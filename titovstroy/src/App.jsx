@@ -379,6 +379,96 @@ function LoginScreen({ onLogin }) {
 }
 
 // ─── ПАНЕЛЬ АДМИНИСТРАТОРА (управление пользователями) ───────────────────────
+// ─── Карточка редактирования цены одной позиции ─────────────────────────────
+function PriceWorkCard({ w, priceEdits, setPriceEdits }) {
+  const ov = priceEdits[w.code] || {};
+  const baseTiers = w.tiers || [];
+  // editTiers: если есть override.tiers — берём их, иначе копию из базы
+  const editTiers = ov.tiers !== undefined ? ov.tiers : baseTiers.map(t=>({...t}));
+  const fixedVal = ov.fixedPrice !== undefined ? ov.fixedPrice : (w.fixedPrice !== undefined ? w.fixedPrice : "");
+  const hasOverride = ov.fixedPrice !== undefined || ov.tiers !== undefined;
+  const showTiers = editTiers.length > 0;
+
+  const update = (patch) => setPriceEdits(prev => ({...prev, [w.code]: {...(prev[w.code]||{}), ...patch}}));
+
+  const updateTierPrice = (ti, val) => {
+    const newTiers = editTiers.map((t,i) => i===ti ? {...t, price: val===""?"":Number(val)} : t);
+    update({tiers: newTiers});
+  };
+  const updateTierRange = (ti, field, val) => {
+    const newTiers = editTiers.map((t,i) => i===ti ? {...t, [field]: val===""?"":Number(val)} : t);
+    update({tiers: newTiers});
+  };
+  const addTier = () => {
+    const last = editTiers[editTiers.length-1];
+    const newMin = last ? (Number(last.max)||0)+1 : 1;
+    update({tiers: [...editTiers, {min:newMin, max:newMin+49, price:""}]});
+  };
+  const removeTier = (ti) => {
+    update({tiers: editTiers.filter((_,i)=>i!==ti)});
+  };
+  const updateFixed = (val) => {
+    update({fixedPrice: val===""?undefined:Number(val)});
+  };
+
+  const inp = (extra={}) => ({
+    type:"number", min:"0",
+    style:{background:"#0c0e1a",color:"#ddd8ce",borderRadius:5,padding:"5px 8px",
+           fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",...(extra.style||{})},
+    ...extra
+  });
+
+  return (
+    <div style={{background:hasOverride?"rgba(184,144,74,.05)":"transparent",
+                 border:`1px solid ${hasOverride?"rgba(184,144,74,.2)":"#1a1e30"}`,
+                 borderRadius:8, padding:"10px 12px", marginBottom:6}}>
+      <div style={{marginBottom:8}}>
+        <span style={{fontSize:13,fontWeight:600,color:hasOverride?"#ddd8ce":"#9090b0"}}>{w.name}</span>
+        <span style={{fontSize:10,color:"#454560",marginLeft:8}}>{w.unit}</span>
+      </div>
+      {showTiers ? (
+        <div>
+          <div style={{display:"grid",gridTemplateColumns:"70px 70px 1fr 28px",gap:4,marginBottom:4}}>
+            {["ОТ","ДО","ЦЕНА (₸)",""].map((h,i)=>(
+              <div key={i} style={{fontSize:9,color:"#454560",textAlign:i===2?"right":"center",fontWeight:700}}>{h}</div>
+            ))}
+          </div>
+          {editTiers.map((t,ti)=>(
+            <div key={ti} style={{display:"grid",gridTemplateColumns:"70px 70px 1fr 28px",gap:4,marginBottom:3,alignItems:"center"}}>
+              <input {...inp({value:t.min,onChange:e=>updateTierRange(ti,"min",e.target.value),
+                style:{background:"#0c0e1a",border:"1px solid #20243a",color:"#9090b0",borderRadius:5,padding:"5px 7px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%",textAlign:"center"}})}/>
+              <input {...inp({value:t.max,onChange:e=>updateTierRange(ti,"max",e.target.value),
+                style:{background:"#0c0e1a",border:"1px solid #20243a",color:"#9090b0",borderRadius:5,padding:"5px 7px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%",textAlign:"center"}})}/>
+              <input type="number" min="0" value={t.price} placeholder={baseTiers[ti]?.price ?? "цена"}
+                onChange={e=>updateTierPrice(ti,e.target.value)}
+                style={{background:"#0c0e1a",border:`1px solid ${t.price!==""?"#b8904a":"#20243a"}`,color:"#ddd8ce",borderRadius:5,padding:"5px 8px",fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",textAlign:"right"}}/>
+              <button onClick={()=>removeTier(ti)}
+                style={{background:"rgba(200,60,60,.15)",color:"#e07070",border:"none",borderRadius:5,padding:"5px",cursor:"pointer",fontSize:11,lineHeight:1}}>✕</button>
+            </div>
+          ))}
+          <button onClick={addTier}
+            style={{marginTop:4,background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit",width:"100%"}}>
+            + Добавить диапазон
+          </button>
+        </div>
+      ) : (
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <input type="number" min="0"
+            placeholder={w.fixedPrice != null ? String(w.fixedPrice) : "нет цены"}
+            value={fixedVal !== undefined ? fixedVal : ""}
+            onChange={e=>updateFixed(e.target.value)}
+            style={{background:"#0c0e1a",border:`1px solid ${fixedVal!==""&&fixedVal!==undefined?"#b8904a":"#20243a"}`,color:"#ddd8ce",borderRadius:6,padding:"6px 10px",fontFamily:"inherit",fontSize:13,outline:"none",width:150,textAlign:"right"}}/>
+          <span style={{fontSize:11,color:"#454560"}}>₸</span>
+          <button onClick={addTier}
+            style={{marginLeft:"auto",background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+            + Диапазоны
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminPanel({ currentUser, onClose }) {
   const [tab, setTab] = useState("users"); // "users" | "prices"
   const [users, setUsers]     = useState([]);
@@ -639,97 +729,9 @@ function AdminPanel({ currentUser, onClose }) {
                 return Object.entries(groups).map(([grp, works]) => (
                   <div key={grp} style={{marginBottom:12}}>
                     <div style={{fontSize:10,fontWeight:700,color:"#b8904a",letterSpacing:1,textTransform:"uppercase",padding:"6px 0 4px",borderBottom:"1px solid #1c2035",marginBottom:6}}>{grp}</div>
-                    {works.map(w => {
-                      const ov = priceEdits[w.code] || {};
-                      // tiers в редакторе: массив {min,max,price} либо из override, либо из базы
-                      const baseTiers = w.tiers || [];
-                      const editTiers = ov.tiers !== undefined ? ov.tiers : baseTiers.map(t=>({...t}));
-                      const fixedVal = ov.fixedPrice !== undefined ? ov.fixedPrice : (w.fixedPrice !== undefined ? w.fixedPrice : "");
-                      const hasTiers = baseTiers.length > 0 || (ov.tiers && ov.tiers.length > 0);
-                      const hasOverride = ov.fixedPrice !== undefined || ov.tiers !== undefined;
-
-                      const updateTierPrice = (ti, val) => {
-                        const newTiers = editTiers.map((t,i) => i===ti ? {...t, price: val===""?"":Number(val)} : t);
-                        setPriceEdits(prev => ({...prev, [w.code]: {...(prev[w.code]||{}), tiers: newTiers}}));
-                      };
-                      const updateTierRange = (ti, field, val) => {
-                        const newTiers = editTiers.map((t,i) => i===ti ? {...t, [field]: val===""?"":Number(val)} : t);
-                        setPriceEdits(prev => ({...prev, [w.code]: {...(prev[w.code]||{}), tiers: newTiers}}));
-                      };
-                      const addTier = () => {
-                        const last = editTiers[editTiers.length-1];
-                        const newMin = last ? last.max+1 : 1;
-                        const newTiers = [...editTiers, {min:newMin, max:newMin+49, price:""}];
-                        setPriceEdits(prev => ({...prev, [w.code]: {...(prev[w.code]||{}), tiers: newTiers}}));
-                      };
-                      const removeTier = (ti) => {
-                        const newTiers = editTiers.filter((_,i)=>i!==ti);
-                        setPriceEdits(prev => ({...prev, [w.code]: {...(prev[w.code]||{}), tiers: newTiers}}));
-                      };
-                      const updateFixed = (val) => {
-                        setPriceEdits(prev => ({...prev, [w.code]: {...(prev[w.code]||{}), fixedPrice: val===""?undefined:Number(val)}}));
-                      };
-
-                      // Показываем диапазоны если они есть (из базы или добавлены), иначе — одно поле
-                      const showTiers = editTiers.length > 0;
-                      return (
-                        <div key={w.code} style={{background: hasOverride?"rgba(184,144,74,.05)":"transparent", border:`1px solid ${hasOverride?"rgba(184,144,74,.2)":"#1a1e30"}`, borderRadius:8, padding:"10px 12px", marginBottom:6}}>
-                          {/* Заголовок */}
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                            <div>
-                              <span style={{fontSize:13,fontWeight:600,color:hasOverride?"#ddd8ce":"#9090b0"}}>{w.name}</span>
-                              <span style={{fontSize:10,color:"#454560",marginLeft:8}}>{w.unit}</span>
-                            </div>
-                          </div>
-
-                          {showTiers ? (
-                            /* Диапазоны */
-                            <div>
-                              <div style={{display:"grid",gridTemplateColumns:"70px 70px 1fr 24px",gap:4,marginBottom:4}}>
-                                <div style={{fontSize:9,color:"#454560",textAlign:"center",fontWeight:700}}>ОТ</div>
-                                <div style={{fontSize:9,color:"#454560",textAlign:"center",fontWeight:700}}>ДО</div>
-                                <div style={{fontSize:9,color:"#454560",textAlign:"right",fontWeight:700}}>ЦЕНА (₸)</div>
-                                <div/>
-                              </div>
-                              {editTiers.map((t,ti)=>(
-                                <div key={ti} style={{display:"grid",gridTemplateColumns:"70px 70px 1fr 24px",gap:4,marginBottom:3,alignItems:"center"}}>
-                                  <input type="number" min="0" value={t.min}
-                                    onChange={e=>updateTierRange(ti,"min",e.target.value)}
-                                    style={{background:"#0c0e1a",border:"1px solid #20243a",color:"#9090b0",borderRadius:5,padding:"5px 7px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%",textAlign:"center"}}/>
-                                  <input type="number" min="0" value={t.max}
-                                    onChange={e=>updateTierRange(ti,"max",e.target.value)}
-                                    style={{background:"#0c0e1a",border:"1px solid #20243a",color:"#9090b0",borderRadius:5,padding:"5px 7px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%",textAlign:"center"}}/>
-                                  <input type="number" min="0" value={t.price}
-                                    placeholder={baseTiers[ti]?.price ?? "цена"}
-                                    onChange={e=>updateTierPrice(ti,e.target.value)}
-                                    style={{background:"#0c0e1a",border:`1px solid ${t.price!==""?"#b8904a":"#20243a"}`,color:"#ddd8ce",borderRadius:5,padding:"5px 8px",fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",textAlign:"right"}}/>
-                                  <button onClick={()=>removeTier(ti)}
-                                    style={{background:"rgba(200,60,60,.15)",color:"#e07070",border:"none",borderRadius:5,padding:"4px",cursor:"pointer",fontSize:12,lineHeight:1}}>✕</button>
-                                </div>
-                              ))}
-                              <button onClick={addTier}
-                                style={{marginTop:4,background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit",width:"100%"}}>
-                                + Добавить диапазон
-                              </button>
-                            </div>
-                          ) : (
-                            /* Одна цена + кнопка добавить диапазоны */
-                            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                              <input type="number" min="0"
-                                placeholder={w.fixedPrice != null ? String(w.fixedPrice) : "нет цены"}
-                                value={fixedVal !== undefined ? fixedVal : ""}
-                                onChange={e=>updateFixed(e.target.value)}
-                                style={{background:"#0c0e1a",border:`1px solid ${fixedVal!==""&&fixedVal!==undefined?"#b8904a":"#20243a"}`,color:"#ddd8ce",borderRadius:6,padding:"6px 10px",fontFamily:"inherit",fontSize:13,outline:"none",width:140,textAlign:"right"}}/>
-                              <span style={{fontSize:11,color:"#454560"}}>₸</span>
-                              <button onClick={addTier}
-                                style={{marginLeft:"auto",background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"4px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                                + Диапазоны
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                    {works.map(w => (
+                      <PriceWorkCard key={w.code} w={w} priceEdits={priceEdits} setPriceEdits={setPriceEdits}/>
+                    ))}
                   </div>
                 ));
               })()}
