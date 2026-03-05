@@ -670,22 +670,24 @@ function AdminPanel({ currentUser, onClose }) {
                         setPriceEdits(prev => ({...prev, [w.code]: {...(prev[w.code]||{}), fixedPrice: val===""?undefined:Number(val)}}));
                       };
 
+                      // Показываем диапазоны если они есть (из базы или добавлены), иначе — одно поле
+                      const showTiers = editTiers.length > 0;
                       return (
                         <div key={w.code} style={{background: hasOverride?"rgba(184,144,74,.05)":"transparent", border:`1px solid ${hasOverride?"rgba(184,144,74,.2)":"#1a1e30"}`, borderRadius:8, padding:"10px 12px", marginBottom:6}}>
-                          {/* Заголовок позиции */}
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom: hasTiers?8:6}}>
+                          {/* Заголовок */}
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                             <div>
                               <span style={{fontSize:13,fontWeight:600,color:hasOverride?"#ddd8ce":"#9090b0"}}>{w.name}</span>
                               <span style={{fontSize:10,color:"#454560",marginLeft:8}}>{w.unit}</span>
                             </div>
                           </div>
 
-                          {hasTiers ? (
-                            /* Позиция с диапазонами */
+                          {showTiers ? (
+                            /* Диапазоны */
                             <div>
                               <div style={{display:"grid",gridTemplateColumns:"70px 70px 1fr 24px",gap:4,marginBottom:4}}>
-                                <div style={{fontSize:9,color:"#454560",textAlign:"center",fontWeight:700}}>ОТ (м)</div>
-                                <div style={{fontSize:9,color:"#454560",textAlign:"center",fontWeight:700}}>ДО (м)</div>
+                                <div style={{fontSize:9,color:"#454560",textAlign:"center",fontWeight:700}}>ОТ</div>
+                                <div style={{fontSize:9,color:"#454560",textAlign:"center",fontWeight:700}}>ДО</div>
                                 <div style={{fontSize:9,color:"#454560",textAlign:"right",fontWeight:700}}>ЦЕНА (₸)</div>
                                 <div/>
                               </div>
@@ -711,15 +713,18 @@ function AdminPanel({ currentUser, onClose }) {
                               </button>
                             </div>
                           ) : (
-                            /* Фиксированная цена */
-                            <div style={{display:"flex",alignItems:"center",gap:8}}>
-                              <span style={{fontSize:10,color:"#454560",flex:1}}>Фиксированная цена:</span>
+                            /* Одна цена + кнопка добавить диапазоны */
+                            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                               <input type="number" min="0"
                                 placeholder={w.fixedPrice != null ? String(w.fixedPrice) : "нет цены"}
-                                value={fixedVal}
+                                value={fixedVal !== undefined ? fixedVal : ""}
                                 onChange={e=>updateFixed(e.target.value)}
-                                style={{background:"#0c0e1a",border:`1px solid ${fixedVal!==""&&fixedVal!==undefined?"#b8904a":"#20243a"}`,color:"#ddd8ce",borderRadius:6,padding:"6px 10px",fontFamily:"inherit",fontSize:13,outline:"none",width:130,textAlign:"right"}}/>
+                                style={{background:"#0c0e1a",border:`1px solid ${fixedVal!==""&&fixedVal!==undefined?"#b8904a":"#20243a"}`,color:"#ddd8ce",borderRadius:6,padding:"6px 10px",fontFamily:"inherit",fontSize:13,outline:"none",width:140,textAlign:"right"}}/>
                               <span style={{fontSize:11,color:"#454560"}}>₸</span>
+                              <button onClick={addTier}
+                                style={{marginLeft:"auto",background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"4px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                                + Диапазоны
+                              </button>
                             </div>
                           )}
                         </div>
