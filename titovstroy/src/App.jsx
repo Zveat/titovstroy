@@ -772,6 +772,7 @@ export default function App() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;900&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
+        html,body{background:#0c0e1a;overflow-x:hidden;width:100%}
         input,select,textarea{outline:none}
         ::-webkit-scrollbar{width:4px}
         ::-webkit-scrollbar-thumb{background:#b8904a;border-radius:2px}
@@ -805,10 +806,22 @@ export default function App() {
         @keyframes up{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
         .up{animation:up .22s ease forwards}
         @media(min-width:900px){.main-grid{grid-template-columns:minmax(0,1fr) 295px!important}}
-        @media(max-width:600px){
-          .wrow{grid-template-columns:1fr 50px 90px 60px 80px!important;font-size:12px}
-          .tab-btn{padding:5px 9px;font-size:12px}
-          .sub-btn{padding:4px 7px;font-size:11px}
+        @media(max-width:700px){
+          .editor-header{flex-wrap:wrap;gap:6px;padding:8px 12px!important}
+          .editor-header-left{flex:1;min-width:0}
+          .editor-header-right{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+          .editor-header-right .proj-name{display:none}
+          .tab-btn{padding:5px 10px;font-size:12px}
+          .sub-btn{padding:4px 8px;font-size:11px}
+          .wrow-mobile{display:grid!important;grid-template-columns:1fr auto!important;gap:4px!important;padding:10px 12px!important}
+          .wrow-mobile .wrow-name{grid-column:1/2}
+          .wrow-mobile .wrow-unit{display:none}
+          .wrow-mobile .wrow-price{grid-column:1/2;font-size:11px!important}
+          .wrow-mobile .wrow-qty{grid-column:2/3;grid-row:1/3;display:flex;align-items:center}
+          .wrow-mobile .wrow-total{grid-column:1/2;font-size:12px!important}
+          .num-mobile{width:72px!important;font-size:14px!important;padding:8px!important;text-align:center!important}
+          .list-header{flex-wrap:wrap!important;gap:6px!important;padding:10px 14px!important}
+          .list-header-btns{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
         }
         @media print{
           body *{display:none!important}
@@ -826,35 +839,30 @@ export default function App() {
           ЭКРАН 1: СПИСОК СМЕТ
       ═══════════════════════════════════════════════════════════════════ */}
       {screen === "list" && (
-        <div style={{maxWidth:720,margin:"0 auto",padding:"0 0 40px"}}>
+        <div style={{maxWidth:720,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
           {/* Шапка */}
-          <div style={{background:"#0e1122",borderBottom:"1px solid #181c2e",padding:"14px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
-            <div style={{display:"flex",alignItems:"center",gap:11}}>
-              <div style={{width:33,height:33,borderRadius:8,background:"linear-gradient(135deg,#b8904a,#d4a85a)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:15,color:"#0c0e1a"}}>T</div>
-              <div>
-                <div style={{fontWeight:800,fontSize:14}}>TitovStroy</div>
-                <div style={{fontSize:10,color:"#353550"}}>Сметы · Общая база</div>
+          <div className="list-header" style={{background:"#0e1122",borderBottom:"1px solid #181c2e",padding:"14px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
+            <div style={{display:"flex",alignItems:"center",gap:11,flex:1,minWidth:0}}>
+              <div style={{width:33,height:33,borderRadius:8,background:"linear-gradient(135deg,#b8904a,#d4a85a)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:15,color:"#0c0e1a",flexShrink:0}}>T</div>
+              <div style={{minWidth:0}}>
+                <div style={{fontWeight:800,fontSize:14,whiteSpace:"nowrap"}}>TitovStroy</div>
+                <div style={{fontSize:10,color:"#353550",whiteSpace:"nowrap"}}>
+                  <span style={{color:"#b8904a"}}>{currentUser.role==="admin"?"👑":"👤"}</span>{" "}{currentUser.name}
+                </div>
               </div>
             </div>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
               {saving && <span style={{fontSize:11,color:"#555575"}}>💾</span>}
-              {/* Имя пользователя */}
-              <div style={{fontSize:12,color:"#555575",display:"flex",alignItems:"center",gap:6}}>
-                <span style={{color:"#b8904a"}}>{currentUser.role==="admin"?"👑":"👤"}</span>
-                <span>{currentUser.name}</span>
-              </div>
-              {/* Кнопка управления пользователями — только для админа */}
               {currentUser.role === "admin" && (
-                <button className="btn btn-o" style={{padding:"7px 12px",fontSize:11}} onClick={()=>setShowAdmin(true)}>
-                  👥 Сотрудники
+                <button className="btn btn-o" style={{padding:"7px 10px",fontSize:11}} onClick={()=>setShowAdmin(true)}>
+                  👥
                 </button>
               )}
-              {/* Выйти */}
-              <button className="btn btn-o" style={{padding:"7px 12px",fontSize:11}} onClick={()=>setCurrentUser(null)}>
+              <button className="btn btn-o" style={{padding:"7px 10px",fontSize:11}} onClick={()=>setCurrentUser(null)}>
                 Выйти
               </button>
-              <button className="btn btn-g" style={{padding:"8px 16px",fontSize:13}} onClick={newEstimate}>
-                + Новая смета
+              <button className="btn btn-g" style={{padding:"8px 14px",fontSize:13,whiteSpace:"nowrap"}} onClick={newEstimate}>
+                + Новая
               </button>
             </div>
           </div>
@@ -929,6 +937,38 @@ export default function App() {
               </div>
             )}
           </div>
+
+          {/* Плавающая кнопка итога (мобильная) */}
+          {grand > 0 && (
+            <div id="float-total-btn" style={{
+              position:"fixed",bottom:20,right:20,zIndex:50,
+              display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6
+            }}>
+              <button
+                onClick={()=>{
+                  const el = document.getElementById("summary-panel");
+                  if(el) {
+                    const rect = el.getBoundingClientRect();
+                    if(rect.top > window.innerHeight || rect.bottom < 0) {
+                      el.scrollIntoView({behavior:"smooth",block:"start"});
+                    } else {
+                      window.scrollTo({top:0,behavior:"smooth"});
+                    }
+                  }
+                }}
+                style={{
+                  background:"linear-gradient(135deg,#b8904a,#d4a85a)",
+                  color:"#0c0e1a",border:"none",borderRadius:50,
+                  padding:"10px 16px",fontFamily:"inherit",fontWeight:800,
+                  fontSize:13,cursor:"pointer",
+                  boxShadow:"0 4px 20px rgba(184,144,74,.5)",
+                  display:"flex",alignItems:"center",gap:8,whiteSpace:"nowrap"
+                }}>
+                <span>⇅</span>
+                <span>{fmt(final)} ₸</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -955,22 +995,22 @@ export default function App() {
       {screen === "editor" && (
         <div>
           {/* HEADER */}
-          <div style={{background:"#0e1122",borderBottom:"1px solid #181c2e",padding:"11px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
-            <div style={{display:"flex",alignItems:"center",gap:10}}>
-              <button className="btn btn-o" style={{padding:"7px 13px",fontSize:12}} onClick={saveAndBack}>
+          <div className="editor-header" style={{background:"#0e1122",borderBottom:"1px solid #181c2e",padding:"11px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10,gap:8}}>
+            <div className="editor-header-left" style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
+              <button className="btn btn-o" style={{padding:"7px 11px",fontSize:12,flexShrink:0}} onClick={saveAndBack}>
                 ← Сметы
               </button>
-              <div style={{fontSize:13,fontWeight:600,color:"#9090b0",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              <div style={{fontSize:13,fontWeight:600,color:"#9090b0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>
                 {proj.name || "Новая смета"}
               </div>
             </div>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div className="editor-header-right" style={{display:"flex",alignItems:"center",gap:8}}>
               {saving && <span style={{fontSize:11,color:"#555575"}}>💾</span>}
               {filledCount > 0 && <span className="badge">{filledCount} позиций</span>}
               <button className="btn btn-o" style={{fontSize:11,padding:"6px 12px"}} onClick={()=>setEditPrices(m=>!m)}>
-                {editPrices ? "✓ Готово" : "✏ Цены"}
+                {editPrices ? "✓" : "✏"}
               </button>
-              <span style={{fontSize:11,color:"#454560"}}>
+              <span className="proj-name" style={{fontSize:11,color:"#454560"}}>
                 {currentUser.role==="admin"?"👑":"👤"} {currentUser.name}
               </span>
               <button className="btn btn-g" style={{padding:"8px 16px",fontSize:13}} onClick={saveAndBack}>
@@ -1038,11 +1078,9 @@ export default function App() {
                 </div>}
 
                 {/* Шапка таблицы */}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 60px 120px 76px 90px",padding:"6px 14px 7px",fontSize:10,color:"#353550",fontWeight:700,letterSpacing:.8,textTransform:"uppercase",borderBottom:"1px solid #181c2e"}}>
-                  <span>Наименование</span><span style={{textAlign:"center"}}>Ед.</span>
-                  <span style={{textAlign:"right"}}>Цена за ед., ₸</span>
-                  <span style={{textAlign:"right"}}>Объём</span>
-                  <span style={{textAlign:"right"}}>Итого, ₸</span>
+                <div style={{display:"grid",gridTemplateColumns:"1fr auto",padding:"6px 14px 7px",fontSize:10,color:"#353550",fontWeight:700,letterSpacing:.8,textTransform:"uppercase",borderBottom:"1px solid #181c2e"}}>
+                  <span>Наименование / Ед.</span>
+                  <span style={{textAlign:"right"}}>Цена · Объём · Итого</span>
                 </div>
 
                 {/* Строки работ */}
@@ -1072,12 +1110,13 @@ export default function App() {
                       ? work.tiers.map(t=>`${t.min}–${t.max}: ${fmt(t.price)} ₸`).join(" · ")
                       : null;
                     return (
-                      <div key={work.name} className={`wrow ${filled?"on":""}`}
-                        style={{gridTemplateColumns:"1fr 60px 120px 76px 90px"}}>
-                        <div>
+                      <div key={work.name} className={`wrow wrow-mobile ${filled?"on":""}`}
+                        style={{display:"grid",gridTemplateColumns:"1fr auto",gap:"2px 8px",alignItems:"start"}}>
+                        {/* Название */}
+                        <div style={{minWidth:0}}>
                           {showBreadcrumb && <div style={{fontSize:10,color:"#454568",marginBottom:2}}>{work.cat} › {work.sub}</div>}
-                          <div style={{fontSize:13,color:filled?"#ddd8ce":"#707090"}}>{work.name}</div>
-                          {tierHint && <div style={{fontSize:10,color:"#444460",marginTop:1}}>{tierHint}</div>}
+                          <div style={{fontSize:13,color:filled?"#ddd8ce":"#707090",lineHeight:1.3}}>{work.name}</div>
+                          <div style={{fontSize:10,color:"#454560",marginTop:1}}>{work.unit}{tierHint ? " · "+tierHint : ""}</div>
                           {qty > 0 && (
                             <select className="cpx-sel" value={cpx}
                               onChange={e=>{setRow(work.name,"complexity",e.target.value);setRow(work.name,"manualPrice",undefined);}}>
@@ -1085,33 +1124,22 @@ export default function App() {
                             </select>
                           )}
                         </div>
-                        <div style={{textAlign:"center",fontSize:12,color:"#454560",paddingTop:3}}>{work.unit}</div>
-                        <div style={{textAlign:"right",paddingTop:2}}>
+                        {/* Ввод объёма + итог */}
+                        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,paddingTop:2}}>
                           {editPrices ? (
-                            <input className="num" style={{width:110}} type="number" min="0" placeholder="Введите цену"
+                            <input className="num" style={{width:90}} type="number" min="0" placeholder="цена"
                               value={r.manualPrice!==undefined ? r.manualPrice : (price||"")}
                               onChange={e=>setRow(work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}/>
-                          ) : displayPrice !== null && displayPrice !== undefined ? (
-                            <div>
-                              <span style={{fontSize:12,color:filled?"#b8a880":"#555575"}}>{fmt(displayPrice)}</span>
-                              {filled && work.tiers.length > 1 && (
-                                <div style={{fontSize:9,color:"#454560",marginTop:1}}>
-                                  {work.tiers.find(t=>qty>=t.min&&qty<=t.max) ? `диапазон ${work.tiers.find(t=>qty>=t.min&&qty<=t.max).min}–${work.tiers.find(t=>qty>=t.min&&qty<=t.max).max}` : "макс. диапазон"}
-                                </div>
-                              )}
-                            </div>
                           ) : (
-                            <span style={{fontSize:10,color:"#353550",fontStyle:"italic"}}>нет цены</span>
+                            <span style={{fontSize:11,color:filled?"#b8a880":"#555575",textAlign:"right"}}>
+                              {displayPrice != null ? fmt(displayPrice)+" ₸" : <span style={{fontStyle:"italic",color:"#353550"}}>нет цены</span>}
+                            </span>
                           )}
-                        </div>
-                        <div style={{textAlign:"right"}}>
-                          <input className="num" style={{width:70}} type="number" min="0" placeholder="0"
+                          <input className="num" style={{width:72,textAlign:"center",fontSize:15,padding:"7px 8px"}} type="number" min="0" placeholder="0"
                             value={r.qty||""} onChange={e=>setRow(work.name,"qty",e.target.value)}/>
-                        </div>
-                        <div style={{textAlign:"right",paddingTop:3}}>
                           {total>0
-                            ? <span style={{fontSize:13,fontWeight:700,color:"#b8904a"}}>{fmt(total)}</span>
-                            : <span style={{color:"#252535",fontSize:12}}>—</span>}
+                            ? <span style={{fontSize:12,fontWeight:700,color:"#b8904a"}}>{fmt(total)} ₸</span>
+                            : <span style={{color:"#252535",fontSize:11}}>—</span>}
                         </div>
                       </div>
                     );
@@ -1136,7 +1164,7 @@ export default function App() {
               </div>
 
               {/* ПРАВАЯ ПАНЕЛЬ */}
-              <div style={{display:"flex",flexDirection:"column",gap:14}}>
+              <div id="summary-panel" style={{display:"flex",flexDirection:"column",gap:14}}>
                 <div style={{background:"linear-gradient(145deg,#13162a,#111424)",border:"1px solid #1c2035",borderRadius:12,padding:18}} className="up">
                   <div style={{fontSize:10,fontWeight:700,color:"#b8904a",letterSpacing:1.5,textTransform:"uppercase",marginBottom:14}}>Смета</div>
                   {cats.map(cat=>{
