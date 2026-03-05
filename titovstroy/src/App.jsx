@@ -1110,13 +1110,16 @@ export default function App() {
                           {total>0 ? <span style={{fontSize:13,fontWeight:700,color:"#b8904a"}}>{fmt(total)}</span>
                                    : <span style={{color:"#252535",fontSize:12}}>—</span>}
                         </div>
-                        {/* Mobile right column */}
-                        <div className="wrow-mob-extra" style={{flexDirection:"column",alignItems:"flex-end",gap:4,display:"none",paddingTop:2}}>
-                          <input className="num" style={{width:80,textAlign:"center",fontSize:16,padding:"8px 10px",fontWeight:700}} type="number" min="0" placeholder="0"
+                        {/* Mobile right column: цена/ед · поле · итог */}
+                        <div className="wrow-mob-extra" style={{flexDirection:"column",alignItems:"flex-end",gap:3,display:"none",paddingTop:2,minWidth:90}}>
+                          <span style={{fontSize:11,color:"#555575",whiteSpace:"nowrap"}}>
+                            {displayPrice!=null ? fmt(displayPrice)+" ₸/ед" : <span style={{fontStyle:"italic",fontSize:10}}>нет цены</span>}
+                          </span>
+                          <input className="num" style={{width:82,textAlign:"center",fontSize:16,padding:"7px 10px",fontWeight:700}} type="number" min="0" placeholder="0"
                             value={r.qty||""} onChange={e=>setRow(work.name,"qty",e.target.value)}/>
                           {total>0
-                            ? <span style={{fontSize:13,fontWeight:800,color:"#b8904a"}}>{fmt(total)} ₸</span>
-                            : <span style={{fontSize:11,color:filled?"#b8a880":"#454560"}}>{displayPrice!=null?fmt(displayPrice)+" ₸/ед":""}</span>}
+                            ? <span style={{fontSize:12,fontWeight:800,color:"#b8904a",whiteSpace:"nowrap"}}>{fmt(total)} ₸</span>
+                            : <span style={{fontSize:10,color:"#333345"}}>—</span>}
                         </div>
                       </div>
                     );
