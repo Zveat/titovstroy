@@ -380,43 +380,42 @@ function LoginScreen({ onLogin }) {
 
 // ─── ПАНЕЛЬ АДМИНИСТРАТОРА (управление пользователями) ───────────────────────
 // ─── Карточка редактирования цены одной позиции ─────────────────────────────
-function PriceWorkCard({ w, priceEdits, setPriceEdits }) {
-  const ov = priceEdits[w.code] || {};
+function PriceWorkCard({ w, initialOv, onSave }) {
   const baseTiers = w.tiers || [];
-  // editTiers: если есть override.tiers — берём их, иначе копию из базы
-  const editTiers = ov.tiers !== undefined ? ov.tiers : baseTiers.map(t=>({...t}));
-  const fixedVal = ov.fixedPrice !== undefined ? ov.fixedPrice : (w.fixedPrice !== undefined ? w.fixedPrice : "");
-  const hasOverride = ov.fixedPrice !== undefined || ov.tiers !== undefined;
-  const showTiers = editTiers.length > 0;
+  const [tiers, setTiers] = useState(
+    initialOv?.tiers !== undefined ? initialOv.tiers.map(t=>({...t})) : baseTiers.map(t=>({...t}))
+  );
+  const [fixedVal, setFixedVal] = useState(
+    initialOv?.fixedPrice !== undefined ? initialOv.fixedPrice : (w.fixedPrice !== undefined ? w.fixedPrice : "")
+  );
+  const showTiers = tiers.length > 0;
+  const hasOverride = initialOv !== undefined;
 
-  const update = (patch) => setPriceEdits(prev => ({...prev, [w.code]: {...(prev[w.code]||{}), ...patch}}));
+  const notify = (newTiers, newFixed) => {
+    onSave(w.code, { tiers: newTiers, fixedPrice: newFixed !== "" && newFixed !== undefined ? Number(newFixed) : undefined });
+  };
 
   const updateTierPrice = (ti, val) => {
-    const newTiers = editTiers.map((t,i) => i===ti ? {...t, price: val===""?"":Number(val)} : t);
-    update({tiers: newTiers});
+    const t2 = tiers.map((t,i) => i===ti ? {...t, price: val===""?"":Number(val)} : t);
+    setTiers(t2); notify(t2, fixedVal);
   };
   const updateTierRange = (ti, field, val) => {
-    const newTiers = editTiers.map((t,i) => i===ti ? {...t, [field]: val===""?"":Number(val)} : t);
-    update({tiers: newTiers});
+    const t2 = tiers.map((t,i) => i===ti ? {...t, [field]: val===""?"":Number(val)} : t);
+    setTiers(t2); notify(t2, fixedVal);
   };
   const addTier = () => {
-    const last = editTiers[editTiers.length-1];
+    const last = tiers[tiers.length-1];
     const newMin = last ? (Number(last.max)||0)+1 : 1;
-    update({tiers: [...editTiers, {min:newMin, max:newMin+49, price:""}]});
+    const t2 = [...tiers, {min:newMin, max:newMin+49, price:""}];
+    setTiers(t2); notify(t2, fixedVal);
   };
   const removeTier = (ti) => {
-    update({tiers: editTiers.filter((_,i)=>i!==ti)});
+    const t2 = tiers.filter((_,i)=>i!==ti);
+    setTiers(t2); notify(t2, fixedVal);
   };
   const updateFixed = (val) => {
-    update({fixedPrice: val===""?undefined:Number(val)});
+    setFixedVal(val); notify(tiers, val);
   };
-
-  const inp = (extra={}) => ({
-    type:"number", min:"0",
-    style:{background:"#0c0e1a",color:"#ddd8ce",borderRadius:5,padding:"5px 8px",
-           fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",...(extra.style||{})},
-    ...extra
-  });
 
   return (
     <div style={{background:hasOverride?"rgba(184,144,74,.05)":"transparent",
@@ -433,12 +432,12 @@ function PriceWorkCard({ w, priceEdits, setPriceEdits }) {
               <div key={i} style={{fontSize:9,color:"#454560",textAlign:i===2?"right":"center",fontWeight:700}}>{h}</div>
             ))}
           </div>
-          {editTiers.map((t,ti)=>(
+          {tiers.map((t,ti)=>(
             <div key={ti} style={{display:"grid",gridTemplateColumns:"70px 70px 1fr 28px",gap:4,marginBottom:3,alignItems:"center"}}>
-              <input {...inp({value:t.min,onChange:e=>updateTierRange(ti,"min",e.target.value),
-                style:{background:"#0c0e1a",border:"1px solid #20243a",color:"#9090b0",borderRadius:5,padding:"5px 7px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%",textAlign:"center"}})}/>
-              <input {...inp({value:t.max,onChange:e=>updateTierRange(ti,"max",e.target.value),
-                style:{background:"#0c0e1a",border:"1px solid #20243a",color:"#9090b0",borderRadius:5,padding:"5px 7px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%",textAlign:"center"}})}/>
+              <input type="number" min="0" value={t.min} onChange={e=>updateTierRange(ti,"min",e.target.value)}
+                style={{background:"#0c0e1a",border:"1px solid #20243a",color:"#9090b0",borderRadius:5,padding:"5px 7px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%",textAlign:"center"}}/>
+              <input type="number" min="0" value={t.max} onChange={e=>updateTierRange(ti,"max",e.target.value)}
+                style={{background:"#0c0e1a",border:"1px solid #20243a",color:"#9090b0",borderRadius:5,padding:"5px 7px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%",textAlign:"center"}}/>
               <input type="number" min="0" value={t.price} placeholder={baseTiers[ti]?.price ?? "цена"}
                 onChange={e=>updateTierPrice(ti,e.target.value)}
                 style={{background:"#0c0e1a",border:`1px solid ${t.price!==""?"#b8904a":"#20243a"}`,color:"#ddd8ce",borderRadius:5,padding:"5px 8px",fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",textAlign:"right"}}/>
@@ -730,7 +729,9 @@ function AdminPanel({ currentUser, onClose }) {
                   <div key={grp} style={{marginBottom:12}}>
                     <div style={{fontSize:10,fontWeight:700,color:"#b8904a",letterSpacing:1,textTransform:"uppercase",padding:"6px 0 4px",borderBottom:"1px solid #1c2035",marginBottom:6}}>{grp}</div>
                     {works.map(w => (
-                      <PriceWorkCard key={w.code} w={w} priceEdits={priceEdits} setPriceEdits={setPriceEdits}/>
+                      <PriceWorkCard key={w.code} w={w}
+                        initialOv={priceEdits[w.code]}
+                        onSave={(code, val) => setPriceEdits(prev => ({...prev, [code]: val}))}/>
                     ))}
                   </div>
                 ));
