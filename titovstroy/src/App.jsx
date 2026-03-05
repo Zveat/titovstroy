@@ -811,11 +811,11 @@ export default function App() {
           .sub-btn{padding:4px 7px;font-size:11px}
         }
         @media print{
-          body *{visibility:hidden!important}
-          #kp-print-portal,#kp-print-portal *{visibility:visible!important}
-          #kp-print-portal{position:fixed!important;top:0!important;left:0!important;width:100%!important;height:auto!important;background:#f5f2ec!important;z-index:999999!important;padding:20px!important;overflow:visible!important}
+          body *{display:none!important}
+          #kp-print-portal{display:block!important;position:fixed;inset:0;background:#f5f2ec;padding:24px;z-index:9999;font-family:'Golos Text','Segoe UI',sans-serif}
+          #kp-print-portal *{display:revert!important}
           .kp-no-print{display:none!important}
-          @page{margin:10mm;size:A4}
+          @page{margin:10mm;size:A4 portrait}
         }
         .est-card{background:#111425;border:1px solid #1c2035;border-radius:11px;padding:16px 18px;cursor:pointer;transition:all .15s;position:relative}
         .est-card:hover{border-color:#b8904a;background:#14172e}
@@ -1208,7 +1208,13 @@ export default function App() {
               <KPContent proj={proj} kpItems={kpItems} discount={discount} discAmt={discAmt} final={final} note={note}/>
               <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:20}}>
                 <button style={{background:"#ddd",color:"#555",border:"none",cursor:"pointer",padding:"10px 18px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:600}} onClick={()=>setShowKP(false)}>Закрыть</button>
-                <button style={{background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",cursor:"pointer",padding:"10px 20px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:700}} onClick={()=>window.print()}>Печать / PDF</button>
+                <button style={{background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",cursor:"pointer",padding:"10px 20px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:700}} onClick={()=>{
+                const el = document.getElementById("kp-print-portal");
+                const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>КП TitovStroy</title><link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;900&display=swap" rel="stylesheet"><style>*{box-sizing:border-box;margin:0;padding:0;font-family:'Golos Text','Segoe UI',sans-serif}body{background:#f5f2ec;padding:20px;color:#1a1a28}@page{margin:10mm;size:A4}@media print{body{padding:0}button{display:none!important}}</style></head><body>${el.innerHTML}<br><button onclick="window.print()" style="margin-top:20px;padding:10px 24px;background:#b8904a;color:#fff;border:none;border-radius:7px;font-size:14px;cursor:pointer;font-weight:700">Печать / PDF</button></body></html>`;
+                const w = window.open("","_blank","width=900,height=700");
+                w.document.write(html);
+                w.document.close();
+              }}>Печать / PDF</button>
               </div>
             </div>
           </div>
