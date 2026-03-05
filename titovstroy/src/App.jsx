@@ -384,19 +384,15 @@ function LoginScreen({ onLogin }) {
 function PriceWorkCard({ w, savedOv, onChange }) {
   const baseTiers = w.tiers || [];
 
-  // Инициализируем из сохранённых данных или базы — ОДИН РАЗ через useRef для стабильности
-  const initTiers = React.useRef(
+  const [tiers, setTiersRaw] = useState(() =>
     savedOv?.tiers !== undefined
       ? savedOv.tiers.map(t=>({...t}))
       : baseTiers.map(t=>({...t}))
-  ).current;
-  const initFixed = React.useRef(
+  );
+  const [fixedVal, setFixedRaw] = useState(() =>
     savedOv?.fixedPrice !== undefined ? String(savedOv.fixedPrice) :
     w.fixedPrice !== undefined ? String(w.fixedPrice) : ""
-  ).current;
-
-  const [tiers, setTiersRaw] = useState(initTiers);
-  const [fixedVal, setFixedRaw] = useState(initFixed);
+  );
 
   const setTiers = (t) => { setTiersRaw(t); onChange(w.code, buildOv(t, fixedVal)); };
   const setFixed = (v) => { setFixedRaw(v); onChange(w.code, buildOv(tiers, v)); };
