@@ -1210,10 +1210,20 @@ export default function App() {
                 <button style={{background:"#ddd",color:"#555",border:"none",cursor:"pointer",padding:"10px 18px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:600}} onClick={()=>setShowKP(false)}>Закрыть</button>
                 <button style={{background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",cursor:"pointer",padding:"10px 20px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:700}} onClick={()=>{
                 const el = document.getElementById("kp-print-portal");
-                const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>КП TitovStroy</title><link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;900&display=swap" rel="stylesheet"><style>*{box-sizing:border-box;margin:0;padding:0;font-family:'Golos Text','Segoe UI',sans-serif}body{background:#f5f2ec;padding:20px;color:#1a1a28}@page{margin:10mm;size:A4}@media print{body{padding:0}button{display:none!important}}</style></head><body>${el.innerHTML}<br><button onclick="window.print()" style="margin-top:20px;padding:10px 24px;background:#b8904a;color:#fff;border:none;border-radius:7px;font-size:14px;cursor:pointer;font-weight:700">Печать / PDF</button></body></html>`;
-                const w = window.open("","_blank","width=900,height=700");
+                const css = `
+                  @import url('https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;900&display=swap');
+                  *{box-sizing:border-box;margin:0;padding:0}
+                  body{font-family:'Golos Text','Segoe UI',sans-serif;background:#f5f2ec;color:#1a1a28;padding:24px;-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact}
+                  table{width:100%;border-collapse:collapse}
+                  @page{margin:8mm;size:A4 portrait}
+                  @media print{.no-print{display:none!important}body{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}}
+                `;
+                const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>КП TitovStroy</title><style>' + css + '</style></head><body>' + el.innerHTML + '<div class="no-print" style="margin-top:24px;text-align:center"><button onclick="window.print()" style="padding:12px 32px;background:#b8904a;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:inherit">🖨 Сохранить PDF</button></div></body></html>';
+                const w = window.open("","_blank","width=960,height=800");
+                w.document.open();
                 w.document.write(html);
                 w.document.close();
+                setTimeout(()=>w.focus(),300);
               }}>Печать / PDF</button>
               </div>
             </div>
