@@ -375,6 +375,7 @@ function AdminPanel({ currentUser, onClose }) {
   const [newPass, setNewPass]     = useState("");
   const [newRole, setNewRole]     = useState("user");
   const [editingPass, setEditingPass] = useState(null); // {id, val}
+  const [editingUser, setEditingUser] = useState(null); // {id, name, login}
   const [msg, setMsg] = useState("");
 
   useEffect(() => {
@@ -422,6 +423,18 @@ function AdminPanel({ currentUser, onClose }) {
     setTimeout(() => setMsg(""), 2500);
   };
 
+  const saveUser = async () => {
+    if (!editingUser?.name?.trim() || !editingUser?.login?.trim()) return;
+    const conflict = users.find(u => u.id !== editingUser.id && u.login.toLowerCase() === editingUser.login.trim().toLowerCase());
+    if (conflict) { setMsg("Логин уже занят"); setTimeout(()=>setMsg(""),2000); return; }
+    const updated = users.map(u => u.id === editingUser.id ? {...u, name: editingUser.name.trim(), login: editingUser.login.trim()} : u);
+    setUsers(updated);
+    await saveUsers(updated);
+    setEditingUser(null);
+    setMsg("✓ Сохранено");
+    setTimeout(() => setMsg(""), 2500);
+  };
+
   const roleLabel = r => r === "admin" ? "👑 Админ" : "👤 Замерщик";
 
   return (
@@ -451,9 +464,14 @@ function AdminPanel({ currentUser, onClose }) {
                     </div>
                     <div style={{display:"flex",gap:6,alignItems:"center"}}>
                       <button
-                        onClick={()=>setEditingPass(editingPass?.id===u.id ? null : {id:u.id,val:""})}
+                        onClick={()=>{setEditingUser(editingUser?.id===u.id?null:{id:u.id,name:u.name,login:u.login});setEditingPass(null);}}
+                        style={{background:"rgba(100,100,200,.1)",color:"#8888cc",border:"1px solid rgba(100,100,200,.2)",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+                        ✏ Изменить
+                      </button>
+                      <button
+                        onClick={()=>{setEditingPass(editingPass?.id===u.id?null:{id:u.id,val:""});setEditingUser(null);}}
                         style={{background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.2)",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
-                        🔑 Пароль
+                        🔑
                       </button>
                       {u.id !== currentUser.id && (
                         <button onClick={()=>removeUser(u.id)}
@@ -461,6 +479,26 @@ function AdminPanel({ currentUser, onClose }) {
                       )}
                     </div>
                   </div>
+                  {editingUser?.id === u.id && (
+                    <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:8}}>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                        <div>
+                          <div style={{fontSize:10,color:"#555575",marginBottom:3}}>Имя</div>
+                          <input style={{width:"100%",background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:6,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"}}
+                            value={editingUser.name} onChange={e=>setEditingUser(p=>({...p,name:e.target.value}))}/>
+                        </div>
+                        <div>
+                          <div style={{fontSize:10,color:"#555575",marginBottom:3}}>Логин</div>
+                          <input style={{width:"100%",background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:6,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"}}
+                            value={editingUser.login} onChange={e=>setEditingUser(p=>({...p,login:e.target.value}))}/>
+                        </div>
+                      </div>
+                      <button onClick={saveUser}
+                        style={{background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:6,padding:"8px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                        Сохранить изменения
+                      </button>
+                    </div>
+                  )}
                   {editingPass?.id === u.id && (
                     <div style={{marginTop:10,display:"flex",gap:8}}>
                       <input
