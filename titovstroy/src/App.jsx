@@ -807,21 +807,14 @@ export default function App() {
         .up{animation:up .22s ease forwards}
         @media(min-width:900px){.main-grid{grid-template-columns:minmax(0,1fr) 295px!important}}
         @media(max-width:700px){
-          .editor-header{flex-wrap:wrap;gap:6px;padding:8px 12px!important}
-          .editor-header-left{flex:1;min-width:0}
-          .editor-header-right{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+          .editor-header{gap:6px!important;padding:8px 12px!important}
           .editor-header-right .proj-name{display:none}
           .tab-btn{padding:5px 10px;font-size:12px}
           .sub-btn{padding:4px 8px;font-size:11px}
-          .wrow-mobile{display:grid!important;grid-template-columns:1fr auto!important;gap:4px!important;padding:10px 12px!important}
-          .wrow-mobile .wrow-name{grid-column:1/2}
-          .wrow-mobile .wrow-unit{display:none}
-          .wrow-mobile .wrow-price{grid-column:1/2;font-size:11px!important}
-          .wrow-mobile .wrow-qty{grid-column:2/3;grid-row:1/3;display:flex;align-items:center}
-          .wrow-mobile .wrow-total{grid-column:1/2;font-size:12px!important}
-          .num-mobile{width:72px!important;font-size:14px!important;padding:8px!important;text-align:center!important}
-          .list-header{flex-wrap:wrap!important;gap:6px!important;padding:10px 14px!important}
-          .list-header-btns{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+          .wrow{grid-template-columns:1fr auto!important;gap:4px 8px!important;padding:10px 12px!important}
+          .wrow-desk{display:none!important}
+          .wrow-mob-extra{display:flex!important}
+          .wrow-th{grid-template-columns:1fr auto!important}
         }
         @media print{
           body *{display:none!important}
@@ -1047,9 +1040,13 @@ export default function App() {
                 </div>}
 
                 {/* Шапка таблицы */}
-                <div style={{display:"grid",gridTemplateColumns:"1fr auto",padding:"6px 14px 7px",fontSize:10,color:"#353550",fontWeight:700,letterSpacing:.8,textTransform:"uppercase",borderBottom:"1px solid #181c2e"}}>
-                  <span>Наименование / Ед.</span>
-                  <span style={{textAlign:"right"}}>Цена · Объём · Итого</span>
+                <div className="wrow-th" style={{display:"grid",gridTemplateColumns:"1fr 50px 120px 76px 90px",padding:"6px 14px 7px",fontSize:10,color:"#353550",fontWeight:700,letterSpacing:.8,textTransform:"uppercase",borderBottom:"1px solid #181c2e"}}>
+                  <span>Наименование</span>
+                  <span className="wrow-desk" style={{textAlign:"center"}}>Ед.</span>
+                  <span className="wrow-desk" style={{textAlign:"right"}}>Цена за ед., ₸</span>
+                  <span className="wrow-desk" style={{textAlign:"right"}}>Объём</span>
+                  <span className="wrow-desk" style={{textAlign:"right"}}>Итого, ₸</span>
+                  <span className="wrow-mob-extra" style={{textAlign:"right",display:"none"}}>Цена · Объём · Итого</span>
                 </div>
 
                 {/* Строки работ */}
@@ -1078,37 +1075,47 @@ export default function App() {
                     const tierHint = work.tiers.length > 1
                       ? work.tiers.map(t=>`${t.min}–${t.max}: ${fmt(t.price)} ₸`).join(" · ")
                       : null;
+                    const priceCell = editPrices ? (
+                      <input className="num" style={{width:110}} type="number" min="0" placeholder="Введите цену"
+                        value={r.manualPrice!==undefined ? r.manualPrice : (price||"")}
+                        onChange={e=>setRow(work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}/>
+                    ) : displayPrice != null ? (
+                      <span style={{fontSize:12,color:filled?"#b8a880":"#555575"}}>{fmt(displayPrice)}</span>
+                    ) : <span style={{fontSize:10,color:"#353550",fontStyle:"italic"}}>нет цены</span>;
+                    const qtyInput = <input className="num" style={{width:70,textAlign:"center"}} type="number" min="0" placeholder="0"
+                      value={r.qty||""} onChange={e=>setRow(work.name,"qty",e.target.value)}/>;
+                    const nameBlock = (
+                      <div style={{minWidth:0}}>
+                        {showBreadcrumb && <div style={{fontSize:10,color:"#454568",marginBottom:2}}>{work.cat} › {work.sub}</div>}
+                        <div style={{fontSize:13,color:filled?"#ddd8ce":"#707090",lineHeight:1.3}}>{work.name}</div>
+                        {tierHint && <div style={{fontSize:10,color:"#444460",marginTop:1}}>{tierHint}</div>}
+                        {qty > 0 && (
+                          <select className="cpx-sel" value={cpx}
+                            onChange={e=>{setRow(work.name,"complexity",e.target.value);setRow(work.name,"manualPrice",undefined);}}>
+                            {COMPLEXITY.map(c=><option key={c.key} value={c.key}>{c.label}</option>)}
+                          </select>
+                        )}
+                      </div>
+                    );
                     return (
-                      <div key={work.name} className={`wrow wrow-mobile ${filled?"on":""}`}
-                        style={{display:"grid",gridTemplateColumns:"1fr auto",gap:"2px 8px",alignItems:"start"}}>
-                        {/* Название */}
-                        <div style={{minWidth:0}}>
-                          {showBreadcrumb && <div style={{fontSize:10,color:"#454568",marginBottom:2}}>{work.cat} › {work.sub}</div>}
-                          <div style={{fontSize:13,color:filled?"#ddd8ce":"#707090",lineHeight:1.3}}>{work.name}</div>
-                          <div style={{fontSize:10,color:"#454560",marginTop:1}}>{work.unit}{tierHint ? " · "+tierHint : ""}</div>
-                          {qty > 0 && (
-                            <select className="cpx-sel" value={cpx}
-                              onChange={e=>{setRow(work.name,"complexity",e.target.value);setRow(work.name,"manualPrice",undefined);}}>
-                              {COMPLEXITY.map(c=><option key={c.key} value={c.key}>{c.label}</option>)}
-                            </select>
-                          )}
+                      <div key={work.name} className={`wrow ${filled?"on":""}`}>
+                        {/* Desktop: 5 cols via CSS class; Mobile: overridden to 2 cols */}
+                        <style>{`@media(min-width:701px){.wrow{grid-template-columns:1fr 50px 120px 76px 90px}}.wrow-mob-extra{display:none}@media(max-width:700px){.wrow{grid-template-columns:1fr auto!important}.wrow-mob-extra{display:flex!important}}`}</style>
+                        {nameBlock}
+                        <div className="wrow-desk" style={{textAlign:"center",fontSize:12,color:"#454560",paddingTop:3}}>{work.unit}</div>
+                        <div className="wrow-desk" style={{textAlign:"right",paddingTop:2}}>{priceCell}</div>
+                        <div className="wrow-desk" style={{textAlign:"right"}}>{qtyInput}</div>
+                        <div className="wrow-desk" style={{textAlign:"right",paddingTop:3}}>
+                          {total>0 ? <span style={{fontSize:13,fontWeight:700,color:"#b8904a"}}>{fmt(total)}</span>
+                                   : <span style={{color:"#252535",fontSize:12}}>—</span>}
                         </div>
-                        {/* Ввод объёма + итог */}
-                        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,paddingTop:2}}>
-                          {editPrices ? (
-                            <input className="num" style={{width:90}} type="number" min="0" placeholder="цена"
-                              value={r.manualPrice!==undefined ? r.manualPrice : (price||"")}
-                              onChange={e=>setRow(work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}/>
-                          ) : (
-                            <span style={{fontSize:11,color:filled?"#b8a880":"#555575",textAlign:"right"}}>
-                              {displayPrice != null ? fmt(displayPrice)+" ₸" : <span style={{fontStyle:"italic",color:"#353550"}}>нет цены</span>}
-                            </span>
-                          )}
+                        {/* Mobile right column */}
+                        <div className="wrow-mob-extra" style={{flexDirection:"column",alignItems:"flex-end",gap:3,display:"none"}}>
+                          <span style={{fontSize:11,color:filled?"#b8a880":"#555575"}}>{displayPrice!=null?fmt(displayPrice)+" ₸":""}</span>
                           <input className="num" style={{width:72,textAlign:"center",fontSize:15,padding:"7px 8px"}} type="number" min="0" placeholder="0"
                             value={r.qty||""} onChange={e=>setRow(work.name,"qty",e.target.value)}/>
-                          {total>0
-                            ? <span style={{fontSize:12,fontWeight:700,color:"#b8904a"}}>{fmt(total)} ₸</span>
-                            : <span style={{color:"#252535",fontSize:11}}>—</span>}
+                          {total>0 ? <span style={{fontSize:12,fontWeight:700,color:"#b8904a"}}>{fmt(total)} ₸</span>
+                                   : <span style={{color:"#252535",fontSize:11}}>—</span>}
                         </div>
                       </div>
                     );
