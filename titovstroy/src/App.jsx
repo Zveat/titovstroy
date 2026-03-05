@@ -791,7 +791,7 @@ export default function App() {
         .num{background:#14172a;border:1px solid #20243a;color:#ddd8ce;border-radius:6px;padding:6px 8px;text-align:right;font-family:inherit;font-size:13px;transition:border .15s}
         .num:focus{border-color:#b8904a}
         .num::placeholder{color:#33364d}
-        .cpx-sel{background:#14172a;border:1px solid #20243a;color:#7070a0;border-radius:6px;padding:4px 6px;font-family:inherit;font-size:11px;margin-top:4px;cursor:pointer}
+        .cpx-sel{background:#14172a;border:1px solid #20243a;color:#7070a0;border-radius:6px;padding:4px 6px;font-family:inherit;font-size:11px;margin-top:4px;cursor:pointer;width:auto;max-width:130px}
         .cpx-sel:focus{border-color:#b8904a}
         .card{background:#111425;border:1px solid #1c2035;border-radius:12px;overflow:hidden}
         .btn{border:none;cursor:pointer;padding:11px 22px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:700;transition:all .2s;letter-spacing:.2px}
@@ -938,37 +938,6 @@ export default function App() {
             )}
           </div>
 
-          {/* Плавающая кнопка итога (мобильная) */}
-          {grand > 0 && (
-            <div id="float-total-btn" style={{
-              position:"fixed",bottom:20,right:20,zIndex:50,
-              display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6
-            }}>
-              <button
-                onClick={()=>{
-                  const el = document.getElementById("summary-panel");
-                  if(el) {
-                    const rect = el.getBoundingClientRect();
-                    if(rect.top > window.innerHeight || rect.bottom < 0) {
-                      el.scrollIntoView({behavior:"smooth",block:"start"});
-                    } else {
-                      window.scrollTo({top:0,behavior:"smooth"});
-                    }
-                  }
-                }}
-                style={{
-                  background:"linear-gradient(135deg,#b8904a,#d4a85a)",
-                  color:"#0c0e1a",border:"none",borderRadius:50,
-                  padding:"10px 16px",fontFamily:"inherit",fontWeight:800,
-                  fontSize:13,cursor:"pointer",
-                  boxShadow:"0 4px 20px rgba(184,144,74,.5)",
-                  display:"flex",alignItems:"center",gap:8,whiteSpace:"nowrap"
-                }}>
-                <span>⇅</span>
-                <span>{fmt(final)} ₸</span>
-              </button>
-            </div>
-          )}
         </div>
       )}
 
@@ -1220,6 +1189,35 @@ export default function App() {
               </div>
             </div>
           </div>
+
+          {/* Плавающая кнопка итога */}
+          {screen === "editor" && grand > 0 && (
+            <div style={{position:"fixed",bottom:22,right:18,zIndex:50}}>
+              <button
+                onClick={()=>{
+                  const el = document.getElementById("summary-panel");
+                  if(el) {
+                    const rect = el.getBoundingClientRect();
+                    if(rect.top > window.innerHeight*0.8) {
+                      el.scrollIntoView({behavior:"smooth",block:"start"});
+                    } else {
+                      window.scrollTo({top:0,behavior:"smooth"});
+                    }
+                  }
+                }}
+                style={{
+                  background:"linear-gradient(135deg,#b8904a,#d4a85a)",
+                  color:"#0c0e1a",border:"none",borderRadius:30,
+                  padding:"11px 18px",fontFamily:"inherit",fontWeight:800,
+                  fontSize:14,cursor:"pointer",
+                  boxShadow:"0 4px 24px rgba(184,144,74,.55)",
+                  display:"flex",alignItems:"center",gap:8,whiteSpace:"nowrap"
+                }}>
+                <span>⇅</span>
+                <span>{fmt(final)} ₸</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 
