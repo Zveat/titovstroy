@@ -379,28 +379,21 @@ function LoginScreen({ onLogin }) {
 }
 
 // ─── ПАНЕЛЬ АДМИНИСТРАТОРА (управление пользователями) ───────────────────────
-// Глобальный буфер: только то что пользователь реально изменил
-const _priceEditBuf = {};   // {code: {tiers, fixedPrice}} — только изменённые
-const _priceInitialized = new Set(); // коды карточек которые уже созданы
+// Прайс редактор — карточки ниже
 
-function PriceWorkCard({ w, initOv }) {
+// Простая карточка — получает данные и функцию обновления от родителя
+function PriceWorkCard({ w, tiers, fixedVal, onChange }) {
+  // onChange(patch) — патч это {tiers:...} или {fixedPrice:...}
   const baseTiers = w.tiers || [];
-  const code = w.code;
-
-  // Начальные значения — из сохранённого override или из базы
-  const initTiers = initOv?.tiers !== undefined ? initOv.tiers.map(t=>({...t})) : baseTiers.map(t=>({...t}));
-  const initFixed = initOv?.fixedPrice !== undefined ? String(initOv.fixedPrice) : w.fixedPrice !== undefined ? String(w.fixedPrice) : "";
-
-  const [tiers, setTiersState] = useState(initTiers);
-  const [fixedVal, setFixedState] = useState(initFixed);
-
-  // Записываем в буфер ТОЛЬКО когда пользователь что-то меняет
-  const setTiers = (t) => { _priceEditBuf[code] = {tiers: t, fixedPrice: fixedVal}; setTiersState(t); };
-  const setFixed = (v) => { _priceEditBuf[code] = {tiers, fixedPrice: v}; setFixedState(v); };
-
   const showTiers = tiers.length > 0;
-  const hasChange = initOv !== undefined;
+  const hasChange = tiers.some((t,i) => t.price !== (baseTiers[i]?.price ?? ""))
+    || (fixedVal !== "" && Number(fixedVal) !== w.fixedPrice);
   const s = (extra) => ({background:"#0c0e1a",color:"#ddd8ce",borderRadius:5,padding:"5px 8px",fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",...extra});
+
+  const updTier = (ti, field, val) =>
+    onChange({tiers: tiers.map((t,i) => i===ti ? {...t,[field]: val===""?"":Number(val)} : t)});
+  const remTier = (ti) => onChange({tiers: tiers.filter((_,i)=>i!==ti)});
+  const addTier = () => { const last=tiers[tiers.length-1]; const m=last?(Number(last.max)||0)+1:1; onChange({tiers:[...tiers,{min:m,max:m+49,price:""}]}); };
 
   return (
     <div style={{background:hasChange?"rgba(184,144,74,.05)":"transparent",border:`1px solid ${hasChange?"rgba(184,144,74,.25)":"#1a1e30"}`,borderRadius:8,padding:"10px 12px",marginBottom:6}}>
@@ -415,36 +408,25 @@ function PriceWorkCard({ w, initOv }) {
           </div>
           {tiers.map((t,ti)=>(
             <div key={ti} style={{display:"grid",gridTemplateColumns:"70px 70px 1fr 28px",gap:4,marginBottom:3,alignItems:"center"}}>
-              <input type="number" min="0" value={t.min}
-                onChange={e=>setTiers(tiers.map((x,i)=>i===ti?{...x,min:e.target.value===""?"":Number(e.target.value)}:x))}
+              <input type="number" min="0" value={t.min} onChange={e=>updTier(ti,"min",e.target.value)}
                 style={s({border:"1px solid #20243a",color:"#9090b0",textAlign:"center"})}/>
-              <input type="number" min="0" value={t.max}
-                onChange={e=>setTiers(tiers.map((x,i)=>i===ti?{...x,max:e.target.value===""?"":Number(e.target.value)}:x))}
+              <input type="number" min="0" value={t.max} onChange={e=>updTier(ti,"max",e.target.value)}
                 style={s({border:"1px solid #20243a",color:"#9090b0",textAlign:"center"})}/>
-              <input type="number" min="0" value={t.price} placeholder={baseTiers[ti]?.price??"цена"}
-                onChange={e=>setTiers(tiers.map((x,i)=>i===ti?{...x,price:e.target.value===""?"":Number(e.target.value)}:x))}
+              <input type="number" min="0" value={t.price} placeholder={String(baseTiers[ti]?.price??"")}
+                onChange={e=>updTier(ti,"price",e.target.value)}
                 style={s({border:`1px solid ${t.price!==""?"#b8904a":"#20243a"}`,textAlign:"right"})}/>
-              <button onClick={()=>setTiers(tiers.filter((_,i)=>i!==ti))}
-                style={{background:"rgba(200,60,60,.15)",color:"#e07070",border:"none",borderRadius:5,padding:"5px",cursor:"pointer",fontSize:11}}>✕</button>
+              <button onClick={()=>remTier(ti)} style={{background:"rgba(200,60,60,.15)",color:"#e07070",border:"none",borderRadius:5,padding:"5px",cursor:"pointer",fontSize:11}}>✕</button>
             </div>
           ))}
-          <button onClick={()=>{const last=tiers[tiers.length-1];const m=last?(Number(last.max)||0)+1:1;setTiers([...tiers,{min:m,max:m+49,price:""}]);}}
-            style={{marginTop:4,background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit",width:"100%"}}>
-            + Добавить диапазон
-          </button>
+          <button onClick={addTier} style={{marginTop:4,background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit",width:"100%"}}>+ Добавить диапазон</button>
         </div>
       ) : (
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <input type="number" min="0"
-            placeholder={w.fixedPrice!=null?String(w.fixedPrice):"нет цены"}
-            value={fixedVal}
-            onChange={e=>setFixed(e.target.value)}
+          <input type="number" min="0" placeholder={w.fixedPrice!=null?String(w.fixedPrice):"нет цены"}
+            value={fixedVal} onChange={e=>onChange({fixedPrice:e.target.value})}
             style={{background:"#0c0e1a",border:`1px solid ${fixedVal!==""?"#b8904a":"#20243a"}`,color:"#ddd8ce",borderRadius:6,padding:"6px 10px",fontFamily:"inherit",fontSize:13,outline:"none",width:150,textAlign:"right"}}/>
           <span style={{fontSize:11,color:"#454560"}}>₸</span>
-          <button onClick={()=>setTiers([{min:1,max:50,price:""}])}
-            style={{marginLeft:"auto",background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-            + Диапазоны
-          </button>
+          <button onClick={addTier} style={{marginLeft:"auto",background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ Диапазоны</button>
         </div>
       )}
     </div>
@@ -463,8 +445,10 @@ function AdminPanel({ currentUser, onClose }) {
   const [editingPass, setEditingPass] = useState(null);
   const [editingUser, setEditingUser] = useState(null);
   const [msg, setMsg] = useState("");
-  // Прайс-лист
-  const [priceEdits, setPriceEdits] = useState({}); // {code: newPrice}
+  // Прайс-лист — localPrices хранит состояние ВСЕХ карточек сразу
+  // {code: {tiers: [...], fixedPrice: "строка"}}
+  const [localPrices, setLocalPrices] = useState(null); // null = ещё не загружено
+  const [savedOverrides, setSavedOverrides] = useState({});
   const [priceSearch, setPriceSearch] = useState("");
   const [priceMsg, setPriceMsg] = useState("");
   const [priceSaving, setPriceSaving] = useState(false);
@@ -475,15 +459,21 @@ function AdminPanel({ currentUser, onClose }) {
         const res = await storage.get(USERS_KEY);
         setUsers(res ? JSON.parse(res.value) : DEFAULT_USERS);
       } catch { setUsers(DEFAULT_USERS); }
-      // Загружаем текущие переопределения цен
+      // Загружаем переопределения цен и инициализируем localPrices
       try {
         const pr = await storage.get(PRICES_KEY);
-        if (pr) {
-          const ov = JSON.parse(pr.value);
-          setPriceEdits(ov);
-          // Сбрасываем буфер чтобы карточки переинициализировались из свежих данных
-          Object.keys(_priceEditBuf).forEach(k => delete _priceEditBuf[k]);
+        const ov = pr ? JSON.parse(pr.value) : {};
+        setSavedOverrides(ov);
+        // Инициализируем localPrices для ВСЕХ позиций сразу
+        const lp = {};
+        for (const w of WORKS_DATA) {
+          const saved = ov[w.code];
+          lp[w.code] = {
+            tiers: saved?.tiers !== undefined ? saved.tiers.map(t=>({...t})) : (w.tiers||[]).map(t=>({...t})),
+            fixedPrice: saved?.fixedPrice !== undefined ? String(saved.fixedPrice) : w.fixedPrice !== undefined ? String(w.fixedPrice) : ""
+          };
         }
+        setLocalPrices(lp);
       } catch {}
       setLoading(false);
     })();
@@ -537,39 +527,28 @@ function AdminPanel({ currentUser, onClose }) {
   };
 
   const savePrices = async () => {
+    if (!localPrices) return;
     setPriceSaving(true);
-    // Берём уже сохранённые overrides как базу
-    const overrides = {...priceEdits};
-
-    // Применяем только то, что пользователь реально изменил в этой сессии
-    for (const [code, buf] of Object.entries(_priceEditBuf)) {
-      const work = WORKS_DATA.find(w => w.code === code);
-      if (!work) continue;
-
-      const validTiers = (buf.tiers || [])
-        .filter(t => t.price !== "" && t.price !== undefined && !isNaN(Number(t.price)) && t.min !== "" && t.max !== "")
-        .map(t => ({min:Number(t.min), max:Number(t.max), price:Number(t.price)}));
-
-      const hasValidTiers = validTiers.length > 0;
-      const hasFixed = buf.fixedPrice !== "" && buf.fixedPrice !== undefined && !isNaN(Number(buf.fixedPrice));
-
-      if (hasValidTiers) {
-        overrides[code] = { tiers: validTiers };
-      } else if (hasFixed) {
-        overrides[code] = { fixedPrice: Number(buf.fixedPrice), tiers: [] };
-      } else {
-        // Пользователь очистил — удаляем override
-        delete overrides[code];
+    const overrides = {};
+    for (const w of WORKS_DATA) {
+      const lp = localPrices[w.code];
+      if (!lp) continue;
+      const validTiers = (lp.tiers||[])
+        .filter(t => t.price!==""&&t.price!==undefined&&!isNaN(Number(t.price))&&t.min!==""&&t.max!=="")
+        .map(t=>({min:Number(t.min),max:Number(t.max),price:Number(t.price)}));
+      const hasFixed = lp.fixedPrice!==""&&!isNaN(Number(lp.fixedPrice));
+      if (validTiers.length > 0) {
+        overrides[w.code] = {tiers:validTiers};
+      } else if (hasFixed && lp.tiers.length===0) {
+        overrides[w.code] = {fixedPrice:Number(lp.fixedPrice),tiers:[]};
       }
     }
     await storage.set(PRICES_KEY, JSON.stringify(overrides));
     setPriceOverrides(overrides);
-    setPriceEdits(overrides);
-    // Очищаем буфер изменений после сохранения
-    Object.keys(_priceEditBuf).forEach(k => delete _priceEditBuf[k]);
+    setSavedOverrides(overrides);
     setPriceSaving(false);
     setPriceMsg("✓ Прайс сохранён!");
-    setTimeout(() => setPriceMsg(""), 3000);
+    setTimeout(()=>setPriceMsg(""),3000);
   };
 
   const roleLabel = r => r === "admin" ? "👑 Админ" : "👤 Замерщик";
@@ -690,7 +669,8 @@ function AdminPanel({ currentUser, onClose }) {
         ) : (
           /* ═══ ВКЛАДКА ПРАЙС-ЛИСТ ═══ */
           <div>
-            <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"center"}}>
+            {!localPrices ? <div style={{textAlign:"center",padding:30,color:"#454560"}}>Загрузка...</div> : null}
+            {localPrices && <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"center"}}>
               <input
                 style={{flex:1,background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:7,padding:"8px 12px",fontFamily:"inherit",fontSize:12,outline:"none"}}
                 placeholder="🔍 Поиск по названию..."
@@ -723,13 +703,24 @@ function AdminPanel({ currentUser, onClose }) {
                   <div key={grp} style={{marginBottom:12}}>
                     <div style={{fontSize:10,fontWeight:700,color:"#b8904a",letterSpacing:1,textTransform:"uppercase",padding:"6px 0 4px",borderBottom:"1px solid #1c2035",marginBottom:6}}>{grp}</div>
                     {works.map(w => (
-                      <PriceWorkCard key={w.code} w={w} initOv={priceEdits[w.code]}/>
+                      <PriceWorkCard key={w.code} w={w}
+                        tiers={localPrices[w.code]?.tiers || []}
+                        fixedVal={localPrices[w.code]?.fixedPrice || ""}
+                        onChange={patch => setLocalPrices(prev => ({
+                          ...prev,
+                          [w.code]: {
+                            tiers: patch.tiers !== undefined ? patch.tiers : prev[w.code].tiers,
+                            fixedPrice: patch.fixedPrice !== undefined ? patch.fixedPrice : prev[w.code].fixedPrice
+                          }
+                        }))}
+                      />
                     ))}
                   </div>
                 ));
               })()}
             </div>
             {priceMsg && <div style={{marginTop:12,textAlign:"center",fontSize:12,color:"#4caf7d",fontWeight:700}}>{priceMsg}</div>}
+            }
           </div>
         )}
       </div>
