@@ -811,10 +811,11 @@ export default function App() {
           .editor-header-right .proj-name{display:none}
           .tab-btn{padding:5px 10px;font-size:12px}
           .sub-btn{padding:4px 8px;font-size:11px}
-          .wrow{grid-template-columns:1fr auto!important;gap:4px 8px!important;padding:10px 12px!important}
+          .wrow{grid-template-columns:1fr auto!important;gap:4px 10px!important;padding:10px 12px!important;align-items:center!important}
           .wrow-desk{display:none!important}
           .wrow-mob-extra{display:flex!important}
           .wrow-th{grid-template-columns:1fr auto!important}
+          .cpx-sel{font-size:10px!important;padding:3px 4px!important;max-width:110px!important}
         }
         @media print{
           body *{display:none!important}
@@ -1110,12 +1111,12 @@ export default function App() {
                                    : <span style={{color:"#252535",fontSize:12}}>—</span>}
                         </div>
                         {/* Mobile right column */}
-                        <div className="wrow-mob-extra" style={{flexDirection:"column",alignItems:"flex-end",gap:3,display:"none"}}>
-                          <span style={{fontSize:11,color:filled?"#b8a880":"#555575"}}>{displayPrice!=null?fmt(displayPrice)+" ₸":""}</span>
-                          <input className="num" style={{width:72,textAlign:"center",fontSize:15,padding:"7px 8px"}} type="number" min="0" placeholder="0"
+                        <div className="wrow-mob-extra" style={{flexDirection:"column",alignItems:"flex-end",gap:4,display:"none",paddingTop:2}}>
+                          <input className="num" style={{width:80,textAlign:"center",fontSize:16,padding:"8px 10px",fontWeight:700}} type="number" min="0" placeholder="0"
                             value={r.qty||""} onChange={e=>setRow(work.name,"qty",e.target.value)}/>
-                          {total>0 ? <span style={{fontSize:12,fontWeight:700,color:"#b8904a"}}>{fmt(total)} ₸</span>
-                                   : <span style={{color:"#252535",fontSize:11}}>—</span>}
+                          {total>0
+                            ? <span style={{fontSize:13,fontWeight:800,color:"#b8904a"}}>{fmt(total)} ₸</span>
+                            : <span style={{fontSize:11,color:filled?"#b8a880":"#454560"}}>{displayPrice!=null?fmt(displayPrice)+" ₸/ед":""}</span>}
                         </div>
                       </div>
                     );
