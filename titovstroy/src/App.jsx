@@ -175,27 +175,39 @@ const fmt = n => n > 0 ? new Intl.NumberFormat("ru-RU").format(Math.round(n)) : 
 const today = () => new Date().toLocaleDateString("ru-RU");
 
 // Базовая цена для отображения в колонке (без объёма) — первый диапазон или fixedPrice
+// priceOverrides = {code: {fixedPrice?, tiers?}} — загружается из Firebase
+let _priceOverrides = {};
+function setPriceOverrides(o) { _priceOverrides = o || {}; }
+
+function getEffectiveWork(work) {
+  const ov = _priceOverrides[work.code];
+  if (!ov) return work;
+  return {
+    ...work,
+    fixedPrice: ov.fixedPrice !== undefined ? ov.fixedPrice : work.fixedPrice,
+    tiers: ov.tiers !== undefined ? ov.tiers : work.tiers,
+  };
+}
+
 function getBasePrice(work) {
-  if (work.tiers.length > 0) return work.tiers[0].price;
-  if (work.fixedPrice) return work.fixedPrice;
+  const w = getEffectiveWork(work);
+  if (w.tiers && w.tiers.length > 0) return w.tiers[0].price;
+  if (w.fixedPrice) return w.fixedPrice;
   return null;
 }
 
-// Логика точно повторяет Google Apps Script onEdit:
-// 1. Есть диапазоны -> ищем подходящий по объёму
-// 2. Нет диапазонов, но есть fixedPrice -> берём его
-// 3. Иначе -> null (нужно вводить вручную)
 function getPrice(work, qty, complexity) {
   if (!qty || qty <= 0) return null;
+  const w = getEffectiveWork(work);
   const mult = COMPLEXITY.find(c => c.key === complexity)?.mult || 1;
   let price = null;
-  if (work.tiers.length > 0) {
-    for (const t of work.tiers) {
+  if (w.tiers && w.tiers.length > 0) {
+    for (const t of w.tiers) {
       if (qty >= t.min && qty <= t.max) { price = t.price; break; }
     }
-    if (price === null) price = work.tiers[work.tiers.length - 1].price;
-  } else if (work.fixedPrice) {
-    price = work.fixedPrice;
+    if (price === null) price = w.tiers[w.tiers.length - 1].price;
+  } else if (w.fixedPrice) {
+    price = w.fixedPrice;
   }
   return price !== null ? price * mult : null;
 }
@@ -230,6 +242,7 @@ const EMPTY_PROJ = { name:"", type:"Вторичка", area:"", address:"", phon
 const STORAGE_KEY    = "titovstroy-estimates";
 const USERS_KEY      = "titovstroy-users";
 const SESSION_KEY    = "titovstroy-session";
+const PRICES_KEY     = "titovstroy-prices"; // переопределённые цены {code: {fixedPrice?, tiers?}}
 
 // Дефолтные пользователи
 const DEFAULT_USERS = [
@@ -367,6 +380,7 @@ function LoginScreen({ onLogin }) {
 
 // ─── ПАНЕЛЬ АДМИНИСТРАТОРА (управление пользователями) ───────────────────────
 function AdminPanel({ currentUser, onClose }) {
+  const [tab, setTab] = useState("users"); // "users" | "prices"
   const [users, setUsers]     = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving]   = useState(false);
@@ -374,9 +388,14 @@ function AdminPanel({ currentUser, onClose }) {
   const [newName, setNewName]     = useState("");
   const [newPass, setNewPass]     = useState("");
   const [newRole, setNewRole]     = useState("user");
-  const [editingPass, setEditingPass] = useState(null); // {id, val}
-  const [editingUser, setEditingUser] = useState(null); // {id, name, login}
+  const [editingPass, setEditingPass] = useState(null);
+  const [editingUser, setEditingUser] = useState(null);
   const [msg, setMsg] = useState("");
+  // Прайс-лист
+  const [priceEdits, setPriceEdits] = useState({}); // {code: newPrice}
+  const [priceSearch, setPriceSearch] = useState("");
+  const [priceMsg, setPriceMsg] = useState("");
+  const [priceSaving, setPriceSaving] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -384,6 +403,19 @@ function AdminPanel({ currentUser, onClose }) {
         const res = await storage.get(USERS_KEY);
         setUsers(res ? JSON.parse(res.value) : DEFAULT_USERS);
       } catch { setUsers(DEFAULT_USERS); }
+      // Загружаем текущие переопределения цен
+      try {
+        const pr = await storage.get(PRICES_KEY);
+        if (pr) {
+          const ov = JSON.parse(pr.value);
+          // Конвертируем в {code: price} для редактирования
+          const edits = {};
+          for (const [code, val] of Object.entries(ov)) {
+            edits[code] = val.fixedPrice !== undefined ? val.fixedPrice : (val.tiers?.[0]?.price ?? "");
+          }
+          setPriceEdits(edits);
+        }
+      } catch {}
       setLoading(false);
     })();
   }, []);
@@ -435,6 +467,29 @@ function AdminPanel({ currentUser, onClose }) {
     setTimeout(() => setMsg(""), 2500);
   };
 
+  const savePrices = async () => {
+    setPriceSaving(true);
+    // Собираем overrides: для каждой позиции с изменённой ценой
+    const overrides = {};
+    for (const work of WORKS_DATA) {
+      const val = priceEdits[work.code];
+      if (val === "" || val === undefined || val === null) continue;
+      const num = Number(val);
+      if (isNaN(num) || num < 0) continue;
+      if (work.tiers.length > 0) {
+        // Для тиров — задаём fixedPrice который перекрывает все тиры
+        overrides[work.code] = { fixedPrice: num, tiers: [] };
+      } else {
+        overrides[work.code] = { fixedPrice: num };
+      }
+    }
+    await storage.set(PRICES_KEY, JSON.stringify(overrides));
+    setPriceOverrides(overrides);
+    setPriceSaving(false);
+    setPriceMsg("✓ Прайс сохранён");
+    setTimeout(() => setPriceMsg(""), 2500);
+  };
+
   const roleLabel = r => r === "admin" ? "👑 Админ" : "👤 Замерщик";
 
   return (
@@ -443,12 +498,24 @@ function AdminPanel({ currentUser, onClose }) {
       <div style={{background:"#111425",border:"1px solid #1c2035",borderRadius:14,padding:"24px 28px",maxWidth:520,width:"100%",maxHeight:"88vh",overflowY:"auto"}}
         onClick={e=>e.stopPropagation()}>
 
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <div style={{fontWeight:800,fontSize:16,color:"#e2ddd4"}}>👥 Управление пользователями</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div style={{fontWeight:800,fontSize:16,color:"#e2ddd4"}}>⚙️ Администрирование</div>
           <button onClick={onClose} style={{background:"none",border:"none",color:"#555575",cursor:"pointer",fontSize:20}}>×</button>
         </div>
 
-        {loading ? <div style={{textAlign:"center",padding:"30px 0",color:"#454560"}}>Загрузка...</div> : (
+        {/* Вкладки */}
+        <div style={{display:"flex",gap:4,marginBottom:16,background:"#0c0e1a",borderRadius:8,padding:4}}>
+          {[["users","👥 Сотрудники"],["prices","💰 Прайс-лист"]].map(([t,label])=>(
+            <button key={t} onClick={()=>setTab(t)} style={{
+              flex:1,padding:"8px",borderRadius:6,border:"none",cursor:"pointer",
+              fontFamily:"inherit",fontSize:12,fontWeight:700,
+              background: tab===t ? "linear-gradient(135deg,#b8904a,#d4a85a)" : "transparent",
+              color: tab===t ? "#0c0e1a" : "#555575",transition:"all .15s"
+            }}>{label}</button>
+          ))}
+        </div>
+
+        {loading ? <div style={{textAlign:"center",padding:"30px 0",color:"#454560"}}>Загрузка...</div> : tab === "users" ? (
           <>
             {/* Список */}
             <div style={{marginBottom:20}}>
@@ -538,6 +605,70 @@ function AdminPanel({ currentUser, onClose }) {
             {msg && <div style={{marginTop:12,textAlign:"center",fontSize:12,color: msg.startsWith("✓") ? "#4caf7d" : "#e07070"}}>{msg}</div>}
             {saving && <div style={{textAlign:"center",fontSize:11,color:"#454560",marginTop:8}}>💾 Сохранение...</div>}
           </>
+        ) : (
+          /* ═══ ВКЛАДКА ПРАЙС-ЛИСТ ═══ */
+          <div>
+            <div style={{display:"flex",gap:8,marginBottom:12,alignItems:"center"}}>
+              <input
+                style={{flex:1,background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:7,padding:"8px 12px",fontFamily:"inherit",fontSize:12,outline:"none"}}
+                placeholder="🔍 Поиск по названию..."
+                value={priceSearch}
+                onChange={e=>setPriceSearch(e.target.value)}
+              />
+              <button onClick={savePrices} disabled={priceSaving}
+                style={{background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:7,padding:"8px 16px",fontFamily:"inherit",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                {priceSaving ? "💾..." : "💾 Сохранить"}
+              </button>
+            </div>
+            <div style={{fontSize:10,color:"#454560",marginBottom:10}}>
+              Оставьте поле пустым — будет использована цена из базы. Введите число — перекроет базовую цену.
+            </div>
+            {/* Список позиций */}
+            <div style={{display:"flex",flexDirection:"column",gap:2}}>
+              {(() => {
+                const q = priceSearch.toLowerCase();
+                const filtered = WORKS_DATA.filter(w =>
+                  !q || w.name.toLowerCase().includes(q) || w.sub.toLowerCase().includes(q)
+                );
+                // Группируем по sub
+                const groups = {};
+                for (const w of filtered) {
+                  const key = w.cat + " / " + w.sub;
+                  if (!groups[key]) groups[key] = [];
+                  groups[key].push(w);
+                }
+                return Object.entries(groups).map(([grp, works]) => (
+                  <div key={grp} style={{marginBottom:8}}>
+                    <div style={{fontSize:10,fontWeight:700,color:"#b8904a",letterSpacing:1,textTransform:"uppercase",padding:"6px 0 4px",borderBottom:"1px solid #1c2035",marginBottom:4}}>{grp}</div>
+                    {works.map(w => {
+                      const baseP = w.tiers.length > 0 ? w.tiers[0].price : (w.fixedPrice || null);
+                      const editVal = priceEdits[w.code];
+                      const hasOverride = editVal !== undefined && editVal !== "";
+                      return (
+                        <div key={w.code} style={{display:"grid",gridTemplateColumns:"1fr 50px 110px",gap:8,alignItems:"center",padding:"5px 6px",borderRadius:6,background:hasOverride?"rgba(184,144,74,.06)":"transparent"}}>
+                          <div>
+                            <span style={{fontSize:12,color:hasOverride?"#ddd8ce":"#8080a0"}}>{w.name}</span>
+                            <span style={{fontSize:10,color:"#454560",marginLeft:6}}>{w.unit}</span>
+                          </div>
+                          <div style={{fontSize:10,color:"#454560",textAlign:"right"}}>
+                            {baseP != null ? fmt(baseP) : <span style={{fontStyle:"italic"}}>—</span>}
+                          </div>
+                          <input
+                            type="number" min="0"
+                            placeholder={baseP != null ? String(baseP) : "нет цены"}
+                            value={editVal !== undefined ? editVal : ""}
+                            onChange={e => setPriceEdits(prev => ({...prev, [w.code]: e.target.value}))}
+                            style={{background:"#0c0e1a",border:`1px solid ${hasOverride?"#b8904a":"#20243a"}`,color:"#ddd8ce",borderRadius:6,padding:"5px 8px",fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",textAlign:"right"}}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                ));
+              })()}
+            </div>
+            {priceMsg && <div style={{marginTop:12,textAlign:"center",fontSize:12,color:"#4caf7d"}}>{priceMsg}</div>}
+          </div>
         )}
       </div>
     </div>
@@ -688,6 +819,11 @@ export default function App() {
     } catch(e) {
       setEstimates([]);
     }
+    // Загружаем переопределения цен
+    try {
+      const pr = await storage.get(PRICES_KEY);
+      if (pr) setPriceOverrides(JSON.parse(pr.value));
+    } catch {}
     setLoadingList(false);
   }, []);
 
