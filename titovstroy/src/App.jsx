@@ -379,39 +379,31 @@ function LoginScreen({ onLogin }) {
 }
 
 // ─── ПАНЕЛЬ АДМИНИСТРАТОРА (управление пользователями) ───────────────────────
-// ─── Карточка редактирования цены одной позиции ─────────────────────────────
-// Хранит своё состояние локально, сообщает родителю через onChange
-function PriceWorkCard({ w, savedOv, onChange }) {
+// Глобальный буфер: только то что пользователь реально изменил
+const _priceEditBuf = {};   // {code: {tiers, fixedPrice}} — только изменённые
+const _priceInitialized = new Set(); // коды карточек которые уже созданы
+
+function PriceWorkCard({ w, initOv }) {
   const baseTiers = w.tiers || [];
+  const code = w.code;
 
-  const [tiers, setTiersRaw] = useState(() =>
-    savedOv?.tiers !== undefined
-      ? savedOv.tiers.map(t=>({...t}))
-      : baseTiers.map(t=>({...t}))
-  );
-  const [fixedVal, setFixedRaw] = useState(() =>
-    savedOv?.fixedPrice !== undefined ? String(savedOv.fixedPrice) :
-    w.fixedPrice !== undefined ? String(w.fixedPrice) : ""
-  );
+  // Начальные значения — из сохранённого override или из базы
+  const initTiers = initOv?.tiers !== undefined ? initOv.tiers.map(t=>({...t})) : baseTiers.map(t=>({...t}));
+  const initFixed = initOv?.fixedPrice !== undefined ? String(initOv.fixedPrice) : w.fixedPrice !== undefined ? String(w.fixedPrice) : "";
 
-  const setTiers = (t) => { setTiersRaw(t); onChange(w.code, buildOv(t, fixedVal)); };
-  const setFixed = (v) => { setFixedRaw(v); onChange(w.code, buildOv(tiers, v)); };
+  const [tiers, setTiersState] = useState(initTiers);
+  const [fixedVal, setFixedState] = useState(initFixed);
 
-  const buildOv = (t, f) => ({
-    tiers: t,
-    fixedPrice: f !== "" && f !== undefined ? Number(f) : undefined
-  });
+  // Записываем в буфер ТОЛЬКО когда пользователь что-то меняет
+  const setTiers = (t) => { _priceEditBuf[code] = {tiers: t, fixedPrice: fixedVal}; setTiersState(t); };
+  const setFixed = (v) => { _priceEditBuf[code] = {tiers, fixedPrice: v}; setFixedState(v); };
 
   const showTiers = tiers.length > 0;
-  const hasChange = savedOv !== undefined;
-
-  const stInp = (extra) => ({background:"#0c0e1a",color:"#ddd8ce",borderRadius:5,
-    padding:"5px 8px",fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",...extra});
+  const hasChange = initOv !== undefined;
+  const s = (extra) => ({background:"#0c0e1a",color:"#ddd8ce",borderRadius:5,padding:"5px 8px",fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",...extra});
 
   return (
-    <div style={{background:hasChange?"rgba(184,144,74,.05)":"transparent",
-                 border:`1px solid ${hasChange?"rgba(184,144,74,.25)":"#1a1e30"}`,
-                 borderRadius:8, padding:"10px 12px", marginBottom:6}}>
+    <div style={{background:hasChange?"rgba(184,144,74,.05)":"transparent",border:`1px solid ${hasChange?"rgba(184,144,74,.25)":"#1a1e30"}`,borderRadius:8,padding:"10px 12px",marginBottom:6}}>
       <div style={{marginBottom:8}}>
         <span style={{fontSize:13,fontWeight:600,color:hasChange?"#ddd8ce":"#9090b0"}}>{w.name}</span>
         <span style={{fontSize:10,color:"#454560",marginLeft:8}}>{w.unit}</span>
@@ -419,21 +411,19 @@ function PriceWorkCard({ w, savedOv, onChange }) {
       {showTiers ? (
         <div>
           <div style={{display:"grid",gridTemplateColumns:"70px 70px 1fr 28px",gap:4,marginBottom:4}}>
-            {["ОТ","ДО","ЦЕНА (₸)",""].map((h,i)=>(
-              <div key={i} style={{fontSize:9,color:"#454560",textAlign:i===2?"right":"center",fontWeight:700}}>{h}</div>
-            ))}
+            {["ОТ","ДО","ЦЕНА (₸)",""].map((h,i)=>(<div key={i} style={{fontSize:9,color:"#454560",textAlign:i===2?"right":"center",fontWeight:700}}>{h}</div>))}
           </div>
           {tiers.map((t,ti)=>(
             <div key={ti} style={{display:"grid",gridTemplateColumns:"70px 70px 1fr 28px",gap:4,marginBottom:3,alignItems:"center"}}>
               <input type="number" min="0" value={t.min}
                 onChange={e=>setTiers(tiers.map((x,i)=>i===ti?{...x,min:e.target.value===""?"":Number(e.target.value)}:x))}
-                style={stInp({border:"1px solid #20243a",color:"#9090b0",textAlign:"center"})}/>
+                style={s({border:"1px solid #20243a",color:"#9090b0",textAlign:"center"})}/>
               <input type="number" min="0" value={t.max}
                 onChange={e=>setTiers(tiers.map((x,i)=>i===ti?{...x,max:e.target.value===""?"":Number(e.target.value)}:x))}
-                style={stInp({border:"1px solid #20243a",color:"#9090b0",textAlign:"center"})}/>
+                style={s({border:"1px solid #20243a",color:"#9090b0",textAlign:"center"})}/>
               <input type="number" min="0" value={t.price} placeholder={baseTiers[ti]?.price??"цена"}
                 onChange={e=>setTiers(tiers.map((x,i)=>i===ti?{...x,price:e.target.value===""?"":Number(e.target.value)}:x))}
-                style={stInp({border:`1px solid ${t.price!==""?"#b8904a":"#20243a"}`,textAlign:"right"})}/>
+                style={s({border:`1px solid ${t.price!==""?"#b8904a":"#20243a"}`,textAlign:"right"})}/>
               <button onClick={()=>setTiers(tiers.filter((_,i)=>i!==ti))}
                 style={{background:"rgba(200,60,60,.15)",color:"#e07070",border:"none",borderRadius:5,padding:"5px",cursor:"pointer",fontSize:11}}>✕</button>
             </div>
@@ -451,7 +441,7 @@ function PriceWorkCard({ w, savedOv, onChange }) {
             onChange={e=>setFixed(e.target.value)}
             style={{background:"#0c0e1a",border:`1px solid ${fixedVal!==""?"#b8904a":"#20243a"}`,color:"#ddd8ce",borderRadius:6,padding:"6px 10px",fontFamily:"inherit",fontSize:13,outline:"none",width:150,textAlign:"right"}}/>
           <span style={{fontSize:11,color:"#454560"}}>₸</span>
-          <button onClick={()=>{const m=1;setTiers([{min:m,max:m+49,price:""}]);}}
+          <button onClick={()=>setTiers([{min:1,max:50,price:""}])}
             style={{marginLeft:"auto",background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
             + Диапазоны
           </button>
@@ -490,8 +480,9 @@ function AdminPanel({ currentUser, onClose }) {
         const pr = await storage.get(PRICES_KEY);
         if (pr) {
           const ov = JSON.parse(pr.value);
-          // Загружаем overrides как есть
           setPriceEdits(ov);
+          // Сбрасываем буфер чтобы карточки переинициализировались из свежих данных
+          Object.keys(_priceEditBuf).forEach(k => delete _priceEditBuf[k]);
         }
       } catch {}
       setLoading(false);
@@ -547,32 +538,35 @@ function AdminPanel({ currentUser, onClose }) {
 
   const savePrices = async () => {
     setPriceSaving(true);
-    const overrides = {};
-    for (const work of WORKS_DATA) {
-      const ov = priceEdits[work.code];
-      if (!ov) continue;
+    // Берём уже сохранённые overrides как базу
+    const overrides = {...priceEdits};
 
-      // Проверяем тиры: берём только если есть хоть один с заполненной ценой
-      const validTiers = (ov.tiers || [])
-        .filter(t => t.price !== "" && t.price !== undefined && !isNaN(Number(t.price))
-                  && t.min !== "" && t.max !== "")
+    // Применяем только то, что пользователь реально изменил в этой сессии
+    for (const [code, buf] of Object.entries(_priceEditBuf)) {
+      const work = WORKS_DATA.find(w => w.code === code);
+      if (!work) continue;
+
+      const validTiers = (buf.tiers || [])
+        .filter(t => t.price !== "" && t.price !== undefined && !isNaN(Number(t.price)) && t.min !== "" && t.max !== "")
         .map(t => ({min:Number(t.min), max:Number(t.max), price:Number(t.price)}));
 
       const hasValidTiers = validTiers.length > 0;
-      const hasFixed = ov.fixedPrice !== undefined && ov.fixedPrice !== "" && !isNaN(Number(ov.fixedPrice));
+      const hasFixed = buf.fixedPrice !== "" && buf.fixedPrice !== undefined && !isNaN(Number(buf.fixedPrice));
 
-      // Сохраняем только если есть реальные данные
       if (hasValidTiers) {
-        overrides[work.code] = { tiers: validTiers };
-      } else if (hasFixed && (ov.tiers === undefined || ov.tiers.length === 0)) {
-        // Фиксированная цена только если нет диапазонов вообще
-        overrides[work.code] = { fixedPrice: Number(ov.fixedPrice), tiers: [] };
+        overrides[code] = { tiers: validTiers };
+      } else if (hasFixed) {
+        overrides[code] = { fixedPrice: Number(buf.fixedPrice), tiers: [] };
+      } else {
+        // Пользователь очистил — удаляем override
+        delete overrides[code];
       }
     }
     await storage.set(PRICES_KEY, JSON.stringify(overrides));
     setPriceOverrides(overrides);
-    // Обновляем priceEdits чтобы отражать сохранённое состояние
     setPriceEdits(overrides);
+    // Очищаем буфер изменений после сохранения
+    Object.keys(_priceEditBuf).forEach(k => delete _priceEditBuf[k]);
     setPriceSaving(false);
     setPriceMsg("✓ Прайс сохранён!");
     setTimeout(() => setPriceMsg(""), 3000);
@@ -729,9 +723,7 @@ function AdminPanel({ currentUser, onClose }) {
                   <div key={grp} style={{marginBottom:12}}>
                     <div style={{fontSize:10,fontWeight:700,color:"#b8904a",letterSpacing:1,textTransform:"uppercase",padding:"6px 0 4px",borderBottom:"1px solid #1c2035",marginBottom:6}}>{grp}</div>
                     {works.map(w => (
-                      <PriceWorkCard key={w.code} w={w}
-                        savedOv={priceEdits[w.code]}
-                        onChange={(code, val) => setPriceEdits(prev => ({...prev, [code]: val}))}/>
+                      <PriceWorkCard key={w.code} w={w} initOv={priceEdits[w.code]}/>
                     ))}
                   </div>
                 ));
