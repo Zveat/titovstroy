@@ -762,7 +762,7 @@ export default function App() {
   const newEstimate = () => {
     const id = genId();
     setCurrentId(id);
-    setProj({...EMPTY_PROJ});
+    setProj({...EMPTY_PROJ, _createdBy: currentUser.name, _createdById: currentUser.id});
     setRows({});
     setDiscount(0);
     setNote("");
@@ -774,13 +774,16 @@ export default function App() {
 
   // ── Сохранить текущую и вернуться к списку ──
   const saveAndBack = async () => {
+    const exists = estimates.find(e => e.id === currentId);
     const updated = {
       id: currentId,
       proj, rows, discount, note,
+      createdAt: exists?.createdAt || Date.now(),
+      createdBy: exists?.createdBy || currentUser.name,
       updatedAt: Date.now(),
+      updatedBy: currentUser.name,
       total: final,
     };
-    const exists = estimates.find(e => e.id === currentId);
     const newList = exists
       ? estimates.map(e => e.id === currentId ? updated : e)
       : [updated, ...estimates];
@@ -954,6 +957,15 @@ export default function App() {
                               <div style={{fontSize:12,color:"#454560",fontStyle:"italic"}}>черновик</div>
                             )}
                             <div style={{fontSize:10,color:"#353550",marginTop:3}}>{fmtDate(est.updatedAt)}</div>
+                            {(est.createdBy || est.updatedBy) && (
+                              <div style={{fontSize:10,color:"#353550",marginTop:2,textAlign:"right"}}>
+                                {est.updatedBy && est.updatedBy !== est.createdBy
+                                  ? <span>✏ {est.updatedBy}</span>
+                                  : est.createdBy
+                                    ? <span>👤 {est.createdBy}</span>
+                                    : null}
+                              </div>
+                            )}
                           </div>
                         </div>
                         {/* Кнопка удаления */}
