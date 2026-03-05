@@ -408,12 +408,8 @@ function AdminPanel({ currentUser, onClose }) {
         const pr = await storage.get(PRICES_KEY);
         if (pr) {
           const ov = JSON.parse(pr.value);
-          // Конвертируем в {code: price} для редактирования
-          const edits = {};
-          for (const [code, val] of Object.entries(ov)) {
-            edits[code] = val.fixedPrice !== undefined ? val.fixedPrice : (val.tiers?.[0]?.price ?? "");
-          }
-          setPriceEdits(edits);
+          // Загружаем overrides как есть
+          setPriceEdits(ov);
         }
       } catch {}
       setLoading(false);
@@ -469,25 +465,28 @@ function AdminPanel({ currentUser, onClose }) {
 
   const savePrices = async () => {
     setPriceSaving(true);
-    // Собираем overrides: для каждой позиции с изменённой ценой
     const overrides = {};
     for (const work of WORKS_DATA) {
-      const val = priceEdits[work.code];
-      if (val === "" || val === undefined || val === null) continue;
-      const num = Number(val);
-      if (isNaN(num) || num < 0) continue;
-      if (work.tiers.length > 0) {
-        // Для тиров — задаём fixedPrice который перекрывает все тиры
-        overrides[work.code] = { fixedPrice: num, tiers: [] };
-      } else {
-        overrides[work.code] = { fixedPrice: num };
+      const ov = priceEdits[work.code];
+      if (!ov) continue;
+      const entry = {};
+      // Фиксированная цена
+      if (ov.fixedPrice !== undefined && ov.fixedPrice !== "") {
+        entry.fixedPrice = Number(ov.fixedPrice);
       }
+      // Тиры
+      if (ov.tiers !== undefined) {
+        entry.tiers = ov.tiers
+          .filter(t => t.price !== "" && t.price !== undefined && t.min !== "" && t.max !== "")
+          .map(t => ({min:Number(t.min), max:Number(t.max), price:Number(t.price)}));
+      }
+      if (Object.keys(entry).length > 0) overrides[work.code] = entry;
     }
     await storage.set(PRICES_KEY, JSON.stringify(overrides));
     setPriceOverrides(overrides);
     setPriceSaving(false);
-    setPriceMsg("✓ Прайс сохранён");
-    setTimeout(() => setPriceMsg(""), 2500);
+    setPriceMsg("✓ Прайс сохранён и применён!");
+    setTimeout(() => setPriceMsg(""), 3000);
   };
 
   const roleLabel = r => r === "admin" ? "👑 Админ" : "👤 Замерщик";
@@ -608,7 +607,7 @@ function AdminPanel({ currentUser, onClose }) {
         ) : (
           /* ═══ ВКЛАДКА ПРАЙС-ЛИСТ ═══ */
           <div>
-            <div style={{display:"flex",gap:8,marginBottom:12,alignItems:"center"}}>
+            <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"center"}}>
               <input
                 style={{flex:1,background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:7,padding:"8px 12px",fontFamily:"inherit",fontSize:12,outline:"none"}}
                 placeholder="🔍 Поиск по названию..."
@@ -620,17 +619,17 @@ function AdminPanel({ currentUser, onClose }) {
                 {priceSaving ? "💾..." : "💾 Сохранить"}
               </button>
             </div>
-            <div style={{fontSize:10,color:"#454560",marginBottom:10}}>
-              Оставьте поле пустым — будет использована цена из базы. Введите число — перекроет базовую цену.
+            <div style={{fontSize:10,color:"#454560",marginBottom:10,lineHeight:1.5}}>
+              Для позиций без диапазонов — введите фиксированную цену.<br/>
+              Для позиций с диапазонами — отредактируйте каждый диапазон или добавьте новые.<br/>
+              <span style={{color:"#b8904a"}}>Пустое поле = цена из базы данных.</span>
             </div>
-            {/* Список позиций */}
             <div style={{display:"flex",flexDirection:"column",gap:2}}>
               {(() => {
                 const q = priceSearch.toLowerCase();
                 const filtered = WORKS_DATA.filter(w =>
                   !q || w.name.toLowerCase().includes(q) || w.sub.toLowerCase().includes(q)
                 );
-                // Группируем по sub
                 const groups = {};
                 for (const w of filtered) {
                   const key = w.cat + " / " + w.sub;
@@ -638,28 +637,91 @@ function AdminPanel({ currentUser, onClose }) {
                   groups[key].push(w);
                 }
                 return Object.entries(groups).map(([grp, works]) => (
-                  <div key={grp} style={{marginBottom:8}}>
-                    <div style={{fontSize:10,fontWeight:700,color:"#b8904a",letterSpacing:1,textTransform:"uppercase",padding:"6px 0 4px",borderBottom:"1px solid #1c2035",marginBottom:4}}>{grp}</div>
+                  <div key={grp} style={{marginBottom:12}}>
+                    <div style={{fontSize:10,fontWeight:700,color:"#b8904a",letterSpacing:1,textTransform:"uppercase",padding:"6px 0 4px",borderBottom:"1px solid #1c2035",marginBottom:6}}>{grp}</div>
                     {works.map(w => {
-                      const baseP = w.tiers.length > 0 ? w.tiers[0].price : (w.fixedPrice || null);
-                      const editVal = priceEdits[w.code];
-                      const hasOverride = editVal !== undefined && editVal !== "";
+                      const ov = priceEdits[w.code] || {};
+                      // tiers в редакторе: массив {min,max,price} либо из override, либо из базы
+                      const baseTiers = w.tiers || [];
+                      const editTiers = ov.tiers !== undefined ? ov.tiers : baseTiers.map(t=>({...t}));
+                      const fixedVal = ov.fixedPrice !== undefined ? ov.fixedPrice : (w.fixedPrice !== undefined ? w.fixedPrice : "");
+                      const hasTiers = baseTiers.length > 0 || (ov.tiers && ov.tiers.length > 0);
+                      const hasOverride = ov.fixedPrice !== undefined || ov.tiers !== undefined;
+
+                      const updateTierPrice = (ti, val) => {
+                        const newTiers = editTiers.map((t,i) => i===ti ? {...t, price: val===""?"":Number(val)} : t);
+                        setPriceEdits(prev => ({...prev, [w.code]: {...(prev[w.code]||{}), tiers: newTiers}}));
+                      };
+                      const updateTierRange = (ti, field, val) => {
+                        const newTiers = editTiers.map((t,i) => i===ti ? {...t, [field]: val===""?"":Number(val)} : t);
+                        setPriceEdits(prev => ({...prev, [w.code]: {...(prev[w.code]||{}), tiers: newTiers}}));
+                      };
+                      const addTier = () => {
+                        const last = editTiers[editTiers.length-1];
+                        const newMin = last ? last.max+1 : 1;
+                        const newTiers = [...editTiers, {min:newMin, max:newMin+49, price:""}];
+                        setPriceEdits(prev => ({...prev, [w.code]: {...(prev[w.code]||{}), tiers: newTiers}}));
+                      };
+                      const removeTier = (ti) => {
+                        const newTiers = editTiers.filter((_,i)=>i!==ti);
+                        setPriceEdits(prev => ({...prev, [w.code]: {...(prev[w.code]||{}), tiers: newTiers}}));
+                      };
+                      const updateFixed = (val) => {
+                        setPriceEdits(prev => ({...prev, [w.code]: {...(prev[w.code]||{}), fixedPrice: val===""?undefined:Number(val)}}));
+                      };
+
                       return (
-                        <div key={w.code} style={{display:"grid",gridTemplateColumns:"1fr 50px 110px",gap:8,alignItems:"center",padding:"5px 6px",borderRadius:6,background:hasOverride?"rgba(184,144,74,.06)":"transparent"}}>
-                          <div>
-                            <span style={{fontSize:12,color:hasOverride?"#ddd8ce":"#8080a0"}}>{w.name}</span>
-                            <span style={{fontSize:10,color:"#454560",marginLeft:6}}>{w.unit}</span>
+                        <div key={w.code} style={{background: hasOverride?"rgba(184,144,74,.05)":"transparent", border:`1px solid ${hasOverride?"rgba(184,144,74,.2)":"#1a1e30"}`, borderRadius:8, padding:"10px 12px", marginBottom:6}}>
+                          {/* Заголовок позиции */}
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom: hasTiers?8:6}}>
+                            <div>
+                              <span style={{fontSize:13,fontWeight:600,color:hasOverride?"#ddd8ce":"#9090b0"}}>{w.name}</span>
+                              <span style={{fontSize:10,color:"#454560",marginLeft:8}}>{w.unit}</span>
+                            </div>
                           </div>
-                          <div style={{fontSize:10,color:"#454560",textAlign:"right"}}>
-                            {baseP != null ? fmt(baseP) : <span style={{fontStyle:"italic"}}>—</span>}
-                          </div>
-                          <input
-                            type="number" min="0"
-                            placeholder={baseP != null ? String(baseP) : "нет цены"}
-                            value={editVal !== undefined ? editVal : ""}
-                            onChange={e => setPriceEdits(prev => ({...prev, [w.code]: e.target.value}))}
-                            style={{background:"#0c0e1a",border:`1px solid ${hasOverride?"#b8904a":"#20243a"}`,color:"#ddd8ce",borderRadius:6,padding:"5px 8px",fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",textAlign:"right"}}
-                          />
+
+                          {hasTiers ? (
+                            /* Позиция с диапазонами */
+                            <div>
+                              <div style={{display:"grid",gridTemplateColumns:"70px 70px 1fr 24px",gap:4,marginBottom:4}}>
+                                <div style={{fontSize:9,color:"#454560",textAlign:"center",fontWeight:700}}>ОТ (м)</div>
+                                <div style={{fontSize:9,color:"#454560",textAlign:"center",fontWeight:700}}>ДО (м)</div>
+                                <div style={{fontSize:9,color:"#454560",textAlign:"right",fontWeight:700}}>ЦЕНА (₸)</div>
+                                <div/>
+                              </div>
+                              {editTiers.map((t,ti)=>(
+                                <div key={ti} style={{display:"grid",gridTemplateColumns:"70px 70px 1fr 24px",gap:4,marginBottom:3,alignItems:"center"}}>
+                                  <input type="number" min="0" value={t.min}
+                                    onChange={e=>updateTierRange(ti,"min",e.target.value)}
+                                    style={{background:"#0c0e1a",border:"1px solid #20243a",color:"#9090b0",borderRadius:5,padding:"5px 7px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%",textAlign:"center"}}/>
+                                  <input type="number" min="0" value={t.max}
+                                    onChange={e=>updateTierRange(ti,"max",e.target.value)}
+                                    style={{background:"#0c0e1a",border:"1px solid #20243a",color:"#9090b0",borderRadius:5,padding:"5px 7px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%",textAlign:"center"}}/>
+                                  <input type="number" min="0" value={t.price}
+                                    placeholder={baseTiers[ti]?.price ?? "цена"}
+                                    onChange={e=>updateTierPrice(ti,e.target.value)}
+                                    style={{background:"#0c0e1a",border:`1px solid ${t.price!==""?"#b8904a":"#20243a"}`,color:"#ddd8ce",borderRadius:5,padding:"5px 8px",fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",textAlign:"right"}}/>
+                                  <button onClick={()=>removeTier(ti)}
+                                    style={{background:"rgba(200,60,60,.15)",color:"#e07070",border:"none",borderRadius:5,padding:"4px",cursor:"pointer",fontSize:12,lineHeight:1}}>✕</button>
+                                </div>
+                              ))}
+                              <button onClick={addTier}
+                                style={{marginTop:4,background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit",width:"100%"}}>
+                                + Добавить диапазон
+                              </button>
+                            </div>
+                          ) : (
+                            /* Фиксированная цена */
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <span style={{fontSize:10,color:"#454560",flex:1}}>Фиксированная цена:</span>
+                              <input type="number" min="0"
+                                placeholder={w.fixedPrice != null ? String(w.fixedPrice) : "нет цены"}
+                                value={fixedVal}
+                                onChange={e=>updateFixed(e.target.value)}
+                                style={{background:"#0c0e1a",border:`1px solid ${fixedVal!==""&&fixedVal!==undefined?"#b8904a":"#20243a"}`,color:"#ddd8ce",borderRadius:6,padding:"6px 10px",fontFamily:"inherit",fontSize:13,outline:"none",width:130,textAlign:"right"}}/>
+                              <span style={{fontSize:11,color:"#454560"}}>₸</span>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -667,7 +729,7 @@ function AdminPanel({ currentUser, onClose }) {
                 ));
               })()}
             </div>
-            {priceMsg && <div style={{marginTop:12,textAlign:"center",fontSize:12,color:"#4caf7d"}}>{priceMsg}</div>}
+            {priceMsg && <div style={{marginTop:12,textAlign:"center",fontSize:12,color:"#4caf7d",fontWeight:700}}>{priceMsg}</div>}
           </div>
         )}
       </div>
