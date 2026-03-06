@@ -1599,8 +1599,6 @@ export default function App() {
                         </button>
                       ))}
                     </div>
-                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}
-                    </div>
                     {/* Фильтр по сотруднику */}
                     {allUsers.filter(u=>u.role!=="viewer").length > 1 && (
                       <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
