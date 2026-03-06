@@ -1822,7 +1822,7 @@ export default function App() {
         if(!catMap[cat]){ catMap[cat]={total:0,rows:[]}; catOrder.push(cat); }
         const sum = Number(w.quantity||0)*Number(w.price||0);
         catMap[cat].total += sum;
-        catMap[cat].rows.push({...w,sum});
+        catMap[cat].rows.push(Object.assign({},w,{sum:sum}));
       });
       const multiCat = catOrder.length > 1;
       // For DOCX: use width="" attribute which html-docx-js respects
@@ -2282,12 +2282,16 @@ export default function App() {
         const cat=w.category||"Работы";
         if(!catMap[cat]){catMap[cat]={total:0,rows:[]};catOrder.push(cat);}
         const sum=Number(w.quantity||0)*Number(w.price||0);
-        catMap[cat].total+=sum; catMap[cat].rows.push({...w,sum});
+        catMap[cat].total+=sum; catMap[cat].rows.push(Object.assign({},w,{sum:sum}));
       });
+      console.log("catOrder len:", catOrder.length, "rows building");
       const rows=[];
+      console.log("pushing header");
       rows.push(new D.TableRow({children:[TC("№",5,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Наименование работ",45,{b:true,bg:"DDDDDD"}),TC("Ед.",8,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Объём",8,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Цена за ед.",17,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Сумма",17,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER})]}));
+      console.log("header done, starting forEach");
       let n=0;
       catOrder.forEach(cat=>{
+        console.log("processing cat:", cat);
         const {rows:cr,total:ct}=catMap[cat];
         rows.push(new D.TableRow({children:[TC(cat+" — "+fmtN2(ct)+" ₸",100,{span:6,b:true,bg:"2a2a3a",col:"c8a060"})]}));
         let lastSub="";
@@ -2295,7 +2299,8 @@ export default function App() {
           if(w.subcategory&&w.subcategory!==lastSub){lastSub=w.subcategory;rows.push(new D.TableRow({children:[TC(w.subcategory,100,{span:6,i:true,bg:"e8e4f0",col:"5a3a8a"})]}));}
           n++;
           const bg=i%2===0?"f8f6f0":"f0ede5";
-          rows.push(new D.TableRow({children:[TC(String(n),5,{bg,al:D.AlignmentType.CENTER}),TC(w.name||"",45,{bg}),TC(w.unit||"м²",8,{bg,al:D.AlignmentType.CENTER}),TC(String(w.quantity||""),8,{bg,al:D.AlignmentType.CENTER}),TC(fmtN2(w.price)+" ₸",17,{bg,al:D.AlignmentType.RIGHT}),TC(fmtN2(w.sum)+" ₸",17,{bg,b:true,al:D.AlignmentType.RIGHT})]}));
+            console.log("pushing data row", n);
+        rows.push(new D.TableRow({children:[TC(String(n),5,{bg,al:D.AlignmentType.CENTER}),TC(w.name||"",45,{bg}),TC(w.unit||"м²",8,{bg,al:D.AlignmentType.CENTER}),TC(String(w.quantity||""),8,{bg,al:D.AlignmentType.CENTER}),TC(fmtN2(w.price)+" ₸",17,{bg,al:D.AlignmentType.RIGHT}),TC(fmtN2(w.sum)+" ₸",17,{bg,b:true,al:D.AlignmentType.RIGHT})]}));
         });
         rows.push(new D.TableRow({children:[TC("Итого по разделу «"+cat+"»:",83,{span:5,i:true,bg:"ede8d5",al:D.AlignmentType.RIGHT}),TC(fmtN2(ct)+" ₸",17,{bg:"ede8d5",b:true,al:D.AlignmentType.RIGHT})]}));
       });
