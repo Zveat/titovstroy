@@ -1073,7 +1073,7 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
           <div style={{fontSize:12,color:"#888",marginTop:3}}>на услуги ремонта и отделки недвижимости</div>
         </div>
         <div style={{textAlign:"right"}}>
-          <img src="/logo-dark.png" alt="TitovStroy" style={{width:80,height:80,objectFit:"contain"}}/>
+          <div style={{fontWeight:900,fontSize:16,color:"#b8904a"}}>TitovStroy</div>
           <div style={{fontSize:11,color:"#555",marginTop:2}}>БИН 231040002769</div>
           <div style={{fontSize:11,color:"#555"}}>WA: <span style={{color:"#b8904a"}}>+7 707 982 4915</span></div>
         </div>
@@ -1503,7 +1503,7 @@ export default function App() {
           {/* Шапка */}
           <div className="list-header" style={{background:"#0e1122",borderBottom:"1px solid #181c2e",padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
             <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
-              <img src="/logo.png" alt="TitovStroy" style={{width:36,height:36,objectFit:"contain",flexShrink:0,borderRadius:4}}/>
+              <img src="/logo.png" alt="TitovStroy" style={{width:32,height:32,objectFit:"contain",flexShrink:0}}/>
               <div style={{minWidth:0}}>
                 <div style={{fontWeight:800,fontSize:13,whiteSpace:"nowrap",color:"#e2ddd4"}}>TitovStroy</div>
                 <div style={{fontSize:10,color:"#454560",whiteSpace:"nowrap"}}>
