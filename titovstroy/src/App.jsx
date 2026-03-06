@@ -1759,15 +1759,15 @@ export default function App() {
   .c{text-align:center}.b{font-weight:bold}.t{font-size:14pt;font-weight:bold;text-align:center;margin:6pt 0}
   .s{font-weight:bold;margin:8pt 0 3pt}
   .city-line{text-align:center;margin:4pt 0}
-  table{width:100%;border-collapse:collapse;margin:8pt 0;font-size:9pt;table-layout:fixed}
-  th,td{border:1px solid #000;padding:2pt 4pt;word-wrap:break-word}
-  th{background:#ddd;font-weight:bold;text-align:center;font-size:8.5pt}
+  table{width:100%;border-collapse:collapse;margin:6pt 0;font-size:8.5pt;table-layout:fixed}
+  th,td{border:1px solid #000;padding:2pt 3pt;word-wrap:break-word;overflow-wrap:break-word}
+  th{background:#ddd;font-weight:bold;text-align:center;font-size:8pt}
   .tc{text-align:center}.tr{text-align:right}
   .st{width:100%;border-collapse:collapse;margin-top:20pt;table-layout:auto}
   .st td{border:none;vertical-align:top;width:50%;padding:0 8pt 0 0;font-size:10pt;line-height:1.8}
   tr{page-break-inside:avoid}
   @media print{.np{display:none}body{padding:10mm 10mm 10mm 20mm}@page{size:A4;margin:0}
-  tr{page-break-inside:avoid}table{page-break-inside:auto}}
+  tr{page-break-inside:avoid}table{page-break-inside:auto}}`
     const isYur = client?.clientType==="yur";
     const clName = client?.name||"___________________";
     const clIIN = client?.iin||"___________________";
@@ -1864,14 +1864,14 @@ export default function App() {
       return html;
     };
     const preambula = (role="Подрядчик") => {
+      const tit = "ТОО TITOVSTROY, БИН 231040002769 (далее — \""+role+"\"), в лице директора Василия Титова, действующего на основании Устава";
+      const tail = "совместно именуемые \"Стороны\", а по отдельности – \"Сторона\", заключили настоящий документ о нижеследующем:";
       if(isYur){
-        // ЮР: TITOVSTROY идёт первым как Подрядчик
-        return `<p>ТОО TITOVSTROY, БИН 231040002769 (далее - "${role}"), в лице директора Василия Титова, действующего на основании Устава, с одной стороны, и</p>
-  <p>${clName}, БИН ${clIIN} (далее - "Заказчик") в лице ${client?.director||"Директора"}, ${client?.directorShort||clDir}, действующего на основании Устава, с другой стороны, совместно именуемые "Стороны", а по отдельности – "Сторона", заключили настоящий документ о нижеследующем:</p>`;
+        const clLine = clName+", БИН "+clIIN+" (далее — \"Заказчик\") в лице "+(client?.director||"Директора")+", "+(client?.directorShort||clDir)+", действующего на основании Устава, с другой стороны, "+tail;
+        return "<p>"+tit+", с одной стороны, и</p><p>"+clLine+"</p>";
       }
-      const cl = `${clName}, ИИН ${clIIN}, № документа ${clDoc}, Выдан МВД РК, (далее - "Заказчик") с одной стороны, и`;
-      return `<p>${cl}</p>
-  <p>ТОО TITOVSTROY, БИН 231040002769 (далее - "${role}"), в лице директора Василия Титова, действующего на основании Устава, с другой стороны, совместно именуемые "Стороны", а по отдельности – "Сторона", заключили настоящий документ о нижеследующем:</p>`;
+      const cl = clName+", ИИН "+clIIN+", № документа "+clDoc+", Выдан МВД РК, (далее — \"Заказчик\") с одной стороны, и";
+      return "<p>"+cl+"</p><p>"+tit+", с другой стороны, "+tail+"</p>";
     };
     let body = "";
     // ─────── 1 & 2. ДОГОВОР РЕМОНТА (ФИЗ / ЮР) ───────
@@ -2905,49 +2905,7 @@ export default function App() {
                 <button className="btn btn-g" disabled={kpItems.length===0} onClick={()=>setShowKP(true)}>
                   Сформировать КП
                 </button>
-                {/* WhatsApp */}
-                {kpItems.length>0&&(
-                  <button onClick={()=>{
-                    const lines = [];
-                    const dateStr = new Date().toLocaleDateString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric"});
-                    const vDate = addWorkdays(new Date(),7).toLocaleDateString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric"});
-                    lines.push("*TitovStroy — Ценовое предложение*");
-                    lines.push(`Дата: ${dateStr}`);
-                    lines.push(`Действует до: ${vDate}`);
-                    lines.push("");
-                    if(proj.name) lines.push(`👤 Клиент: ${proj.name}`);
-                    if(proj.phone) lines.push(`📞 Телефон: ${proj.phone}`);
-                    if(proj.address) lines.push(`📍 Адрес: ${proj.address}`);
-                    if(proj.type) lines.push(`🏠 Тип: ${proj.type}`);
-                    if(proj.area) lines.push(`📐 Площадь: ${proj.area} м²`);
-                    lines.push("");
-                    lines.push("*Состав работ:*");
-                    const catOrder = [];
-                    const catMap = {};
-                    for(const item of kpItems){
-                      if(!catMap[item.cat]){ catMap[item.cat]=[]; catOrder.push(item.cat); }
-                      catMap[item.cat].push(item);
-                    }
-                    for(const cat of catOrder){
-                      const catSum = catMap[cat].reduce((s,x)=>s+x.total,0);
-                      lines.push(`\n*${cat}* — ${fmt(catSum)} ₸`);
-                      for(const item of catMap[cat]){
-                        lines.push(`  • ${item.name}: ${item.qty} ${item.unit} × ${fmt(item.price)} = ${fmt(item.total)} ₸`);
-                      }
-                    }
-                    lines.push("");
-                    if(discount>0) lines.push(`💰 Скидка ${discount}%: -${fmt(discAmt)} ₸`);
-                    lines.push(`\n*ИТОГО: ${fmt(final)} ₸*`);
-                    if(proj.area&&Number(proj.area)>0) lines.push(`≈ ${fmt(Math.round(final/Number(proj.area)))} ₸/м²`);
-                    lines.push("\n_Срок действия предложения: 7 рабочих дней_");
-                    const text = encodeURIComponent(lines.join("\n"));
-                    const phone = proj.phone ? proj.phone.replace(/\D/g,"") : "";
-                    window.open(`https://wa.me/${phone}?text=${text}`,"_blank");
-                  }}
-                  style={{background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",borderRadius:8,padding:"10px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",width:"100%",position:"relative",zIndex:1}}>
-                    📲 Отправить в WhatsApp
-                  </button>
-                )}
+
                 <button className="btn btn-o" onClick={()=>{setRows({});setDiscount(0);setNote("");}}>
                   Сбросить позиции
                 </button>
