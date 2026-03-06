@@ -1753,10 +1753,12 @@ export default function App() {
     const dtM = fmtDate(c.mainDate||c.date);
     const dtA = fmtDate(c.annexDate||c.date);
     const total = (c.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
-    const bodyPad = forDocx ? '' : 'padding:20mm 15mm 20mm 30mm;';
+    const bodyPad = forDocx ? 'padding:0;' : 'padding:20mm 15mm 20mm 30mm;';
+    const pageCss = forDocx ? '@page{size:A4;margin:20mm 15mm 20mm 30mm}' : '';
     const CSS = `*{margin:0;padding:0;box-sizing:border-box}
   body{font-family:'Times New Roman',Times,serif;${bodyPad}line-height:1.4;color:#000;font-size:11pt}
-  p{margin:2pt 0;text-align:justify}
+  p{margin:2pt 0;text-align:justify;mso-pagination:none;mso-line-height-rule:exactly}
+  div{mso-pagination:none}
   .c{text-align:center}.b{font-weight:bold}.t{font-size:13pt;font-weight:bold;text-align:center;margin:5pt 0}
   .s{font-weight:bold;margin:6pt 0 2pt}
   .city-line{text-align:center;margin:3pt 0}
@@ -1767,7 +1769,7 @@ export default function App() {
   .st{width:100%;border-collapse:collapse;margin-top:14pt;table-layout:fixed}
   .st td{border:none;vertical-align:top;width:50%;padding:0 6pt 0 0;font-size:9.5pt;line-height:1.5}
   tr{page-break-inside:avoid;mso-row-margin-right:0pt}
-  @media print{.np{display:none}body{padding:10mm 10mm 10mm 20mm}@page{size:A4;margin:0}
+  ${pageCss}@media print{.np{display:none}body{padding:10mm 10mm 10mm 20mm}@page{size:A4;margin:0}
   tr{page-break-inside:avoid}table{page-break-inside:auto}}`
     const isYur = client?.clientType==="yur";
     const clName = client?.name||"___________________";
@@ -2200,17 +2202,13 @@ export default function App() {
 
   const generateContractDocx = (c, client, ca) => {
     const html = buildContractHtml(c, client, ca, true);
-    if(typeof htmlDocx === "undefined") {
-      alert("Библиотека для DOCX не загружена. Проверьте подключение к интернету.");
-      return;
-    }
-    const docxBlob = htmlDocx.asBlob(html, {orientation:"portrait", margins:{top:1134,right:851,bottom:1134,left:1701}});
-    const url = URL.createObjectURL(docxBlob);
-    const a = document.createElement("a");
     const clientName = client?.name || c.estClient || "договор";
     const num = c.number || c.id?.slice(-4) || "б-н";
+    const blob = new Blob([html], {type:"application/msword;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
     a.href = url;
-    a.download = `Договор_${num}_${clientName}.docx`.replace(/[<>:"/\\|?*]/g,"_");
+    a.download = ("Договор_"+num+"_"+clientName+".doc").replace(/[<>:"/\\\\|?*]/g,"_");
     a.click();
     setTimeout(()=>URL.revokeObjectURL(url),20000);
   };
@@ -2227,13 +2225,8 @@ export default function App() {
         // Генерируем PDF blob через html-docx или просто HTML
         const html = buildContractHtml(c, client, ca, true);
         let fileToShare = null;
-        if(typeof htmlDocx !== "undefined") {
-          const docxBlob = htmlDocx.asBlob(html, {orientation:"portrait",margins:{top:1134,right:851,bottom:1134,left:1701}});
-          fileToShare = new File([docxBlob], safeName+".docx", {type:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"});
-        } else {
-          const htmlBlob = new Blob([html], {type:"text/html"});
-          fileToShare = new File([htmlBlob], safeName+".html", {type:"text/html"});
-        }
+        const docBlob = new Blob([html], {type:"application/msword;charset=utf-8"});
+        fileToShare = new File([docBlob], safeName+".doc", {type:"application/msword"});
         if(navigator.canShare({files:[fileToShare]})) {
           await navigator.share({files:[fileToShare], title:`Договор №${num}`, text:`Договор для ${clientName}`});
           return;
@@ -2243,13 +2236,13 @@ export default function App() {
         // fallback ниже
       }
     }
-    // Fallback: скачать DOCX + открыть WhatsApp
-    if(typeof htmlDocx !== "undefined") {
+    // Fallback: скачать DOC + открыть WhatsApp
+    {
       const html = buildContractHtml(c, client, ca, true);
-      const docxBlob = htmlDocx.asBlob(html, {orientation:"portrait",margins:{top:1134,right:851,bottom:1134,left:1701}});
-      const url = URL.createObjectURL(docxBlob);
+      const docBlob = new Blob([html], {type:"application/msword;charset=utf-8"});
+      const url = URL.createObjectURL(docBlob);
       const a = document.createElement("a");
-      a.href = url; a.download = safeName+".docx"; a.click();
+      a.href = url; a.download = safeName+".doc"; a.click();
       setTimeout(()=>URL.revokeObjectURL(url),20000);
     }
     // Открываем WhatsApp с коротким сообщением
