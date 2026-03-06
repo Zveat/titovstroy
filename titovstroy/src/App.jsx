@@ -3277,7 +3277,7 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
                   await saveContracts([...list, currentContract]);
                   setContractTab("list");
                 }}
-                onPdf={()=>{\
+                onPdf={()=>{
                   const cl = contractClients.find(x=>x.id===currentContract.clientId);
                   const ca = contragents.find(x=>x.id===currentContract.contragentId);
                   generateContractPdf(currentContract, cl, ca);
