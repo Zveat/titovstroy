@@ -323,7 +323,6 @@ const storage = {
     try {
       if (_fbDb) {
         await _race(set(ref(_fbDb, _fbKey(key)), parsed), 5000);
-        console.log("FB saved:", _fbKey(key));
       }
     } catch(e) { console.warn("FB set error:", e); }
     try { localStorage.setItem(key, value); } catch(e) {}
@@ -2216,7 +2215,6 @@ export default function App() {
     const filename = ("Договор_"+num+"_"+clientName+".docx").replace(/[<>:"/\\|?*]/g,"_");
 
     try {
-    console.log("DOCX step 1: loading library");
     if (!window.docx) {
       await new Promise((res, rej) => {
         const s = document.createElement("script");
@@ -2227,7 +2225,6 @@ export default function App() {
       });
     }
     const D = window.docx;
-    console.log("DOCX step 2: D keys=", Object.keys(D).join(","));
     if (!D || !D.Document) { alert("Ошибка загрузки библиотеки DOCX. Проверьте интернет."); return; }
     const TNR = "Times New Roman";
     const mmT = mm => Math.round(mm * 56.692);
@@ -2273,63 +2270,35 @@ export default function App() {
     });
 
     // Таблица работ
-    console.log("DOCX step 3: building doc");
     const makeWorksTable = () => {
-      console.log("makeWorksTable called, works:", (c.works||[]).length);
       const works = c.works||[];
       const catOrder=[], catMap={};
       works.forEach(w=>{
-        const cat=w.category||"Работы";
+        const cat=w.category||"\u0420\u0430\u0431\u043e\u0442\u044b";
         if(!catMap[cat]){catMap[cat]={total:0,rows:[]};catOrder.push(cat);}
         const sum=Number(w.quantity||0)*Number(w.price||0);
         catMap[cat].total+=sum; catMap[cat].rows.push(Object.assign({},w,{sum:sum}));
       });
-      console.log("catOrder len:", catOrder.length, "rows building");
       const rows=[];
-      console.log("pushing header");
-      rows.push(new D.TableRow({children:[TC("№",5,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Наименование работ",45,{b:true,bg:"DDDDDD"}),TC("Ед.",8,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Объём",8,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Цена за ед.",17,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Сумма",17,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER})]}));
-      console.log("header done, starting forEach");
+      rows.push(new D.TableRow({children:[TC("\u2116",5,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0440\u0430\u0431\u043e\u0442",45,{b:true,bg:"DDDDDD"}),TC("\u0415\u0434.",8,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("\u041e\u0431\u044a\u0451\u043c",8,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("\u0426\u0435\u043d\u0430 \u0437\u0430 \u0435\u0434.",17,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("\u0421\u0443\u043c\u043c\u0430",17,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER})]}));
       let n=0;
-      catOrder.forEach(cat=>{
-        console.log("processing cat:", cat);
-        const {rows:cr,total:ct}=catMap[cat];
-        rows.push(new D.TableRow({children:[TC(cat+" — "+fmtN2(ct)+" ₸",100,{span:6,b:true,bg:"2a2a3a",col:"c8a060"})]}));
-        let lastSub="";
-        cr.forEach((w,i)=>{
+      catOrder.forEach(function(cat){
+        const ct=catMap[cat].total, cr=catMap[cat].rows;
+        rows.push(new D.TableRow({children:[TC(cat+" \u2014 "+fmtN2(ct)+" \u20b8",100,{span:6,b:true,bg:"2a2a3a",col:"c8a060"})]}));
+        var lastSub="";
+        cr.forEach(function(w,i){
           if(w.subcategory&&w.subcategory!==lastSub){lastSub=w.subcategory;rows.push(new D.TableRow({children:[TC(w.subcategory,100,{span:6,i:true,bg:"e8e4f0",col:"5a3a8a"})]}));}
           n++;
-          const bg=i%2===0?"f8f6f0":"f0ede5";
-            console.log("pushing data row", n);
-        rows.push(new D.TableRow({children:[TC(String(n),5,{bg,al:D.AlignmentType.CENTER}),TC(w.name||"",45,{bg}),TC(w.unit||"м²",8,{bg,al:D.AlignmentType.CENTER}),TC(String(w.quantity||""),8,{bg,al:D.AlignmentType.CENTER}),TC(fmtN2(w.price)+" ₸",17,{bg,al:D.AlignmentType.RIGHT}),TC(fmtN2(w.sum)+" ₸",17,{bg,b:true,al:D.AlignmentType.RIGHT})]}));
+          var bg=i%2===0?"f8f6f0":"f0ede5";
+          rows.push(new D.TableRow({children:[TC(String(n),5,{bg:bg,al:D.AlignmentType.CENTER}),TC(w.name||"",45,{bg:bg}),TC(w.unit||"\u043c\xb2",8,{bg:bg,al:D.AlignmentType.CENTER}),TC(String(w.quantity||""),8,{bg:bg,al:D.AlignmentType.CENTER}),TC(fmtN2(w.price)+" \u20b8",17,{bg:bg,al:D.AlignmentType.RIGHT}),TC(fmtN2(w.sum)+" \u20b8",17,{bg:bg,b:true,al:D.AlignmentType.RIGHT})]}));
         });
-        rows.push(new D.TableRow({children:[TC("Итого по разделу «"+cat+"»:",83,{span:5,i:true,bg:"ede8d5",al:D.AlignmentType.RIGHT}),TC(fmtN2(ct)+" ₸",17,{bg:"ede8d5",b:true,al:D.AlignmentType.RIGHT})]}));
+        rows.push(new D.TableRow({children:[TC("\u0418\u0442\u043e\u0433\u043e \u043f\u043e \u0440\u0430\u0437\u0434\u0435\u043b\u0443 \u00ab"+cat+"\u00bb:",83,{span:5,i:true,bg:"ede8d5",al:D.AlignmentType.RIGHT}),TC(fmtN2(ct)+" \u20b8",17,{bg:"ede8d5",b:true,al:D.AlignmentType.RIGHT})]}));
       });
-      return new D.Table({rows,width:{size:CONTENT_W,type:D.WidthType.DXA},columnWidths:[col(5),col(45),col(8),col(8),col(17),col(17)]});
+      // ИТОГО строка
+      rows.push(new D.TableRow({children:[TC("\u0418\u0422\u041e\u0413\u041e:",83,{span:5,b:true,bg:"e8e0c8",al:D.AlignmentType.RIGHT}),TC(fmtN2(total)+" \u20b8",17,{bg:"e8e0c8",b:true,sz:11,al:D.AlignmentType.RIGHT})]}));
+      return new D.Table({rows:rows,width:{size:CONTENT_W,type:D.WidthType.DXA}});
     };
 
-    // Сводка и итого после таблицы работ
-    const makeSvodka = () => {
-      const works = c.works||[];
-      const catOrder=[], catMap={};
-      works.forEach(w=>{
-        const cat=w.category||"Работы";
-        if(!catMap[cat]){catMap[cat]=0; catOrder.push(cat);}
-        catMap[cat]+=Number(w.quantity||0)*Number(w.price||0);
-      });
-      const multiCat = catOrder.length > 1;
-      const result = [P([])];
-      if(multiCat){
-        result.push(P([T("Сводка по разделам:",{b:true,sz:10})],{al:D.AlignmentType.RIGHT,sb:20,sa:10}));
-        catOrder.forEach(cat=>{
-          result.push(P([T(cat+":  "+fmtN2(catMap[cat])+" ₸",{sz:9})],{al:D.AlignmentType.RIGHT,sb:8,sa:8}));
-        });
-        result.push(P([T("ИТОГО: "+fmtN2(total)+" ₸",{b:true,sz:12})],{al:D.AlignmentType.RIGHT,sb:20,sa:20}));
-      } else {
-        result.push(P([T("ИТОГО: "+fmtN2(total)+" ₸",{b:true,sz:12})],{al:D.AlignmentType.RIGHT,sb:20,sa:20}));
-      }
-      return result;
-    }
-    // Подписи
     const SC = (lineArr) => new D.TableCell({
       children:lineArr.map(l=>P([T(l.t||"",{sz:10,b:l.b})],{sb:25,sa:25})),
       borders:NO_BORDERS,
@@ -2349,7 +2318,7 @@ export default function App() {
     } else {
       rightLines=[{t:"Заказчик:",b:true},{t:""},{t:"ФИО: "+clName},{t:"ИИН: "+clIIN},{t:"№ документа: "+clDoc},{t:"Адрес: "+clAddr},{t:"Тел.: "+clPhone},{t:""},{t:clShort+" Подпись ___________"}];
     }
-    const sigTable = () => new D.Table({rows:[new D.TableRow({children:[SC(leftLines),SC(rightLines)]})],width:{size:CONTENT_W,type:D.WidthType.DXA},columnWidths:[col(50),col(50)]});
+    const sigTable = () => new D.Table({rows:[new D.TableRow({children:[SC(leftLines),SC(rightLines)]})],width:{size:CONTENT_W,type:D.WidthType.DXA}});
 
     // Преамбула
     const preamParas = (role="Подрядчик") => {
@@ -2364,8 +2333,6 @@ export default function App() {
         P([T(tit+', с другой стороны, '+tail)]),
       ];
     };
-
-    console.log("DOCX building annex1");
     // Приложение №1
     const annex1 = [
       PC([T("Приложение №1",{sz:13,b:true})],{pb:true,sb:0}),
@@ -2376,8 +2343,8 @@ export default function App() {
       P([T("1. Общие положения",{b:true})]),
       P([T("1.1. Настоящее Приложение является неотъемлемой частью Договора ремонтно-отделочных работ №"+(c.number||"___")+" от «"+dt.d+"» "+dt.m+" "+dt.y+" г. и определяет этапы, виды и стоимость работ, выполняемых Подрядчиком на Объекте.")]),
       P([T("2. Перечень этапов и видов работ",{b:true})]),
-      ...makeWorksTable(),
-      ...makeSvodka(),
+      makeWorksTable(),
+      P([T("ИТОГО: "+fmtN2(total)+" ₸",{b:true,sz:12})],{al:D.AlignmentType.RIGHT,sb:10,sa:10}),
       P([]),
       P([T("3. Условия выполнения работ",{b:true})]),
       P([T("3.1. В стоимость Работ могут входить расходы Подрядчика на материалы, оборудование, доставку и иные затраты, необходимые для выполнения Работ.")]),
@@ -2390,10 +2357,8 @@ export default function App() {
       P([]),
       P([T("Подписи сторон",{b:true})]),
       P([]),
-      console.log("annex1 sigTable") || sigTable(),
+      sigTable(),
     ];
-
-    console.log("DOCX step 4: building children");
     const children = [
       PC([T("Договор подряда №"+(c.number||"___"),{sz:13,b:true})]),
       PC([T("на выполнение ремонтно-отделочных работ",{sz:12,b:true})]),
@@ -2475,14 +2440,12 @@ export default function App() {
       sigTable(),
       ...annex1,
     ];
-    console.log("DOCX step 5: creating Document");
     const doc = new D.Document({
       sections:[{
         properties:{page:{size:{width:mmT(210),height:mmT(297),orientation:D.PageOrientation.PORTRAIT},margin:{top:mmT(20),right:mmT(15),bottom:mmT(20),left:mmT(30)}}},
         children,
       }],
     });
-    console.log("DOCX step 6: packing");
     const blob = await D.Packer.toBlob(doc);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
