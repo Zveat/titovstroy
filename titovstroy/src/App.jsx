@@ -1273,6 +1273,7 @@ export default function App() {
   const [listSearch, setListSearch] = useState("");
   const [listFilter, setListFilter] = useState(""); // "" | "Вторичка" | "Новостройка" | "Коммерция"
   const [listFilterManager, setListFilterManager] = useState(""); // "" = все
+  const [listFilterStatus, setListFilterStatus] = useState(""); // "" = все статусы
   const [listSort, setListSort] = useState("date"); // "date" | "sum" | "name"
 
   // Когда каталог меняется — синхронизируем activeCat/activeSub
@@ -1585,6 +1586,21 @@ export default function App() {
                         </button>
                       ))}
                     </div>
+                    {/* Фильтр по статусу */}
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      <button onClick={()=>setListFilterStatus("")}
+                        style={{background:!listFilterStatus?"rgba(255,255,255,.08)":"rgba(255,255,255,.04)",color:!listFilterStatus?"#e2ddd4":"#555575",border:`1px solid ${!listFilterStatus?"rgba(255,255,255,.15)":"#1c2035"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                        Все статусы
+                      </button>
+                      {STATUSES.map(s=>(
+                        <button key={s.key} onClick={()=>setListFilterStatus(s.key)}
+                          style={{background:listFilterStatus===s.key?s.bg:"rgba(255,255,255,.04)",color:listFilterStatus===s.key?s.color:"#555575",border:`1px solid ${listFilterStatus===s.key?s.color:"#1c2035"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}
+                    </div>
                     {/* Фильтр по сотруднику */}
                     {allUsers.filter(u=>u.role!=="viewer").length > 1 && (
                       <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
@@ -1627,6 +1643,7 @@ export default function App() {
                   const filtered = estimates
                     .filter(e => !listFilter || e.proj?.type === listFilter)
                     .filter(e => !listFilterManager || (e.proj?.manager||e.createdBy||"")=== listFilterManager)
+                    .filter(e => !listFilterStatus || (e.status||"new") === listFilterStatus)
                     .filter(e => !q || [e.proj?.name,e.proj?.address,e.proj?.phone,e.proj?.manager].some(v=>v&&v.toLowerCase().includes(q)))
                     .slice()
                     .sort((a,b) => {
