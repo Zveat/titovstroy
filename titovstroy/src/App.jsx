@@ -180,12 +180,11 @@ let _priceOverrides = {};
 function setPriceOverrides(o) { _priceOverrides = o || {}; }
 
 function getEffectiveWork(work) {
-  // Сначала применяем переименования из каталога
-  const renamed = _catalogOverrides.renames[work.code]
-    ? { ...work, name: _catalogOverrides.renames[work.code] }
-    : work;
-  // Потом переопределения цен
-  const ov = _priceOverrides[work.code];
+  const safe = { ...work, tiers: work.tiers || [] };
+  const renamed = _catalogOverrides.renames[safe.code]
+    ? { ...safe, name: _catalogOverrides.renames[safe.code] }
+    : safe;
+  const ov = _priceOverrides[renamed.code];
   if (!ov) return renamed;
   return {
     ...renamed,
@@ -1540,8 +1539,8 @@ export default function App() {
                     const total = rowTotal(work);
                     const filled = qty > 0 && price;
                     const showBreadcrumb = isSearching;
-                    const tierHint = work.tiers.length > 1
-                      ? work.tiers.map(t=>`${t.min}–${t.max}: ${fmt(t.price)} ₸`).join(" · ")
+                    const tierHint = (work.tiers||[]).length > 1
+                      ? (work.tiers||[]).map(t=>`${t.min}–${t.max}: ${fmt(t.price)} ₸`).join(" · ")
                       : null;
                     const priceCell = editPrices ? (
                       <input className="num" style={{width:110}} type="number" min="0" placeholder="Введите цену"
