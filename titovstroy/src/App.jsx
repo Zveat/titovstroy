@@ -704,33 +704,30 @@ function AdminPanel({ currentUser, onClose }) {
               />
               {/* Список — скроллится */}
               <div style={{flex:1,overflowY:"auto",paddingRight:4}}>
-              <div style={{display:"flex",flexDirection:"column",gap:2}}>
-              {(() => {
-                const q = priceSearch.toLowerCase();
-                const filtered = WORKS_DATA.filter(w =>
-                  !q || w.name.toLowerCase().includes(q) || w.sub.toLowerCase().includes(q)
-                );
-                const groups = {};
-                for (const w of filtered) {
-                  const key = w.cat + " / " + w.sub;
-                  if (!groups[key]) groups[key] = [];
-                  groups[key].push(w);
-                }
-                return Object.entries(groups).map(([grp, works]) => (
-                  <div key={grp} style={{marginBottom:12}}>
-                    <div style={{fontSize:10,fontWeight:700,color:"#b8904a",letterSpacing:1,textTransform:"uppercase",padding:"6px 0 4px",borderBottom:"1px solid #1c2035",marginBottom:6}}>{grp}</div>
-                    {works.map(w => (
-                      <PriceWorkCard key={w.code} w={w}
-                        initTiers={localPrices?.[w.code]?.tiers || []}
-                        initFixed={localPrices?.[w.code]?.fixedPrice || ""}
-                      />
-                    ))}
-                  </div>
-                ));
-              })()}
-            </div>
-              </div>{/* end list */}
-              </div>{/* end scroll */}
+                {(() => {
+                  const q = priceSearch.toLowerCase();
+                  const filtered = WORKS_DATA.filter(w =>
+                    !q || w.name.toLowerCase().includes(q) || w.sub.toLowerCase().includes(q)
+                  );
+                  const groups = {};
+                  for (const w of filtered) {
+                    const key = w.cat + " / " + w.sub;
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(w);
+                  }
+                  return Object.entries(groups).map(([grp, works]) => (
+                    <div key={grp} style={{marginBottom:12}}>
+                      <div style={{fontSize:10,fontWeight:700,color:"#b8904a",letterSpacing:1,textTransform:"uppercase",padding:"6px 0 4px",borderBottom:"1px solid #1c2035",marginBottom:6}}>{grp}</div>
+                      {works.map(w => (
+                        <PriceWorkCard key={w.code} w={w}
+                          initTiers={localPrices?.[w.code]?.tiers || []}
+                          initFixed={localPrices?.[w.code]?.fixedPrice || ""}
+                        />
+                      ))}
+                    </div>
+                  ));
+                })()}
+              </div>
               {/* Кнопка сохранить — фиксирована снизу */}
               <div style={{paddingTop:10,borderTop:"1px solid #1c2035",marginTop:6}}>
                 {priceMsg && <div style={{textAlign:"center",fontSize:12,color:"#4caf7d",fontWeight:700,marginBottom:6}}>{priceMsg}</div>}
