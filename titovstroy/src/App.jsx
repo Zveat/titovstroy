@@ -703,7 +703,13 @@ function AdminPanel({ currentUser, onClose }) {
                 onChange={e=>setPriceSearch(e.target.value)}
               />
               {/* Список — скроллится */}
-              <div style={{flex:1,overflowY:"auto",paddingRight:4}}>
+              <div className="price-scroll" style={{flex:1,overflowY:"scroll",paddingRight:4,scrollbarWidth:"auto",scrollbarColor:"#b8904a #1a1e30"}}>
+                <style>{`
+                  .price-scroll::-webkit-scrollbar{width:10px}
+                  .price-scroll::-webkit-scrollbar-track{background:#1a1e30;border-radius:5px}
+                  .price-scroll::-webkit-scrollbar-thumb{background:#b8904a;border-radius:5px;min-height:40px}
+                  .price-scroll::-webkit-scrollbar-thumb:hover{background:#d4a85a}
+                `}</style>
                 {(() => {
                   const q = priceSearch.toLowerCase();
                   const filtered = WORKS_DATA.filter(w =>
