@@ -2298,6 +2298,40 @@ export default function App() {
       return new D.Table({rows,width:{size:CONTENT_W,type:D.WidthType.DXA},columnWidths:[col(5),col(45),col(8),col(8),col(17),col(17)]});
     };
 
+    // Сводка и итого после таблицы работ
+    const makeSvodka = () => {
+      const works = c.works||[];
+      const catOrder=[], catMap={};
+      works.forEach(w=>{
+        const cat=w.category||"Работы";
+        if(!catMap[cat]){catMap[cat]=0; catOrder.push(cat);}
+        catMap[cat]+=Number(w.quantity||0)*Number(w.price||0);
+      });
+      const multiCat = catOrder.length > 1;
+      const items = [];
+      if(multiCat){
+        // Сводная таблица по разделам + ИТОГО
+        const svRows = [];
+        svRows.push(new D.TableRow({children:[
+          new D.TableCell({children:[P([T("Сводка по разделам",{b:true,sz:9})],{sb:20,sa:20})],columnSpan:2,borders:{top:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},bottom:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},left:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},right:{style:D.BorderStyle.SINGLE,size:4,color:"000000"}},shading:{fill:"e8e4d8",type:D.ShadingType.CLEAR,color:"e8e4d8"},width:{size:col(60),type:D.WidthType.DXA},margins:{top:28,bottom:28,left:57,right:57}}),
+        ]}));
+        catOrder.forEach(cat=>{
+          svRows.push(new D.TableRow({children:[
+            new D.TableCell({children:[P([T(cat,{sz:9})],{sb:20,sa:20})],borders:{top:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},bottom:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},left:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},right:{style:D.BorderStyle.SINGLE,size:4,color:"000000"}},width:{size:col(43),type:D.WidthType.DXA},margins:{top:28,bottom:28,left:57,right:57}}),
+            new D.TableCell({children:[P([T(fmtN2(catMap[cat])+" ₸",{sz:9,b:true})],{al:D.AlignmentType.RIGHT,sb:20,sa:20})],borders:{top:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},bottom:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},left:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},right:{style:D.BorderStyle.SINGLE,size:4,color:"000000"}},width:{size:col(17),type:D.WidthType.DXA},margins:{top:28,bottom:28,left:57,right:57}}),
+          ]}));
+        });
+        svRows.push(new D.TableRow({children:[
+          new D.TableCell({children:[P([T("ИТОГО:",{b:true,sz:10})],{sb:20,sa:20})],borders:{top:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},bottom:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},left:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},right:{style:D.BorderStyle.SINGLE,size:4,color:"000000"}},shading:{fill:"e8e0c8",type:D.ShadingType.CLEAR,color:"e8e0c8"},width:{size:col(43),type:D.WidthType.DXA},margins:{top:28,bottom:28,left:57,right:57}}),
+          new D.TableCell({children:[P([T(fmtN2(total)+" ₸",{b:true,sz:11})],{al:D.AlignmentType.RIGHT,sb:20,sa:20})],borders:{top:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},bottom:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},left:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},right:{style:D.BorderStyle.SINGLE,size:4,color:"000000"}},shading:{fill:"e8e0c8",type:D.ShadingType.CLEAR,color:"e8e0c8"},width:{size:col(17),type:D.WidthType.DXA},margins:{top:28,bottom:28,left:57,right:57}}),
+        ]}));
+        items.push(new D.Table({rows:svRows,width:{size:col(60),type:D.WidthType.DXA},float:{horizontalAnchor:D.TableAnchorType.MARGIN,absoluteHorizontalPosition:col(40),relativeHorizontalPosition:D.RelativeHorizontalPosition.PAGE}}));
+      } else {
+        items.push(P([T("ИТОГО: "+fmtN2(total)+" ₸",{b:true,sz:11})],{al:D.AlignmentType.RIGHT,sb:20,sa:20}));
+      }
+      return items;
+    };
+
     // Подписи
     const SC = (lineArr) => new D.TableCell({
       children:lineArr.map(l=>P([T(l.t||"",{sz:10,b:l.b})],{sb:25,sa:25})),
@@ -2344,7 +2378,8 @@ export default function App() {
       P([T("1. Общие положения",{b:true})]),
       P([T("1.1. Настоящее Приложение является неотъемлемой частью Договора ремонтно-отделочных работ №"+(c.number||"___")+" от «"+dt.d+"» "+dt.m+" "+dt.y+" г. и определяет этапы, виды и стоимость работ, выполняемых Подрядчиком на Объекте.")]),
       P([T("2. Перечень этапов и видов работ",{b:true})]),
-      makeWorksTable(),
+      ...makeWorksTable(),
+      ...makeSvodka(),
       P([]),
       P([T("3. Условия выполнения работ",{b:true})]),
       P([T("3.1. В стоимость Работ могут входить расходы Подрядчика на материалы, оборудование, доставку и иные затраты, необходимые для выполнения Работ.")]),
