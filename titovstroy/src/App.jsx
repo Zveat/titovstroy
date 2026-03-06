@@ -650,12 +650,14 @@ function AdminPanel({ currentUser, onClose }) {
   };
 
   const addCustomWork = async () => {
-    if (!newWork.name.trim() || !newWork.cat.trim() || !newWork.sub.trim()) return;
+    const finalCat = newWork.cat === "__new__" ? (newWork.catNew||"").trim() : newWork.cat.trim();
+    const finalSub = newWork.sub === "__new__" ? (newWork.subNew||"").trim() : newWork.sub.trim();
+    if (!newWork.name.trim() || !finalCat || !finalSub) return;
     const code = "CUSTOM-" + Date.now();
-    const work = { code, cat:newWork.cat.trim(), sub:newWork.sub.trim(), name:newWork.name.trim(), unit:newWork.unit||"м²", tiers:[], fixedPrice:null };
+    const work = { code, cat:finalCat, sub:finalSub, name:newWork.name.trim(), unit:newWork.unit||"м²", tiers:[], fixedPrice:null };
     const cat = { ...(localCatalog||{}), custom: [...((localCatalog||{}).custom||[]), work] };
     await saveCatalog(cat);
-    setNewWork({cat:"", sub:"", name:"", unit:"м²"});
+    setNewWork({cat:"", catNew:"", sub:"", subNew:"", name:"", unit:"м²"});
     setShowAddWork(false);
     Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
@@ -834,25 +836,76 @@ function AdminPanel({ currentUser, onClose }) {
                       style={{width:"100%",background:"transparent",color:"#b8904a",border:"none",padding:"6px",fontFamily:"inherit",fontSize:12,cursor:"pointer",fontWeight:700}}>
                       ＋ Добавить позицию в каталог
                     </button>
-                  ) : (
-                    <div>
-                      <div style={{fontSize:11,fontWeight:700,color:"#b8904a",marginBottom:8}}>Новая позиция</div>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
-                        {[["Категория", "cat"],["Подкатегория", "sub"],["Название", "name"],["Единица (м², шт)", "unit"]].map(([ph,field])=>(
-                          <input key={field} placeholder={ph} value={newWork[field]}
-                            onChange={e=>setNewWork(p=>({...p,[field]:e.target.value}))}
-                            style={{background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:6,padding:"6px 9px",fontFamily:"inherit",fontSize:11,outline:"none"}}/>
-                        ))}
+                  ) : (() => {
+                    const allW = getEffectiveCatalog();
+                    const cats = [...new Set(allW.map(w=>w.cat))];
+                    const subs = newWork.cat ? [...new Set(allW.filter(w=>w.cat===newWork.cat).map(w=>w.sub))] : [];
+                    const inpStyle = {background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:6,padding:"6px 9px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%",boxSizing:"border-box"};
+                    const selStyle = {...inpStyle, cursor:"pointer"};
+                    return (
+                      <div>
+                        <div style={{fontSize:11,fontWeight:700,color:"#b8904a",marginBottom:10}}>Новая позиция</div>
+
+                        {/* Категория */}
+                        <div style={{marginBottom:6}}>
+                          <div style={{fontSize:10,color:"#555575",marginBottom:3}}>Категория</div>
+                          <select value={newWork.cat} onChange={e=>setNewWork(p=>({...p,cat:e.target.value,sub:""}))} style={selStyle}>
+                            <option value="">— выбрать существующую —</option>
+                            {cats.map(c=><option key={c} value={c}>{c}</option>)}
+                            <option value="__new__">＋ Новая категория...</option>
+                          </select>
+                          {newWork.cat==="__new__" && (
+                            <input autoFocus placeholder="Введите название категории" value={newWork.catNew||""}
+                              onChange={e=>setNewWork(p=>({...p,catNew:e.target.value}))}
+                              style={{...inpStyle,marginTop:4}}/>
+                          )}
+                        </div>
+
+                        {/* Подкатегория */}
+                        <div style={{marginBottom:6}}>
+                          <div style={{fontSize:10,color:"#555575",marginBottom:3}}>Подкатегория</div>
+                          <select value={newWork.sub} onChange={e=>setNewWork(p=>({...p,sub:e.target.value}))} style={selStyle}
+                            disabled={!newWork.cat||newWork.cat==="__new__"&&!newWork.catNew}>
+                            <option value="">— выбрать существующую —</option>
+                            {subs.map(s=><option key={s} value={s}>{s}</option>)}
+                            <option value="__new__">＋ Новая подкатегория...</option>
+                          </select>
+                          {newWork.sub==="__new__" && (
+                            <input autoFocus placeholder="Введите название подкатегории" value={newWork.subNew||""}
+                              onChange={e=>setNewWork(p=>({...p,subNew:e.target.value}))}
+                              style={{...inpStyle,marginTop:4}}/>
+                          )}
+                        </div>
+
+                        {/* Название и единица */}
+                        <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:6,marginBottom:10}}>
+                          <div>
+                            <div style={{fontSize:10,color:"#555575",marginBottom:3}}>Название работы</div>
+                            <input placeholder="напр. Укладка паркета" value={newWork.name}
+                              onChange={e=>setNewWork(p=>({...p,name:e.target.value}))}
+                              style={inpStyle}/>
+                          </div>
+                          <div>
+                            <div style={{fontSize:10,color:"#555575",marginBottom:3}}>Единица</div>
+                            <select value={newWork.unit} onChange={e=>setNewWork(p=>({...p,unit:e.target.value}))} style={{...selStyle,width:80}}>
+                              {["м²","м.п.","шт","усл.","кг","л"].map(u=><option key={u} value={u}>{u}</option>)}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div style={{display:"flex",gap:6}}>
+                          <button onClick={addCustomWork}
+                            style={{flex:1,background:"rgba(184,144,74,.15)",color:"#b8904a",border:"1px solid rgba(184,144,74,.3)",borderRadius:6,padding:"7px",fontFamily:"inherit",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                            ✓ Добавить
+                          </button>
+                          <button onClick={()=>{setShowAddWork(false);setNewWork({cat:"",sub:"",name:"",unit:"м²"});}}
+                            style={{background:"rgba(200,60,60,.1)",color:"#e07070",border:"1px solid rgba(200,60,60,.2)",borderRadius:6,padding:"7px 12px",fontFamily:"inherit",fontSize:12,cursor:"pointer"}}>
+                            Отмена
+                          </button>
+                        </div>
                       </div>
-                      <div style={{fontSize:10,color:"#555575",marginBottom:8}}>
-                        Существующие категории: {[...new Set(getEffectiveCatalog().map(w=>w.cat))].join(" · ")}
-                      </div>
-                      <div style={{display:"flex",gap:6}}>
-                        <button onClick={addCustomWork} style={{flex:1,background:"rgba(184,144,74,.15)",color:"#b8904a",border:"1px solid rgba(184,144,74,.3)",borderRadius:6,padding:"7px",fontFamily:"inherit",fontSize:12,fontWeight:700,cursor:"pointer"}}>✓ Добавить</button>
-                        <button onClick={()=>{setShowAddWork(false);setNewWork({cat:"",sub:"",name:"",unit:"м²"});}} style={{background:"rgba(200,60,60,.1)",color:"#e07070",border:"1px solid rgba(200,60,60,.2)",borderRadius:6,padding:"7px 12px",fontFamily:"inherit",fontSize:12,cursor:"pointer"}}>✕</button>
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
               {/* Кнопка сохранить — фиксирована снизу */}
