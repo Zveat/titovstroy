@@ -180,12 +180,17 @@ let _priceOverrides = {};
 function setPriceOverrides(o) { _priceOverrides = o || {}; }
 
 function getEffectiveWork(work) {
+  // Сначала применяем переименования из каталога
+  const renamed = _catalogOverrides.renames[work.code]
+    ? { ...work, name: _catalogOverrides.renames[work.code] }
+    : work;
+  // Потом переопределения цен
   const ov = _priceOverrides[work.code];
-  if (!ov) return work;
+  if (!ov) return renamed;
   return {
-    ...work,
-    fixedPrice: ov.fixedPrice !== undefined ? ov.fixedPrice : work.fixedPrice,
-    tiers: ov.tiers !== undefined ? ov.tiers : work.tiers,
+    ...renamed,
+    fixedPrice: ov.fixedPrice !== undefined ? ov.fixedPrice : renamed.fixedPrice,
+    tiers: ov.tiers !== undefined ? ov.tiers : renamed.tiers,
   };
 }
 
@@ -242,7 +247,23 @@ const EMPTY_PROJ = { name:"", type:"Вторичка", area:"", address:"", phon
 const STORAGE_KEY    = "titovstroy-estimates";
 const USERS_KEY      = "titovstroy-users";
 const SESSION_KEY    = "titovstroy-session";
-const PRICES_KEY     = "titovstroy-prices"; // переопределённые цены {code: {fixedPrice?, tiers?}}
+const PRICES_KEY     = "titovstroy-prices";  // переопределённые цены {code: {fixedPrice?, tiers?}}
+const CATALOG_KEY    = "titovstroy-catalog"; // изменения каталога {renames:{code:name}, custom:[{code,cat,sub,name,unit,tiers,fixedPrice}], hiddenCodes:[]}
+
+// Каталог с пользовательскими изменениями
+let _catalogOverrides = { renames: {}, custom: [], hiddenCodes: [] };
+function setCatalogOverrides(o) { _catalogOverrides = { renames:{}, custom:[], hiddenCodes:[], ...(o||{}) }; }
+function getEffectiveCatalog() {
+  // Берём базовые работы, применяем переименования, убираем скрытые
+  const base = WORKS_DATA
+    .filter(w => !_catalogOverrides.hiddenCodes.includes(w.code))
+    .map(w => _catalogOverrides.renames[w.code]
+      ? { ...w, name: _catalogOverrides.renames[w.code] }
+      : w
+    );
+  // Добавляем пользовательские позиции
+  return [...base, ...(_catalogOverrides.custom || [])];
+}
 
 // Дефолтные пользователи
 const DEFAULT_USERS = [
@@ -386,7 +407,7 @@ function LoginScreen({ onLogin }) {
 // При размонтировании сохраняет данные в priceCardCache
 const priceCardCache = {};
 
-function PriceWorkCard({ w, initTiers, initFixed }) {
+function PriceWorkCard({ w, initTiers, initFixed, onRename, onDelete }) {
   const code = w.code;
   const baseTiers = w.tiers || [];
 
@@ -407,11 +428,35 @@ function PriceWorkCard({ w, initTiers, initFixed }) {
   const hasChange = !!priceCardCache[code];
   const s = (extra) => ({background:"#0c0e1a",color:"#ddd8ce",borderRadius:5,padding:"5px 8px",fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",...extra});
 
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState(w.name);
+
+  const submitRename = () => {
+    if (editName.trim() && editName.trim() !== w.name) onRename(editName.trim());
+    setEditing(false);
+  };
+
   return (
     <div style={{background:hasChange?"rgba(184,144,74,.05)":"transparent",border:`1px solid ${hasChange?"rgba(184,144,74,.25)":"#1a1e30"}`,borderRadius:8,padding:"10px 12px",marginBottom:6}}>
-      <div style={{marginBottom:8}}>
-        <span style={{fontSize:13,fontWeight:600,color:hasChange?"#ddd8ce":"#9090b0"}}>{w.name}</span>
-        <span style={{fontSize:10,color:"#454560",marginLeft:8}}>{w.unit}</span>
+      <div style={{marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
+        {editing ? (
+          <>
+            <input autoFocus value={editName} onChange={e=>setEditName(e.target.value)}
+              onKeyDown={e=>{if(e.key==="Enter")submitRename();if(e.key==="Escape")setEditing(false);}}
+              style={{flex:1,background:"#0c0e1a",border:"1px solid #b8904a",color:"#ddd8ce",borderRadius:5,padding:"3px 8px",fontFamily:"inherit",fontSize:13,fontWeight:600,outline:"none"}}/>
+            <button onClick={submitRename} style={{background:"rgba(76,175,125,.15)",color:"#4caf7d",border:"none",borderRadius:5,padding:"3px 8px",cursor:"pointer",fontSize:12}}>✓</button>
+            <button onClick={()=>setEditing(false)} style={{background:"transparent",color:"#555575",border:"none",cursor:"pointer",fontSize:14}}>✕</button>
+          </>
+        ) : (
+          <>
+            <span style={{fontSize:13,fontWeight:600,color:hasChange?"#ddd8ce":"#9090b0",flex:1}}>{w.name}</span>
+            <span style={{fontSize:10,color:"#454560"}}>{w.unit}</span>
+            <button onClick={()=>{setEditName(w.name);setEditing(true);}} title="Переименовать"
+              style={{background:"transparent",color:"#454560",border:"none",cursor:"pointer",fontSize:11,padding:"2px 4px",lineHeight:1}}>✏️</button>
+            {onDelete && <button onClick={onDelete} title="Удалить позицию"
+              style={{background:"transparent",color:"#e07070",border:"none",cursor:"pointer",fontSize:11,padding:"2px 4px",lineHeight:1}}>🗑</button>}
+          </>
+        )}
       </div>
       {showTiers ? (
         <div>
@@ -466,13 +511,16 @@ function AdminPanel({ currentUser, onClose }) {
   const [editingPass, setEditingPass] = useState(null);
   const [editingUser, setEditingUser] = useState(null);
   const [msg, setMsg] = useState("");
-  // Прайс-лист — localPrices хранит состояние ВСЕХ карточек сразу
-  // {code: {tiers: [...], fixedPrice: "строка"}}
-  const [localPrices, setLocalPrices] = useState(null); // null = ещё не загружено
+  // Прайс-лист
+  const [localPrices, setLocalPrices] = useState(null);
   const [savedOverrides, setSavedOverrides] = useState({});
+  const [localCatalog, setLocalCatalog] = useState(null); // {renames, custom, hiddenCodes}
   const [priceSearch, setPriceSearch] = useState("");
   const [priceMsg, setPriceMsg] = useState("");
   const [priceSaving, setPriceSaving] = useState(false);
+  // Форма новой позиции
+  const [showAddWork, setShowAddWork] = useState(false);
+  const [newWork, setNewWork] = useState({cat:"", sub:"", name:"", unit:"м²"});
 
   useEffect(() => {
     (async () => {
@@ -480,14 +528,20 @@ function AdminPanel({ currentUser, onClose }) {
         const res = await storage.get(USERS_KEY);
         setUsers(res ? JSON.parse(res.value) : DEFAULT_USERS);
       } catch { setUsers(DEFAULT_USERS); }
+      // Загружаем каталог
+      try {
+        const cat = await storage.get(CATALOG_KEY);
+        if (cat) { const parsed = JSON.parse(cat.value); setCatalogOverrides(parsed); setLocalCatalog(parsed); }
+        else setLocalCatalog({ renames:{}, custom:[], hiddenCodes:[] });
+      } catch { setLocalCatalog({ renames:{}, custom:[], hiddenCodes:[] }); }
       // Загружаем переопределения цен и инициализируем localPrices
       try {
         const pr = await storage.get(PRICES_KEY);
         const ov = pr ? JSON.parse(pr.value) : {};
         setSavedOverrides(ov);
-        // Инициализируем localPrices для ВСЕХ позиций сразу
+        const allWorks = getEffectiveCatalog();
         const lp = {};
-        for (const w of WORKS_DATA) {
+        for (const w of allWorks) {
           const saved = ov[w.code];
           lp[w.code] = {
             tiers: saved?.tiers !== undefined ? saved.tiers.map(t=>({...t})) : (w.tiers||[]).map(t=>({...t})),
@@ -573,6 +627,43 @@ function AdminPanel({ currentUser, onClose }) {
     setPriceSaving(false);
     setPriceMsg("✓ Прайс сохранён!");
     setTimeout(()=>setPriceMsg(""),3000);
+  };
+
+  const saveCatalog = async (cat) => {
+    await storage.set(CATALOG_KEY, JSON.stringify(cat));
+    setCatalogOverrides(cat);
+    setLocalCatalog(cat);
+    // Переинициализируем localPrices для новых позиций
+    const allWorks = getEffectiveCatalog();
+    setLocalPrices(prev => {
+      const lp = {...(prev||{})};
+      for (const w of allWorks) {
+        if (!lp[w.code]) lp[w.code] = { tiers:(w.tiers||[]).map(t=>({...t})), fixedPrice: w.fixedPrice!=null?String(w.fixedPrice):"" };
+      }
+      return lp;
+    });
+  };
+
+  const renameWork = async (code, newName) => {
+    const cat = { ...(localCatalog||{}), renames: { ...((localCatalog||{}).renames||{}), [code]: newName } };
+    await saveCatalog(cat);
+  };
+
+  const addCustomWork = async () => {
+    if (!newWork.name.trim() || !newWork.cat.trim() || !newWork.sub.trim()) return;
+    const code = "CUSTOM-" + Date.now();
+    const work = { code, cat:newWork.cat.trim(), sub:newWork.sub.trim(), name:newWork.name.trim(), unit:newWork.unit||"м²", tiers:[], fixedPrice:null };
+    const cat = { ...(localCatalog||{}), custom: [...((localCatalog||{}).custom||[]), work] };
+    await saveCatalog(cat);
+    setNewWork({cat:"", sub:"", name:"", unit:"м²"});
+    setShowAddWork(false);
+    Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
+  };
+
+  const deleteCustomWork = async (code) => {
+    const cat = { ...(localCatalog||{}), custom: ((localCatalog||{}).custom||[]).filter(w=>w.code!==code) };
+    await saveCatalog(cat);
+    Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
 
   const roleLabel = r => r === "admin" ? "👑 Админ" : "👤 Замерщик";
@@ -711,9 +802,10 @@ function AdminPanel({ currentUser, onClose }) {
                   .price-scroll::-webkit-scrollbar-thumb:hover{background:#d4a85a}
                 `}</style>
                 {(() => {
+                  const allWorks = getEffectiveCatalog();
                   const q = priceSearch.toLowerCase();
-                  const filtered = WORKS_DATA.filter(w =>
-                    !q || w.name.toLowerCase().includes(q) || w.sub.toLowerCase().includes(q)
+                  const filtered = allWorks.filter(w =>
+                    !q || w.name.toLowerCase().includes(q) || w.sub.toLowerCase().includes(q) || w.cat.toLowerCase().includes(q)
                   );
                   const groups = {};
                   for (const w of filtered) {
@@ -728,11 +820,40 @@ function AdminPanel({ currentUser, onClose }) {
                         <PriceWorkCard key={w.code} w={w}
                           initTiers={localPrices?.[w.code]?.tiers || []}
                           initFixed={localPrices?.[w.code]?.fixedPrice || ""}
+                          onRename={newName => renameWork(w.code, newName)}
+                          onDelete={w.code.startsWith("CUSTOM-") ? ()=>deleteCustomWork(w.code) : null}
                         />
                       ))}
                     </div>
                   ));
                 })()}
+                {/* Форма добавления новой позиции */}
+                <div style={{marginTop:8,border:"1px dashed rgba(184,144,74,.3)",borderRadius:8,padding:"10px 12px",marginBottom:8}}>
+                  {!showAddWork ? (
+                    <button onClick={()=>setShowAddWork(true)}
+                      style={{width:"100%",background:"transparent",color:"#b8904a",border:"none",padding:"6px",fontFamily:"inherit",fontSize:12,cursor:"pointer",fontWeight:700}}>
+                      ＋ Добавить позицию в каталог
+                    </button>
+                  ) : (
+                    <div>
+                      <div style={{fontSize:11,fontWeight:700,color:"#b8904a",marginBottom:8}}>Новая позиция</div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
+                        {[["Категория", "cat"],["Подкатегория", "sub"],["Название", "name"],["Единица (м², шт)", "unit"]].map(([ph,field])=>(
+                          <input key={field} placeholder={ph} value={newWork[field]}
+                            onChange={e=>setNewWork(p=>({...p,[field]:e.target.value}))}
+                            style={{background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:6,padding:"6px 9px",fontFamily:"inherit",fontSize:11,outline:"none"}}/>
+                        ))}
+                      </div>
+                      <div style={{fontSize:10,color:"#555575",marginBottom:8}}>
+                        Существующие категории: {[...new Set(getEffectiveCatalog().map(w=>w.cat))].join(" · ")}
+                      </div>
+                      <div style={{display:"flex",gap:6}}>
+                        <button onClick={addCustomWork} style={{flex:1,background:"rgba(184,144,74,.15)",color:"#b8904a",border:"1px solid rgba(184,144,74,.3)",borderRadius:6,padding:"7px",fontFamily:"inherit",fontSize:12,fontWeight:700,cursor:"pointer"}}>✓ Добавить</button>
+                        <button onClick={()=>{setShowAddWork(false);setNewWork({cat:"",sub:"",name:"",unit:"м²"});}} style={{background:"rgba(200,60,60,.1)",color:"#e07070",border:"1px solid rgba(200,60,60,.2)",borderRadius:6,padding:"7px 12px",fontFamily:"inherit",fontSize:12,cursor:"pointer"}}>✕</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
               {/* Кнопка сохранить — фиксирована снизу */}
               <div style={{paddingTop:10,borderTop:"1px solid #1c2035",marginTop:6}}>
