@@ -2353,8 +2353,7 @@ export default function App() {
                     if(discount>0){ lines.push(""); lines.push(`Скидка ${discount}%: -${fmt(discAmt)} ₸`); }
                     lines.push(""); lines.push(`*Итого: ${fmt(final)} ₸*`);
                     if(proj.area&&Number(proj.area)>0) lines.push(`≈ ${fmt(final/Number(proj.area))} ₸/м²`);
-                    const text = encodeURIComponent(lines.join("
-"));
+                    const text = encodeURIComponent(lines.join("\n"));
                     const phone = proj.phone ? proj.phone.replace(/\D/g,"") : "";
                     window.open(`https://wa.me/${phone}?text=${text}`,"_blank");
                   }}
