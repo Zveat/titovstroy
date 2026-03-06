@@ -1202,7 +1202,7 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
           <div style={{fontSize:10,color:"#aaa",marginTop:2}}>М.П.</div>
         </div>
         <div style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
-          <img src="/stamp.jpg" alt="Печать TitovStroy" style={{width:160,height:160,objectFit:"contain",opacity:.85,mixBlendMode:"multiply",marginBottom:4}}/>
+          <img src="/stamp.jpg" alt="Печать TitovStroy" style={{width:200,height:200,objectFit:"contain",opacity:.85,mixBlendMode:"multiply",marginBottom:4}}/>
         </div>
       </div>
     </div>
