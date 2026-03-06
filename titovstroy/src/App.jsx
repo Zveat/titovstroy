@@ -1060,6 +1060,20 @@ export default function App() {
   const [currentId, setCurrentId] = useState(null);
   const [activeCat, setActiveCat] = useState(cats[0]);
   const [activeSub, setActiveSub] = useState(Object.keys(Gdyn[cats[0]]||{})[0]);
+
+  // Когда каталог меняется — проверяем что activeCat ещё существует
+  useEffect(() => {
+    if (!Gdyn[activeCat]) {
+      const firstCat = Object.keys(Gdyn)[0] || "";
+      setActiveCat(firstCat);
+      setActiveSub(Object.keys(Gdyn[firstCat]||{})[0] || "");
+    } else {
+      const subsNow = Object.keys(Gdyn[activeCat]||{});
+      if (!subsNow.includes(activeSub)) {
+        setActiveSub(subsNow[0] || "");
+      }
+    }
+  }, [catalogVersion]);
   const [rows, setRows] = useState({});
   const [proj, setProj] = useState({...EMPTY_PROJ});
   const [discount, setDiscount] = useState(0);
@@ -1143,8 +1157,11 @@ export default function App() {
     );
   }, [search]);
   const isSearching = search.trim().length > 0;
-  const subs = Object.keys(Gdyn[activeCat] || {});
+  const subs = Object.keys(Gdyn[safeCat] || {});
+  // Защита от краша: если activeCat не в Gdyn — берём первый
+  const safeCat = Gdyn[activeCat] ? activeCat : (Object.keys(Gdyn)[0]||"");
   const safeActiveSub = subs.includes(activeSub) ? activeSub : (subs[0]||"");
+  const safeSubs = Object.keys(Gdyn[safeCat]||{});
 
   // ── Открыть смету на редактирование ──
   const openEstimate = (est) => {
@@ -1486,7 +1503,7 @@ export default function App() {
                 {!isSearching && <div style={{display:"flex",flexWrap:"wrap",gap:3,padding:"8px 10px",borderBottom:"1px solid #181c2e",background:"rgba(0,0,0,.12)"}}>
                   {subs.map(sub=>(
                     <button key={sub} className={`sub-btn ${safeActiveSub===sub?"active":""}`} onClick={()=>setActiveSub(sub)}>
-                      {sub}{subSum(activeCat,sub)>0&&<span style={{marginLeft:3,color:"#b8904a",fontSize:8}}>●</span>}
+                      {sub}{subSum(safeCat,sub)>0&&<span style={{marginLeft:3,color:"#b8904a",fontSize:8}}>●</span>}
                     </button>
                   ))}
                 </div>}
@@ -1514,7 +1531,7 @@ export default function App() {
                       Найдено: {searchResults.length} работ
                     </div>
                   )}
-                  {(isSearching ? searchResults : (Gdyn[activeCat]?.[safeActiveSub]||[])).map(work=>{
+                  {(isSearching ? searchResults : (Gdyn[safeCat]?.[safeActiveSub]||[])).map(work=>{
                     const r = rows[work.name]||{};
                     const qty = Number(r.qty||0);
                     const cpx = r.complexity||"std";
@@ -1577,10 +1594,10 @@ export default function App() {
                   })}
                 </div>
 
-                {!isSearching && subSum(activeCat,safeActiveSub)>0&&(
+                {!isSearching && subSum(safeCat,safeActiveSub)>0&&(
                   <div style={{borderTop:"1px solid #181c2e",padding:"10px 14px",display:"flex",justifyContent:"space-between"}}>
                     <span style={{fontSize:11,color:"#454560"}}>Итого по разделу «{safeActiveSub}»</span>
-                    <span style={{fontSize:15,fontWeight:700,color:"#b8904a"}}>{fmt(subSum(activeCat,safeActiveSub))} ₸</span>
+                    <span style={{fontSize:15,fontWeight:700,color:"#b8904a"}}>{fmt(subSum(safeCat,safeActiveSub))} ₸</span>
                   </div>
                 )}
                 {isSearching && searchResults.length > 0 && (() => {
