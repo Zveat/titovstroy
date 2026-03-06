@@ -1413,6 +1413,22 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
           </div>
         </div>
       </div>
+      {/* Предоплата для ремонтных договоров */}
+      {isRepair && (
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div>
+            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Предоплата (%)</div>
+            <input className="fi" type="number" min="0" max="100" value={contract.advancePercent??30}
+              onChange={e=>upd({advancePercent:parseFloat(e.target.value)||0})} placeholder="30"/>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Сумма предоплаты (₸)</div>
+            <div className="fi" style={{background:"rgba(184,144,74,.07)",color:"#b8904a",fontWeight:700,display:"flex",alignItems:"center"}}>
+              {fmt(Math.round(total*(contract.advancePercent??30)/100))} ₸
+            </div>
+          </div>
+        </div>
+      )}
       {/* Примечание */}
       <div>
         <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Примечание</div>
@@ -1744,8 +1760,8 @@ th{background:#ddd;font-weight:bold;text-align:center}
           <span>${cat}</span><span>${fmtN(catTotal)} ₸</span></div>`;
         html += `<table style="margin:0"><thead><tr>
           <th style="width:4%">№</th>
-          <th style="width:30%">Наименование работ</th>
           <th style="width:12%">Подраздел</th>
+          <th style="width:30%">Наименование работ</th>
           <th style="width:8%">Ед.</th>
           <th style="width:8%">Объём</th>
           <th style="width:14%">Цена за ед.</th>
@@ -1762,8 +1778,8 @@ th{background:#ddd;font-weight:bold;text-align:center}
           lastSub = w.subcategory||lastSub;
           html += `<tr style="background:${bg}">
             <td class="tc">${globalNum}</td>
-            <td>${w.name||""}</td>
             ${subCell}
+            <td>${w.name||""}</td>
             <td class="tc">${w.unit||"м²"}</td>
             <td class="tc">${w.quantity||""}</td>
             <td class="tr">${fmtN(w.price)} ₸</td>
@@ -1821,7 +1837,7 @@ ${worksTable()}
 <p>3.2. Работы выполняются поэтапно в соответствии с указанными сроками.</p>
 <p>3.3. Любые дополнительные работы, не предусмотренные настоящим Приложением, выполняются на основании дополнительного соглашения сторон с корректировкой стоимости и сроков.</p>
 <p class="s">4. Порядок оплаты</p>
-<p>4.1. При заключении договора заказчик вносит предоплату (аванс) в размере ${fmtN(c.advance||0)} тг, которая идет в зачет основной суммы договора, при расторжении договора предоплата возврату не подлежит.</p>
+<p>4.1. При заключении договора заказчик вносит предоплату (аванс) в размере ${c.advancePercent??30}% (${fmtN(Math.round(total*(c.advancePercent??30)/100))} тенге), которая идет в зачет основной суммы договора, при расторжении договора предоплата возврату не подлежит.</p>
 <p>4.2. Оплата за работы (за исключением предоплаты) производится поэтапно на основании актов выполненных работ (форма КС-2) в течение 2 банковских дней после подписания акта.</p>
 <p class="s">5. Общая стоимость работ составляет ${fmtN(total)} ₸</p><br>
 ${sigBlock("Подрядчик:", "Заказчик:")}
@@ -2444,7 +2460,7 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
                                   if(!w) return null;
                                   const qty = Number(r.qty||0);
                                   const price = getPrice(w,qty,r.complexity||"std");
-                                  return {name:w.name,category:w.cat||"",subcategory:w.sub||"",quantity:qty,unit:w.unit||"м²",price:price?Math.round(price/qty):0};
+                                  return {name:w.name,category:w.cat||"",subcategory:w.sub||"",quantity:qty,unit:w.unit||"м²",price:price?Math.round(price):0};
                                 }).filter(Boolean);
                                 const newContract = {id:Date.now().toString(),number:"",date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works,appendix:1,estId:est.id,estClient:est.proj?.name||"",estPhone:est.proj?.phone||"",estAddress:est.proj?.address||"",note:""};
                                 setCurrentContract(newContract);
