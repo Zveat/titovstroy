@@ -2275,6 +2275,7 @@ export default function App() {
     // Таблица работ
     console.log("DOCX step 3: building doc");
     const makeWorksTable = () => {
+      console.log("makeWorksTable called, works:", (c.works||[]).length);
       const works = c.works||[];
       const catOrder=[], catMap={};
       works.forEach(w=>{
@@ -2359,6 +2360,7 @@ export default function App() {
       ];
     };
 
+    console.log("DOCX building annex1");
     // Приложение №1
     const annex1 = [
       PC([T("Приложение №1",{sz:13,b:true})],{pb:true,sb:0}),
@@ -2383,7 +2385,7 @@ export default function App() {
       P([]),
       P([T("Подписи сторон",{b:true})]),
       P([]),
-      sigTable(),
+      console.log("annex1 sigTable") || sigTable(),
     ];
 
     console.log("DOCX step 4: building children");
