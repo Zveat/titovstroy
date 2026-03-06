@@ -1724,18 +1724,73 @@ th{background:#ddd;font-weight:bold;text-align:center}
 </tr></table>`;
     };
 
-    const worksRows = () => {
-      let rows = "", num=0, lastCat="";
-      (c.works||[]).forEach(w=>{
-        if(w.category&&w.category!==lastCat){lastCat=w.category;rows+=`<tr><td colspan="7" style="background:#eee;text-align:center;font-weight:bold">${w.category}</td></tr>`;}
-        num++;
-        rows+=`<tr><td class="tc">${num}</td><td>${w.name||""}</td><td class="tc">${w.quantity||""}</td><td class="tc">${w.unit||"м²"}</td><td class="tc">${w.deadline||""}</td><td class="tr">${fmtN(w.price)} ₸</td><td class="tr"><b>${fmtN(Number(w.quantity)*Number(w.price))} ₸</b></td></tr>`;
+    const worksTable = () => {
+      const works = c.works||[];
+      // Group by category
+      const catOrder = [], catMap = {};
+      works.forEach(w=>{
+        const cat = w.category||"Работы";
+        if(!catMap[cat]){ catMap[cat]={total:0,rows:[]}; catOrder.push(cat); }
+        const sum = Number(w.quantity||0)*Number(w.price||0);
+        catMap[cat].total += sum;
+        catMap[cat].rows.push({...w,sum});
       });
-      return rows;
+      const multiCat = catOrder.length > 1;
+      let html = "", globalNum = 0;
+      catOrder.forEach(cat=>{
+        const {rows, total: catTotal} = catMap[cat];
+        html += `<div style="margin-bottom:8px">`;
+        html += `<div style="background:#1a1a28;color:#b8904a;font-weight:bold;font-size:10pt;padding:5px 8px;display:flex;justify-content:space-between">
+          <span>${cat}</span><span>${fmtN(catTotal)} ₸</span></div>`;
+        html += `<table style="margin:0"><thead><tr>
+          <th style="width:4%">№</th>
+          <th style="width:30%">Наименование работ</th>
+          <th style="width:12%">Подраздел</th>
+          <th style="width:8%">Ед.</th>
+          <th style="width:8%">Объём</th>
+          <th style="width:14%">Цена за ед.</th>
+          <th style="width:14%">Общая стоимость</th>
+        </tr></thead><tbody>`;
+        let lastSub = "";
+        rows.forEach((w,i)=>{
+          globalNum++;
+          const even = i%2===0;
+          const bg = even?"#f5f2ec":"#ede9e0";
+          const subCell = w.subcategory&&w.subcategory!==lastSub
+            ? `<td style="color:#8855aa;font-style:italic;font-size:8.5pt;text-align:center">${w.subcategory}</td>`
+            : `<td style="color:#888;font-size:8.5pt;text-align:center">${w.subcategory||""}</td>`;
+          lastSub = w.subcategory||lastSub;
+          html += `<tr style="background:${bg}">
+            <td class="tc">${globalNum}</td>
+            <td>${w.name||""}</td>
+            ${subCell}
+            <td class="tc">${w.unit||"м²"}</td>
+            <td class="tc">${w.quantity||""}</td>
+            <td class="tr">${fmtN(w.price)} ₸</td>
+            <td class="tr"><b>${fmtN(w.sum)} ₸</b></td>
+          </tr>`;
+        });
+        html += `<tr style="background:#f0ead8;border-top:2px solid #c8a96e">
+          <td colspan="6" class="tr" style="font-style:italic;color:#5a4020">Итого по разделу «${cat}»:</td>
+          <td class="tr" style="font-weight:bold;color:#b8904a">${fmtN(catTotal)} ₸</td>
+        </tr>`;
+        html += `</tbody></table></div>`;
+      });
+      if(multiCat){
+        html += `<div style="background:#f5f2ec;border:1px solid #c8a96e;padding:8px 12px;margin-top:8px">
+          <div style="font-weight:bold;margin-bottom:6px;color:#1a1a28">Сводка по разделам:</div>`;
+        catOrder.forEach(cat=>{
+          html += `<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px dotted #ccc">
+            <span>${cat}</span><span style="font-weight:bold">${fmtN(catMap[cat].total)} ₸</span></div>`;
+        });
+        html += `<div style="display:flex;justify-content:space-between;padding:4px 0;margin-top:4px;border-top:2px solid #c8a96e;font-weight:bold;font-size:11pt">
+          <span>ИТОГО:</span><span style="color:#b8904a">${fmtN(total)} ₸</span></div></div>`;
+      } else {
+        html += `<div style="text-align:right;font-weight:bold;font-size:11pt;padding:6px 0;border-top:2px solid #c8a96e;color:#1a1a28">
+          ИТОГО: ${fmtN(total)} ₸</div>`;
+      }
+      return html;
     };
-    const worksTable = () => `<table>
-<thead><tr><th style="width:4%">№</th><th style="width:36%">Наименование этапа/вида работ</th><th style="width:8%">Объем</th><th style="width:7%">Ед.</th><th style="width:12%">Срок</th><th style="width:13%">Цена за ед.</th><th style="width:14%">Общая стоимость</th></tr></thead>
-<tbody>${worksRows()}<tr><td colspan="6" class="tr"><b>Итого:</b></td><td class="tr"><b>${fmtN(total)} ₸</b></td></tr></tbody></table>`;
 
     const preambula = (role="Подрядчик") => {
       if(isYur){
@@ -2389,7 +2444,7 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
                                   if(!w) return null;
                                   const qty = Number(r.qty||0);
                                   const price = getPrice(w,qty,r.complexity||"std");
-                                  return {name:w.name,quantity:qty,unit:w.unit||"м²",price:price?Math.round(price/qty):0};
+                                  return {name:w.name,category:w.cat||"",subcategory:w.sub||"",quantity:qty,unit:w.unit||"м²",price:price?Math.round(price/qty):0};
                                 }).filter(Boolean);
                                 const newContract = {id:Date.now().toString(),number:"",date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works,appendix:1,estId:est.id,estClient:est.proj?.name||"",estPhone:est.proj?.phone||"",estAddress:est.proj?.address||"",note:""};
                                 setCurrentContract(newContract);
