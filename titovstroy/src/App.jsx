@@ -2265,8 +2265,8 @@ export default function App() {
       width:{size:col(w),type:D.WidthType.DXA},
       columnSpan:opts.span||1,
       borders:BORDERS,
-      shading: opts.bg?{fill:opts.bg,type:D.ShadingType.CLEAR,color:opts.bg}:undefined,
-      verticalAlign:D.VerticalAlign.CENTER,
+      shading: opts.bg?{fill:opts.bg,type:"clear",color:opts.bg}:undefined,
+      verticalAlign:"center",
       margins:{top:28,bottom:28,left:57,right:57},
     });
 
@@ -2281,7 +2281,7 @@ export default function App() {
         catMap[cat].total+=sum; catMap[cat].rows.push({...w,sum});
       });
       const rows=[];
-      rows.push(new D.TableRow({children:[TC("№",5,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Наименование работ",45,{b:true,bg:"DDDDDD"}),TC("Ед.",8,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Объём",8,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Цена за ед.",17,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Сумма",17,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER})],tableHeader:true}));
+      rows.push(new D.TableRow({children:[TC("№",5,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Наименование работ",45,{b:true,bg:"DDDDDD"}),TC("Ед.",8,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Объём",8,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Цена за ед.",17,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Сумма",17,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER})]}));
       let n=0;
       catOrder.forEach(cat=>{
         const {rows:cr,total:ct}=catMap[cat];
@@ -2308,22 +2308,17 @@ export default function App() {
         catMap[cat]+=Number(w.quantity||0)*Number(w.price||0);
       });
       const multiCat = catOrder.length > 1;
-      const NB = {top:{style:D.BorderStyle.NONE},bottom:{style:D.BorderStyle.NONE},left:{style:D.BorderStyle.NONE},right:{style:D.BorderStyle.NONE}};
-      const SB = {top:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},bottom:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},left:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},right:{style:D.BorderStyle.SINGLE,size:4,color:"000000"}};
-      const SC2 = (text,opts={}) => new D.TableCell({children:[P([T(text,{sz:opts.sz||9,b:opts.b})],{al:opts.al||D.AlignmentType.LEFT,sb:20,sa:20})],borders:SB,shading:opts.bg?{fill:opts.bg,type:D.ShadingType.CLEAR,color:opts.bg}:undefined,width:{size:col(opts.w||30),type:D.WidthType.DXA},margins:{top:28,bottom:28,left:57,right:57}});
+      const result = [P([])];
       if(multiCat){
-        const svRows=[];
-        svRows.push(new D.TableRow({children:[SC2("Сводка по разделам",{w:60,b:true,bg:"e8e4d8",sz:9})]}));
+        result.push(P([T("Сводка по разделам:",{b:true,sz:10})],{al:D.AlignmentType.RIGHT,sb:20,sa:10}));
         catOrder.forEach(cat=>{
-          svRows.push(new D.TableRow({children:[SC2(cat,{w:43}), SC2(fmtN2(catMap[cat])+" ₸",{w:17,b:true,al:D.AlignmentType.RIGHT})]}));
+          result.push(P([T(cat+":  "+fmtN2(catMap[cat])+" ₸",{sz:9})],{al:D.AlignmentType.RIGHT,sb:8,sa:8}));
         });
-        svRows.push(new D.TableRow({children:[SC2("ИТОГО:",{w:43,b:true,bg:"e8e0c8",sz:10}), SC2(fmtN2(total)+" ₸",{w:17,b:true,bg:"e8e0c8",sz:11,al:D.AlignmentType.RIGHT})]}));
-        return [
-          P([]),
-          new D.Table({rows:svRows,width:{size:col(60),type:D.WidthType.DXA},indent:{size:col(40),type:D.WidthType.DXA}}),
-        ];
+        result.push(P([T("ИТОГО: "+fmtN2(total)+" ₸",{b:true,sz:12})],{al:D.AlignmentType.RIGHT,sb:20,sa:20}));
+      } else {
+        result.push(P([T("ИТОГО: "+fmtN2(total)+" ₸",{b:true,sz:12})],{al:D.AlignmentType.RIGHT,sb:20,sa:20}));
       }
-      return [P([T("ИТОГО: "+fmtN2(total)+" ₸",{b:true,sz:11})],{al:D.AlignmentType.RIGHT,sb:20,sa:20})];
+      return result;
     }
     // Подписи
     const SC = (lineArr) => new D.TableCell({
