@@ -1375,7 +1375,9 @@ export default function App() {
   // ── Открыть смету на редактирование ──
   const openEstimate = (est) => {
     setCurrentId(est.id);
-    setProj(est.proj || {...EMPTY_PROJ});
+    const validNames = new Set(allUsers.filter(u=>u.role!=="viewer").map(u=>u.name));
+    const p = est.proj || {...EMPTY_PROJ};
+    setProj({...p, manager: validNames.has(p.manager||"") ? p.manager : ""});
     setRows(est.rows || {});
     setDiscount(est.discount || 0);
     setNote(est.note || "");
@@ -2125,7 +2127,8 @@ export default function App() {
                 }
               }
               const topCats = Object.entries(catSums).sort((a,b)=>b[1]-a[1]).slice(0,5);
-              const managers = [...new Set(estimates.map(e=>e.proj?.manager||"").filter(Boolean))];
+              const validManagerNames = new Set(allUsers.filter(u=>u.role!=="viewer").map(u=>u.name));
+              const managers = [...new Set(estimates.map(e=>e.proj?.manager||"").filter(m=>m&&validManagerNames.has(m)))];
               // Per-manager totals for company view
               const managerStats = managers.map(m=>{
                 const mes = base.filter(e=>(e.proj?.manager||"")=== m);
