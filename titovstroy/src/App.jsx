@@ -1244,7 +1244,11 @@ export default function App() {
     try {
       const s = localStorage.getItem(SESSION_KEY);
       if (!s) return null;
-      const { user, savedAt } = JSON.parse(s);
+      const parsed = JSON.parse(s);
+      // Support both old format (user object directly) and new format ({user, savedAt})
+      const user = parsed?.user || parsed;
+      const savedAt = parsed?.savedAt || Date.now();
+      if (!user?.id) return null;
       if (Date.now() - savedAt > 30 * 24 * 60 * 60 * 1000) { localStorage.removeItem(SESSION_KEY); return null; }
       return user;
     } catch(e) { return null; }
