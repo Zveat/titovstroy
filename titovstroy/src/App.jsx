@@ -173,6 +173,8 @@ const OBJ_TYPES = ["Вторичка","Новостройка","Коммерци
 
 const fmt = n => n > 0 ? new Intl.NumberFormat("ru-RU").format(Math.round(n)) : "—";
 const today = () => new Date().toLocaleDateString("ru-RU");
+const addWorkdays = (date, days) => { let d = new Date(date); let added = 0; while(added < days){ d.setDate(d.getDate()+1); if(d.getDay()!==0&&d.getDay()!==6) added++; } return d; };
+const validUntil = () => addWorkdays(new Date(),7).toLocaleDateString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric"});
 
 // Базовая цена для отображения в колонке (без объёма) — первый диапазон или fixedPrice
 // priceOverrides = {code: {fixedPrice?, tiers?}} — загружается из Firebase
