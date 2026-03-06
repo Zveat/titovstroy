@@ -1753,23 +1753,33 @@ export default function App() {
     const dtM = fmtDate(c.mainDate||c.date);
     const dtA = fmtDate(c.annexDate||c.date);
     const total = (c.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
-    const bodyPad = forDocx ? 'padding:0;' : 'padding:20mm 15mm 20mm 30mm;';
-    const pageCss = forDocx ? '@page{size:A4;margin:20mm 15mm 20mm 30mm}' : '';
-    const CSS = `*{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:'Times New Roman',Times,serif;${bodyPad}line-height:1.4;color:#000;font-size:11pt}
-  p{margin:2pt 0;text-align:justify;mso-pagination:none;mso-line-height-rule:exactly}
-  div{mso-pagination:none}
-  .c{text-align:center}.b{font-weight:bold}.t{font-size:13pt;font-weight:bold;text-align:center;margin:5pt 0}
-  .s{font-weight:bold;margin:6pt 0 2pt}
-  .city-line{text-align:center;margin:3pt 0}
-  table{width:100%;border-collapse:collapse;margin:4pt 0;font-size:8pt;table-layout:fixed;mso-table-lspace:0pt;mso-table-rspace:0pt}
-  th,td{border:1px solid #000;padding:2pt 3pt;word-wrap:break-word;overflow-wrap:break-word;mso-line-height-rule:exactly;line-height:1.2}
-  th{background:#ddd;font-weight:bold;text-align:center;font-size:7.5pt}
+    const CSS = forDocx
+      ? `*{margin:0;padding:0}
+  body{font-family:'Times New Roman',Times,serif;font-size:12pt;color:#000;line-height:1.5}
+  p{margin:3pt 0;text-align:justify}
+  .c{text-align:center}.b{font-weight:bold}.t{font-size:14pt;font-weight:bold;text-align:center;margin:6pt 0}
+  .s{font-weight:bold;margin:8pt 0 3pt}
+  .city-line{text-align:center}
+  table{width:100%;border-collapse:collapse;font-size:9pt;table-layout:fixed}
+  th,td{border:1px solid #000;padding:2pt 4pt;word-wrap:break-word}
+  th{background:#ddd;font-weight:bold;text-align:center;font-size:8.5pt}
   .tc{text-align:center}.tr{text-align:right}
-  .st{width:100%;border-collapse:collapse;margin-top:14pt;table-layout:fixed}
-  .st td{border:none;vertical-align:top;width:50%;padding:0 6pt 0 0;font-size:9.5pt;line-height:1.5}
-  tr{page-break-inside:avoid;mso-row-margin-right:0pt}
-  ${pageCss}@media print{.np{display:none}body{padding:10mm 10mm 10mm 20mm}@page{size:A4;margin:0}
+  .st{width:100%;border-collapse:collapse}
+  .st td{border:none;vertical-align:top;width:50%;padding:0 8pt 0 0;font-size:10pt}`
+      : `*{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Times New Roman',Times,serif;padding:20mm 15mm 20mm 30mm;line-height:1.5;color:#000;font-size:12pt}
+  p{margin:3pt 0;text-align:justify}
+  .c{text-align:center}.b{font-weight:bold}.t{font-size:14pt;font-weight:bold;text-align:center;margin:6pt 0}
+  .s{font-weight:bold;margin:8pt 0 3pt}
+  .city-line{text-align:center;margin:4pt 0}
+  table{width:100%;border-collapse:collapse;margin:8pt 0;font-size:9pt;table-layout:fixed}
+  th,td{border:1px solid #000;padding:2pt 4pt;word-wrap:break-word}
+  th{background:#ddd;font-weight:bold;text-align:center;font-size:8.5pt}
+  .tc{text-align:center}.tr{text-align:right}
+  .st{width:100%;border-collapse:collapse;margin-top:20pt;table-layout:auto}
+  .st td{border:none;vertical-align:top;width:50%;padding:0 8pt 0 0;font-size:10pt;line-height:1.8}
+  tr{page-break-inside:avoid}
+  @media print{.np{display:none}body{padding:10mm 10mm 10mm 20mm}@page{size:A4;margin:0}
   tr{page-break-inside:avoid}table{page-break-inside:auto}}`
     const isYur = client?.clientType==="yur";
     const clName = client?.name||"___________________";
