@@ -266,15 +266,15 @@ function getEffectiveCatalog() {
     .filter(w => !hc.includes(w.cat))
     .filter(w => !hs.includes(w.cat+"|"+w.sub))
     .map(w => {
-      let r = {...w, tiers: w.tiers||[]};
+      let r = {...w, tiers: w.tiers||[], _origCat: w.cat, _origSub: w.sub};
       if (_catalogOverrides.renames[r.code]) r = {...r, name: _catalogOverrides.renames[r.code]};
-      if (_catalogOverrides.catRenames[r.cat]) r = {...r, cat: _catalogOverrides.catRenames[r.cat]};
-      const subKey = w.cat+"|"+w.sub; // use ORIGINAL cat for lookup
-      if (_catalogOverrides.subRenames[subKey]) r = {...r, sub: _catalogOverrides.subRenames[subKey]};
+      if (_catalogOverrides.catRenames[w.cat]) r = {...r, cat: _catalogOverrides.catRenames[w.cat]};
+      if (_catalogOverrides.subRenames[w.cat+"|"+w.sub]) r = {...r, sub: _catalogOverrides.subRenames[w.cat+"|"+w.sub]};
       return r;
     });
   const custom = (_catalogOverrides.custom||[])
-    .filter(w => !(_catalogOverrides.hiddenCodes||[]).includes(w.code));
+    .filter(w => !(_catalogOverrides.hiddenCodes||[]).includes(w.code))
+    .map(w => ({...w, tiers: w.tiers||[], _origCat: w.cat, _origSub: w.sub}));
   return [...base, ...custom];
 }
 
@@ -685,43 +685,49 @@ function AdminPanel({ currentUser, onClose }) {
     Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
 
-  const renameCat = async (oldCat, newCat) => {
-    if (!newCat.trim() || newCat.trim() === oldCat) return;
-    // Rename in catRenames + update custom works
-    const cr = { ...((localCatalog||{}).catRenames||{}), [oldCat]: newCat.trim() };
-    const custom = ((localCatalog||{}).custom||[]).map(w => w.cat===oldCat ? {...w,cat:newCat.trim()} : w);
-    // Also update hiddenCats, hiddenSubs keys
-    const hc = ((localCatalog||{}).hiddenCats||[]).map(c => c===oldCat ? newCat.trim() : c);
-    const hs = ((localCatalog||{}).hiddenSubs||[]).map(s => s.startsWith(oldCat+"|") ? newCat.trim()+s.slice(oldCat.length) : s);
-    await saveCatalog({ ...(localCatalog||{}), catRenames:cr, custom, hiddenCats:hc, hiddenSubs:hs });
+  const renameCat = async (origKey, newCat) => {
+    // origKey — ORIGINAL cat name (before any renames)
+    if (!newCat.trim() || newCat.trim() === origKey) return;
+    const cr = { ...((localCatalog||{}).catRenames||{}), [origKey]: newCat.trim() };
+    // Update custom works that use the current display name
+    const currentName = (localCatalog?.catRenames||{})[origKey] || origKey;
+    const custom = ((localCatalog||{}).custom||[]).map(w => w.cat===currentName ? {...w,cat:newCat.trim()} : w);
+    await saveCatalog({ ...(localCatalog||{}), catRenames:cr, custom });
     setEditingCat(null);
     Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
 
-  const renameSub = async (origCat, origSub, newSub) => {
-    if (!newSub.trim() || newSub.trim() === origSub) return;
-    const key = origCat+"|"+origSub;
+  const renameSub = async (origCatKey, origSubKey, newSub) => {
+    // origCatKey/origSubKey — ORIGINAL names before any renames
+    if (!newSub.trim() || newSub.trim() === origSubKey) return;
+    const key = origCatKey+"|"+origSubKey;
     const sr = { ...((localCatalog||{}).subRenames||{}), [key]: newSub.trim() };
-    const custom = ((localCatalog||{}).custom||[]).map(w => w.sub===origSub && w.cat===origCat ? {...w,sub:newSub.trim()} : w);
+    // Update custom works
+    const curCat = (localCatalog?.catRenames||{})[origCatKey] || origCatKey;
+    const curSub = (localCatalog?.subRenames||{})[key] || origSubKey;
+    const custom = ((localCatalog||{}).custom||[]).map(w =>
+      w.cat===curCat && w.sub===curSub ? {...w,sub:newSub.trim()} : w
+    );
     await saveCatalog({ ...(localCatalog||{}), subRenames:sr, custom });
     setEditingSub(null);
     Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
 
-  const deleteCat = async (catName) => {
-    // Hide all works in this cat + remove custom works in it
-    const allWorks = getEffectiveCatalog();
-    const codesToHide = allWorks.filter(w => w.cat===catName && !w.code.startsWith("CUSTOM-")).map(w=>w.code);
-    const hc = [...new Set([...((localCatalog||{}).hiddenCats||[]), catName])];
-    const custom = ((localCatalog||{}).custom||[]).filter(w => w.cat!==catName);
+  const deleteCat = async (origCatKey) => {
+    // origCatKey = original name. hiddenCats stores originals.
+    const hc = [...new Set([...((localCatalog||{}).hiddenCats||[]), origCatKey])];
+    const curName = (localCatalog?.catRenames||{})[origCatKey] || origCatKey;
+    const custom = ((localCatalog||{}).custom||[]).filter(w => w.cat!==curName);
     await saveCatalog({ ...(localCatalog||{}), hiddenCats:hc, custom });
     Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
 
-  const deleteSub = async (catName, subName) => {
-    const key = catName+"|"+subName;
+  const deleteSub = async (origCatKey, origSubKey) => {
+    const key = origCatKey+"|"+origSubKey;
     const hs = [...new Set([...((localCatalog||{}).hiddenSubs||[]), key])];
-    const custom = ((localCatalog||{}).custom||[]).filter(w => !(w.cat===catName && w.sub===subName));
+    const curCat = (localCatalog?.catRenames||{})[origCatKey] || origCatKey;
+    const curSub = (localCatalog?.subRenames||{})[key] || origSubKey;
+    const custom = ((localCatalog||{}).custom||[]).filter(w => !(w.cat===curCat && w.sub===curSub));
     await saveCatalog({ ...(localCatalog||{}), hiddenSubs:hs, custom });
     Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
@@ -874,64 +880,76 @@ function AdminPanel({ currentUser, onClose }) {
                     groups[key].push(w);
                   }
                   // Группируем по категории отдельно для заголовков кат.
-                  const catGroups = {};
+                  // Группируем с сохранением оригинальных ключей
+                  const catGroups = {}; // displayCat -> { _origCat, subs: { displaySub -> { _origSub, works[] } } }
                   for (const w of filtered) {
-                    if (!catGroups[w.cat]) catGroups[w.cat] = {};
-                    if (!catGroups[w.cat][w.sub]) catGroups[w.cat][w.sub] = [];
-                    catGroups[w.cat][w.sub].push(w);
+                    if (!catGroups[w.cat]) catGroups[w.cat] = { _origCat: w._origCat||w.cat, subs:{} };
+                    if (!catGroups[w.cat].subs[w.sub]) catGroups[w.cat].subs[w.sub] = { _origSub: w._origSub||w.sub, works:[] };
+                    catGroups[w.cat].subs[w.sub].works.push(w);
                   }
                   const btnS = {background:"transparent",border:"none",cursor:"pointer",padding:"2px 5px",fontSize:11,lineHeight:1};
-                  return Object.entries(catGroups).map(([cat, subMap]) => (
+                  return Object.entries(catGroups).map(([cat, catData]) => {
+                    const origCat = catData._origCat;
+                    return (
                     <div key={cat} style={{marginBottom:16}}>
                       {/* Заголовок категории */}
-                      {editingCat?.key===cat ? (
+                      {editingCat?.key===origCat ? (
                         <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:6}}>
                           <input autoFocus value={editingCat.val}
                             onChange={e=>setEditingCat(p=>({...p,val:e.target.value}))}
-                            onKeyDown={e=>{if(e.key==="Enter")renameCat(cat,editingCat.val);if(e.key==="Escape")setEditingCat(null);}}
+                            onKeyDown={e=>{if(e.key==="Enter")renameCat(origCat,editingCat.val);if(e.key==="Escape")setEditingCat(null);}}
                             style={{flex:1,background:"#0c0e1a",border:"1px solid #b8904a",color:"#b8904a",borderRadius:5,padding:"3px 8px",fontFamily:"inherit",fontSize:11,fontWeight:700,outline:"none"}}/>
-                          <button onClick={()=>renameCat(cat,editingCat.val)} style={{...btnS,color:"#4caf7d"}}>✓</button>
+                          <button onClick={()=>renameCat(origCat,editingCat.val)} style={{...btnS,color:"#4caf7d"}}>✓</button>
                           <button onClick={()=>setEditingCat(null)} style={{...btnS,color:"#555575"}}>✕</button>
                         </div>
                       ) : (
                         <div style={{display:"flex",alignItems:"center",gap:4,padding:"4px 0",borderBottom:"1px solid #1c2035",marginBottom:6}}>
                           <span style={{fontSize:10,fontWeight:700,color:"#b8904a",letterSpacing:1,textTransform:"uppercase",flex:1}}>{cat}</span>
-                          <button onClick={()=>setEditingCat({key:cat,val:cat})} title="Переименовать категорию" style={{...btnS,color:"#555575"}}>✏️</button>
-                          <button onClick={()=>{ if(window.confirm(`Удалить всю категорию "${cat}"?`)) deleteCat(cat); }} title="Удалить категорию" style={{...btnS,color:"#c84848"}}>🗑</button>
+                          <button onClick={()=>setEditingCat({key:origCat,val:cat})} title="Переименовать категорию" style={{...btnS,color:"#555575"}}>✏️</button>
+                          <button onClick={()=>{ if(window.confirm(`Удалить всю категорию "${cat}"?`)) deleteCat(origCat); }} title="Удалить категорию" style={{...btnS,color:"#c84848"}}>🗑</button>
                         </div>
                       )}
                       {/* Подкатегории */}
-                      {Object.entries(subMap).map(([sub, works]) => (
+                      {Object.entries(catData.subs).map(([sub, subData]) => {
+                        const origSub = subData._origSub;
+                        return (
                         <div key={sub} style={{marginBottom:10}}>
-                          {/* Заголовок подкатегории */}
-                          {editingSub?.cat===cat&&editingSub?.key===sub ? (
+                          {editingSub?.cat===origCat&&editingSub?.key===origSub ? (
                             <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:4,paddingLeft:8}}>
                               <input autoFocus value={editingSub.val}
                                 onChange={e=>setEditingSub(p=>({...p,val:e.target.value}))}
-                                onKeyDown={e=>{if(e.key==="Enter")renameSub(cat,sub,editingSub.val);if(e.key==="Escape")setEditingSub(null);}}
+                                onKeyDown={e=>{if(e.key==="Enter")renameSub(origCat,origSub,editingSub.val);if(e.key==="Escape")setEditingSub(null);}}
                                 style={{flex:1,background:"#0c0e1a",border:"1px solid #6060a0",color:"#9090c0",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",fontSize:10,outline:"none"}}/>
-                              <button onClick={()=>renameSub(cat,sub,editingSub.val)} style={{...btnS,color:"#4caf7d"}}>✓</button>
+                              <button onClick={()=>renameSub(origCat,origSub,editingSub.val)} style={{...btnS,color:"#4caf7d"}}>✓</button>
                               <button onClick={()=>setEditingSub(null)} style={{...btnS,color:"#555575"}}>✕</button>
                             </div>
                           ) : (
                             <div style={{display:"flex",alignItems:"center",gap:3,paddingLeft:8,marginBottom:4}}>
                               <span style={{fontSize:9,fontWeight:700,color:"#555575",letterSpacing:.8,textTransform:"uppercase",flex:1}}>{sub}</span>
-                              <button onClick={()=>setEditingSub({cat,key:sub,val:sub})} title="Переименовать подкатегорию" style={{...btnS,color:"#404058",fontSize:10}}>✏️</button>
-                              <button onClick={()=>{ if(window.confirm(`Удалить подкатегорию "${sub}"?`)) deleteSub(cat,sub); }} title="Удалить подкатегорию" style={{...btnS,color:"#7a3030",fontSize:10}}>🗑</button>
+                              <button onClick={()=>setEditingSub({cat:origCat,key:origSub,val:sub})} title="Переименовать подкатегорию" style={{...btnS,color:"#404058",fontSize:10}}>✏️</button>
+                              <button onClick={()=>{ if(window.confirm(`Удалить подкатегорию "${sub}"?`)) deleteSub(origCat,origSub); }} title="Удалить подкатегорию" style={{...btnS,color:"#7a3030",fontSize:10}}>🗑</button>
                             </div>
                           )}
-                          {works.map(w => (
+                          {subData.works.map(w => (
                             <PriceWorkCard key={w.code} w={w}
                               initTiers={localPrices?.[w.code]?.tiers || []}
                               initFixed={localPrices?.[w.code]?.fixedPrice || ""}
                               onRename={newName => renameWork(w.code, newName)}
-                              onDelete={w.code.startsWith("CUSTOM-") ? ()=>deleteCustomWork(w.code) : null}
+                              onDelete={()=>{
+                                if(w.code.startsWith("CUSTOM-")) deleteCustomWork(w.code);
+                                else {
+                                  const hc = [...new Set([...((localCatalog||{}).hiddenCodes||[]), w.code])];
+                                  saveCatalog({...(localCatalog||{}), hiddenCodes:hc});
+                                }
+                              }}
                             />
                           ))}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
-                  ));
+                    );
+                  });
                 })()}
                 {/* Форма добавления новой позиции */}
                 <div style={{marginTop:8,border:"1px dashed rgba(184,144,74,.3)",borderRadius:8,padding:"10px 12px",marginBottom:8}}>
