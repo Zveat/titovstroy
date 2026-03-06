@@ -242,7 +242,7 @@ const fmtDate = (ts) => {
   return d.toLocaleDateString("ru-RU", {day:"numeric",month:"short"}) + " " + time;
 };
 
-const EMPTY_PROJ = { name:"", type:"Вторичка", area:"", address:"", phone:"", manager:"Василий Титов" };
+const EMPTY_PROJ = { name:"", type:"Вторичка", area:"", address:"", phone:"", manager:"" };
 const STORAGE_KEY    = "titovstroy-estimates";
 const USERS_KEY      = "titovstroy-users";
 const SESSION_KEY    = "titovstroy-session";
@@ -1227,6 +1227,9 @@ export default function App() {
   // Экраны: "list" | "editor"
   const [screen, setScreen] = useState("list");
 
+  // Пользователи для выпадающего списка менеджеров
+  const [allUsers, setAllUsers] = useState(DEFAULT_USERS);
+
   // Список смет { id, proj, rows, discount, note, updatedAt, total }
   const [estimates, setEstimates] = useState([]);
   const [loadingList, setLoadingList] = useState(true);
@@ -1271,6 +1274,11 @@ export default function App() {
     } catch(e) {
       setEstimates([]);
     }
+    // Загружаем пользователей для списка менеджеров
+    try {
+      const u = await storage.get(USERS_KEY);
+      if (u) setAllUsers(JSON.parse(u.value));
+    } catch {}
     // Загружаем переопределения цен
     try {
       const pr = await storage.get(PRICES_KEY);
@@ -1358,7 +1366,7 @@ export default function App() {
   const newEstimate = () => {
     const id = genId();
     setCurrentId(id);
-    setProj({...EMPTY_PROJ, _createdBy: currentUser.name, _createdById: currentUser.id});
+    setProj({...EMPTY_PROJ, manager: currentUser.name, _createdBy: currentUser.name, _createdById: currentUser.id});
     setRows({});
     setDiscount(0);
     setNote("");
@@ -1695,21 +1703,29 @@ export default function App() {
             <div className="card up" style={{padding:"16px 20px",marginBottom:16}}>
               <div style={{fontSize:10,fontWeight:700,color:"#b8904a",letterSpacing:1.5,textTransform:"uppercase",marginBottom:11}}>Информация об объекте</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:10}}>
-                {[["Клиент / Объект","name","Иванов — Бухар-Жырау 45",false],
-                  ["Тип","type","",true],
-                  ["Площадь, м²","area","75",false],
-                  ["Менеджер","manager","Василий Титов",false],
-                  ["Телефон клиента","phone","+7 707...",false],
-                  ["Адрес","address","ул. Бухар-Жырау, 45",false],
-                ].map(([lbl,f,ph,isSel])=>(
+                {[["Клиент / Объект","name","Иванов — Бухар-Жырау 45","text"],
+                  ["Тип","type","","objtype"],
+                  ["Площадь, м²","area","75","text"],
+                  ["Менеджер","manager","","manager"],
+                  ["Телефон клиента","phone","+7 707...","text"],
+                  ["Адрес","address","ул. Бухар-Жырау, 45","text"],
+                ].map(([lbl,f,ph,ftype])=>(
                   <div key={f}>
                     <div style={{fontSize:10,color:"#353550",marginBottom:4}}>{lbl}</div>
-                    {isSel ? (
+                    {ftype==="objtype" ? (
                       <select className="fi" value={proj.type} onChange={e=>setProj(p=>({...p,type:e.target.value}))}>
                         {OBJ_TYPES.map(t=><option key={t}>{t}</option>)}
                       </select>
-                    ):(
-                      <input className="fi" placeholder={ph} value={proj[f]} onChange={e=>setProj(p=>({...p,[f]:e.target.value}))}/>
+                    ) : ftype==="manager" ? (
+                      <select className="fi" value={proj.manager||""} onChange={e=>setProj(p=>({...p,manager:e.target.value}))}>
+                        <option value="">— выбрать —</option>
+                        {allUsers.filter(u=>u.role!=="viewer").map(u=>(
+                          <option key={u.id} value={u.name}>{u.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input className="fi" placeholder={ph} value={proj[f]||""} onChange={e=>setProj(p=>({...p,[f]:e.target.value}))}
+                        disabled={currentUser.role==="viewer"} style={{opacity:currentUser.role==="viewer"?.6:1}}/>
                     )}
                   </div>
                 ))}
