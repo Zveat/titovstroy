@@ -1086,40 +1086,88 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
         ))}
       </div>
 
-      {/* Таблица */}
-      <div style={{overflowX:"auto",marginBottom:14}}><table style={{width:"100%",minWidth:500,borderCollapse:"collapse",fontSize:12}}>
-        <thead>
-          <tr style={{background:"#1a1a28",color:"#f5f2ec"}}>
-            {["№","Раздел","Наименование","Ед.","Объём","Слож.","Цена","Сумма"].map(h=>(
-              <th key={h} style={{padding:"9px 8px",textAlign:["№","Ед.","Объём"].includes(h)?"center":"left",fontSize:11,fontWeight:600,letterSpacing:.3}}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {kpItems.map((item,i)=>(
-            <tr key={i} style={{background:i%2===0?"#f5f2ec":"#ede9e0",borderBottom:"1px solid #ddd9d0"}}>
-              <td style={{padding:"7px 8px",textAlign:"center",color:"#999",fontSize:11}}>{i+1}</td>
-              <td style={{padding:"7px 8px",color:"#8855aa",fontSize:11,fontWeight:500}}>{item.sub}</td>
-              <td style={{padding:"7px 8px",fontWeight:600,fontSize:13}}>{item.name}</td>
-              <td style={{padding:"7px 8px",textAlign:"center",color:"#888",fontSize:11}}>{item.unit}</td>
-              <td style={{padding:"7px 8px",textAlign:"center",fontWeight:500}}>{item.qty}</td>
-              <td style={{padding:"7px 8px",fontSize:11,color:"#888"}}>{COMPLEXITY.find(c=>c.key===item.cpx)?.label.split(" ")[0]||"Стандарт"}</td>
-              <td style={{padding:"7px 8px",textAlign:"right",color:"#555"}}>{fmt(item.price)} ₸</td>
-              <td style={{padding:"7px 8px",textAlign:"right",fontWeight:700,fontSize:13}}>{fmt(item.total)} ₸</td>
-            </tr>
-          ))}
-        </tbody>
-      </table></div>
+      {/* Таблица с группировкой по категориям */}
+      {(() => {
+        // Группируем по категории
+        const catOrder = [];
+        const catMap = {};
+        for (const item of kpItems) {
+          if (!catMap[item.cat]) { catMap[item.cat] = []; catOrder.push(item.cat); }
+          catMap[item.cat].push(item);
+        }
+        let rowNum = 0;
+        return (
+          <div style={{marginBottom:14}}>
+            {catOrder.map(cat => {
+              const items = catMap[cat];
+              const catTotal = items.reduce((s,x)=>s+x.total,0);
+              return (
+                <div key={cat} style={{marginBottom:12}}>
+                  {/* Заголовок категории */}
+                  <div style={{background:"#1a1a28",color:"#f5f2ec",padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center",borderRadius:"6px 6px 0 0"}}>
+                    <span style={{fontWeight:700,fontSize:13,letterSpacing:.5,textTransform:"uppercase"}}>{cat}</span>
+                    <span style={{fontWeight:700,fontSize:13,color:"#b8904a"}}>{fmt(catTotal)} ₸</span>
+                  </div>
+                  {/* Строки работ */}
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                    <thead>
+                      <tr style={{background:"#2a2a3a",color:"#aaa"}}>
+                        {["№","Раздел","Наименование","Ед.","Объём","Слож.","Цена","Сумма"].map(h=>(
+                          <th key={h} style={{padding:"6px 8px",textAlign:["№","Ед.","Объём"].includes(h)?"center":"left",fontSize:10,fontWeight:600,letterSpacing:.3}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((item,i) => {
+                        rowNum++;
+                        return (
+                          <tr key={i} style={{background:i%2===0?"#f5f2ec":"#ede9e0",borderBottom:"1px solid #ddd9d0"}}>
+                            <td style={{padding:"6px 8px",textAlign:"center",color:"#999",fontSize:11}}>{rowNum}</td>
+                            <td style={{padding:"6px 8px",color:"#8855aa",fontSize:11,fontWeight:500}}>{item.sub}</td>
+                            <td style={{padding:"6px 8px",fontWeight:600,fontSize:12}}>{item.name}</td>
+                            <td style={{padding:"6px 8px",textAlign:"center",color:"#888",fontSize:11}}>{item.unit}</td>
+                            <td style={{padding:"6px 8px",textAlign:"center",fontWeight:500}}>{item.qty}</td>
+                            <td style={{padding:"6px 8px",fontSize:11,color:"#888"}}>{COMPLEXITY.find(c=>c.key===item.cpx)?.label.split(" ")[0]||"Стандарт"}</td>
+                            <td style={{padding:"6px 8px",textAlign:"right",color:"#555"}}>{fmt(item.price)} ₸</td>
+                            <td style={{padding:"6px 8px",textAlign:"right",fontWeight:700,fontSize:12}}>{fmt(item.total)} ₸</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr style={{background:"#e8e4da",borderTop:"2px solid #ccc"}}>
+                        <td colSpan={7} style={{padding:"7px 8px",fontSize:12,fontWeight:700,color:"#444",textAlign:"right"}}>Итого по разделу «{cat}»:</td>
+                        <td style={{padding:"7px 8px",textAlign:"right",fontWeight:800,fontSize:13,color:"#b8904a"}}>{fmt(catTotal)} ₸</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              );
+            })}
 
-      {/* Итог */}
-      <div style={{background:"#1a1a28",borderRadius:10,padding:"13px 18px",color:"#f5f2ec",marginBottom:14}}>
-        {discount>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#e07070",marginBottom:6}}><span>Скидка {discount}%</span><span>− {fmt(discAmt)} ₸</span></div>}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{fontSize:14,fontWeight:600,letterSpacing:.5}}>ИТОГО:</span>
-          <span style={{fontSize:28,fontWeight:900,color:"#b8904a",letterSpacing:-.5}}>{fmt(final)} ₸</span>
-        </div>
-        {proj.area&&Number(proj.area)>0&&<div style={{textAlign:"right",fontSize:11,color:"#666",marginTop:3}}>{fmt(final/Number(proj.area))} ₸/м²</div>}
-      </div>
+            {/* Итоговая сводка */}
+            <div style={{background:"#e8e4da",borderRadius:8,padding:"12px 16px",marginTop:8,marginBottom:4}}>
+              <div style={{fontWeight:700,fontSize:12,color:"#444",marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>Сводка по разделам</div>
+              {catOrder.map(cat => (
+                <div key={cat} style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:5,paddingBottom:5,borderBottom:"1px solid #d0ccc0"}}>
+                  <span style={{color:"#555"}}>{cat}</span>
+                  <span style={{fontWeight:700}}>{fmt(catMap[cat].reduce((s,x)=>s+x.total,0))} ₸</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Итог */}
+            <div style={{background:"#1a1a28",borderRadius:10,padding:"13px 18px",color:"#f5f2ec",marginTop:8}}>
+              {discount>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#e07070",marginBottom:6}}><span>Скидка {discount}%</span><span>− {fmt(discAmt)} ₸</span></div>}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:14,fontWeight:600,letterSpacing:.5}}>ИТОГО:</span>
+                <span style={{fontSize:28,fontWeight:900,color:"#b8904a",letterSpacing:-.5}}>{fmt(final)} ₸</span>
+              </div>
+              {proj.area&&Number(proj.area)>0&&<div style={{textAlign:"right",fontSize:11,color:"#666",marginTop:3}}>{fmt(final/Number(proj.area))} ₸/м²</div>}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Примечание */}
       {note&&<div style={{background:"#e8e4da",borderRadius:8,padding:"10px 14px",fontSize:12,color:"#555",marginBottom:14}}>{note}</div>}
