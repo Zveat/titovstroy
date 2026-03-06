@@ -1813,53 +1813,53 @@ export default function App() {
       });
       const multiCat = catOrder.length > 1;
       let html = "<table><thead><tr>"
-        + '<th style="width:5%">№</th>'
-        + '<th style="width:45%;text-align:left">Наименование работ</th>'
-        + '<th style="width:8%">Ед.</th>'
-        + '<th style="width:8%">Объём</th>'
-        + '<th style="width:17%">Цена за ед.</th>'
-        + '<th style="width:17%">Сумма</th>'
+        + "<th style=\"width:5%\">\u2116</th>"
+        + "<th style=\"width:45%;text-align:left\">\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0440\u0430\u0431\u043e\u0442</th>"
+        + "<th style=\"width:8%\">\u0415\u0434.</th>"
+        + "<th style=\"width:8%\">\u041e\u0431\u044a\u0451\u043c</th>"
+        + "<th style=\"width:17%\">\u0426\u0435\u043d\u0430 \u0437\u0430 \u0435\u0434.</th>"
+        + "<th style=\"width:17%\">\u0421\u0443\u043c\u043c\u0430</th>"
         + "</tr></thead><tbody>";
       let globalNum = 0;
-      catOrder.forEach(cat=>{
+      catOrder.forEach(function(cat){
         const {rows, total: catTotal} = catMap[cat];
-        // Category header row
-        html += `<tr><td colspan="6" style="background:#2a2a3a;color:#c8a060;font-weight:bold;font-size:9pt;padding:3pt 5pt">${cat} — ${fmtN(catTotal)} ₸</td></tr>`;
+        html += "<tr><td colspan=\"6\" style=\"background:#2a2a3a;color:#c8a060;font-weight:bold;font-size:9pt;padding:3pt 5pt\">"
+          + cat + " \u2014 " + fmtN(catTotal) + " \u20b8</td></tr>";
         let lastSub = "";
-        rows.forEach((w,i)=>{
-          // Subcategory separator row
+        rows.forEach(function(w,i){
           if(w.subcategory && w.subcategory !== lastSub){
             lastSub = w.subcategory;
-            html += `<tr><td colspan="6" style="background:#e8e4f0;color:#5a3a8a;font-style:italic;font-size:8.5pt;padding:2pt 5pt">${w.subcategory}</td></tr>`;
+            html += "<tr><td colspan=\"6\" style=\"background:#e8e4f0;color:#5a3a8a;font-style:italic;font-size:8.5pt;padding:2pt 5pt\">"
+              + w.subcategory + "</td></tr>";
           }
           globalNum++;
-          const bg = i%2===0?"#f8f6f0":"#f0ede5";
-          html += `<tr style="background:${bg}">
-            <td class="tc">${globalNum}</td>
-            <td>${w.name||""}</td>
-            <td class="tc">${w.unit||"м²"}</td>
-            <td class="tc">${w.quantity||""}</td>
-            <td class="tr">${fmtN(w.price)} ₸</td>
-            <td class="tr"><b>${fmtN(w.sum)} ₸</b></td>
-          </tr>`;
+          const bg = i%2===0 ? "#f8f6f0" : "#f0ede5";
+          html += "<tr style=\"background:" + bg + "\">"
+            + "<td class=\"tc\">" + globalNum + "</td>"
+            + "<td>" + (w.name||"") + "</td>"
+            + "<td class=\"tc\">" + (w.unit||"\u043c\xb2") + "</td>"
+            + "<td class=\"tc\">" + (w.quantity||"") + "</td>"
+            + "<td class=\"tr\">" + fmtN(w.price) + " \u20b8</td>"
+            + "<td class=\"tr\"><b>" + fmtN(w.sum) + " \u20b8</b></td>"
+            + "</tr>";
         });
-        html += `<tr style="background:#ede8d5">
-          <td colspan="5" class="tr" style="font-style:italic;font-size:9pt">Итого по разделу «${cat}»:</td>
-          <td class="tr" style="font-weight:bold">${fmtN(catTotal)} ₸</td>
-        </tr>`;
+        html += "<tr style=\"background:#ede8d5\">"
+          + "<td colspan=\"5\" class=\"tr\" style=\"font-style:italic;font-size:9pt\">\u0418\u0442\u043e\u0433\u043e \u043f\u043e \u0440\u0430\u0437\u0434\u0435\u043b\u0443 \u00ab" + cat + "\u00bb:</td>"
+          + "<td class=\"tr\" style=\"font-weight:bold\">" + fmtN(catTotal) + " \u20b8</td>"
+          + "</tr>";
       });
-      html += `</tbody></table>`;
+      html += "</tbody></table>";
       if(multiCat){
-        html += '<table style="margin-top:6pt;width:60%;margin-left:40%"><tbody>';
-        html += '<tr><td colspan="2" style="background:#e8e4d8;font-weight:bold;font-size:9pt">Сводка по разделам</td></tr>';
-        catOrder.forEach(cat=>{
-          html += "<tr><td style=\"font-size:9pt\">"+cat+"</td><td class=\"tr\" style=\"font-weight:bold;font-size:9pt\">"+fmtN(catMap[cat].total)+" ₸</td></tr>";
+        html += "<table style=\"margin-top:6pt;width:60%;margin-left:40%\"><tbody>";
+        html += "<tr><td colspan=\"2\" style=\"background:#e8e4d8;font-weight:bold;font-size:9pt\">\u0421\u0432\u043e\u0434\u043a\u0430 \u043f\u043e \u0440\u0430\u0437\u0434\u0435\u043b\u0430\u043c</td></tr>";
+        catOrder.forEach(function(cat){
+          html += "<tr><td style=\"font-size:9pt\">" + cat + "</td><td class=\"tr\" style=\"font-weight:bold;font-size:9pt\">" + fmtN(catMap[cat].total) + " \u20b8</td></tr>";
         });
-        html += '<tr style="background:#e8e0c8"><td style="font-weight:bold">ИТОГО:</td>';
-        html += "<td class=\"tr\" style=\"font-weight:bold;font-size:11pt\">"+fmtN(total)+" ₸</td></tr>";
+        html += "<tr style=\"background:#e8e0c8\"><td style=\"font-weight:bold\">\u0418\u0422\u041e\u0413\u041e:</td>"
+          + "<td class=\"tr\" style=\"font-weight:bold;font-size:11pt\">" + fmtN(total) + " \u20b8</td></tr>";
         html += "</tbody></table>";
       } else {
-        html += `<p class="tr" style="font-weight:bold;font-size:11pt;padding-top:4pt">ИТОГО: ${fmtN(total)} ₸</p>`;
+        html += "<p class=\"tr\" style=\"font-weight:bold;font-size:11pt;padding-top:4pt\">\u0418\u0422\u041e\u0413\u041e: " + fmtN(total) + " \u20b8</p>";
       }
       return html;
     };
