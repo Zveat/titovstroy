@@ -227,7 +227,7 @@ function groupData(works) {
   return g;
 }
 
-const G = groupData(WORKS_DATA);
+// G теперь динамический - пересчитывается через getEffectiveCatalog()
 
 // ─── УТИЛИТЫ ────────────────────────────────────────────────────────────────
 const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
@@ -252,7 +252,11 @@ const CATALOG_KEY    = "titovstroy-catalog"; // изменения катало�
 
 // Каталог с пользовательскими изменениями
 let _catalogOverrides = { renames: {}, custom: [], hiddenCodes: [] };
-function setCatalogOverrides(o) { _catalogOverrides = { renames:{}, custom:[], hiddenCodes:[], ...(o||{}) }; }
+let _onCatalogChange = null; // callback to trigger re-render in editor
+function setCatalogOverrides(o) {
+  _catalogOverrides = { renames:{}, custom:[], hiddenCodes:[], ...(o||{}) };
+  if (_onCatalogChange) _onCatalogChange();
+}
 function getEffectiveCatalog() {
   // Берём базовые работы, применяем переименования, убираем скрытые
   const base = WORKS_DATA
@@ -1032,7 +1036,13 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
 
 // ─── ГЛАВНЫЙ КОМПОНЕНТ ───────────────────────────────────────────────────────
 export default function App() {
-  const cats = Object.keys(G);
+  const [catalogVersion, setCatalogVersion] = useState(0);
+  useEffect(() => {
+    _onCatalogChange = () => setCatalogVersion(v => v + 1);
+    return () => { _onCatalogChange = null; };
+  }, []);
+  const Gdyn = useMemo(() => groupData(getEffectiveCatalog()), [catalogVersion]);
+  const cats = Object.keys(Gdyn);
 
   // Авторизация
   const [currentUser, setCurrentUser] = useState(null);
@@ -1049,7 +1059,7 @@ export default function App() {
   // Текущая смета в редакторе
   const [currentId, setCurrentId] = useState(null);
   const [activeCat, setActiveCat] = useState(cats[0]);
-  const [activeSub, setActiveSub] = useState(Object.keys(G[cats[0]])[0]);
+  const [activeSub, setActiveSub] = useState(Object.keys(Gdyn[cats[0]]||{})[0]);
   const [rows, setRows] = useState({});
   const [proj, setProj] = useState({...EMPTY_PROJ});
   const [discount, setDiscount] = useState(0);
@@ -1072,6 +1082,11 @@ export default function App() {
     try {
       const pr = await storage.get(PRICES_KEY);
       if (pr) setPriceOverrides(JSON.parse(pr.value));
+      // Загружаем каталог
+      try {
+        const cat = await storage.get(CATALOG_KEY);
+        if (cat) setCatalogOverrides(JSON.parse(cat.value));
+      } catch {}
     } catch {}
     setLoadingList(false);
   }, []);
@@ -1101,18 +1116,18 @@ export default function App() {
     const price = rowPrice(work);
     return qty > 0 && price ? qty * price : 0;
   };
-  const subSum = (cat, sub) => (G[cat]?.[sub] || []).reduce((s,w) => s + rowTotal(w), 0);
-  const catSum = (cat) => Object.keys(G[cat]||{}).reduce((s,sub) => s + subSum(cat,sub), 0);
+  const subSum = (cat, sub) => (Gdyn[cat]?.[sub] || []).reduce((s,w) => s + rowTotal(w), 0);
+  const catSum = (cat) => Object.keys(Gdyn[cat]||{}).reduce((s,sub) => s + subSum(cat,sub), 0);
   const grand = useMemo(() => {
     let s = 0;
-    for (const cat of cats) for (const sub of Object.keys(G[cat])) for (const w of G[cat][sub]) s += rowTotal(w);
+    for (const cat of cats) for (const sub of Object.keys(Gdyn[cat]||{})) for (const w of Gdyn[cat]?.[sub]||[]) s += rowTotal(w);
     return s;
   }, [rows]);
   const discAmt = grand * discount / 100;
   const final = grand - discAmt;
   const kpItems = useMemo(() => {
     const out = [];
-    for (const cat of cats) for (const sub of Object.keys(G[cat])) for (const w of G[cat][sub]) {
+    for (const cat of cats) for (const sub of Object.keys(Gdyn[cat]||{})) for (const w of Gdyn[cat]?.[sub]||[]) {
       const qty = Number((rows[w.name]||{}).qty||0);
       const price = rowPrice(w);
       if (qty > 0 && price) out.push({ ...w, qty, price, total: qty * price, cpx: (rows[w.name]||{}).complexity||"std" });
@@ -1123,12 +1138,12 @@ export default function App() {
   const searchResults = useMemo(() => {
     if (!search.trim()) return [];
     const q = search.toLowerCase();
-    return WORKS_DATA.filter(w =>
+    return getEffectiveCatalog().filter(w =>
       w.name.toLowerCase().includes(q) || w.sub.toLowerCase().includes(q) || w.cat.toLowerCase().includes(q)
     );
   }, [search]);
   const isSearching = search.trim().length > 0;
-  const subs = Object.keys(G[activeCat] || {});
+  const subs = Object.keys(Gdyn[activeCat] || {});
 
   // ── Открыть смету на редактирование ──
   const openEstimate = (est) => {
@@ -1139,7 +1154,7 @@ export default function App() {
     setNote(est.note || "");
     setSearch("");
     setActiveCat(cats[0]);
-    setActiveSub(Object.keys(G[cats[0]])[0]);
+    setActiveSub(Object.keys(Gdyn[cats[0]]||{})[0]);
     setScreen("editor");
   };
 
@@ -1153,7 +1168,7 @@ export default function App() {
     setNote("");
     setSearch("");
     setActiveCat(cats[0]);
-    setActiveSub(Object.keys(G[cats[0]])[0]);
+    setActiveSub(Object.keys(Gdyn[cats[0]]||{})[0]);
     setScreen("editor");
   };
 
@@ -1460,7 +1475,7 @@ export default function App() {
                 {!isSearching && <div style={{display:"flex",gap:3,padding:"10px 10px 0",borderBottom:"1px solid #181c2e"}}>
                   {cats.map(cat=>(
                     <button key={cat} className={`tab-btn ${activeCat===cat?"active":""}`}
-                      onClick={()=>{setActiveCat(cat);setActiveSub(Object.keys(G[cat])[0]);}}>
+                      onClick={()=>{setActiveCat(cat);setActiveSub(Object.keys(Gdyn[cat]||{})[0]);}}>
                       {cat}{catSum(cat)>0&&<span style={{marginLeft:4,fontSize:9,color:"#b8904a"}}>●</span>}
                     </button>
                   ))}
@@ -1498,7 +1513,7 @@ export default function App() {
                       Найдено: {searchResults.length} работ
                     </div>
                   )}
-                  {(isSearching ? searchResults : (G[activeCat]?.[activeSub]||[])).map(work=>{
+                  {(isSearching ? searchResults : (Gdyn[activeCat]?.[activeSub]||[])).map(work=>{
                     const r = rows[work.name]||{};
                     const qty = Number(r.qty||0);
                     const cpx = r.complexity||"std";
@@ -1588,7 +1603,7 @@ export default function App() {
                     return (
                       <div key={cat} style={{marginBottom:8}}>
                         <div style={{fontSize:10,color:"#454560",fontWeight:700,textTransform:"uppercase",letterSpacing:.7,padding:"5px 0 3px",borderBottom:"1px solid #181c2e"}}>{cat}</div>
-                        {Object.keys(G[cat]).map(sub=>{
+                        {Object.keys(Gdyn[cat]||{}).map(sub=>{
                           const ss = subSum(cat,sub);
                           if(!ss) return null;
                           return (
