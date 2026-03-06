@@ -1739,7 +1739,7 @@ export default function App() {
   };
 
   // ── Генерация договора: HTML / PDF / DOCX / WhatsApp ──
-  const buildContractHtml = (c, client, ca) => {
+  const buildContractHtml = (c, client, ca, forDocx=false) => {
     const type = c.type || "repair_fiz";
     const fmtN = n => Math.round(n||0).toLocaleString("ru-RU");
     const fmtDate = s => {
@@ -1758,12 +1758,18 @@ body{font-family:'Times New Roman',Times,serif;padding:20mm 15mm 20mm 30mm;line-
 p{margin:3pt 0;text-align:justify}
 .c{text-align:center}.b{font-weight:bold}.t{font-size:14pt;font-weight:bold;text-align:center;margin:6pt 0}
 .s{font-weight:bold;margin:8pt 0 3pt}
+.city-line{text-align:center;margin:4pt 0}
 table{width:100%;border-collapse:collapse;margin:8pt 0;font-size:10pt}
 th,td{border:1px solid #000;padding:3pt 5pt}
 th{background:#ddd;font-weight:bold;text-align:center}
 .tc{text-align:center}.tr{text-align:right}
 .st{width:100%;border-collapse:collapse;margin-top:20pt}
 .st td{border:none;vertical-align:top;width:50%;padding:0 8pt 0 0;font-size:10pt;line-height:1.8}
+.cat-block{margin-bottom:12pt;page-break-inside:avoid}
+.cat-header{background:#1a1a28;color:#b8904a;font-weight:bold;font-size:10pt;padding:4pt 6pt;display:flex;justify-content:space-between}
+.svodka{background:#f5f2ec;border:1px solid #c8a96e;padding:6pt 10pt;margin-top:8pt}
+.svodka-row{display:flex;justify-content:space-between;padding:2pt 0;border-bottom:1px dotted #ccc}
+.svodka-total{display:flex;justify-content:space-between;padding:4pt 0;margin-top:4pt;border-top:2pt solid #c8a96e;font-weight:bold;font-size:11pt}
 @media print{.np{display:none}body{padding:10mm 10mm 10mm 20mm}@page{size:A4;margin:0}}`;
 
     const isYur = client?.clientType==="yur";
@@ -1794,7 +1800,6 @@ th{background:#ddd;font-weight:bold;text-align:center}
 
     const worksTable = () => {
       const works = c.works||[];
-      // Group by category
       const catOrder = [], catMap = {};
       works.forEach(w=>{
         const cat = w.category||"Работы";
@@ -1804,33 +1809,29 @@ th{background:#ddd;font-weight:bold;text-align:center}
         catMap[cat].rows.push({...w,sum});
       });
       const multiCat = catOrder.length > 1;
-      let html = "", globalNum = 0;
+      let html = `<table><thead><tr>
+        <th style="width:4%">№</th>
+        <th style="width:14%">Подраздел</th>
+        <th style="width:32%">Наименование работ</th>
+        <th style="width:7%">Ед.</th>
+        <th style="width:7%">Объём</th>
+        <th style="width:16%">Цена за ед.</th>
+        <th style="width:16%">Сумма</th>
+      </tr></thead><tbody>`;
+      let globalNum = 0;
       catOrder.forEach(cat=>{
         const {rows, total: catTotal} = catMap[cat];
-        html += `<div style="margin-bottom:8px">`;
-        html += `<div style="background:#1a1a28;color:#b8904a;font-weight:bold;font-size:10pt;padding:5px 8px;display:flex;justify-content:space-between">
-          <span>${cat}</span><span>${fmtN(catTotal)} ₸</span></div>`;
-        html += `<table style="margin:0"><thead><tr>
-          <th style="width:4%">№</th>
-          <th style="width:12%">Подраздел</th>
-          <th style="width:30%">Наименование работ</th>
-          <th style="width:8%">Ед.</th>
-          <th style="width:8%">Объём</th>
-          <th style="width:14%">Цена за ед.</th>
-          <th style="width:14%">Общая стоимость</th>
-        </tr></thead><tbody>`;
+        html += `<tr><td colspan="7" style="background:#1a1a28;color:#b8904a;font-weight:bold;padding:4pt 6pt">
+          ${cat} — ${fmtN(catTotal)} ₸</td></tr>`;
         let lastSub = "";
         rows.forEach((w,i)=>{
           globalNum++;
-          const even = i%2===0;
-          const bg = even?"#f5f2ec":"#ede9e0";
-          const subCell = w.subcategory&&w.subcategory!==lastSub
-            ? `<td style="color:#8855aa;font-style:italic;font-size:8.5pt;text-align:center">${w.subcategory}</td>`
-            : `<td style="color:#888;font-size:8.5pt;text-align:center">${w.subcategory||""}</td>`;
+          const bg = i%2===0?"#f5f2ec":"#ede9e0";
+          const subTxt = w.subcategory&&w.subcategory!==lastSub ? w.subcategory : "";
           lastSub = w.subcategory||lastSub;
           html += `<tr style="background:${bg}">
             <td class="tc">${globalNum}</td>
-            ${subCell}
+            <td style="font-style:italic;font-size:9pt;color:#5a3a8a">${subTxt}</td>
             <td>${w.name||""}</td>
             <td class="tc">${w.unit||"м²"}</td>
             <td class="tc">${w.quantity||""}</td>
@@ -1838,24 +1839,23 @@ th{background:#ddd;font-weight:bold;text-align:center}
             <td class="tr"><b>${fmtN(w.sum)} ₸</b></td>
           </tr>`;
         });
-        html += `<tr style="background:#f0ead8;border-top:2px solid #c8a96e">
-          <td colspan="6" class="tr" style="font-style:italic;color:#5a4020">Итого по разделу «${cat}»:</td>
-          <td class="tr" style="font-weight:bold;color:#b8904a">${fmtN(catTotal)} ₸</td>
+        html += `<tr style="background:#f0ead8">
+          <td colspan="6" class="tr" style="font-style:italic;border-top:2px solid #c8a96e">Итого по разделу «${cat}»:</td>
+          <td class="tr" style="font-weight:bold;color:#b8904a;border-top:2px solid #c8a96e">${fmtN(catTotal)} ₸</td>
         </tr>`;
-        html += `</tbody></table></div>`;
       });
+      html += `</tbody></table>`;
       if(multiCat){
-        html += `<div style="background:#f5f2ec;border:1px solid #c8a96e;padding:8px 12px;margin-top:8px">
-          <div style="font-weight:bold;margin-bottom:6px;color:#1a1a28">Сводка по разделам:</div>`;
+        html += `<table style="margin-top:8pt"><tbody>
+          <tr><td colspan="2" style="background:#f5f2ec;font-weight:bold;border:1px solid #c8a96e">Сводка по разделам</td></tr>`;
         catOrder.forEach(cat=>{
-          html += `<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px dotted #ccc">
-            <span>${cat}</span><span style="font-weight:bold">${fmtN(catMap[cat].total)} ₸</span></div>`;
+          html += `<tr><td style="border:1px solid #c8a96e">${cat}</td><td class="tr" style="font-weight:bold;border:1px solid #c8a96e">${fmtN(catMap[cat].total)} ₸</td></tr>`;
         });
-        html += `<div style="display:flex;justify-content:space-between;padding:4px 0;margin-top:4px;border-top:2px solid #c8a96e;font-weight:bold;font-size:11pt">
-          <span>ИТОГО:</span><span style="color:#b8904a">${fmtN(total)} ₸</span></div></div>`;
+        html += `<tr style="background:#f0ead8"><td style="font-weight:bold;font-size:11pt;border:2px solid #c8a96e">ИТОГО:</td>
+          <td class="tr" style="font-weight:bold;font-size:11pt;color:#b8904a;border:2px solid #c8a96e">${fmtN(total)} ₸</td></tr>
+        </tbody></table>`;
       } else {
-        html += `<div style="text-align:right;font-weight:bold;font-size:11pt;padding:6px 0;border-top:2px solid #c8a96e;color:#1a1a28">
-          ИТОГО: ${fmtN(total)} ₸</div>`;
+        html += `<p class="tr" style="font-weight:bold;font-size:11pt;border-top:2px solid #c8a96e;padding-top:4pt">ИТОГО: ${fmtN(total)} ₸</p>`;
       }
       return html;
     };
@@ -1898,7 +1898,7 @@ ${sigBlock("Подрядчик:", "Заказчик:")}
       body = `
 <p class="t">Договор подряда №${c.number||"___"}</p>
 <p class="t" style="font-size:13pt">на выполнение ремонтно-отделочных работ</p>
-<p class="c">${dt.full} г.&nbsp;&nbsp;&nbsp;&nbsp;г. Караганда</p><br>
+<p class="city-line">${dt.full} г.&nbsp;&nbsp;&nbsp;&nbsp;г. Караганда</p><br>
 ${preambula("Подрядчик")}
 <p class="s">1. ТЕРМИНЫ И ОПРЕДЕЛЕНИЯ</p>
 <p>1.1.1. Договор – настоящий договор подряда со всеми приложениями и дополнениями к нему, заключенными в период его действия, подписанными Заказчиком и Подрядчиком, и являющимися его неотъемлемой частью.</p>
@@ -2027,7 +2027,7 @@ ${annex1}`;
 <p class="c b">Перечень дополнительных работ и их стоимость</p>
 <p class="c">к Договору ремонтно-отделочных работ</p>
 <p class="c">№${c.mainNumber||c.number||"___"} от «${dtM.d}» ${dtM.m} ${dtM.y} г.</p>
-<br><p>г. Караганда ${dtA.full} г.</p><br>
+<br><p class="city-line">г. Караганда ${dtA.full} г.</p><br>
 <p class="s">1. Общие положения</p>
 <p>1.1. Настоящее Приложение №${an} является неотъемлемой частью Договора ремонтно-отделочных работ №${c.mainNumber||c.number||"___"} от «${dtM.d}» ${dtM.m} ${dtM.y} г. и определяет перечень дополнительных работ, согласованных Сторонами в процессе выполнения Работ.</p>
 <p>1.2. Работы, указанные в настоящем Приложении №${an}, выполняются Подрядчиком по заданию Заказчика в рамках предмета Договора и подлежат оплате на условиях, установленных Договором, если иное прямо не предусмотрено настоящим Приложением.</p>
@@ -2042,7 +2042,7 @@ ${sigBlock("Подрядчик:", "Заказчик:")}`;
       body = `
 <p class="t">СОГЛАШЕНИЕ №${c.number||"___"}</p>
 <p class="t" style="font-size:13pt">о разработке дизайн проекта</p>
-<p class="c">${dt.full} г.&nbsp;&nbsp;&nbsp;&nbsp;г. Караганда</p><br>
+<p class="city-line">${dt.full} г.&nbsp;&nbsp;&nbsp;&nbsp;г. Караганда</p><br>
 ${preambula("Исполнитель")}
 <p class="s">1. Общие положения</p>
 <p>1.1. Исполнитель обязуется по заданию Заказчика разработать дизайн проект Объекта, расположенного по адресу: ${clAddr}.</p>
@@ -2099,7 +2099,7 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
       body = `
 <p class="t">ДОПОЛНИТЕЛЬНОЕ СОГЛАШЕНИЕ №${c.number||"_______"}</p>
 <p class="c b">к Соглашению №${c.mainNumber||"_________"} о разработке дизайн проекта</p>
-<p class="c">${dt.d==="__"?"":'"'}${dt.d}" ${dt.m} ${dt.y} г.&nbsp;&nbsp;&nbsp;&nbsp;г. Караганда</p><br>
+<p class="city-line">${dt.d==="__"?"":'"'}${dt.d}" ${dt.m} ${dt.y} г.&nbsp;&nbsp;&nbsp;&nbsp;г. Караганда</p><br>
 ${preambula("Исполнитель")}
 <p class="s">1. Техническое задание</p>
 <p>1.1. Стороны согласовали следующий состав дизайн проекта:</p>
@@ -2138,7 +2138,7 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
       body = `
 <p class="t">СОГЛАШЕНИЕ №${c.number||"___"}</p>
 <p class="t" style="font-size:13pt">о резервировании даты начала ремонтно-строительных работ</p>
-<p class="c">${dt.full} г.&nbsp;&nbsp;&nbsp;&nbsp;г. Караганда</p><br>
+<p class="city-line">${dt.full} г.&nbsp;&nbsp;&nbsp;&nbsp;г. Караганда</p><br>
 <p>ФИО ${clName}, ИИН ${clIIN}, № документа ${clDoc} Выдан МВД РК, (далее - "Заказчик") с одной стороны, и</p>
 <p>ТОО TITOVSTROY, БИН 231040002769 (далее - "Исполнитель"), в лице директора Василия Титова, действующего на основании Устава, с другой стороны, совместно именуемые "Стороны", а по отдельности – "Сторона", заключили настоящее соглашение о нижеследующем:</p>
 <p class="s">1. Общие положения</p>
@@ -2183,10 +2183,10 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
     }
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Договор №${c.number||""}</title><style>${CSS}</style></head>
-<body>${body}
+<body>${body}${forDocx ? "" : `
 <div class="np" style="margin-top:24px;text-align:center">
   <button onclick="window.print()" style="padding:12px 36px;background:#b8904a;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;font-weight:700">🖨 Распечатать / Сохранить PDF</button>
-</div>
+</div>`}
 </body></html>`;
     return html;
   };
@@ -2200,7 +2200,7 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
   };
 
   const generateContractDocx = (c, client, ca) => {
-    const html = buildContractHtml(c, client, ca);
+    const html = buildContractHtml(c, client, ca, true);
     if(typeof htmlDocx === "undefined") {
       alert("Библиотека для DOCX не загружена. Проверьте подключение к интернету.");
       return;
@@ -2216,51 +2216,47 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
     setTimeout(()=>URL.revokeObjectURL(url),20000);
   };
 
-  const sendContractWhatsApp = (c, client) => {
-    const type = c.type || "repair_fiz";
-    const TYPE_NAMES = {
-      repair_fiz:"Договор ремонта (ФИЗ)", repair_yur:"Договор ремонта (ЮР)",
-      annex:"Приложение к договору", design:"Соглашение о дизайне",
-      design_add:"Доп. соглашение к дизайну", reservation:"Соглашение о резервировании"
-    };
-    const total = (c.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
-    const fmtN = n => Math.round(n||0).toLocaleString("ru-RU");
-    const lines = [];
-    lines.push(`*TitovStroy — ${TYPE_NAMES[type]||type}*`);
-    lines.push(`📋 №${c.number||"б/н"} от ${c.date ? new Date(c.date).toLocaleDateString("ru-RU") : "—"}`);
-    lines.push("");
-    if(client?.name) lines.push(`👤 Клиент: ${client.name}`);
-    if(client?.phone) lines.push(`📞 Телефон: ${client.phone}`);
-    if(client?.address) lines.push(`📍 Адрес: ${client.address}`);
-    if((c.works||[]).length>0){
-      lines.push("");
-      lines.push("*Состав работ:*");
-      const catMap={}, catOrder=[];
-      (c.works||[]).forEach(w=>{
-        const cat=w.category||"Работы";
-        if(!catMap[cat]){catMap[cat]=[];catOrder.push(cat);}
-        catMap[cat].push(w);
-      });
-      catOrder.forEach(cat=>{
-        const catSum = catMap[cat].reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
-        lines.push(`\n*${cat}* — ${fmtN(catSum)} ₸`);
-        catMap[cat].forEach(w=>{
-          lines.push(`  • ${w.name}: ${w.quantity} ${w.unit||"м²"} × ${fmtN(w.price)} = ${fmtN(Number(w.quantity)*Number(w.price))} ₸`);
-        });
-      });
-      lines.push("");
-      lines.push(`*ИТОГО: ${fmtN(total)} ₸*`);
-      if(type==="repair_fiz"||type==="repair_yur"){
-        const pct = c.advancePercent??30;
-        lines.push(`💰 Предоплата ${pct}%: ${fmtN(Math.round(total*pct/100))} ₸`);
+  const sendContractWhatsApp = async (c, client, ca) => {
+    const clientName = client?.name || c.estClient || "договор";
+    const num = c.number || c.id?.slice(-4) || "б-н";
+    const safeName = `Договор_${num}_${clientName}`.replace(/[<>:"/\\|?*]/g,"_");
+    const phone = (client?.phone||"").replace(/\D/g,"");
+
+    // Пробуем Web Share API (работает на мобильных)
+    if(navigator.canShare) {
+      try {
+        // Генерируем PDF blob через html-docx или просто HTML
+        const html = buildContractHtml(c, client, ca, true);
+        let fileToShare = null;
+        if(typeof htmlDocx !== "undefined") {
+          const docxBlob = htmlDocx.asBlob(html, {orientation:"portrait",margins:{top:720,right:720,bottom:720,left:1440}});
+          fileToShare = new File([docxBlob], safeName+".docx", {type:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"});
+        } else {
+          const htmlBlob = new Blob([html], {type:"text/html"});
+          fileToShare = new File([htmlBlob], safeName+".html", {type:"text/html"});
+        }
+        if(navigator.canShare({files:[fileToShare]})) {
+          await navigator.share({files:[fileToShare], title:`Договор №${num}`, text:`Договор для ${clientName}`});
+          return;
+        }
+      } catch(e) {
+        if(e.name==="AbortError") return; // пользователь отменил
+        // fallback ниже
       }
     }
-    if(type==="reservation") lines.push(`\n💳 Сумма резервирования: ${fmtN(c.reserveAmount||50000)} ₸`);
-    if(type==="design"||type==="design_add") lines.push(`\n💳 Предоплата: ${fmtN(c.designAdvance||25000)} ₸`);
-    lines.push("\n_TitovStroy — ваш надёжный подрядчик_");
-    const text = encodeURIComponent(lines.join("\n"));
-    const phone = (client?.phone||"").replace(/\D/g,"");
-    window.open(`https://wa.me/${phone}?text=${text}`,"_blank");
+    // Fallback: скачать DOCX + открыть WhatsApp
+    if(typeof htmlDocx !== "undefined") {
+      const html = buildContractHtml(c, client, ca, true);
+      const docxBlob = htmlDocx.asBlob(html, {orientation:"portrait",margins:{top:720,right:720,bottom:720,left:1440}});
+      const url = URL.createObjectURL(docxBlob);
+      const a = document.createElement("a");
+      a.href = url; a.download = safeName+".docx"; a.click();
+      setTimeout(()=>URL.revokeObjectURL(url),20000);
+    }
+    // Открываем WhatsApp с коротким сообщением
+    const msg = encodeURIComponent(`Договор №${num} для ${clientName} — файл отправлен отдельно`);
+    const waUrl = phone ? `https://wa.me/${phone}?text=${msg}` : `https://wa.me/?text=${msg}`;
+    setTimeout(()=>window.open(waUrl,"_blank"), 500);
   };
 
   // ── Экспорт сметы в JSON ──
@@ -3249,7 +3245,7 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
                             }} style={{background:"rgba(100,140,220,.1)",color:"#6699dd",border:"1px solid rgba(100,140,220,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📝 DOCX</button>
                             <button onClick={e=>{e.stopPropagation();
                               const cl = contractClients.find(x=>x.id===c.clientId);
-                              sendContractWhatsApp(c, cl);
+                              sendContractWhatsApp(c, cl, ca2);
                             }} style={{background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📲 WA</button>
                             {currentUser.role==="admin" && (
                               <button onClick={e=>{e.stopPropagation(); if(window.confirm("Удалить договор?")) saveContracts(contracts.filter(x=>x.id!==c.id));}}
@@ -3289,7 +3285,8 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
                 }}
                 onWhatsApp={()=>{
                   const cl = contractClients.find(x=>x.id===currentContract.clientId);
-                  sendContractWhatsApp(currentContract, cl);
+                  const ca = contragents.find(x=>x.id===currentContract.contragentId);
+                  sendContractWhatsApp(currentContract, cl, ca);
                 }}
                 onAddClientFromEstimate={async ()=>{
                   const newClient = {id:Date.now().toString(),name:currentContract.estClient||"",phone:currentContract.estPhone||"",address:currentContract.estAddress||"",iin:"",doc:"",type:"физ"};
