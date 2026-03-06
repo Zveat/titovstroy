@@ -2775,7 +2775,3 @@ export default function App() {
 // Принимает начальные данные ОДИН РАЗ, дальше живёт сама
 // При размонтировании сохраняет данные в priceCardCache
 const priceCardCache = {};
-
-    </div>
-  );
-}
