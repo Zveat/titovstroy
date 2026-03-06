@@ -1272,6 +1272,7 @@ export default function App() {
   const [statsManager, setStatsManager] = useState(""); // "" = все
   const [listSearch, setListSearch] = useState("");
   const [listFilter, setListFilter] = useState(""); // "" | "Вторичка" | "Новостройка" | "Коммерция"
+  const [listFilterManager, setListFilterManager] = useState(""); // "" = все
   const [listSort, setListSort] = useState("date"); // "date" | "sum" | "name"
 
   // Когда каталог меняется — синхронизируем activeCat/activeSub
@@ -1461,7 +1462,7 @@ export default function App() {
   return (
     <div style={{fontFamily:"'Golos Text','Segoe UI',sans-serif",background:"#0c0e1a",minHeight:"100vh",color:"#ddd8ce"}}>
       {/* Панель администратора */}
-      {showAdmin && <AdminPanel currentUser={currentUser} onClose={()=>setShowAdmin(false)}/>}
+      {showAdmin && <AdminPanel currentUser={currentUser} onClose={async ()=>{ setShowAdmin(false); const u=await storage.get(USERS_KEY); if(u) setAllUsers(JSON.parse(u.value)); }}/>}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;900&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
@@ -1583,6 +1584,23 @@ export default function App() {
                           {t||"Все типы"}
                         </button>
                       ))}
+                    </div>
+                    {/* Фильтр по сотруднику */}
+                    {allUsers.filter(u=>u.role!=="viewer").length > 1 && (
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                        <button onClick={()=>setListFilterManager("")}
+                          style={{background:!listFilterManager?"rgba(136,136,204,.2)":"rgba(255,255,255,.04)",color:!listFilterManager?"#8888cc":"#555575",border:`1px solid ${!listFilterManager?"rgba(136,136,204,.4)":"#1c2035"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                          Все сотрудники
+                        </button>
+                        {allUsers.filter(u=>u.role!=="viewer").map(u=>(
+                          <button key={u.id} onClick={()=>setListFilterManager(u.name)}
+                            style={{background:listFilterManager===u.name?"rgba(136,136,204,.2)":"rgba(255,255,255,.04)",color:listFilterManager===u.name?"#8888cc":"#555575",border:`1px solid ${listFilterManager===u.name?"rgba(136,136,204,.4)":"#1c2035"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                            👤 {u.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{display:"flex",gap:6,alignItems:"center"}}>
                       <div style={{flex:1}}/>
                       {/* Сортировка */}
                       <select value={listSort} onChange={e=>setListSort(e.target.value)}
@@ -1608,6 +1626,7 @@ export default function App() {
                   const q = listSearch.toLowerCase().trim();
                   const filtered = estimates
                     .filter(e => !listFilter || e.proj?.type === listFilter)
+                    .filter(e => !listFilterManager || (e.proj?.manager||e.createdBy||"")=== listFilterManager)
                     .filter(e => !q || [e.proj?.name,e.proj?.address,e.proj?.phone,e.proj?.manager].some(v=>v&&v.toLowerCase().includes(q)))
                     .slice()
                     .sort((a,b) => {
