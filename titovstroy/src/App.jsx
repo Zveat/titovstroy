@@ -1308,9 +1308,15 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
 
       {/* Доп поля: резервирование */}
       {isRes && (
-        <div>
-          <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Сумма резервирования (₸)</div>
-          <input className="fi" type="number" value={contract.reserveAmount||50000} onChange={e=>upd({reserveAmount:parseFloat(e.target.value)||0})}/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div>
+            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Сумма резервирования (₸)</div>
+            <input className="fi" type="number" value={contract.reserveAmount||50000} onChange={e=>upd({reserveAmount:parseFloat(e.target.value)||0})}/>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Дата начала работ (п.2.1)</div>
+            <input className="fi" type="date" value={contract.reserveStartDate||""} onChange={e=>upd({reserveStartDate:e.target.value})}/>
+          </div>
         </div>
       )}
 
@@ -1323,7 +1329,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       )}
 
       {/* Доп поля: доп. соглашение к дизайну */}
-      {isDesAdd && (<>
+      {isDesAdd && (<>\
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <div>
             <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Площадь объекта (м²)</div>
@@ -1334,13 +1340,54 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
             <input className="fi" type="number" value={contract.deadline||""} onChange={e=>upd({deadline:e.target.value})} placeholder="30"/>
           </div>
           <div>
-            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Итоговая стоимость (₸)</div>
-            <input className="fi" type="number" value={contract.totalCost||""} onChange={e=>upd({totalCost:parseFloat(e.target.value)||0})} placeholder="170000"/>
+            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Вариантов планировки</div>
+            <input className="fi" type="number" min="1" value={contract.variantsLayout||""} onChange={e=>upd({variantsLayout:e.target.value})} placeholder="2"/>
           </div>
           <div>
-            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Предоплата уже внесена (₸)</div>
-            <input className="fi" type="number" value={contract.designAdvance||25000} onChange={e=>upd({designAdvance:parseFloat(e.target.value)||0})}/>
+            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Раундов корр. планировки</div>
+            <input className="fi" type="number" min="0" value={contract.corrLayout||""} onChange={e=>upd({corrLayout:e.target.value})} placeholder="2"/>
           </div>
+          <div>
+            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Раундов корр. визуализаций</div>
+            <input className="fi" type="number" min="0" value={contract.corrVis||""} onChange={e=>upd({corrVis:e.target.value})} placeholder="2"/>
+          </div>
+        </div>
+        {/* Тип стоимости */}
+        <div>
+          <div style={{fontSize:11,color:"#555575",marginBottom:6}}>Способ расчёта стоимости</div>
+          <div style={{display:"flex",gap:16,marginBottom:8}}>
+            <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#aaa",cursor:"pointer"}}>
+              <input type="radio" name="priceType" checked={!contract.priceType||contract.priceType==="fixed"}
+                onChange={()=>upd({priceType:"fixed"})}/> Фиксированная сумма
+            </label>
+            <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#aaa",cursor:"pointer"}}>
+              <input type="radio" name="priceType" checked={contract.priceType==="sqm"}
+                onChange={()=>upd({priceType:"sqm"})}/> За м²
+            </label>
+          </div>
+          {(!contract.priceType||contract.priceType==="fixed") ? (
+            <div>
+              <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Итоговая стоимость (₸)</div>
+              <input className="fi" type="number" value={contract.totalCost||""} onChange={e=>upd({totalCost:parseFloat(e.target.value)||0})} placeholder="170000"/>
+            </div>
+          ) : (
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div>
+                <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Цена за м² (₸)</div>
+                <input className="fi" type="number" value={contract.pricePerSqm||""} onChange={e=>upd({pricePerSqm:parseFloat(e.target.value)||0})} placeholder="2000"/>
+              </div>
+              <div>
+                <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Итого (авто, ₸)</div>
+                <div className="fi" style={{background:"rgba(184,144,74,.07)",color:"#b8904a",fontWeight:700,display:"flex",alignItems:"center"}}>
+                  {fmt(Math.round((contract.pricePerSqm||0)*(contract.area||0)))} ₸
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+        <div>
+          <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Предоплата уже внесена (₸)</div>
+          <input className="fi" type="number" value={contract.designAdvance||25000} onChange={e=>upd({designAdvance:parseFloat(e.target.value)||0})}/>
         </div>
         <div>
           <div style={{fontSize:11,color:"#555575",marginBottom:6}}>Состав дизайн-проекта</div>
@@ -2040,7 +2087,9 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
       const comp = c.composition||{};
       const COMP = [["plan","Обмерочный план"],["layout","Планировочное решение"],["concept","Концепция интерьера"],["vis3d","3D визуализация"],["drawings","Рабочие чертежи"],["materials","Ведомость отделочных материалов"]];
       const adv = c.designAdvance||25000;
-      const tcost = c.totalCost||null;
+      const tcost = c.priceType==="sqm"
+        ? Math.round((c.pricePerSqm||0)*(c.area||0)) || null
+        : c.totalCost||null;
       const rem = tcost&&adv ? tcost-adv : null;
       body = `
 <p class="t">ДОПОЛНИТЕЛЬНОЕ СОГЛАШЕНИЕ №${c.number||"_______"}</p>
@@ -2079,6 +2128,8 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
     // ─────── 6. СОГЛАШЕНИЕ О РЕЗЕРВИРОВАНИИ ───────
     } else if(type==="reservation"){
       const amt = c.reserveAmount||50000;
+      const rsd = c.reserveStartDate ? fmtDate(c.reserveStartDate) : null;
+      const rsdStr = rsd ? `«${rsd.d}» ${rsd.m} ${rsd.y} г.` : `"_____" _____________ ${dt.y} г.`;
       body = `
 <p class="t">СОГЛАШЕНИЕ №${c.number||"___"}</p>
 <p class="t" style="font-size:13pt">о резервировании даты начала ремонтно-строительных работ</p>
@@ -2089,7 +2140,7 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
 <p>1.2. Настоящее Соглашение подтверждает намерение сторон заключить договор подряда на выполнение ремонтно-строительных работ. Исполнитель обязуется зарезервировать за Заказчиком производственные ресурсы и ориентировочную дату начала работ.</p>
 <p>1.3. Стороны подтверждают, что основной договор подряда будет заключен отдельно после согласования: дизайн-проекта, сметы и технического задания.</p>
 <p class="s">2. Предмет Соглашения</p>
-<p>2.1. Исполнитель обязуется зарезервировать за Заказчиком производственные ресурсы и ориентировочную дату начала работ с "_____" _____________ 2026 г.</p>
+<p>2.1. Исполнитель обязуется зарезервировать за Заказчиком производственные ресурсы и ориентировочную дату начала работ с ${rsdStr}</p>
 <p>2.2. Под резервированием понимается: включение объекта Заказчика в производственный график; блокировка временного слота бригады; планирование загрузки ресурсов; закрепление за Заказчиком определенного производственного ресурса в рамках внутреннего графика Исполнителя.</p>
 <p>2.3. Настоящее Соглашение не определяет объем, стоимость и сроки выполнения ремонтных работ.</p>
 <p class="s">3. Стоимость резервирования и порядок оплаты</p>
