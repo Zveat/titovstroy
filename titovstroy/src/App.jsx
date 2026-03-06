@@ -2215,15 +2215,18 @@ export default function App() {
     const num = c.number || c.id?.slice(-4) || "б-н";
     const filename = ("Договор_"+num+"_"+clientName+".docx").replace(/[<>:"/\\|?*]/g,"_");
 
+    try {
     if (!window.docx) {
       await new Promise((res, rej) => {
         const s = document.createElement("script");
-        s.src = "https://unpkg.com/docx@8.5.0/build/index.js";
-        s.onload = res; s.onerror = rej;
+        s.src = "https://unpkg.com/docx@7.8.2/build/index.js";
+        s.onload = () => { if(window.docx) res(); else rej(new Error("docx not in window")); };
+        s.onerror = () => rej(new Error("Failed to load docx.js"));
         document.head.appendChild(s);
       });
     }
     const D = window.docx;
+    if (!D || !D.Document) { alert("Ошибка загрузки библиотеки DOCX. Проверьте интернет."); return; }
     const TNR = "Times New Roman";
     const mmT = mm => Math.round(mm * 56.692);
     const hp = pt => pt * 2;
@@ -2398,6 +2401,10 @@ export default function App() {
     const a = document.createElement("a");
     a.href=url; a.download=filename; a.click();
     setTimeout(()=>URL.revokeObjectURL(url),20000);
+    } catch(err) {
+      console.error("DOCX generation error:", err);
+      alert("Ошибка при создании DOCX: "+err.message);
+    }
   };
 
   const sendContractWhatsApp = async (c, client, ca) => {
