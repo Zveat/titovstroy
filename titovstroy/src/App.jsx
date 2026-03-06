@@ -2308,30 +2308,23 @@ export default function App() {
         catMap[cat]+=Number(w.quantity||0)*Number(w.price||0);
       });
       const multiCat = catOrder.length > 1;
-      const items = [];
+      const NB = {top:{style:D.BorderStyle.NONE},bottom:{style:D.BorderStyle.NONE},left:{style:D.BorderStyle.NONE},right:{style:D.BorderStyle.NONE}};
+      const SB = {top:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},bottom:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},left:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},right:{style:D.BorderStyle.SINGLE,size:4,color:"000000"}};
+      const SC2 = (text,opts={}) => new D.TableCell({children:[P([T(text,{sz:opts.sz||9,b:opts.b})],{al:opts.al||D.AlignmentType.LEFT,sb:20,sa:20})],borders:SB,shading:opts.bg?{fill:opts.bg,type:D.ShadingType.CLEAR,color:opts.bg}:undefined,width:{size:col(opts.w||30),type:D.WidthType.DXA},margins:{top:28,bottom:28,left:57,right:57}});
       if(multiCat){
-        // Сводная таблица по разделам + ИТОГО
-        const svRows = [];
-        svRows.push(new D.TableRow({children:[
-          new D.TableCell({children:[P([T("Сводка по разделам",{b:true,sz:9})],{sb:20,sa:20})],columnSpan:2,borders:{top:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},bottom:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},left:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},right:{style:D.BorderStyle.SINGLE,size:4,color:"000000"}},shading:{fill:"e8e4d8",type:D.ShadingType.CLEAR,color:"e8e4d8"},width:{size:col(60),type:D.WidthType.DXA},margins:{top:28,bottom:28,left:57,right:57}}),
-        ]}));
+        const svRows=[];
+        svRows.push(new D.TableRow({children:[SC2("Сводка по разделам",{w:60,b:true,bg:"e8e4d8",sz:9})]}));
         catOrder.forEach(cat=>{
-          svRows.push(new D.TableRow({children:[
-            new D.TableCell({children:[P([T(cat,{sz:9})],{sb:20,sa:20})],borders:{top:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},bottom:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},left:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},right:{style:D.BorderStyle.SINGLE,size:4,color:"000000"}},width:{size:col(43),type:D.WidthType.DXA},margins:{top:28,bottom:28,left:57,right:57}}),
-            new D.TableCell({children:[P([T(fmtN2(catMap[cat])+" ₸",{sz:9,b:true})],{al:D.AlignmentType.RIGHT,sb:20,sa:20})],borders:{top:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},bottom:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},left:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},right:{style:D.BorderStyle.SINGLE,size:4,color:"000000"}},width:{size:col(17),type:D.WidthType.DXA},margins:{top:28,bottom:28,left:57,right:57}}),
-          ]}));
+          svRows.push(new D.TableRow({children:[SC2(cat,{w:43}), SC2(fmtN2(catMap[cat])+" ₸",{w:17,b:true,al:D.AlignmentType.RIGHT})]}));
         });
-        svRows.push(new D.TableRow({children:[
-          new D.TableCell({children:[P([T("ИТОГО:",{b:true,sz:10})],{sb:20,sa:20})],borders:{top:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},bottom:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},left:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},right:{style:D.BorderStyle.SINGLE,size:4,color:"000000"}},shading:{fill:"e8e0c8",type:D.ShadingType.CLEAR,color:"e8e0c8"},width:{size:col(43),type:D.WidthType.DXA},margins:{top:28,bottom:28,left:57,right:57}}),
-          new D.TableCell({children:[P([T(fmtN2(total)+" ₸",{b:true,sz:11})],{al:D.AlignmentType.RIGHT,sb:20,sa:20})],borders:{top:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},bottom:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},left:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},right:{style:D.BorderStyle.SINGLE,size:4,color:"000000"}},shading:{fill:"e8e0c8",type:D.ShadingType.CLEAR,color:"e8e0c8"},width:{size:col(17),type:D.WidthType.DXA},margins:{top:28,bottom:28,left:57,right:57}}),
-        ]}));
-        items.push(new D.Table({rows:svRows,width:{size:col(60),type:D.WidthType.DXA},float:{horizontalAnchor:D.TableAnchorType.MARGIN,absoluteHorizontalPosition:col(40),relativeHorizontalPosition:D.RelativeHorizontalPosition.PAGE}}));
-      } else {
-        items.push(P([T("ИТОГО: "+fmtN2(total)+" ₸",{b:true,sz:11})],{al:D.AlignmentType.RIGHT,sb:20,sa:20}));
+        svRows.push(new D.TableRow({children:[SC2("ИТОГО:",{w:43,b:true,bg:"e8e0c8",sz:10}), SC2(fmtN2(total)+" ₸",{w:17,b:true,bg:"e8e0c8",sz:11,al:D.AlignmentType.RIGHT})]}));
+        return [
+          P([]),
+          new D.Table({rows:svRows,width:{size:col(60),type:D.WidthType.DXA},indent:{size:col(40),type:D.WidthType.DXA}}),
+        ];
       }
-      return items;
-    };
-
+      return [P([T("ИТОГО: "+fmtN2(total)+" ₸",{b:true,sz:11})],{al:D.AlignmentType.RIGHT,sb:20,sa:20})];
+    }
     // Подписи
     const SC = (lineArr) => new D.TableCell({
       children:lineArr.map(l=>P([T(l.t||"",{sz:10,b:l.b})],{sb:25,sa:25})),
