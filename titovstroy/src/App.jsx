@@ -2216,6 +2216,7 @@ export default function App() {
     const filename = ("Договор_"+num+"_"+clientName+".docx").replace(/[<>:"/\\|?*]/g,"_");
 
     try {
+    console.log("DOCX step 1: loading library");
     if (!window.docx) {
       await new Promise((res, rej) => {
         const s = document.createElement("script");
@@ -2226,6 +2227,7 @@ export default function App() {
       });
     }
     const D = window.docx;
+    console.log("DOCX step 2: D keys=", Object.keys(D).join(","));
     if (!D || !D.Document) { alert("Ошибка загрузки библиотеки DOCX. Проверьте интернет."); return; }
     const TNR = "Times New Roman";
     const mmT = mm => Math.round(mm * 56.692);
@@ -2271,6 +2273,7 @@ export default function App() {
     });
 
     // Таблица работ
+    console.log("DOCX step 3: building doc");
     const makeWorksTable = () => {
       const works = c.works||[];
       const catOrder=[], catMap={};
@@ -2383,6 +2386,7 @@ export default function App() {
       sigTable(),
     ];
 
+    console.log("DOCX step 4: building children");
     const children = [
       PC([T("Договор подряда №"+(c.number||"___"),{sz:13,b:true})]),
       PC([T("на выполнение ремонтно-отделочных работ",{sz:12,b:true})]),
@@ -2464,12 +2468,14 @@ export default function App() {
       sigTable(),
       ...annex1,
     ];
+    console.log("DOCX step 5: creating Document");
     const doc = new D.Document({
       sections:[{
         properties:{page:{size:{width:mmT(210),height:mmT(297),orientation:D.PageOrientation.PORTRAIT},margin:{top:mmT(20),right:mmT(15),bottom:mmT(20),left:mmT(30)}}},
         children,
       }],
     });
+    console.log("DOCX step 6: packing");
     const blob = await D.Packer.toBlob(doc);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
