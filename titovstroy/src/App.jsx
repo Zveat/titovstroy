@@ -1144,6 +1144,7 @@ export default function App() {
   }, [search]);
   const isSearching = search.trim().length > 0;
   const subs = Object.keys(Gdyn[activeCat] || {});
+  const safeActiveSub = subs.includes(activeSub) ? activeSub : (subs[0]||"");
 
   // ── Открыть смету на редактирование ──
   const openEstimate = (est) => {
@@ -1475,7 +1476,7 @@ export default function App() {
                 {!isSearching && <div style={{display:"flex",gap:3,padding:"10px 10px 0",borderBottom:"1px solid #181c2e"}}>
                   {cats.map(cat=>(
                     <button key={cat} className={`tab-btn ${activeCat===cat?"active":""}`}
-                      onClick={()=>{setActiveCat(cat);setActiveSub(Object.keys(Gdyn[cat]||{})[0]);}}>
+                      onClick={()=>{ const s=Object.keys(Gdyn[cat]||{}); setActiveCat(cat); setActiveSub(s[0]||""); }}>
                       {cat}{catSum(cat)>0&&<span style={{marginLeft:4,fontSize:9,color:"#b8904a"}}>●</span>}
                     </button>
                   ))}
@@ -1484,7 +1485,7 @@ export default function App() {
                 {/* Подкатегории */}
                 {!isSearching && <div style={{display:"flex",flexWrap:"wrap",gap:3,padding:"8px 10px",borderBottom:"1px solid #181c2e",background:"rgba(0,0,0,.12)"}}>
                   {subs.map(sub=>(
-                    <button key={sub} className={`sub-btn ${activeSub===sub?"active":""}`} onClick={()=>setActiveSub(sub)}>
+                    <button key={sub} className={`sub-btn ${safeActiveSub===sub?"active":""}`} onClick={()=>setActiveSub(sub)}>
                       {sub}{subSum(activeCat,sub)>0&&<span style={{marginLeft:3,color:"#b8904a",fontSize:8}}>●</span>}
                     </button>
                   ))}
@@ -1513,7 +1514,7 @@ export default function App() {
                       Найдено: {searchResults.length} работ
                     </div>
                   )}
-                  {(isSearching ? searchResults : (Gdyn[activeCat]?.[activeSub]||[])).map(work=>{
+                  {(isSearching ? searchResults : (Gdyn[activeCat]?.[safeActiveSub]||[])).map(work=>{
                     const r = rows[work.name]||{};
                     const qty = Number(r.qty||0);
                     const cpx = r.complexity||"std";
@@ -1576,10 +1577,10 @@ export default function App() {
                   })}
                 </div>
 
-                {!isSearching && subSum(activeCat,activeSub)>0&&(
+                {!isSearching && subSum(activeCat,safeActiveSub)>0&&(
                   <div style={{borderTop:"1px solid #181c2e",padding:"10px 14px",display:"flex",justifyContent:"space-between"}}>
-                    <span style={{fontSize:11,color:"#454560"}}>Итого по разделу «{activeSub}»</span>
-                    <span style={{fontSize:15,fontWeight:700,color:"#b8904a"}}>{fmt(subSum(activeCat,activeSub))} ₸</span>
+                    <span style={{fontSize:11,color:"#454560"}}>Итого по разделу «{safeActiveSub}»</span>
+                    <span style={{fontSize:15,fontWeight:700,color:"#b8904a"}}>{fmt(subSum(activeCat,safeActiveSub))} ₸</span>
                   </div>
                 )}
                 {isSearching && searchResults.length > 0 && (() => {
