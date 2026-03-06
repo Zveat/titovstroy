@@ -2210,16 +2210,193 @@ export default function App() {
     setTimeout(()=>URL.revokeObjectURL(url),20000);
   };
 
-  const generateContractDocx = (c, client, ca) => {
-    const html = buildContractHtml(c, client, ca, true);
+  const generateContractDocx = async (c, client, ca) => {
     const clientName = client?.name || c.estClient || "договор";
     const num = c.number || c.id?.slice(-4) || "б-н";
-    const blob = new Blob([html], {type:"application/msword;charset=utf-8"});
+    const filename = ("Договор_"+num+"_"+clientName+".docx").replace(/[<>:"/\\|?*]/g,"_");
+
+    if (!window.docx) {
+      await new Promise((res, rej) => {
+        const s = document.createElement("script");
+        s.src = "https://unpkg.com/docx@8.5.0/build/index.js";
+        s.onload = res; s.onerror = rej;
+        document.head.appendChild(s);
+      });
+    }
+    const D = window.docx;
+    const TNR = "Times New Roman";
+    const mmT = mm => Math.round(mm * 56.692);
+    const hp = pt => pt * 2;
+    const CONTENT_W = 9356; // twips: A4 - margins 30+15mm
+    const col = pct => Math.round(CONTENT_W * pct / 100);
+
+    const isYur = client?.clientType === "yur";
+    const clName = client?.name || "___________________";
+    const clIIN = client?.iin || "___________________";
+    const clDoc = client?.doc || "___________________";
+    const clAddr = client?.address || "___________________";
+    const clPhone = client?.phone || "___________________";
+    const TITOV = {name:'ТОО "TITOVSTROY"',bin:"231040002769",bank:'АО "Kaspi Bank"',bik:"CASPKZKA",acc:"KZ38722S000030058973",addr:"Казахстан, район им.Казыбек би, улица Кирпичная, дом 8г",phone:"8707 667 8766",email:"titovstroy@mail.ru",dir:"Титов В.Е."};
+    const clShort = (() => { const p=(clName).split(" "); return isYur?clName:p[0]+" "+(p[1]?p[1][0]+".":"")+(p[2]?p[2][0]+".":""); })();
+
+    const fmtMo = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
+    const fmtDate = s => { if(!s) return {d:"__",m:"______",y:"____"}; const [y,m,d]=s.split("-"); return {d:String(Number(d)),m:fmtMo[Number(m)-1]||"",y}; };
+    const dt = fmtDate(c.date);
+    const fmtN2 = n => Math.round(Number(n)||0).toLocaleString("ru-RU");
+    const total = (c.works||[]).reduce((s,w)=>s+(Number(w.quantity||0)*Number(w.price||0)),0);
+    const adv = c.advancePercent ?? 30;
+
+    const T = (text, opts={}) => new D.TextRun({text:String(text??""), font:TNR, size:hp(opts.sz||11), bold:!!opts.b, italics:!!opts.i, color:opts.col||"000000"});
+    const P = (runs, opts={}) => new D.Paragraph({
+      children: Array.isArray(runs)?runs:[runs],
+      alignment: opts.al || D.AlignmentType.JUSTIFIED,
+      spacing: {before: opts.sb??40, after: opts.sa??40},
+      pageBreakBefore: !!opts.pb,
+    });
+    const PC = (runs, opts={}) => P(runs, {...opts, al: D.AlignmentType.CENTER});
+    const BORDERS = {top:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},bottom:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},left:{style:D.BorderStyle.SINGLE,size:4,color:"000000"},right:{style:D.BorderStyle.SINGLE,size:4,color:"000000"}};
+    const NO_BORDERS = {top:{style:D.BorderStyle.NONE},bottom:{style:D.BorderStyle.NONE},left:{style:D.BorderStyle.NONE},right:{style:D.BorderStyle.NONE}};
+
+    const TC = (text, w, opts={}) => new D.TableCell({
+      children:[P([T(text,{sz:opts.sz||8.5,b:opts.b,i:opts.i,col:opts.col})],{al:opts.al||D.AlignmentType.LEFT,sb:20,sa:20})],
+      width:{size:col(w),type:D.WidthType.DXA},
+      columnSpan:opts.span||1,
+      borders:BORDERS,
+      shading: opts.bg?{fill:opts.bg,type:D.ShadingType.CLEAR,color:opts.bg}:undefined,
+      verticalAlign:D.VerticalAlign.CENTER,
+      margins:{top:28,bottom:28,left:57,right:57},
+    });
+
+    // Таблица работ
+    const makeWorksTable = () => {
+      const works = c.works||[];
+      const catOrder=[], catMap={};
+      works.forEach(w=>{
+        const cat=w.category||"Работы";
+        if(!catMap[cat]){catMap[cat]={total:0,rows:[]};catOrder.push(cat);}
+        const sum=Number(w.quantity||0)*Number(w.price||0);
+        catMap[cat].total+=sum; catMap[cat].rows.push({...w,sum});
+      });
+      const rows=[];
+      rows.push(new D.TableRow({children:[TC("№",5,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Наименование работ",45,{b:true,bg:"DDDDDD"}),TC("Ед.",8,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Объём",8,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Цена за ед.",17,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER}),TC("Сумма",17,{b:true,bg:"DDDDDD",al:D.AlignmentType.CENTER})],tableHeader:true}));
+      let n=0;
+      catOrder.forEach(cat=>{
+        const {rows:cr,total:ct}=catMap[cat];
+        rows.push(new D.TableRow({children:[TC(cat+" — "+fmtN2(ct)+" ₸",100,{span:6,b:true,bg:"2a2a3a",col:"c8a060"})]}));
+        let lastSub="";
+        cr.forEach((w,i)=>{
+          if(w.subcategory&&w.subcategory!==lastSub){lastSub=w.subcategory;rows.push(new D.TableRow({children:[TC(w.subcategory,100,{span:6,i:true,bg:"e8e4f0",col:"5a3a8a"})]}));}
+          n++;
+          const bg=i%2===0?"f8f6f0":"f0ede5";
+          rows.push(new D.TableRow({children:[TC(String(n),5,{bg,al:D.AlignmentType.CENTER}),TC(w.name||"",45,{bg}),TC(w.unit||"м²",8,{bg,al:D.AlignmentType.CENTER}),TC(String(w.quantity||""),8,{bg,al:D.AlignmentType.CENTER}),TC(fmtN2(w.price)+" ₸",17,{bg,al:D.AlignmentType.RIGHT}),TC(fmtN2(w.sum)+" ₸",17,{bg,b:true,al:D.AlignmentType.RIGHT})]}));
+        });
+        rows.push(new D.TableRow({children:[TC("Итого по разделу «"+cat+"»:",83,{span:5,i:true,bg:"ede8d5",al:D.AlignmentType.RIGHT}),TC(fmtN2(ct)+" ₸",17,{bg:"ede8d5",b:true,al:D.AlignmentType.RIGHT})]}));
+      });
+      return new D.Table({rows,width:{size:CONTENT_W,type:D.WidthType.DXA},columnWidths:[col(5),col(45),col(8),col(8),col(17),col(17)]});
+    };
+
+    // Подписи
+    const SC = (lineArr) => new D.TableCell({
+      children:lineArr.map(l=>P([T(l.t||"",{sz:10,b:l.b})],{sb:25,sa:25})),
+      borders:NO_BORDERS,
+      width:{size:col(50),type:D.WidthType.DXA},
+      margins:{top:0,bottom:0,left:0,right:200},
+    });
+    const leftLines = [{t:"Подрядчик:",b:true},{t:""},{t:TITOV.name},{t:"БИН: "+TITOV.bin},{t:"Банк: "+TITOV.bank},{t:"БИК: "+TITOV.bik},{t:"Номер счёта: "+TITOV.acc},{t:"Адрес: "+TITOV.addr},{t:"Тел.: "+TITOV.phone},{t:"Email: "+TITOV.email},{t:""},{t:"Генеральный директор:"},{t:TITOV.dir+" _______________ М.П."}];
+    let rightLines;
+    if(isYur){
+      rightLines=[{t:"Заказчик:",b:true},{t:""},{t:clName},{t:"БИН: "+clIIN}];
+      if(client?.bank)rightLines.push({t:"Банк: "+client.bank});
+      if(client?.bik)rightLines.push({t:"БИК: "+client.bik});
+      if(client?.account)rightLines.push({t:"ИИК: "+client.account});
+      rightLines.push({t:"Адрес: "+clAddr},{t:"Тел.: "+clPhone});
+      if(client?.email)rightLines.push({t:"Email: "+client.email});
+      rightLines.push({t:""},{t:"Директор:"},{t:(client?.directorShort||client?.director||"")+" ____________________  М.П."});
+    } else {
+      rightLines=[{t:"Заказчик:",b:true},{t:""},{t:"ФИО: "+clName},{t:"ИИН: "+clIIN},{t:"№ документа: "+clDoc},{t:"Адрес: "+clAddr},{t:"Тел.: "+clPhone},{t:""},{t:clShort+" Подпись ___________"}];
+    }
+    const sigTable = () => new D.Table({rows:[new D.TableRow({children:[SC(leftLines),SC(rightLines)]})],width:{size:CONTENT_W,type:D.WidthType.DXA},columnWidths:[col(50),col(50)]});
+
+    // Преамбула
+    const preamParas = (role="Подрядчик") => {
+      const tit = 'ТОО "TITOVSTROY", БИН 231040002769 (далее — "'+role+'"), в лице директора Василия Титова, действующего на основании Устава';
+      const tail = 'совместно именуемые "Стороны", а по отдельности – "Сторона", заключили настоящий документ о нижеследующем:';
+      if(isYur) return [
+        P([T(tit+", с одной стороны, и")]),
+        P([T(clName+", БИН "+clIIN+' (далее — "Заказчик") в лице '+(client?.director||"Директора")+", "+(client?.directorShort||client?.director||"")+", действующего на основании Устава, с другой стороны, "+tail)]),
+      ];
+      return [
+        P([T(clName+", ИИН "+clIIN+", № документа "+clDoc+', Выдан МВД РК, (далее — "Заказчик") с одной стороны, и')]),
+        P([T(tit+', с другой стороны, '+tail)]),
+      ];
+    };
+
+    // Приложение №1
+    const annex1 = [
+      PC([T("Приложение №1",{sz:13,b:true})],{pb:true,sb:0}),
+      PC([T("Перечень этапов, видов и стоимость работ",{sz:12,b:true})]),
+      PC([T("к Договору ремонтно-отделочных работ")]),
+      PC([T("№"+(c.number||"___")+" от «"+dt.d+"» "+dt.m+" "+dt.y+" г.")]),
+      P([]),
+      P([T("1. Общие положения",{b:true})]),
+      P([T("1.1. Настоящее Приложение является неотъемлемой частью Договора ремонтно-отделочных работ №"+(c.number||"___")+" от «"+dt.d+"» "+dt.m+" "+dt.y+" г. и определяет этапы, виды и стоимость работ, выполняемых Подрядчиком на Объекте.")]),
+      P([T("2. Перечень этапов и видов работ",{b:true})]),
+      makeWorksTable(),
+      P([]),
+      P([T("3. Условия выполнения работ",{b:true})]),
+      P([T("3.1. В стоимость Работ могут входить расходы Подрядчика на материалы, оборудование, доставку и иные затраты, необходимые для выполнения Работ.")]),
+      P([T("3.2. Работы выполняются поэтапно в соответствии с указанными сроками.")]),
+      P([T("3.3. Любые дополнительные работы выполняются на основании дополнительного соглашения сторон.")]),
+      P([T("4. Порядок оплаты",{b:true})]),
+      P([T("4.1. При заключении договора заказчик вносит предоплату (аванс) в размере "+adv+"% ("+fmtN2(Math.round(total*adv/100))+" тенге), которая идет в зачет основной суммы договора.")]),
+      P([T("4.2. Оплата производится поэтапно на основании актов выполненных работ (КС-2) в течение 2 банковских дней после подписания акта.")]),
+      P([T("5. Общая стоимость работ составляет "+fmtN2(total)+" ₸",{b:true})]),
+      P([]),
+      P([T("Подписи сторон",{b:true})]),
+      P([]),
+      sigTable(),
+    ];
+
+    const children = [
+      PC([T("Договор подряда №"+(c.number||"___"),{sz:13,b:true})]),
+      PC([T("на выполнение ремонтно-отделочных работ",{sz:12,b:true})]),
+      PC([T(dt.full+" г.          г. Караганда")]),
+      P([]),
+      ...preamParas("Подрядчик"),
+      P([]),
+      P([T("1. ПРЕДМЕТ ДОГОВОРА",{b:true})]),
+      P([T("1.1. Подрядчик обязуется выполнить ремонтно-отделочные работы на объекте по адресу: "+(client?.address||"___________________")+" в соответствии с Приложением №1.")]),
+      P([T("1.2. Заказчик обязуется принять и оплатить работы в порядке, установленном договором.")]),
+      P([T("2. СРОК ВЫПОЛНЕНИЯ РАБОТ",{b:true})]),
+      P([T("2.1. Подрядчик приступает к выполнению работ после получения предоплаты.")]),
+      P([T("2.2. Срок определяется сторонами дополнительно.")]),
+      P([T("3. ПРАВА И ОБЯЗАННОСТИ СТОРОН",{b:true})]),
+      P([T("3.1. Подрядчик обязан выполнить работы в соответствии с Приложением №1.")]),
+      P([T("3.2. Заказчик обязан обеспечить доступ к объекту.")]),
+      P([T("4. СТОИМОСТЬ И ПОРЯДОК РАСЧЁТОВ",{b:true})]),
+      P([T("4.1. Стоимость и порядок оплаты — в соответствии с Приложением №1.")]),
+      P([T("5. ОТВЕТСТВЕННОСТЬ СТОРОН",{b:true})]),
+      P([T("5.1. Стороны несут ответственность в соответствии с законодательством Республики Казахстан.")]),
+      P([T("6. ПОРЯДОК СДАЧИ-ПРИЁМКИ РАБОТ",{b:true})]),
+      P([T("6.1. По завершению каждого этапа работ Подрядчик уведомляет Заказчика. Заказчик принимает работы в течение 2 рабочих дней или представляет мотивированный отказ.")]),
+      P([T("7. ГАРАНТИИ",{b:true})]),
+      P([T("7.1. Гарантийный срок на выполненные работы составляет 12 месяцев.")]),
+      P([T("8. РЕКВИЗИТЫ И ПОДПИСИ СТОРОН",{b:true})]),
+      P([]),
+      sigTable(),
+      ...annex1,
+    ];
+
+    const doc = new D.Document({
+      sections:[{
+        properties:{page:{size:{width:mmT(210),height:mmT(297),orientation:D.PageOrientation.PORTRAIT},margin:{top:mmT(20),right:mmT(15),bottom:mmT(20),left:mmT(30)}}},
+        children,
+      }],
+    });
+    const blob = await D.Packer.toBlob(doc);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = ("Договор_"+num+"_"+clientName+".doc").replace(/[<>:"/\\\\|?*]/g,"_");
-    a.click();
+    a.href=url; a.download=filename; a.click();
     setTimeout(()=>URL.revokeObjectURL(url),20000);
   };
 
