@@ -1236,7 +1236,7 @@ const DOC_TYPES = [
 ];
 const TYPE_LABELS = { repair_fiz:"Договор ремонта ФИЗ", repair_yur:"Договор ремонта ЮР", annex:"Приложение", design:"Дизайн-проект", design_add:"Доп. соглашение дизайн", reservation:"Бронь" };
 
-function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onDocx, onWhatsApp, onAddClientFromEstimate, currentUserRole, fmt }) {
+function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onDocx, onAddClientFromEstimate, currentUserRole, fmt }) {
   const type = contract.type || "repair_fiz";
   const total = (contract.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
   const upd = (patch) => onUpdate(prev=>({...prev,...patch}));
@@ -1491,9 +1491,6 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
           📝 DOCX
         </button>
       </div>
-      <button onClick={onWhatsApp} style={{width:"100%",background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.3)",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-        📲 Отправить в WhatsApp
-      </button>
     </div>
   );
 }
@@ -1759,18 +1756,15 @@ p{margin:3pt 0;text-align:justify}
 .c{text-align:center}.b{font-weight:bold}.t{font-size:14pt;font-weight:bold;text-align:center;margin:6pt 0}
 .s{font-weight:bold;margin:8pt 0 3pt}
 .city-line{text-align:center;margin:4pt 0}
-table{width:100%;border-collapse:collapse;margin:8pt 0;font-size:10pt}
-th,td{border:1px solid #000;padding:3pt 5pt}
-th{background:#ddd;font-weight:bold;text-align:center}
+table{width:100%;border-collapse:collapse;margin:8pt 0;font-size:9pt;table-layout:fixed}
+th,td{border:1px solid #000;padding:2pt 4pt;word-wrap:break-word}
+th{background:#ddd;font-weight:bold;text-align:center;font-size:8.5pt}
 .tc{text-align:center}.tr{text-align:right}
-.st{width:100%;border-collapse:collapse;margin-top:20pt}
+.st{width:100%;border-collapse:collapse;margin-top:20pt;table-layout:auto}
 .st td{border:none;vertical-align:top;width:50%;padding:0 8pt 0 0;font-size:10pt;line-height:1.8}
-.cat-block{margin-bottom:12pt;page-break-inside:avoid}
-.cat-header{background:#1a1a28;color:#b8904a;font-weight:bold;font-size:10pt;padding:4pt 6pt;display:flex;justify-content:space-between}
-.svodka{background:#f5f2ec;border:1px solid #c8a96e;padding:6pt 10pt;margin-top:8pt}
-.svodka-row{display:flex;justify-content:space-between;padding:2pt 0;border-bottom:1px dotted #ccc}
-.svodka-total{display:flex;justify-content:space-between;padding:4pt 0;margin-top:4pt;border-top:2pt solid #c8a96e;font-weight:bold;font-size:11pt}
-@media print{.np{display:none}body{padding:10mm 10mm 10mm 20mm}@page{size:A4;margin:0}}`;
+tr{page-break-inside:avoid}
+@media print{.np{display:none}body{padding:10mm 10mm 10mm 20mm}@page{size:A4;margin:0}
+tr{page-break-inside:avoid}table{page-break-inside:auto}}
 
     const isYur = client?.clientType==="yur";
     const clName = client?.name||"___________________";
@@ -1809,29 +1803,28 @@ th{background:#ddd;font-weight:bold;text-align:center}
         catMap[cat].rows.push({...w,sum});
       });
       const multiCat = catOrder.length > 1;
-      let html = `<table><thead><tr>
-        <th style="width:4%">№</th>
-        <th style="width:14%">Подраздел</th>
-        <th style="width:32%">Наименование работ</th>
-        <th style="width:7%">Ед.</th>
-        <th style="width:7%">Объём</th>
-        <th style="width:16%">Цена за ед.</th>
-        <th style="width:16%">Сумма</th>
+      // 6 columns: № | Наименование | Ед. | Объём | Цена | Сумма
+      let html = `<table><colgroup>
+        <col style="width:5%"><col style="width:45%"><col style="width:8%"><col style="width:8%"><col style="width:17%"><col style="width:17%">
+      </colgroup><thead><tr>
+        <th>№</th><th style="text-align:left">Наименование работ</th><th>Ед.</th><th>Объём</th><th>Цена за ед.</th><th>Сумма</th>
       </tr></thead><tbody>`;
       let globalNum = 0;
       catOrder.forEach(cat=>{
         const {rows, total: catTotal} = catMap[cat];
-        html += `<tr><td colspan="7" style="background:#1a1a28;color:#b8904a;font-weight:bold;padding:4pt 6pt">
-          ${cat} — ${fmtN(catTotal)} ₸</td></tr>`;
+        // Category header row
+        html += `<tr><td colspan="6" style="background:#2a2a3a;color:#c8a060;font-weight:bold;font-size:9pt;padding:3pt 5pt">${cat} — ${fmtN(catTotal)} ₸</td></tr>`;
         let lastSub = "";
         rows.forEach((w,i)=>{
+          // Subcategory separator row
+          if(w.subcategory && w.subcategory !== lastSub){
+            lastSub = w.subcategory;
+            html += `<tr><td colspan="6" style="background:#e8e4f0;color:#5a3a8a;font-style:italic;font-size:8.5pt;padding:2pt 5pt">${w.subcategory}</td></tr>`;
+          }
           globalNum++;
-          const bg = i%2===0?"#f5f2ec":"#ede9e0";
-          const subTxt = w.subcategory&&w.subcategory!==lastSub ? w.subcategory : "";
-          lastSub = w.subcategory||lastSub;
+          const bg = i%2===0?"#f8f6f0":"#f0ede5";
           html += `<tr style="background:${bg}">
             <td class="tc">${globalNum}</td>
-            <td style="font-style:italic;font-size:9pt;color:#5a3a8a">${subTxt}</td>
             <td>${w.name||""}</td>
             <td class="tc">${w.unit||"м²"}</td>
             <td class="tc">${w.quantity||""}</td>
@@ -1839,23 +1832,23 @@ th{background:#ddd;font-weight:bold;text-align:center}
             <td class="tr"><b>${fmtN(w.sum)} ₸</b></td>
           </tr>`;
         });
-        html += `<tr style="background:#f0ead8">
-          <td colspan="6" class="tr" style="font-style:italic;border-top:2px solid #c8a96e">Итого по разделу «${cat}»:</td>
-          <td class="tr" style="font-weight:bold;color:#b8904a;border-top:2px solid #c8a96e">${fmtN(catTotal)} ₸</td>
+        html += `<tr style="background:#ede8d5">
+          <td colspan="5" class="tr" style="font-style:italic;font-size:9pt">Итого по разделу «${cat}»:</td>
+          <td class="tr" style="font-weight:bold">${fmtN(catTotal)} ₸</td>
         </tr>`;
       });
       html += `</tbody></table>`;
       if(multiCat){
-        html += `<table style="margin-top:8pt"><tbody>
-          <tr><td colspan="2" style="background:#f5f2ec;font-weight:bold;border:1px solid #c8a96e">Сводка по разделам</td></tr>`;
+        html += `<table style="margin-top:6pt;width:60%;margin-left:40%"><tbody>
+          <tr><td colspan="2" style="background:#e8e4d8;font-weight:bold;font-size:9pt">Сводка по разделам</td></tr>`;
         catOrder.forEach(cat=>{
-          html += `<tr><td style="border:1px solid #c8a96e">${cat}</td><td class="tr" style="font-weight:bold;border:1px solid #c8a96e">${fmtN(catMap[cat].total)} ₸</td></tr>`;
+          html += `<tr><td style="font-size:9pt">${cat}</td><td class="tr" style="font-weight:bold;font-size:9pt">${fmtN(catMap[cat].total)} ₸</td></tr>`;
         });
-        html += `<tr style="background:#f0ead8"><td style="font-weight:bold;font-size:11pt;border:2px solid #c8a96e">ИТОГО:</td>
-          <td class="tr" style="font-weight:bold;font-size:11pt;color:#b8904a;border:2px solid #c8a96e">${fmtN(total)} ₸</td></tr>
+        html += `<tr style="background:#e8e0c8"><td style="font-weight:bold">ИТОГО:</td>
+          <td class="tr" style="font-weight:bold;font-size:11pt">${fmtN(total)} ₸</td></tr>
         </tbody></table>`;
       } else {
-        html += `<p class="tr" style="font-weight:bold;font-size:11pt;border-top:2px solid #c8a96e;padding-top:4pt">ИТОГО: ${fmtN(total)} ₸</p>`;
+        html += `<p class="tr" style="font-weight:bold;font-size:11pt;padding-top:4pt">ИТОГО: ${fmtN(total)} ₸</p>`;
       }
       return html;
     };
@@ -3243,10 +3236,6 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
                               const ca2 = contragents.find(x=>x.id===c.contragentId);
                               generateContractDocx(c, cl, ca2);
                             }} style={{background:"rgba(100,140,220,.1)",color:"#6699dd",border:"1px solid rgba(100,140,220,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📝 DOCX</button>
-                            <button onClick={e=>{e.stopPropagation();
-                              const cl = contractClients.find(x=>x.id===c.clientId);
-                              sendContractWhatsApp(c, cl, ca2);
-                            }} style={{background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📲 WA</button>
                             {currentUser.role==="admin" && (
                               <button onClick={e=>{e.stopPropagation(); if(window.confirm("Удалить договор?")) saveContracts(contracts.filter(x=>x.id!==c.id));}}
                                 style={{background:"rgba(200,60,60,.08)",color:"#c06060",border:"1px solid rgba(200,60,60,.15)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
@@ -3282,11 +3271,6 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
                   const cl = contractClients.find(x=>x.id===currentContract.clientId);
                   const ca = contragents.find(x=>x.id===currentContract.contragentId);
                   generateContractDocx(currentContract, cl, ca);
-                }}
-                onWhatsApp={()=>{
-                  const cl = contractClients.find(x=>x.id===currentContract.clientId);
-                  const ca = contragents.find(x=>x.id===currentContract.contragentId);
-                  sendContractWhatsApp(currentContract, cl, ca);
                 }}
                 onAddClientFromEstimate={async ()=>{
                   const newClient = {id:Date.now().toString(),name:currentContract.estClient||"",phone:currentContract.estPhone||"",address:currentContract.estAddress||"",iin:"",doc:"",type:"физ"};
