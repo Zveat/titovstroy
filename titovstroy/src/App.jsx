@@ -1193,6 +1193,9 @@ export default function App() {
   const [editPrices, setEditPrices] = useState(false);
   const [search, setSearch] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [listSearch, setListSearch] = useState("");
+  const [listFilter, setListFilter] = useState(""); // "" | "Вторичка" | "Новостройка" | "Коммерция"
+  const [listSort, setListSort] = useState("date"); // "date" | "sum" | "name"
 
   // Когда каталог меняется — синхронизируем activeCat/activeSub
   useEffect(() => {
@@ -1342,6 +1345,23 @@ export default function App() {
     setDeleteConfirm(null);
   };
 
+  // ── Дублировать смету ──
+  const duplicateEstimate = async (est) => {
+    const id = genId();
+    const copy = {
+      ...est,
+      id,
+      proj: { ...est.proj, name: (est.proj?.name || "Без названия") + " (копия)" },
+      createdAt: Date.now(),
+      createdBy: currentUser.name,
+      updatedAt: Date.now(),
+      updatedBy: currentUser.name,
+    };
+    const newList = [copy, ...estimates];
+    setEstimates(newList);
+    await saveEstimates(newList);
+  };
+
   // ─────────────────────────────────────────────────────────────────────────
   // РЕНДЕР
   // ─────────────────────────────────────────────────────────────────────────
@@ -1450,76 +1470,122 @@ export default function App() {
                 <div style={{fontSize:24,marginBottom:10}}>⏳</div>
                 <div style={{fontSize:13}}>Загрузка смет...</div>
               </div>
-            ) : estimates.length === 0 ? (
-              <div style={{textAlign:"center",padding:"80px 0"}}>
-                <div style={{fontSize:40,marginBottom:16}}>📋</div>
-                <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>Смет пока нет</div>
-                <div style={{fontSize:13,color:"#454560",marginBottom:24}}>Нажмите «+ Новая смета» чтобы начать</div>
-                <button className="btn btn-g" onClick={newEstimate}>+ Создать первую смету</button>
-              </div>
             ) : (
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                <div style={{fontSize:11,color:"#454560",marginBottom:4}}>
-                  Всего смет: {estimates.length} · Общий замерщик видит все
-                </div>
-                {estimates
-                  .slice()
-                  .sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0))
-                  .map((est, i) => {
-                    const hasItems = est.rows && Object.values(est.rows).some(r => Number(r?.qty) > 0);
-                    const status = !hasItems ? "draft" : est.total > 0 ? "done" : "draft";
-                    return (
-                      <div key={est.id} className="est-card up" style={{animationDelay:`${i*0.04}s`}}
-                        onClick={() => openEstimate(est)}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
-                              <span style={{
-                                width:8,height:8,borderRadius:"50%",flexShrink:0,
-                                background: status==="done" ? "#4caf7d" : "#888",
-                                boxShadow: status==="done" ? "0 0 6px #4caf7d" : "none"
-                              }}/>
-                              <span style={{fontWeight:700,fontSize:15,color:"#e2ddd4",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                                {est.proj?.name || <span style={{color:"#454560",fontStyle:"italic"}}>Без названия</span>}
-                              </span>
-                            </div>
-                            <div style={{display:"flex",gap:10,fontSize:12,color:"#555575",flexWrap:"wrap"}}>
-                              <span>{est.proj?.type || "—"}</span>
-                              {est.proj?.area && <span>{est.proj.area} м²</span>}
-                              {est.proj?.address && <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:200}}>{est.proj.address}</span>}
-                            </div>
-                            {est.proj?.phone && (
-                              <div style={{fontSize:11,color:"#454560",marginTop:3}}>{est.proj.phone}</div>
-                            )}
-                          </div>
-                          <div style={{textAlign:"right",flexShrink:0}}>
-                            {est.total > 0 ? (
-                              <div style={{fontSize:16,fontWeight:800,color:"#b8904a"}}>{fmt(est.total)} ₸</div>
-                            ) : (
-                              <div style={{fontSize:12,color:"#454560",fontStyle:"italic"}}>черновик</div>
-                            )}
-                            <div style={{fontSize:10,color:"#353550",marginTop:3}}>{fmtDate(est.updatedAt)}</div>
-                            {(est.createdBy || est.updatedBy) && (
-                              <div style={{fontSize:10,color:"#353550",marginTop:2,textAlign:"right"}}>
-                                {est.updatedBy && est.updatedBy !== est.createdBy
-                                  ? <span>✏ {est.updatedBy}</span>
-                                  : est.createdBy
-                                    ? <span>👤 {est.createdBy}</span>
-                                    : null}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        {/* Кнопка удаления */}
-                        <button
-                          className="btn btn-red"
-                          style={{position:"absolute",top:12,right:12,padding:"3px 9px",fontSize:11,borderRadius:5,opacity:0.6}}
-                          onClick={e => { e.stopPropagation(); setDeleteConfirm(est.id); }}>
-                          ✕
+                {/* Поиск и фильтры */}
+                {estimates.length > 0 && (
+                  <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:4}}>
+                    <input
+                      style={{background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:8,padding:"9px 14px",fontFamily:"inherit",fontSize:13,outline:"none",width:"100%"}}
+                      placeholder="🔍 Поиск по клиенту, адресу, телефону..."
+                      value={listSearch}
+                      onChange={e=>setListSearch(e.target.value)}
+                    />
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                      {/* Фильтр по типу */}
+                      {["","Вторичка","Новостройка","Коммерция"].map(t=>(
+                        <button key={t} onClick={()=>setListFilter(t)}
+                          style={{background:listFilter===t?"rgba(184,144,74,.2)":"rgba(255,255,255,.04)",color:listFilter===t?"#b8904a":"#555575",border:`1px solid ${listFilter===t?"rgba(184,144,74,.4)":"#1c2035"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                          {t||"Все типы"}
                         </button>
+                      ))}
+                      <div style={{flex:1}}/>
+                      {/* Сортировка */}
+                      <select value={listSort} onChange={e=>setListSort(e.target.value)}
+                        style={{background:"#14172a",border:"1px solid #20243a",color:"#555575",borderRadius:6,padding:"4px 8px",fontSize:11,fontFamily:"inherit",cursor:"pointer",outline:"none"}}>
+                        <option value="date">По дате</option>
+                        <option value="sum">По сумме</option>
+                        <option value="name">По имени</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                {estimates.length === 0 ? (
+                  <div style={{textAlign:"center",padding:"80px 0"}}>
+                    <div style={{fontSize:40,marginBottom:16}}>📋</div>
+                    <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>Смет пока нет</div>
+                    <div style={{fontSize:13,color:"#454560",marginBottom:24}}>Нажмите «+ Новая смета» чтобы начать</div>
+                    <button className="btn btn-g" onClick={newEstimate}>+ Создать первую смету</button>
+                  </div>
+                ) : (() => {
+                  const q = listSearch.toLowerCase().trim();
+                  const filtered = estimates
+                    .filter(e => !listFilter || e.proj?.type === listFilter)
+                    .filter(e => !q || [e.proj?.name,e.proj?.address,e.proj?.phone,e.proj?.manager].some(v=>v&&v.toLowerCase().includes(q)))
+                    .slice()
+                    .sort((a,b) => {
+                      if (listSort==="sum") return (b.total||0)-(a.total||0);
+                      if (listSort==="name") return (a.proj?.name||"").localeCompare(b.proj?.name||"","ru");
+                      return (b.updatedAt||0)-(a.updatedAt||0);
+                    });
+                  return (
+                    <>
+                      <div style={{fontSize:11,color:"#454560",marginBottom:2}}>
+                        {filtered.length !== estimates.length
+                          ? `Найдено: ${filtered.length} из ${estimates.length}`
+                          : `Всего смет: ${estimates.length}`}
                       </div>
-                    );
-                  })}
+                      {filtered.length === 0 && (
+                        <div style={{textAlign:"center",padding:"40px 0",color:"#353550",fontSize:13}}>Ничего не найдено</div>
+                      )}
+                      {filtered.map((est, i) => {
+                        const hasItems = est.rows && Object.values(est.rows).some(r => Number(r?.qty) > 0);
+                        const status = !hasItems ? "draft" : est.total > 0 ? "done" : "draft";
+                        return (
+                          <div key={est.id} className="est-card up" style={{animationDelay:`${i*0.04}s`,paddingRight:20}}
+                            onClick={() => openEstimate(est)}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
+                                  <span style={{width:8,height:8,borderRadius:"50%",flexShrink:0,background:status==="done"?"#4caf7d":"#888",boxShadow:status==="done"?"0 0 6px #4caf7d":"none"}}/>
+                                  <span style={{fontWeight:700,fontSize:15,color:"#e2ddd4",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                                    {est.proj?.name || <span style={{color:"#454560",fontStyle:"italic"}}>Без названия</span>}
+                                  </span>
+                                </div>
+                                <div style={{display:"flex",gap:10,fontSize:12,color:"#555575",flexWrap:"wrap"}}>
+                                  <span>{est.proj?.type||"—"}</span>
+                                  {est.proj?.area&&<span>{est.proj.area} м²</span>}
+                                  {est.proj?.address&&<span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:200}}>{est.proj.address}</span>}
+                                </div>
+                                {est.proj?.phone&&<div style={{fontSize:11,color:"#454560",marginTop:3}}>{est.proj.phone}</div>}
+                              </div>
+                              <div style={{textAlign:"right",flexShrink:0}}>
+                                {est.total>0
+                                  ? <div style={{fontSize:16,fontWeight:800,color:"#b8904a"}}>{fmt(est.total)} ₸</div>
+                                  : <div style={{fontSize:12,color:"#454560",fontStyle:"italic"}}>черновик</div>}
+                                <div style={{fontSize:10,color:"#353550",marginTop:3}}>{fmtDate(est.updatedAt)}</div>
+                                {(est.createdBy||est.updatedBy)&&(
+                                  <div style={{fontSize:10,color:"#353550",marginTop:2}}>
+                                    {est.updatedBy&&est.updatedBy!==est.createdBy
+                                      ?<span>✏ {est.updatedBy}</span>
+                                      :est.createdBy?<span>👤 {est.createdBy}</span>:null}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            {/* Кнопки действий */}
+                            <div style={{display:"flex",gap:4,marginTop:10,justifyContent:"flex-end"}}
+                              onClick={e=>e.stopPropagation()}>
+                              <button
+                                onClick={()=>duplicateEstimate(est)}
+                                style={{background:"rgba(100,100,200,.1)",color:"#8888cc",border:"1px solid rgba(100,100,200,.2)",borderRadius:5,padding:"3px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+                                ⧉ Копировать
+                              </button>
+                              {currentUser.role==="admin" && (
+                                <button
+                                  onClick={()=>setDeleteConfirm(est.id)}
+                                  style={{background:"rgba(200,60,60,.1)",color:"#e07070",border:"1px solid rgba(200,60,60,.2)",borderRadius:5,padding:"3px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+                                  🗑 Удалить
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </>
+                  );
+                })()}
               </div>
             )}
           </div>
