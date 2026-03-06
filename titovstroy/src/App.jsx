@@ -1073,6 +1073,7 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
     "Сроки выполнения указывается дополнительно в основном договоре.",
     "Работы выполняются по договору.",
     "Гарантия на работы составляет 12 месяцев.",
+    "Срок действия настоящего предложения — 7 рабочих дней с даты составления.",
   ];
   return (
     <div style={{fontFamily:"'Golos Text','Segoe UI',sans-serif",color:"#1a1a28",background:"#f5f2ec"}}>
@@ -1091,7 +1092,7 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
 
       {/* Блок клиента */}
       <div style={{background:"#e8e4da",borderRadius:10,padding:"13px 16px",marginBottom:16,display:"grid",gridTemplateColumns:"1fr 1fr",gap:"5px 20px",fontSize:13}}>
-        {[["Заказчик",proj.name||"—"],["Телефон",proj.phone||"—"],["Объект",proj.type||"—"],["Адрес",proj.address||"—"],["Дата расчёта",today()],["Менеджер",proj.manager||"—"]].map(([k,v])=>(
+        {[["Заказчик",proj.name||"—"],["Телефон",proj.phone||"—"],["Объект",proj.type||"—"],["Адрес",proj.address||"—"],["Дата расчёта",today()],["Действует до",validUntil()],["Менеджер",proj.manager||"—"]].map(([k,v])=>(
           <div key={k}><span style={{color:"#888"}}>{k}: </span><strong>{v}</strong></div>
         ))}
       </div>
@@ -1265,6 +1266,8 @@ export default function App() {
   const [estStatus, setEstStatus] = useState("new");
   const [estComment, setEstComment] = useState("");
   const [showStats, setShowStats] = useState(false);
+  const [statsPeriod, setStatsPeriod] = useState("all"); // all | month | week | 3month
+  const [statsManager, setStatsManager] = useState(""); // "" = все
   const [listSearch, setListSearch] = useState("");
   const [listFilter, setListFilter] = useState(""); // "" | "Вторичка" | "Новостройка" | "Коммерция"
   const [listSort, setListSort] = useState("date"); // "date" | "sum" | "name"
@@ -1970,17 +1973,37 @@ export default function App() {
                 {kpItems.length>0&&(
                   <button onClick={()=>{
                     const lines = [];
-                    lines.push("*TitovStroy — Смета*");
-                    if(proj.name) lines.push(`Клиент: ${proj.name}`);
-                    if(proj.address) lines.push(`Адрес: ${proj.address}`);
-                    if(proj.type) lines.push(`Тип: ${proj.type}`);
+                    const dateStr = new Date().toLocaleDateString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric"});
+                    const vDate = addWorkdays(new Date(),7).toLocaleDateString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric"});
+                    lines.push("*TitovStroy — Ценовое предложение*");
+                    lines.push(`Дата: ${dateStr}`);
+                    lines.push(`Действует до: ${vDate}`);
                     lines.push("");
-                    const catTotals = {};
-                    for(const item of kpItems){ catTotals[item.cat]=(catTotals[item.cat]||0)+item.total; }
-                    for(const [cat,sum] of Object.entries(catTotals)) lines.push(`• ${cat}: ${fmt(sum)} ₸`);
-                    if(discount>0){ lines.push(""); lines.push(`Скидка ${discount}%: -${fmt(discAmt)} ₸`); }
-                    lines.push(""); lines.push(`*Итого: ${fmt(final)} ₸*`);
-                    if(proj.area&&Number(proj.area)>0) lines.push(`≈ ${fmt(final/Number(proj.area))} ₸/м²`);
+                    if(proj.name) lines.push(`👤 Клиент: ${proj.name}`);
+                    if(proj.phone) lines.push(`📞 Телефон: ${proj.phone}`);
+                    if(proj.address) lines.push(`📍 Адрес: ${proj.address}`);
+                    if(proj.type) lines.push(`🏠 Тип: ${proj.type}`);
+                    if(proj.area) lines.push(`📐 Площадь: ${proj.area} м²`);
+                    lines.push("");
+                    lines.push("*Состав работ:*");
+                    const catOrder = [];
+                    const catMap = {};
+                    for(const item of kpItems){
+                      if(!catMap[item.cat]){ catMap[item.cat]=[]; catOrder.push(item.cat); }
+                      catMap[item.cat].push(item);
+                    }
+                    for(const cat of catOrder){
+                      const catSum = catMap[cat].reduce((s,x)=>s+x.total,0);
+                      lines.push(`\n*${cat}* — ${fmt(catSum)} ₸`);
+                      for(const item of catMap[cat]){
+                        lines.push(`  • ${item.name}: ${item.qty} ${item.unit} × ${fmt(item.price)} = ${fmt(item.total)} ₸`);
+                      }
+                    }
+                    lines.push("");
+                    if(discount>0) lines.push(`💰 Скидка ${discount}%: -${fmt(discAmt)} ₸`);
+                    lines.push(`\n*ИТОГО: ${fmt(final)} ₸*`);
+                    if(proj.area&&Number(proj.area)>0) lines.push(`≈ ${fmt(Math.round(final/Number(proj.area)))} ₸/м²`);
+                    lines.push("\n_Срок действия предложения: 7 рабочих дней_");
                     const text = encodeURIComponent(lines.join("\n"));
                     const phone = proj.phone ? proj.phone.replace(/\D/g,"") : "";
                     window.open(`https://wa.me/${phone}?text=${text}`,"_blank");
@@ -2078,19 +2101,22 @@ export default function App() {
               <button onClick={()=>setShowStats(false)} style={{background:"none",border:"none",color:"#454560",fontSize:20,cursor:"pointer"}}>✕</button>
             </div>
             {(()=>{
-              const total = estimates.length;
-              const withSum = estimates.filter(e=>e.total>0);
+              const now = Date.now();
+              const periodMs = {all:Infinity,month:30*864e5,week:7*864e5,"3month":90*864e5};
+              const ms = periodMs[statsPeriod]||Infinity;
+              const base = estimates
+                .filter(e => ms===Infinity || (now-e.updatedAt)<ms)
+                .filter(e => !statsManager || (e.proj?.manager||e.createdBy||"")=== statsManager);
+              const total = base.length;
+              const withSum = base.filter(e=>e.total>0);
               const totalSum = withSum.reduce((s,e)=>s+e.total,0);
               const avgSum = withSum.length ? Math.round(totalSum/withSum.length) : 0;
-              const now = Date.now();
-              const month = 30*24*60*60*1000;
-              const thisMonth = estimates.filter(e=>(now-e.updatedAt)<month);
               const byStatus = {};
-              for(const s of STATUSES) byStatus[s.key]=estimates.filter(e=>(e.status||"new")===s.key).length;
+              for(const s of STATUSES) byStatus[s.key]=base.filter(e=>(e.status||"new")===s.key).length;
               const byType = {};
-              for(const e of estimates){ const t=e.proj?.type||"—"; byType[t]=(byType[t]||0)+1; }
+              for(const e of base){ const t=e.proj?.type||"—"; byType[t]=(byType[t]||0)+1; }
               const catSums = {};
-              for(const e of estimates){
+              for(const e of base){
                 const items = e.rows ? Object.entries(e.rows).filter(([,r])=>Number(r?.qty)>0) : [];
                 for(const [code,] of items){
                   const w = getEffectiveCatalog().find(x=>x.code===code);
@@ -2098,22 +2124,63 @@ export default function App() {
                 }
               }
               const topCats = Object.entries(catSums).sort((a,b)=>b[1]-a[1]).slice(0,5);
+              const managers = [...new Set(estimates.map(e=>e.proj?.manager||e.createdBy||"").filter(Boolean))];
+              // Per-manager totals for company view
+              const managerStats = managers.map(m=>{
+                const mes = base.filter(e=>(e.proj?.manager||e.createdBy||"")=== m);
+                return {name:m, count:mes.length, sum:mes.filter(e=>e.total>0).reduce((s,e)=>s+e.total,0), agreed:mes.filter(e=>e.status==="agreed").length};
+              }).sort((a,b)=>b.sum-a.sum);
               return (
                 <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                  {/* Фильтры: период + менеджер */}
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                      {[["all","Всё время"],["month","Месяц"],["3month","3 месяца"],["week","Неделя"]].map(([k,l])=>(
+                        <button key={k} onClick={()=>setStatsPeriod(k)}
+                          style={{fontSize:11,fontWeight:600,padding:"3px 10px",borderRadius:6,cursor:"pointer",fontFamily:"inherit",border:`1px solid ${statsPeriod===k?"#b8904a":"rgba(255,255,255,.08)"}`,background:statsPeriod===k?"rgba(184,144,74,.15)":"transparent",color:statsPeriod===k?"#b8904a":"#555575"}}>
+                          {l}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                      <button onClick={()=>setStatsManager("")}
+                        style={{fontSize:11,fontWeight:600,padding:"3px 10px",borderRadius:6,cursor:"pointer",fontFamily:"inherit",border:`1px solid ${!statsManager?"#8888cc":"rgba(255,255,255,.08)"}`,background:!statsManager?"rgba(136,136,204,.15)":"transparent",color:!statsManager?"#8888cc":"#555575"}}>
+                        🏢 Компания
+                      </button>
+                      {managers.map(m=>(
+                        <button key={m} onClick={()=>setStatsManager(m)}
+                          style={{fontSize:11,fontWeight:600,padding:"3px 10px",borderRadius:6,cursor:"pointer",fontFamily:"inherit",border:`1px solid ${statsManager===m?"#8888cc":"rgba(255,255,255,.08)"}`,background:statsManager===m?"rgba(136,136,204,.15)":"transparent",color:statsManager===m?"#8888cc":"#555575"}}>
+                          👤 {m}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   {/* Ключевые цифры */}
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-                    {[["Всего смет",total,"#8888cc"],["За месяц",thisMonth.length,"#b8904a"],["Средний чек",fmt(avgSum)+" ₸","#4caf7d"]].map(([l,v,c])=>(
+                    {[["Смет",total,"#8888cc"],["Объём",fmt(totalSum)+" ₸","#b8904a"],["Средний чек",fmt(avgSum)+" ₸","#4caf7d"]].map(([l,v,c])=>(
                       <div key={l} style={{background:"rgba(255,255,255,.04)",borderRadius:8,padding:"12px 10px",textAlign:"center"}}>
-                        <div style={{fontSize:20,fontWeight:800,color:c}}>{v}</div>
+                        <div style={{fontSize:total>999?14:20,fontWeight:800,color:c,lineHeight:1.2}}>{v}</div>
                         <div style={{fontSize:10,color:"#454560",marginTop:3}}>{l}</div>
                       </div>
                     ))}
                   </div>
-                  {/* Общий объём */}
-                  <div style={{background:"rgba(184,144,74,.08)",border:"1px solid rgba(184,144,74,.2)",borderRadius:8,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <span style={{fontSize:13,color:"#888"}}>Общий объём</span>
-                    <span style={{fontSize:18,fontWeight:800,color:"#b8904a"}}>{fmt(totalSum)} ₸</span>
-                  </div>
+                  {/* По менеджерам (только в режиме компании) */}
+                  {!statsManager && managerStats.length>0 && (
+                    <div>
+                      <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>По менеджерам</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                        {managerStats.map(m=>(
+                          <div key={m.name} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",background:"rgba(255,255,255,.03)",borderRadius:6,cursor:"pointer"}}
+                            onClick={()=>setStatsManager(m.name)}>
+                            <span style={{fontSize:12,color:"#aaa",flex:1}}>👤 {m.name}</span>
+                            <span style={{fontSize:11,color:"#555575"}}>{m.count} смет</span>
+                            <span style={{fontSize:12,fontWeight:700,color:"#b8904a"}}>{fmt(m.sum)} ₸</span>
+                            {m.agreed>0&&<span style={{fontSize:10,color:"#4caf7d",background:"rgba(76,175,125,.1)",borderRadius:4,padding:"1px 6px"}}>✓{m.agreed}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {/* По статусам */}
                   <div>
                     <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>По статусам</div>
@@ -2140,7 +2207,7 @@ export default function App() {
                       ))}
                     </div>
                   </div>
-                  {/* Популярные категории работ */}
+                  {/* Топ категорий */}
                   {topCats.length>0&&(
                     <div>
                       <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>Топ категорий работ</div>
@@ -2154,6 +2221,7 @@ export default function App() {
                       </div>
                     </div>
                   )}
+                  {total===0&&<div style={{textAlign:"center",color:"#353550",fontSize:13,padding:"20px 0"}}>Нет данных за выбранный период</div>}
                 </div>
               );
             })()}
