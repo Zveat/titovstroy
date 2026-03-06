@@ -739,7 +739,7 @@ function AdminPanel({ currentUser, onClose }) {
     Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
 
-  const roleLabel = r => r === "admin" ? "👑 Админ" : "👤 Замерщик";
+  const roleLabel = r => r==="admin" ? "👑 Админ" : r==="viewer" ? "👁 Наблюдатель" : "👤 Замерщик";
 
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:16,fontFamily:"'Golos Text','Segoe UI',sans-serif"}}>
@@ -842,6 +842,7 @@ function AdminPanel({ currentUser, onClose }) {
                 <select style={{background:"#14172a",border:"1px solid #20243a",color:"#9090b0",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none",cursor:"pointer"}} value={newRole} onChange={e=>setNewRole(e.target.value)}>
                   <option value="user">👤 Замерщик</option>
                   <option value="admin">👑 Администратор</option>
+                  <option value="viewer">👁 Наблюдатель</option>
                 </select>
               </div>
               <button onClick={addUser}
@@ -1444,7 +1445,7 @@ export default function App() {
               <div style={{minWidth:0}}>
                 <div style={{fontWeight:800,fontSize:13,whiteSpace:"nowrap",color:"#e2ddd4"}}>TitovStroy</div>
                 <div style={{fontSize:10,color:"#454560",whiteSpace:"nowrap"}}>
-                  <span style={{color:"#b8904a"}}>{currentUser.role==="admin"?"👑":"👤"}</span>{" "}{currentUser.name}
+                  <span style={{color:"#b8904a"}}>{currentUser.role==="admin"?"👑":currentUser.role==="viewer"?"👁":"👤"}</span>{" "}{currentUser.name}
                 </div>
               </div>
             </div>
@@ -1454,7 +1455,9 @@ export default function App() {
                 <button className="btn btn-o" style={{padding:"6px 9px",fontSize:14}} onClick={()=>setShowAdmin(true)}>⚙️</button>
               )}
               <button className="btn btn-o" style={{padding:"6px 9px",fontSize:11}} onClick={()=>setCurrentUser(null)}>Выйти</button>
-              <button className="btn btn-g" style={{padding:"7px 14px",fontSize:12,whiteSpace:"nowrap"}} onClick={newEstimate}>+ Новая</button>
+              {currentUser.role !== "viewer" && (
+                <button className="btn btn-g" style={{padding:"7px 14px",fontSize:12,whiteSpace:"nowrap"}} onClick={newEstimate}>+ Новая</button>
+              )}
             </div>
           </div>
 
@@ -1507,7 +1510,9 @@ export default function App() {
                     <div style={{fontSize:40,marginBottom:16}}>📋</div>
                     <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>Смет пока нет</div>
                     <div style={{fontSize:13,color:"#454560",marginBottom:24}}>Нажмите «+ Новая смета» чтобы начать</div>
-                    <button className="btn btn-g" onClick={newEstimate}>+ Создать первую смету</button>
+                    {currentUser.role !== "viewer" && (
+                      <button className="btn btn-g" onClick={newEstimate}>+ Создать первую смету</button>
+                    )}
                   </div>
                 ) : (() => {
                   const q = listSearch.toLowerCase().trim();
@@ -1536,7 +1541,8 @@ export default function App() {
                         const author = est.updatedBy&&est.updatedBy!==est.createdBy ? est.updatedBy : est.createdBy;
                         return (
                           <div key={est.id} className="est-card up" style={{animationDelay:`${i*0.04}s`,padding:"10px 14px"}}
-                            onClick={() => openEstimate(est)}>
+                            onClick={() => { if(currentUser.role==="viewer") return; openEstimate(est); }}
+                            >
                             {/* Строка 1: статус + имя + сумма */}
                             <div style={{display:"flex",alignItems:"center",gap:8}}>
                               <span style={{width:7,height:7,borderRadius:"50%",flexShrink:0,background:status==="done"?"#4caf7d":"#555",boxShadow:status==="done"?"0 0 5px #4caf7d":"none"}}/>
@@ -1555,10 +1561,12 @@ export default function App() {
                               <span style={{flex:1}}/>
                               <span style={{fontSize:10,color:"#353550",whiteSpace:"nowrap"}}>{fmtDate(est.updatedAt)}</span>
                               {author&&<span style={{fontSize:10,color:"#353550",whiteSpace:"nowrap"}}>· {author}</span>}
-                              <button onClick={()=>duplicateEstimate(est)}
-                                style={{background:"rgba(100,100,200,.1)",color:"#7777bb",border:"1px solid rgba(100,100,200,.15)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
-                                ⧉
-                              </button>
+                              {currentUser.role !== "viewer" && (
+                                <button onClick={()=>duplicateEstimate(est)}
+                                  style={{background:"rgba(100,100,200,.1)",color:"#7777bb",border:"1px solid rgba(100,100,200,.15)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
+                                  ⧉
+                                </button>
+                              )}
                               {currentUser.role==="admin" && (
                                 <button onClick={()=>setDeleteConfirm(est.id)}
                                   style={{background:"rgba(200,60,60,.08)",color:"#c06060",border:"1px solid rgba(200,60,60,.15)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
@@ -1614,15 +1622,21 @@ export default function App() {
             <div className="editor-header-right" style={{display:"flex",alignItems:"center",gap:8}}>
               {saving && <span style={{fontSize:11,color:"#555575"}}>💾</span>}
               {filledCount > 0 && <span className="badge">{filledCount} позиций</span>}
-              <button className="btn btn-o" style={{fontSize:11,padding:"6px 12px"}} onClick={()=>setEditPrices(m=>!m)}>
-                {editPrices ? "✓" : "✏"}
-              </button>
+              {currentUser.role !== "viewer" && (
+                <button className="btn btn-o" style={{fontSize:11,padding:"6px 12px"}} onClick={()=>setEditPrices(m=>!m)}>
+                  {editPrices ? "✓" : "✏"}
+                </button>
+              )}
+              {currentUser.role === "viewer" && (
+                <span style={{fontSize:11,color:"#555575",background:"rgba(255,255,255,.05)",borderRadius:5,padding:"4px 10px"}}>👁 Только просмотр</span>
+              )}
               <span className="proj-name" style={{fontSize:11,color:"#454560"}}>
-                {currentUser.role==="admin"?"👑":"👤"} {currentUser.name}
+                {currentUser.role==="admin"?"👑":currentUser.role==="viewer"?"👁":"👤"} {currentUser.name}
               </span>
-              <button className="btn btn-g" style={{padding:"8px 16px",fontSize:13}} onClick={saveAndBack}>
-                💾 Сохранить
-              </button>
+              {currentUser.role !== "viewer"
+                ? <button className="btn btn-g" style={{padding:"8px 16px",fontSize:13}} onClick={saveAndBack}>💾 Сохранить</button>
+                : <button className="btn btn-o" style={{padding:"8px 16px",fontSize:13}} onClick={saveAndBack}>← Назад</button>
+              }
             </div>
           </div>
 
@@ -1727,7 +1741,7 @@ export default function App() {
                     ) : displayPrice != null ? (
                       <span style={{fontSize:12,color:filled?"#b8a880":"#555575"}}>{fmt(displayPrice)}</span>
                     ) : <span style={{fontSize:10,color:"#353550",fontStyle:"italic"}}>нет цены</span>;
-                    const qtyInput = <input className="num" style={{width:70,textAlign:"center"}} type="number" min="0" placeholder="0"
+                    const qtyInput = <input className="num" style={{width:70,textAlign:"center",opacity:currentUser.role==="viewer"?.4:1}} type="number" min="0" placeholder="0" disabled={currentUser.role==="viewer"}
                       value={r.qty||""} onChange={e=>setRow(work.name,"qty",e.target.value)}/>;
                     const nameBlock = (
                       <div style={{minWidth:0}}>
