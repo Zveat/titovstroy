@@ -1450,6 +1450,67 @@ export default function App() {
     setDeleteConfirm(null);
   };
 
+  // ── Экспорт сметы в JSON ──
+  const exportJSON = (est) => {
+    const catalog = getEffectiveCatalog();
+    const works = [];
+    const rows = est.rows || {};
+    for (const [key, r] of Object.entries(rows)) {
+      if (!Number(r?.qty) > 0 && Number(r?.qty) !== 0) continue;
+      const qty = Number(r.qty || 0);
+      if (qty <= 0) continue;
+      const w = catalog.find(x => x.name === key) || catalog.find(x => x.code === key);
+      if (!w) continue;
+      const price = getPrice(w, qty, r.complexity || "std");
+      works.push({
+        code: w.code || null,
+        name: w.name,
+        category: w.cat,
+        subcategory: w.sub,
+        quantity: qty,
+        unit: w.unit || "м²",
+        pricePerUnit: price ? Math.round(price / qty) : 0,
+        total: price ? Math.round(price) : 0,
+      });
+    }
+    const totalAmount = Math.round((est.total || 0) * (1 - (est.discount || 0) / 100));
+    const json = {
+      estimateInfo: {
+        id: est.id,
+        name: est.proj?.name || "Без названия",
+        date: new Date(est.createdAt || Date.now()).toISOString().split("T")[0],
+        client: est.proj?.name || null,
+        clientPhone: est.proj?.phone || null,
+        manager: est.proj?.manager || est.createdBy || null,
+        objectType: est.proj?.type || null,
+        address: est.proj?.address || null,
+        area: est.proj?.area ? Number(est.proj.area) : null,
+        notes: est.note || null,
+        discount: est.discount || 0,
+      },
+      works,
+      summary: {
+        totalItems: works.length,
+        totalQuantity: Math.round(works.reduce((s, w) => s + w.quantity, 0) * 100) / 100,
+        subtotal: est.total || 0,
+        discount: est.discount || 0,
+        totalAmount,
+        currency: "KZT",
+      },
+      exportDate: new Date().toISOString(),
+      version: "1.0",
+    };
+    const blob = new Blob([JSON.stringify(json, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const clientSlug = (est.proj?.name || "смета").toLowerCase().replace(/\s+/g, "-").replace(/[^a-zа-яё0-9-]/gi, "");
+    const dateSlug = new Date(est.createdAt || Date.now()).toISOString().split("T")[0];
+    a.href = url;
+    a.download = `смета-${clientSlug}-${dateSlug}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+
   // ── Дублировать смету ──
   const duplicateEstimate = async (est) => {
     const id = genId();
@@ -1699,6 +1760,10 @@ export default function App() {
                               <span style={{flex:1}}/>
                               <span style={{fontSize:10,color:"#353550",whiteSpace:"nowrap"}}>{fmtDate(est.updatedAt)}</span>
                               {author&&<span style={{fontSize:10,color:"#353550",whiteSpace:"nowrap"}}>· {author}</span>}
+                              <button onClick={()=>exportJSON(est)} title="Экспорт JSON"
+                                style={{background:"rgba(74,175,125,.08)",color:"#4caf7d",border:"1px solid rgba(74,175,125,.15)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
+                                📥
+                              </button>
                               {currentUser.role !== "viewer" && (
                                 <button onClick={()=>duplicateEstimate(est)}
                                   style={{background:"rgba(100,100,200,.1)",color:"#7777bb",border:"1px solid rgba(100,100,200,.15)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
