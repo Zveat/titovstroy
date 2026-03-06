@@ -662,8 +662,10 @@ function AdminPanel({ currentUser, onClose }) {
   };
 
   const renameWork = async (code, newName) => {
-    const cat = { ...(localCatalog||{}), renames: { ...((localCatalog||{}).renames||{}), [code]: newName } };
-    await saveCatalog(cat);
+    const cur = _catalogOverrides;
+    const next = { renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], ...cur,
+      renames: { ...(cur.renames||{}), [code]: newName } };
+    await saveCatalog(next);
   };
 
   const addCustomWork = async () => {
@@ -686,29 +688,30 @@ function AdminPanel({ currentUser, onClose }) {
   };
 
   const renameCat = async (origKey, newCat) => {
-    // origKey — ORIGINAL cat name (before any renames)
-    if (!newCat.trim() || newCat.trim() === origKey) return;
-    const cr = { ...((localCatalog||{}).catRenames||{}), [origKey]: newCat.trim() };
-    // Update custom works that use the current display name
-    const currentName = (localCatalog?.catRenames||{})[origKey] || origKey;
-    const custom = ((localCatalog||{}).custom||[]).map(w => w.cat===currentName ? {...w,cat:newCat.trim()} : w);
-    await saveCatalog({ ...(localCatalog||{}), catRenames:cr, custom });
+    if (!newCat.trim()) return;
+    // Читаем напрямую из _catalogOverrides (не из localCatalog — может быть stale)
+    const cur = _catalogOverrides;
+    const cr = { ...(cur.catRenames||{}), [origKey]: newCat.trim() };
+    const currentName = (cur.catRenames||{})[origKey] || origKey;
+    const custom = (cur.custom||[]).map(w => w.cat===currentName ? {...w,cat:newCat.trim()} : w);
+    const next = { renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], ...cur, catRenames:cr, custom };
+    await saveCatalog(next);
     setEditingCat(null);
     Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
 
   const renameSub = async (origCatKey, origSubKey, newSub) => {
-    // origCatKey/origSubKey — ORIGINAL names before any renames
-    if (!newSub.trim() || newSub.trim() === origSubKey) return;
+    if (!newSub.trim()) return;
+    const cur = _catalogOverrides;
     const key = origCatKey+"|"+origSubKey;
-    const sr = { ...((localCatalog||{}).subRenames||{}), [key]: newSub.trim() };
-    // Update custom works
-    const curCat = (localCatalog?.catRenames||{})[origCatKey] || origCatKey;
-    const curSub = (localCatalog?.subRenames||{})[key] || origSubKey;
-    const custom = ((localCatalog||{}).custom||[]).map(w =>
+    const sr = { ...(cur.subRenames||{}), [key]: newSub.trim() };
+    const curCat = (cur.catRenames||{})[origCatKey] || origCatKey;
+    const curSub = (cur.subRenames||{})[key] || origSubKey;
+    const custom = (cur.custom||[]).map(w =>
       w.cat===curCat && w.sub===curSub ? {...w,sub:newSub.trim()} : w
     );
-    await saveCatalog({ ...(localCatalog||{}), subRenames:sr, custom });
+    const next = { renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], ...cur, subRenames:sr, custom };
+    await saveCatalog(next);
     setEditingSub(null);
     Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
