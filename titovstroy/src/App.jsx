@@ -1753,8 +1753,9 @@ export default function App() {
     const dtM = fmtDate(c.mainDate||c.date);
     const dtA = fmtDate(c.annexDate||c.date);
     const total = (c.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
+    const bodyPad = forDocx ? '' : 'padding:20mm 15mm 20mm 30mm;';
     const CSS = `*{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:'Times New Roman',Times,serif;padding:20mm 15mm 20mm 30mm;line-height:1.4;color:#000;font-size:11pt}
+  body{font-family:'Times New Roman',Times,serif;${bodyPad}line-height:1.4;color:#000;font-size:11pt}
   p{margin:2pt 0;text-align:justify}
   .c{text-align:center}.b{font-weight:bold}.t{font-size:13pt;font-weight:bold;text-align:center;margin:5pt 0}
   .s{font-weight:bold;margin:6pt 0 2pt}
@@ -1816,7 +1817,7 @@ export default function App() {
       const thW = forDocx
         ? (w,txt,align) => "<th width=\""+w+"\" style=\"width:"+w+";font-size:7.5pt;background:#ddd;font-weight:bold;text-align:"+(align||"center")+";border:1px solid #000;padding:2pt 3pt\">"+txt+"</th>"
         : (w,txt,align) => "<th style=\"width:"+w+";text-align:"+(align||"center")+"\">" + txt + "</th>";
-      let html = "<table"+(forDocx ? ' width="100%"' : "")+">"+"<thead><tr>"
+      let html = "<table"+(forDocx ? ' width="100%" style="table-layout:fixed;width:100%;border-collapse:collapse;font-size:8pt"' : "")+">"+"<thead><tr>"
         + thW("5%","\u2116")
         + thW("45%","\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0440\u0430\u0431\u043e\u0442","left")
         + thW("8%","\u0415\u0434.")
@@ -2203,7 +2204,7 @@ export default function App() {
       alert("Библиотека для DOCX не загружена. Проверьте подключение к интернету.");
       return;
     }
-    const docxBlob = htmlDocx.asBlob(html, {orientation:"portrait", margins:{top:720,right:720,bottom:720,left:1440}});
+    const docxBlob = htmlDocx.asBlob(html, {orientation:"portrait", margins:{top:1134,right:851,bottom:1134,left:1701}});
     const url = URL.createObjectURL(docxBlob);
     const a = document.createElement("a");
     const clientName = client?.name || c.estClient || "договор";
@@ -2227,7 +2228,7 @@ export default function App() {
         const html = buildContractHtml(c, client, ca, true);
         let fileToShare = null;
         if(typeof htmlDocx !== "undefined") {
-          const docxBlob = htmlDocx.asBlob(html, {orientation:"portrait",margins:{top:720,right:720,bottom:720,left:1440}});
+          const docxBlob = htmlDocx.asBlob(html, {orientation:"portrait",margins:{top:1134,right:851,bottom:1134,left:1701}});
           fileToShare = new File([docxBlob], safeName+".docx", {type:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"});
         } else {
           const htmlBlob = new Blob([html], {type:"text/html"});
@@ -2245,7 +2246,7 @@ export default function App() {
     // Fallback: скачать DOCX + открыть WhatsApp
     if(typeof htmlDocx !== "undefined") {
       const html = buildContractHtml(c, client, ca, true);
-      const docxBlob = htmlDocx.asBlob(html, {orientation:"portrait",margins:{top:720,right:720,bottom:720,left:1440}});
+      const docxBlob = htmlDocx.asBlob(html, {orientation:"portrait",margins:{top:1134,right:851,bottom:1134,left:1701}});
       const url = URL.createObjectURL(docxBlob);
       const a = document.createElement("a");
       a.href = url; a.download = safeName+".docx"; a.click();
