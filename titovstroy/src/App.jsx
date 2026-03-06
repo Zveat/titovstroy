@@ -1503,7 +1503,7 @@ export default function App() {
           {/* Шапка */}
           <div className="list-header" style={{background:"#0e1122",borderBottom:"1px solid #181c2e",padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
             <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
-              <img src="/logo.png" alt="TitovStroy" style={{width:32,height:32,objectFit:"contain",flexShrink:0}}/>
+              <div style={{width:30,height:30,borderRadius:7,background:"linear-gradient(135deg,#b8904a,#d4a85a)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:14,color:"#0c0e1a",flexShrink:0}}>T</div>
               <div style={{minWidth:0}}>
                 <div style={{fontWeight:800,fontSize:13,whiteSpace:"nowrap",color:"#e2ddd4"}}>TitovStroy</div>
                 <div style={{fontSize:10,color:"#454560",whiteSpace:"nowrap"}}>
