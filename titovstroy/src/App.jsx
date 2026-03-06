@@ -1060,8 +1060,16 @@ export default function App() {
   const [currentId, setCurrentId] = useState(null);
   const [activeCat, setActiveCat] = useState(cats[0]);
   const [activeSub, setActiveSub] = useState(Object.keys(Gdyn[cats[0]]||{})[0]);
+  const [rows, setRows] = useState({});
+  const [proj, setProj] = useState({...EMPTY_PROJ});
+  const [discount, setDiscount] = useState(0);
+  const [note, setNote] = useState("");
+  const [showKP, setShowKP] = useState(false);
+  const [editPrices, setEditPrices] = useState(false);
+  const [search, setSearch] = useState("");
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
 
-  // Когда каталог меняется — проверяем что activeCat ещё существует
+  // Когда каталог меняется — синхронизируем activeCat/activeSub
   useEffect(() => {
     if (!Gdyn[activeCat]) {
       const firstCat = Object.keys(Gdyn)[0] || "";
@@ -1074,14 +1082,6 @@ export default function App() {
       }
     }
   }, [catalogVersion]);
-  const [rows, setRows] = useState({});
-  const [proj, setProj] = useState({...EMPTY_PROJ});
-  const [discount, setDiscount] = useState(0);
-  const [note, setNote] = useState("");
-  const [showKP, setShowKP] = useState(false);
-  const [editPrices, setEditPrices] = useState(false);
-  const [search, setSearch] = useState("");
-  const [deleteConfirm, setDeleteConfirm] = useState(null);
 
   // ── Загрузка списка смет из shared storage ──
   const loadEstimates = useCallback(async () => {
@@ -1157,11 +1157,10 @@ export default function App() {
     );
   }, [search]);
   const isSearching = search.trim().length > 0;
-  const subs = Object.keys(Gdyn[safeCat] || {});
   // Защита от краша: если activeCat не в Gdyn — берём первый
   const safeCat = Gdyn[activeCat] ? activeCat : (Object.keys(Gdyn)[0]||"");
+  const subs = Object.keys(Gdyn[safeCat] || {});
   const safeActiveSub = subs.includes(activeSub) ? activeSub : (subs[0]||"");
-  const safeSubs = Object.keys(Gdyn[safeCat]||{});
 
   // ── Открыть смету на редактирование ──
   const openEstimate = (est) => {
