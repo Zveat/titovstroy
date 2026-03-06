@@ -381,19 +381,31 @@ function LoginScreen({ onLogin }) {
 // ─── ПАНЕЛЬ АДМИНИСТРАТОРА (управление пользователями) ───────────────────────
 // Прайс редактор — карточки ниже
 
-// Простая карточка — получает данные и функцию обновления от родителя
-function PriceWorkCard({ w, tiers, fixedVal, onChange }) {
-  // onChange(patch) — патч это {tiers:...} или {fixedPrice:...}
-  const baseTiers = w.tiers || [];
-  const showTiers = tiers.length > 0;
-  const hasChange = tiers.some((t,i) => t.price !== (baseTiers[i]?.price ?? ""))
-    || (fixedVal !== "" && Number(fixedVal) !== w.fixedPrice);
-  const s = (extra) => ({background:"#0c0e1a",color:"#ddd8ce",borderRadius:5,padding:"5px 8px",fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",...extra});
+// Карточка с полностью локальным состоянием — изолирована от родителя
+// Принимает начальные данные ОДИН РАЗ, дальше живёт сама
+// При размонтировании сохраняет данные в priceCardCache
+const priceCardCache = {};
 
-  const updTier = (ti, field, val) =>
-    onChange({tiers: tiers.map((t,i) => i===ti ? {...t,[field]: val===""?"":Number(val)} : t)});
-  const remTier = (ti) => onChange({tiers: tiers.filter((_,i)=>i!==ti)});
-  const addTier = () => { const last=tiers[tiers.length-1]; const m=last?(Number(last.max)||0)+1:1; onChange({tiers:[...tiers,{min:m,max:m+49,price:""}]}); };
+function PriceWorkCard({ w, initTiers, initFixed }) {
+  const code = w.code;
+  const baseTiers = w.tiers || [];
+
+  const [tiers, setTiers] = useState(() => {
+    if (priceCardCache[code]) return priceCardCache[code].tiers;
+    return initTiers;
+  });
+  const [fixedVal, setFixed] = useState(() => {
+    if (priceCardCache[code]) return priceCardCache[code].fixedPrice;
+    return initFixed;
+  });
+
+  // Синхронизируем кэш при каждом изменении
+  const updTiers = (t) => { priceCardCache[code] = {tiers:t, fixedPrice:fixedVal}; setTiers(t); };
+  const updFixed = (v) => { priceCardCache[code] = {tiers, fixedPrice:v}; setFixed(v); };
+
+  const showTiers = tiers.length > 0;
+  const hasChange = !!priceCardCache[code];
+  const s = (extra) => ({background:"#0c0e1a",color:"#ddd8ce",borderRadius:5,padding:"5px 8px",fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",...extra});
 
   return (
     <div style={{background:hasChange?"rgba(184,144,74,.05)":"transparent",border:`1px solid ${hasChange?"rgba(184,144,74,.25)":"#1a1e30"}`,borderRadius:8,padding:"10px 12px",marginBottom:6}}>
@@ -408,25 +420,34 @@ function PriceWorkCard({ w, tiers, fixedVal, onChange }) {
           </div>
           {tiers.map((t,ti)=>(
             <div key={ti} style={{display:"grid",gridTemplateColumns:"70px 70px 1fr 28px",gap:4,marginBottom:3,alignItems:"center"}}>
-              <input type="number" min="0" value={t.min} onChange={e=>updTier(ti,"min",e.target.value)}
+              <input type="number" min="0" value={t.min}
+                onChange={e=>updTiers(tiers.map((x,i)=>i===ti?{...x,min:e.target.value===""?"":Number(e.target.value)}:x))}
                 style={s({border:"1px solid #20243a",color:"#9090b0",textAlign:"center"})}/>
-              <input type="number" min="0" value={t.max} onChange={e=>updTier(ti,"max",e.target.value)}
+              <input type="number" min="0" value={t.max}
+                onChange={e=>updTiers(tiers.map((x,i)=>i===ti?{...x,max:e.target.value===""?"":Number(e.target.value)}:x))}
                 style={s({border:"1px solid #20243a",color:"#9090b0",textAlign:"center"})}/>
               <input type="number" min="0" value={t.price} placeholder={String(baseTiers[ti]?.price??"")}
-                onChange={e=>updTier(ti,"price",e.target.value)}
+                onChange={e=>updTiers(tiers.map((x,i)=>i===ti?{...x,price:e.target.value===""?"":Number(e.target.value)}:x))}
                 style={s({border:`1px solid ${t.price!==""?"#b8904a":"#20243a"}`,textAlign:"right"})}/>
-              <button onClick={()=>remTier(ti)} style={{background:"rgba(200,60,60,.15)",color:"#e07070",border:"none",borderRadius:5,padding:"5px",cursor:"pointer",fontSize:11}}>✕</button>
+              <button onClick={()=>updTiers(tiers.filter((_,i)=>i!==ti))}
+                style={{background:"rgba(200,60,60,.15)",color:"#e07070",border:"none",borderRadius:5,padding:"5px",cursor:"pointer",fontSize:11}}>✕</button>
             </div>
           ))}
-          <button onClick={addTier} style={{marginTop:4,background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit",width:"100%"}}>+ Добавить диапазон</button>
+          <button onClick={()=>{const last=tiers[tiers.length-1];const m=last?(Number(last.max)||0)+1:1;updTiers([...tiers,{min:m,max:m+49,price:""}]);}}
+            style={{marginTop:4,background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit",width:"100%"}}>
+            + Добавить диапазон
+          </button>
         </div>
       ) : (
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <input type="number" min="0" placeholder={w.fixedPrice!=null?String(w.fixedPrice):"нет цены"}
-            value={fixedVal} onChange={e=>onChange({fixedPrice:e.target.value})}
+            value={fixedVal} onChange={e=>updFixed(e.target.value)}
             style={{background:"#0c0e1a",border:`1px solid ${fixedVal!==""?"#b8904a":"#20243a"}`,color:"#ddd8ce",borderRadius:6,padding:"6px 10px",fontFamily:"inherit",fontSize:13,outline:"none",width:150,textAlign:"right"}}/>
           <span style={{fontSize:11,color:"#454560"}}>₸</span>
-          <button onClick={addTier} style={{marginLeft:"auto",background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ Диапазоны</button>
+          <button onClick={()=>updTiers([{min:1,max:50,price:""}])}
+            style={{marginLeft:"auto",background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+            + Диапазоны
+          </button>
         </div>
       )}
     </div>
@@ -527,25 +548,28 @@ function AdminPanel({ currentUser, onClose }) {
   };
 
   const savePrices = async () => {
-    if (!localPrices) return;
     setPriceSaving(true);
-    const overrides = {};
-    for (const w of WORKS_DATA) {
-      const lp = localPrices[w.code];
-      if (!lp) continue;
-      const validTiers = (lp.tiers||[])
+    // Берём то что уже было сохранено раньше
+    const overrides = {...savedOverrides};
+    // Применяем ТОЛЬКО то что пользователь реально трогал в этой сессии (из кэша)
+    for (const [code, src] of Object.entries(priceCardCache)) {
+      const w = WORKS_DATA.find(x => x.code === code);
+      if (!w) continue;
+      const validTiers = (src.tiers||[])
         .filter(t => t.price!==""&&t.price!==undefined&&!isNaN(Number(t.price))&&t.min!==""&&t.max!=="")
         .map(t=>({min:Number(t.min),max:Number(t.max),price:Number(t.price)}));
-      const hasFixed = lp.fixedPrice!==""&&!isNaN(Number(lp.fixedPrice));
       if (validTiers.length > 0) {
-        overrides[w.code] = {tiers:validTiers};
-      } else if (hasFixed && lp.tiers.length===0) {
-        overrides[w.code] = {fixedPrice:Number(lp.fixedPrice),tiers:[]};
+        overrides[code] = {tiers: validTiers};
+      } else if (src.fixedPrice!==""&&src.fixedPrice!==undefined&&!isNaN(Number(src.fixedPrice))) {
+        overrides[code] = {fixedPrice: Number(src.fixedPrice), tiers:[]};
+      } else {
+        delete overrides[code];
       }
     }
     await storage.set(PRICES_KEY, JSON.stringify(overrides));
     setPriceOverrides(overrides);
     setSavedOverrides(overrides);
+    Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
     setPriceSaving(false);
     setPriceMsg("✓ Прайс сохранён!");
     setTimeout(()=>setPriceMsg(""),3000);
@@ -554,10 +578,8 @@ function AdminPanel({ currentUser, onClose }) {
   const roleLabel = r => r === "admin" ? "👑 Админ" : "👤 Замерщик";
 
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:16,fontFamily:"'Golos Text','Segoe UI',sans-serif"}}
-      onClick={onClose}>
-      <div style={{background:"#111425",border:"1px solid #1c2035",borderRadius:14,padding:"24px 28px",maxWidth:520,width:"100%",maxHeight:"88vh",overflowY:"auto"}}
-        onClick={e=>e.stopPropagation()}>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:16,fontFamily:"'Golos Text','Segoe UI',sans-serif"}}>
+      <div style={{background:"#111425",border:"1px solid #1c2035",borderRadius:14,padding:"24px 28px",maxWidth:520,width:"100%",maxHeight:"88vh",overflowY:"auto",position:"relative"}}>
 
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
           <div style={{fontWeight:800,fontSize:16,color:"#e2ddd4"}}>⚙️ Администрирование</div>
@@ -668,26 +690,19 @@ function AdminPanel({ currentUser, onClose }) {
           </>
         ) : (
           /* ═══ ВКЛАДКА ПРАЙС-ЛИСТ ═══ */
-          <div>
+          <div style={{display:"flex",flexDirection:"column",height:"calc(88vh - 160px)"}}>
             {!localPrices ? <div style={{textAlign:"center",padding:30,color:"#454560"}}>Загрузка...</div> : null}
-            {localPrices && <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"center"}}>
+            {localPrices && <>
+              {/* Поиск — фиксированный */}
               <input
-                style={{flex:1,background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:7,padding:"8px 12px",fontFamily:"inherit",fontSize:12,outline:"none"}}
+                style={{width:"100%",boxSizing:"border-box",background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:7,padding:"8px 12px",fontFamily:"inherit",fontSize:12,outline:"none",marginBottom:8}}
                 placeholder="🔍 Поиск по названию..."
                 value={priceSearch}
                 onChange={e=>setPriceSearch(e.target.value)}
               />
-              <button onClick={savePrices} disabled={priceSaving}
-                style={{background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:7,padding:"8px 16px",fontFamily:"inherit",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
-                {priceSaving ? "💾..." : "💾 Сохранить"}
-              </button>
-            </div>
-            <div style={{fontSize:10,color:"#454560",marginBottom:10,lineHeight:1.5}}>
-              Для позиций без диапазонов — введите фиксированную цену.<br/>
-              Для позиций с диапазонами — отредактируйте каждый диапазон или добавьте новые.<br/>
-              <span style={{color:"#b8904a"}}>Пустое поле = цена из базы данных.</span>
-            </div>
-            <div style={{display:"flex",flexDirection:"column",gap:2}}>
+              {/* Список — скроллится */}
+              <div style={{flex:1,overflowY:"auto",paddingRight:4}}>
+              <div style={{display:"flex",flexDirection:"column",gap:2}}>
               {(() => {
                 const q = priceSearch.toLowerCase();
                 const filtered = WORKS_DATA.filter(w =>
@@ -704,23 +719,25 @@ function AdminPanel({ currentUser, onClose }) {
                     <div style={{fontSize:10,fontWeight:700,color:"#b8904a",letterSpacing:1,textTransform:"uppercase",padding:"6px 0 4px",borderBottom:"1px solid #1c2035",marginBottom:6}}>{grp}</div>
                     {works.map(w => (
                       <PriceWorkCard key={w.code} w={w}
-                        tiers={localPrices[w.code]?.tiers || []}
-                        fixedVal={localPrices[w.code]?.fixedPrice || ""}
-                        onChange={patch => setLocalPrices(prev => ({
-                          ...prev,
-                          [w.code]: {
-                            tiers: patch.tiers !== undefined ? patch.tiers : prev[w.code].tiers,
-                            fixedPrice: patch.fixedPrice !== undefined ? patch.fixedPrice : prev[w.code].fixedPrice
-                          }
-                        }))}
+                        initTiers={localPrices?.[w.code]?.tiers || []}
+                        initFixed={localPrices?.[w.code]?.fixedPrice || ""}
                       />
                     ))}
                   </div>
                 ));
               })()}
             </div>
-            {priceMsg && <div style={{marginTop:12,textAlign:"center",fontSize:12,color:"#4caf7d",fontWeight:700}}>{priceMsg}</div>}
-            }
+              </div>{/* end list */}
+              </div>{/* end scroll */}
+              {/* Кнопка сохранить — фиксирована снизу */}
+              <div style={{paddingTop:10,borderTop:"1px solid #1c2035",marginTop:6}}>
+                {priceMsg && <div style={{textAlign:"center",fontSize:12,color:"#4caf7d",fontWeight:700,marginBottom:6}}>{priceMsg}</div>}
+                <button onClick={savePrices} disabled={priceSaving}
+                  style={{width:"100%",background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:8,padding:"11px",fontFamily:"inherit",fontSize:13,fontWeight:800,cursor:"pointer"}}>
+                  {priceSaving ? "💾 Сохранение..." : "💾 Сохранить прайс"}
+                </button>
+              </div>
+            </>}
           </div>
         )}
       </div>
