@@ -1754,18 +1754,18 @@ export default function App() {
     const dtA = fmtDate(c.annexDate||c.date);
     const total = (c.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
     const CSS = `*{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:'Times New Roman',Times,serif;padding:20mm 15mm 20mm 30mm;line-height:1.5;color:#000;font-size:12pt}
-  p{margin:3pt 0;text-align:justify}
-  .c{text-align:center}.b{font-weight:bold}.t{font-size:14pt;font-weight:bold;text-align:center;margin:6pt 0}
-  .s{font-weight:bold;margin:8pt 0 3pt}
-  .city-line{text-align:center;margin:4pt 0}
-  table{width:100%;border-collapse:collapse;margin:6pt 0;font-size:8.5pt;table-layout:fixed}
-  th,td{border:1px solid #000;padding:2pt 3pt;word-wrap:break-word;overflow-wrap:break-word}
-  th{background:#ddd;font-weight:bold;text-align:center;font-size:8pt}
+  body{font-family:'Times New Roman',Times,serif;padding:20mm 15mm 20mm 30mm;line-height:1.4;color:#000;font-size:11pt}
+  p{margin:2pt 0;text-align:justify}
+  .c{text-align:center}.b{font-weight:bold}.t{font-size:13pt;font-weight:bold;text-align:center;margin:5pt 0}
+  .s{font-weight:bold;margin:6pt 0 2pt}
+  .city-line{text-align:center;margin:3pt 0}
+  table{width:100%;border-collapse:collapse;margin:4pt 0;font-size:8pt;table-layout:fixed;mso-table-lspace:0pt;mso-table-rspace:0pt}
+  th,td{border:1px solid #000;padding:2pt 3pt;word-wrap:break-word;overflow-wrap:break-word;mso-line-height-rule:exactly;line-height:1.2}
+  th{background:#ddd;font-weight:bold;text-align:center;font-size:7.5pt}
   .tc{text-align:center}.tr{text-align:right}
-  .st{width:100%;border-collapse:collapse;margin-top:20pt;table-layout:auto}
-  .st td{border:none;vertical-align:top;width:50%;padding:0 8pt 0 0;font-size:10pt;line-height:1.8}
-  tr{page-break-inside:avoid}
+  .st{width:100%;border-collapse:collapse;margin-top:14pt;table-layout:fixed}
+  .st td{border:none;vertical-align:top;width:50%;padding:0 6pt 0 0;font-size:9.5pt;line-height:1.5}
+  tr{page-break-inside:avoid;mso-row-margin-right:0pt}
   @media print{.np{display:none}body{padding:10mm 10mm 10mm 20mm}@page{size:A4;margin:0}
   tr{page-break-inside:avoid}table{page-break-inside:auto}}`
     const isYur = client?.clientType==="yur";
@@ -1812,13 +1812,17 @@ export default function App() {
         catMap[cat].rows.push({...w,sum});
       });
       const multiCat = catOrder.length > 1;
-      let html = "<table><thead><tr>"
-        + "<th style=\"width:5%\">\u2116</th>"
-        + "<th style=\"width:45%;text-align:left\">\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0440\u0430\u0431\u043e\u0442</th>"
-        + "<th style=\"width:8%\">\u0415\u0434.</th>"
-        + "<th style=\"width:8%\">\u041e\u0431\u044a\u0451\u043c</th>"
-        + "<th style=\"width:17%\">\u0426\u0435\u043d\u0430 \u0437\u0430 \u0435\u0434.</th>"
-        + "<th style=\"width:17%\">\u0421\u0443\u043c\u043c\u0430</th>"
+      // For DOCX: use width="" attribute which html-docx-js respects
+      const thW = forDocx
+        ? (w,txt,align) => "<th width=\""+w+"\" style=\"width:"+w+";font-size:7.5pt;background:#ddd;font-weight:bold;text-align:"+(align||"center")+";border:1px solid #000;padding:2pt 3pt\">"+txt+"</th>"
+        : (w,txt,align) => "<th style=\"width:"+w+";text-align:"+(align||"center")+"\">" + txt + "</th>";
+      let html = "<table"+(forDocx ? ' width="100%"' : "")+">"+"<thead><tr>"
+        + thW("5%","\u2116")
+        + thW("45%","\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0440\u0430\u0431\u043e\u0442","left")
+        + thW("8%","\u0415\u0434.")
+        + thW("8%","\u041e\u0431\u044a\u0451\u043c")
+        + thW("17%","\u0426\u0435\u043d\u0430 \u0437\u0430 \u0435\u0434.")
+        + thW("17%","\u0421\u0443\u043c\u043c\u0430")
         + "</tr></thead><tbody>";
       let globalNum = 0;
       catOrder.forEach(function(cat){
@@ -1834,13 +1838,14 @@ export default function App() {
           }
           globalNum++;
           const bg = i%2===0 ? "#f8f6f0" : "#f0ede5";
+          const tdS = forDocx ? ";line-height:1.1;mso-line-height-rule:exactly" : "";
           html += "<tr style=\"background:" + bg + "\">"
-            + "<td class=\"tc\">" + globalNum + "</td>"
-            + "<td>" + (w.name||"") + "</td>"
-            + "<td class=\"tc\">" + (w.unit||"\u043c\xb2") + "</td>"
-            + "<td class=\"tc\">" + (w.quantity||"") + "</td>"
-            + "<td class=\"tr\">" + fmtN(w.price) + " \u20b8</td>"
-            + "<td class=\"tr\"><b>" + fmtN(w.sum) + " \u20b8</b></td>"
+            + (forDocx ? '<td width="5%"' : '<td') + ' class="tc" style="font-size:8pt'+tdS+'">' + globalNum + "</td>"
+            + (forDocx ? '<td width="45%"' : '<td') + ' style="font-size:8pt'+tdS+'">' + (w.name||"") + "</td>"
+            + (forDocx ? '<td width="8%"' : '<td') + ' class="tc" style="font-size:8pt'+tdS+'">' + (w.unit||"\u043c\xb2") + "</td>"
+            + (forDocx ? '<td width="8%"' : '<td') + ' class="tc" style="font-size:8pt'+tdS+'">' + (w.quantity||"") + "</td>"
+            + (forDocx ? '<td width="17%"' : '<td') + ' class="tr" style="font-size:8pt'+tdS+'">' + fmtN(w.price) + " \u20b8</td>"
+            + (forDocx ? '<td width="17%"' : '<td') + ' class="tr" style="font-size:8pt;font-weight:bold'+tdS+'">' + fmtN(w.sum) + " \u20b8</td>"
             + "</tr>";
         });
         html += "<tr style=\"background:#ede8d5\">"
@@ -1876,7 +1881,7 @@ export default function App() {
     let body = "";
     // ─────── 1 & 2. ДОГОВОР РЕМОНТА (ФИЗ / ЮР) ───────
     if(type==="repair_fiz"||type==="repair_yur"){
-      const annex1 = `<div style="page-break-before:always">
+      const annex1 = `<div style="page-break-before:always;mso-break-type:page-break">
   <p class="t">Приложение №1</p>
   <p class="c b">Перечень этапов, видов и стоимость работ</p>
   <p class="c">к Договору ремонтно-отделочных работ</p>
