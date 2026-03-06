@@ -425,246 +425,9 @@ function LoginScreen({ onLogin }) {
         </div>
         <div style={{textAlign:"center",marginTop:16,fontSize:11,color:"#2a2a40"}}>TitovStroy · Только для сотрудников</div>
       </div>
-
-
-      {/* ═══════════════════════════════════════════════════════════════════
-          ЭКРАН 3: ДОГОВОРЫ
-      ═══════════════════════════════════════════════════════════════════ */}
-      {screen === "contracts" && (
-        <div style={{maxWidth:860,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
-          {/* Шапка */}
-          <div style={{background:"#0e1122",borderBottom:"1px solid #181c2e",padding:"12px 20px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
-            <button onClick={()=>setScreen("list")} style={{background:"none",border:"none",color:"#555575",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
-            <div style={{width:28,height:28,borderRadius:6,background:"linear-gradient(135deg,#b8904a,#d4a85a)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#0c0e1a"}}>T</div>
-            <div style={{fontWeight:800,fontSize:14,color:"#e2ddd4"}}>Договоры</div>
-            <div style={{flex:1}}/>
-            {contractTab === "list" && currentUser.role !== "viewer" && (
-              <button className="btn btn-g" style={{fontSize:12,padding:"7px 14px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:"",date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:""}); setContractTab("editor"); }}>+ Новый</button>
-            )}
-          </div>
-
-          {/* Табы */}
-          <div style={{display:"flex",gap:4,padding:"12px 20px 0",borderBottom:"1px solid #181c2e",background:"#0e1122"}}>
-            {[["list","📋 Список"],["clients","👥 Клиенты"],["contragents","🏢 ТОО"]].map(([k,l])=>(
-              <button key={k} onClick={()=>setContractTab(k)}
-                style={{background:"none",border:"none",borderBottom:`2px solid ${contractTab===k?"#b8904a":"transparent"}`,color:contractTab===k?"#b8904a":"#555575",cursor:"pointer",padding:"8px 14px",fontSize:13,fontWeight:600,fontFamily:"inherit",transition:"all .15s"}}>
-                {l}
-              </button>
-            ))}
-          </div>
-
-          <div style={{padding:"20px"}}>
-
-            {/* ── СПИСОК ДОГОВОРОВ ── */}
-            {contractTab === "list" && (
-              <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                {contracts.length === 0 && (
-                  <div style={{textAlign:"center",padding:"60px 0",color:"#454560"}}>
-                    <div style={{fontSize:40,marginBottom:12}}>📋</div>
-                    <div style={{fontWeight:700,marginBottom:6}}>Договоров пока нет</div>
-                    <div style={{fontSize:12}}>Создайте новый или используйте кнопку 📄 на карточке сметы</div>
-                  </div>
-                )}
-                {contracts.map(c=>{
-                  const client = contractClients.find(x=>x.id===c.clientId);
-                  const ca = contragents.find(x=>x.id===c.contragentId);
-                  const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
-                  return (
-                    <div key={c.id} style={{background:"#111425",border:"1px solid #1c2035",borderRadius:11,padding:"14px 18px",cursor:"pointer",transition:"all .15s"}}
-                      onClick={()=>{ setCurrentContract({...c}); setContractTab("editor"); }}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-                        <div>
-                          <div style={{fontWeight:700,fontSize:14,color:"#e2ddd4"}}>
-                            {c.number ? `Договор №${c.number}` : "Без номера"}
-                          </div>
-                          <div style={{fontSize:12,color:"#555575",marginTop:3}}>
-                            {client ? `👤 ${client.name}` : c.estClient ? `👤 ${c.estClient} (не добавлен)` : "Клиент не выбран"}
-                            {ca && <span style={{marginLeft:8}}>· {ca.name}</span>}
-                          </div>
-                          <div style={{fontSize:11,color:"#454560",marginTop:3}}>
-                            {new Date(c.date||Date.now()).toLocaleDateString("ru-RU")} · {(c.works||[]).length} позиций
-                          </div>
-                        </div>
-                        <div style={{textAlign:"right",flexShrink:0}}>
-                          <div style={{fontWeight:800,fontSize:16,color:"#b8904a"}}>{fmt(total)} ₸</div>
-                          <div style={{display:"flex",gap:5,marginTop:6}}>
-                            <button onClick={e=>{e.stopPropagation();
-                              const cl = contractClients.find(x=>x.id===c.clientId);
-                              const ca2 = contragents.find(x=>x.id===c.contragentId);
-                              generateContractPdf(c, cl, ca2);
-                            }} style={{background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>
-                            {currentUser.role==="admin" && (
-                              <button onClick={e=>{e.stopPropagation(); if(window.confirm("Удалить договор?")) saveContracts(contracts.filter(x=>x.id!==c.id));}}
-                                style={{background:"rgba(200,60,60,.08)",color:"#c06060",border:"1px solid rgba(200,60,60,.15)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* ── РЕДАКТОР ДОГОВОРА ── */}
-            {contractTab === "editor" && currentContract && !currentContract._mode && (
-              <ContractEditor
-                contract={currentContract}
-                clients={contractClients}
-                contragents={contragents}
-                onUpdate={setCurrentContract}
-                onBack={()=>setContractTab("list")}
-                onSave={async ()=>{
-                  const list = contracts.filter(x=>x.id!==currentContract.id);
-                  await saveContracts([...list, currentContract]);
-                  setContractTab("list");
-                }}
-                onPdf={()=>{
-                  const cl = contractClients.find(x=>x.id===currentContract.clientId);
-                  const ca = contragents.find(x=>x.id===currentContract.contragentId);
-                  generateContractPdf(currentContract, cl, ca);
-                }}
-                onAddClientFromEstimate={async ()=>{
-                  const newClient = {id:Date.now().toString(),name:currentContract.estClient||"",phone:currentContract.estPhone||"",address:currentContract.estAddress||"",iin:"",doc:"",type:"физ"};
-                  const list=[...contractClients,newClient];
-                  await saveContractClients(list);
-                  setCurrentContract(prev=>({...prev,clientId:newClient.id}));
-                }}
-                currentUserRole={currentUser.role}
-                fmt={fmt}
-              />
-            )}
-
-            {/* ── КЛИЕНТЫ ── */}}
-            {contractTab === "clients" && (
-              <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div style={{fontWeight:700,color:"#888",fontSize:12}}>КЛИЕНТЫ ({contractClients.length})</div>
-                  <button onClick={()=>{ setCurrentContract({id:Date.now().toString(),name:"",phone:"",address:"",iin:"",doc:"",type:"физ",_mode:"newClient"}); setContractTab("clientEditor"); }}
-                    className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
-                </div>
-                {contractClients.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#454560",fontSize:13}}>Клиентов пока нет</div>}
-                {contractClients.map(c=>(
-                  <div key={c.id} style={{background:"#111425",border:"1px solid #1c2035",borderRadius:10,padding:"14px 16px"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                      <div>
-                        <div style={{fontWeight:700,fontSize:14,color:"#e2ddd4"}}>{c.name||"Без имени"}</div>
-                        <div style={{fontSize:11,color:"#555575",marginTop:3}}>
-                          {c.type==="физ"?"👤 Физ. лицо":"🏢 Юр. лицо"}
-                          {c.iin&&<span style={{marginLeft:8}}>ИИН: {c.iin}</span>}
-                        </div>
-                        {c.phone&&<div style={{fontSize:11,color:"#454560",marginTop:2}}>📞 {c.phone}</div>}
-                        {c.address&&<div style={{fontSize:11,color:"#454560",marginTop:2}}>📍 {c.address}</div>}
-                      </div>
-                      <div style={{display:"flex",gap:5}}>
-                        <button onClick={()=>{ setCurrentContract({...c,_mode:"editClient"}); setContractTab("clientEditor"); }}
-                          style={{background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
-                        {currentUser.role==="admin"&&<button onClick={()=>{ if(window.confirm("Удалить клиента?")) saveContractClients(contractClients.filter(x=>x.id!==c.id)); }}
-                          style={{background:"rgba(200,60,60,.08)",color:"#c06060",border:"1px solid rgba(200,60,60,.15)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* ── РЕДАКТОР КЛИЕНТА ── */}
-            {contractTab === "clientEditor" && currentContract?._mode?.includes("Client") && (
-              <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                  <button onClick={()=>setContractTab("clients")} style={{background:"none",border:"none",color:"#555575",cursor:"pointer",fontSize:18}}>←</button>
-                  <span style={{fontWeight:700,fontSize:15,color:"#e2ddd4"}}>{currentContract._mode==="newClient"?"Новый клиент":"Редактировать клиента"}</span>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                  {[["ФИО / Название","name",""],["Телефон","phone",""],["Адрес","address",""],["ИИН / БИН","iin",""],["Документ (уд. личности)","doc",""]].map(([label,field])=>(
-                    <div key={field}>
-                      <div style={{fontSize:11,color:"#555575",marginBottom:4}}>{label}</div>
-                      <input className="fi" value={currentContract[field]||""} onChange={e=>setCurrentContract(p=>({...p,[field]:e.target.value}))} placeholder={label}/>
-                    </div>
-                  ))}
-                  <div>
-                    <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Тип</div>
-                    <select className="fi" value={currentContract.type||"физ"} onChange={e=>setCurrentContract(p=>({...p,type:e.target.value}))}>
-                      <option value="физ">Физ. лицо</option>
-                      <option value="юр">Юр. лицо</option>
-                    </select>
-                  </div>
-                </div>
-                <button className="btn btn-g" onClick={()=>{
-                  const {_mode,...clientData} = currentContract;
-                  const list = _mode==="newClient" ? [...contractClients,clientData] : contractClients.map(x=>x.id===clientData.id?clientData:x);
-                  saveContractClients(list);
-                  setContractTab("clients");
-                }}>💾 Сохранить</button>
-              </div>
-            )}
-
-            {/* ── ТОО ── */}
-            {contractTab === "contragents" && (
-              <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div style={{fontWeight:700,color:"#888",fontSize:12}}>ТОО / ПОДРЯДЧИКИ ({contragents.length})</div>
-                  <button onClick={()=>{ setCurrentContract({id:Date.now().toString(),name:"",bin:"",bank:"",bik:"",account:"",director:"",phone:"",email:"",address:"",_mode:"newCA"}); setContractTab("caEditor"); }}
-                    className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
-                </div>
-                {contragents.map(c=>(
-                  <div key={c.id} style={{background:"#111425",border:"1px solid #1c2035",borderRadius:10,padding:"14px 16px"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                      <div>
-                        <div style={{fontWeight:700,fontSize:14,color:"#e2ddd4"}}>{c.name}</div>
-                        <div style={{fontSize:11,color:"#555575",marginTop:2}}>БИН: {c.bin} · {c.bank}</div>
-                        <div style={{fontSize:11,color:"#454560",marginTop:2}}>Директор: {c.director} · {c.phone}</div>
-                      </div>
-                      <div style={{display:"flex",gap:5}}>
-                        <button onClick={()=>{ setCurrentContract({...c,_mode:"editCA"}); setContractTab("caEditor"); }}
-                          style={{background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
-                        {currentUser.role==="admin"&&contragents.length>1&&<button onClick={()=>{ if(window.confirm("Удалить?")) saveContragents(contragents.filter(x=>x.id!==c.id)); }}
-                          style={{background:"rgba(200,60,60,.08)",color:"#c06060",border:"1px solid rgba(200,60,60,.15)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* ── РЕДАКТОР ТОО ── */}
-            {contractTab === "caEditor" && currentContract?._mode?.includes("CA") && (
-              <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                  <button onClick={()=>setContractTab("contragents")} style={{background:"none",border:"none",color:"#555575",cursor:"pointer",fontSize:18}}>←</button>
-                  <span style={{fontWeight:700,fontSize:15,color:"#e2ddd4"}}>{currentContract._mode==="newCA"?"Новое ТОО":"Редактировать ТОО"}</span>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                  {[["Название","name"],["БИН","bin"],["Банк","bank"],["БИК","bik"],["Расчётный счёт","account"],["Директор","director"],["Телефон","phone"],["Email","email"],["Адрес","address"]].map(([label,field])=>(
-                    <div key={field}>
-                      <div style={{fontSize:11,color:"#555575",marginBottom:4}}>{label}</div>
-                      <input className="fi" value={currentContract[field]||""} onChange={e=>setCurrentContract(p=>({...p,[field]:e.target.value}))} placeholder={label}/>
-                    </div>
-                  ))}
-                </div>
-                <button className="btn btn-g" onClick={()=>{
-                  const {_mode,...caData} = currentContract;
-                  const list = _mode==="newCA" ? [...contragents,caData] : contragents.map(x=>x.id===caData.id?caData:x);
-                  saveContragents(list);
-                  setContractTab("contragents");
-                }}>💾 Сохранить</button>
-              </div>
-            )}
-
-          </div>
-        </div>
-      )}
     </div>
   );
 }
-
-// ─── ПАНЕЛЬ АДМИНИСТРАТОРА (управление пользователями) ───────────────────────
-// Прайс редактор — карточки ниже
-
-// Карточка с полностью локальным состоянием — изолирована от родителя
-// Принимает начальные данные ОДИН РАЗ, дальше живёт сама
-// При размонтировании сохраняет данные в priceCardCache
-const priceCardCache = {};
 
 function PriceWorkCard({ w, initTiers, initFixed, onRename, onDelete }) {
   const code = w.code;
@@ -2773,6 +2536,246 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          ЭКРАН 3: ДОГОВОРЫ
+      ═══════════════════════════════════════════════════════════════════ */}
+      {screen === "contracts" && (
+        <div style={{maxWidth:860,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
+          {/* Шапка */}
+          <div style={{background:"#0e1122",borderBottom:"1px solid #181c2e",padding:"12px 20px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
+            <button onClick={()=>setScreen("list")} style={{background:"none",border:"none",color:"#555575",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
+            <div style={{width:28,height:28,borderRadius:6,background:"linear-gradient(135deg,#b8904a,#d4a85a)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#0c0e1a"}}>T</div>
+            <div style={{fontWeight:800,fontSize:14,color:"#e2ddd4"}}>Договоры</div>
+            <div style={{flex:1}}/>
+            {contractTab === "list" && currentUser.role !== "viewer" && (
+              <button className="btn btn-g" style={{fontSize:12,padding:"7px 14px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:"",date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:""}); setContractTab("editor"); }}>+ Новый</button>
+            )}
+          </div>
+
+          {/* Табы */}
+          <div style={{display:"flex",gap:4,padding:"12px 20px 0",borderBottom:"1px solid #181c2e",background:"#0e1122"}}>
+            {[["list","📋 Список"],["clients","👥 Клиенты"],["contragents","🏢 ТОО"]].map(([k,l])=>(
+              <button key={k} onClick={()=>setContractTab(k)}
+                style={{background:"none",border:"none",borderBottom:`2px solid ${contractTab===k?"#b8904a":"transparent"}`,color:contractTab===k?"#b8904a":"#555575",cursor:"pointer",padding:"8px 14px",fontSize:13,fontWeight:600,fontFamily:"inherit",transition:"all .15s"}}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          <div style={{padding:"20px"}}>
+
+            {/* ── СПИСОК ДОГОВОРОВ ── */}
+            {contractTab === "list" && (
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {contracts.length === 0 && (
+                  <div style={{textAlign:"center",padding:"60px 0",color:"#454560"}}>
+                    <div style={{fontSize:40,marginBottom:12}}>📋</div>
+                    <div style={{fontWeight:700,marginBottom:6}}>Договоров пока нет</div>
+                    <div style={{fontSize:12}}>Создайте новый или используйте кнопку 📄 на карточке сметы</div>
+                  </div>
+                )}
+                {contracts.map(c=>{
+                  const client = contractClients.find(x=>x.id===c.clientId);
+                  const ca = contragents.find(x=>x.id===c.contragentId);
+                  const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
+                  return (
+                    <div key={c.id} style={{background:"#111425",border:"1px solid #1c2035",borderRadius:11,padding:"14px 18px",cursor:"pointer",transition:"all .15s"}}
+                      onClick={()=>{ setCurrentContract({...c}); setContractTab("editor"); }}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                        <div>
+                          <div style={{fontWeight:700,fontSize:14,color:"#e2ddd4"}}>
+                            {c.number ? `Договор №${c.number}` : "Без номера"}
+                          </div>
+                          <div style={{fontSize:12,color:"#555575",marginTop:3}}>
+                            {client ? `👤 ${client.name}` : c.estClient ? `👤 ${c.estClient} (не добавлен)` : "Клиент не выбран"}
+                            {ca && <span style={{marginLeft:8}}>· {ca.name}</span>}
+                          </div>
+                          <div style={{fontSize:11,color:"#454560",marginTop:3}}>
+                            {new Date(c.date||Date.now()).toLocaleDateString("ru-RU")} · {(c.works||[]).length} позиций
+                          </div>
+                        </div>
+                        <div style={{textAlign:"right",flexShrink:0}}>
+                          <div style={{fontWeight:800,fontSize:16,color:"#b8904a"}}>{fmt(total)} ₸</div>
+                          <div style={{display:"flex",gap:5,marginTop:6}}>
+                            <button onClick={e=>{e.stopPropagation();
+                              const cl = contractClients.find(x=>x.id===c.clientId);
+                              const ca2 = contragents.find(x=>x.id===c.contragentId);
+                              generateContractPdf(c, cl, ca2);
+                            }} style={{background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>
+                            {currentUser.role==="admin" && (
+                              <button onClick={e=>{e.stopPropagation(); if(window.confirm("Удалить договор?")) saveContracts(contracts.filter(x=>x.id!==c.id));}}
+                                style={{background:"rgba(200,60,60,.08)",color:"#c06060",border:"1px solid rgba(200,60,60,.15)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ── РЕДАКТОР ДОГОВОРА ── */}
+            {contractTab === "editor" && currentContract && !currentContract._mode && (
+              <ContractEditor
+                contract={currentContract}
+                clients={contractClients}
+                contragents={contragents}
+                onUpdate={setCurrentContract}
+                onBack={()=>setContractTab("list")}
+                onSave={async ()=>{
+                  const list = contracts.filter(x=>x.id!==currentContract.id);
+                  await saveContracts([...list, currentContract]);
+                  setContractTab("list");
+                }}
+                onPdf={()=>{
+                  const cl = contractClients.find(x=>x.id===currentContract.clientId);
+                  const ca = contragents.find(x=>x.id===currentContract.contragentId);
+                  generateContractPdf(currentContract, cl, ca);
+                }}
+                onAddClientFromEstimate={async ()=>{
+                  const newClient = {id:Date.now().toString(),name:currentContract.estClient||"",phone:currentContract.estPhone||"",address:currentContract.estAddress||"",iin:"",doc:"",type:"физ"};
+                  const list=[...contractClients,newClient];
+                  await saveContractClients(list);
+                  setCurrentContract(prev=>({...prev,clientId:newClient.id}));
+                }}
+                currentUserRole={currentUser.role}
+                fmt={fmt}
+              />
+            )}
+
+            {/* ── КЛИЕНТЫ ── */}}
+            {contractTab === "clients" && (
+              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{fontWeight:700,color:"#888",fontSize:12}}>КЛИЕНТЫ ({contractClients.length})</div>
+                  <button onClick={()=>{ setCurrentContract({id:Date.now().toString(),name:"",phone:"",address:"",iin:"",doc:"",type:"физ",_mode:"newClient"}); setContractTab("clientEditor"); }}
+                    className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
+                </div>
+                {contractClients.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#454560",fontSize:13}}>Клиентов пока нет</div>}
+                {contractClients.map(c=>(
+                  <div key={c.id} style={{background:"#111425",border:"1px solid #1c2035",borderRadius:10,padding:"14px 16px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                      <div>
+                        <div style={{fontWeight:700,fontSize:14,color:"#e2ddd4"}}>{c.name||"Без имени"}</div>
+                        <div style={{fontSize:11,color:"#555575",marginTop:3}}>
+                          {c.type==="физ"?"👤 Физ. лицо":"🏢 Юр. лицо"}
+                          {c.iin&&<span style={{marginLeft:8}}>ИИН: {c.iin}</span>}
+                        </div>
+                        {c.phone&&<div style={{fontSize:11,color:"#454560",marginTop:2}}>📞 {c.phone}</div>}
+                        {c.address&&<div style={{fontSize:11,color:"#454560",marginTop:2}}>📍 {c.address}</div>}
+                      </div>
+                      <div style={{display:"flex",gap:5}}>
+                        <button onClick={()=>{ setCurrentContract({...c,_mode:"editClient"}); setContractTab("clientEditor"); }}
+                          style={{background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                        {currentUser.role==="admin"&&<button onClick={()=>{ if(window.confirm("Удалить клиента?")) saveContractClients(contractClients.filter(x=>x.id!==c.id)); }}
+                          style={{background:"rgba(200,60,60,.08)",color:"#c06060",border:"1px solid rgba(200,60,60,.15)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ── РЕДАКТОР КЛИЕНТА ── */}
+            {contractTab === "clientEditor" && currentContract?._mode?.includes("Client") && (
+              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <button onClick={()=>setContractTab("clients")} style={{background:"none",border:"none",color:"#555575",cursor:"pointer",fontSize:18}}>←</button>
+                  <span style={{fontWeight:700,fontSize:15,color:"#e2ddd4"}}>{currentContract._mode==="newClient"?"Новый клиент":"Редактировать клиента"}</span>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                  {[["ФИО / Название","name",""],["Телефон","phone",""],["Адрес","address",""],["ИИН / БИН","iin",""],["Документ (уд. личности)","doc",""]].map(([label,field])=>(
+                    <div key={field}>
+                      <div style={{fontSize:11,color:"#555575",marginBottom:4}}>{label}</div>
+                      <input className="fi" value={currentContract[field]||""} onChange={e=>setCurrentContract(p=>({...p,[field]:e.target.value}))} placeholder={label}/>
+                    </div>
+                  ))}
+                  <div>
+                    <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Тип</div>
+                    <select className="fi" value={currentContract.type||"физ"} onChange={e=>setCurrentContract(p=>({...p,type:e.target.value}))}>
+                      <option value="физ">Физ. лицо</option>
+                      <option value="юр">Юр. лицо</option>
+                    </select>
+                  </div>
+                </div>
+                <button className="btn btn-g" onClick={()=>{
+                  const {_mode,...clientData} = currentContract;
+                  const list = _mode==="newClient" ? [...contractClients,clientData] : contractClients.map(x=>x.id===clientData.id?clientData:x);
+                  saveContractClients(list);
+                  setContractTab("clients");
+                }}>💾 Сохранить</button>
+              </div>
+            )}
+
+            {/* ── ТОО ── */}
+            {contractTab === "contragents" && (
+              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{fontWeight:700,color:"#888",fontSize:12}}>ТОО / ПОДРЯДЧИКИ ({contragents.length})</div>
+                  <button onClick={()=>{ setCurrentContract({id:Date.now().toString(),name:"",bin:"",bank:"",bik:"",account:"",director:"",phone:"",email:"",address:"",_mode:"newCA"}); setContractTab("caEditor"); }}
+                    className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
+                </div>
+                {contragents.map(c=>(
+                  <div key={c.id} style={{background:"#111425",border:"1px solid #1c2035",borderRadius:10,padding:"14px 16px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                      <div>
+                        <div style={{fontWeight:700,fontSize:14,color:"#e2ddd4"}}>{c.name}</div>
+                        <div style={{fontSize:11,color:"#555575",marginTop:2}}>БИН: {c.bin} · {c.bank}</div>
+                        <div style={{fontSize:11,color:"#454560",marginTop:2}}>Директор: {c.director} · {c.phone}</div>
+                      </div>
+                      <div style={{display:"flex",gap:5}}>
+                        <button onClick={()=>{ setCurrentContract({...c,_mode:"editCA"}); setContractTab("caEditor"); }}
+                          style={{background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                        {currentUser.role==="admin"&&contragents.length>1&&<button onClick={()=>{ if(window.confirm("Удалить?")) saveContragents(contragents.filter(x=>x.id!==c.id)); }}
+                          style={{background:"rgba(200,60,60,.08)",color:"#c06060",border:"1px solid rgba(200,60,60,.15)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ── РЕДАКТОР ТОО ── */}
+            {contractTab === "caEditor" && currentContract?._mode?.includes("CA") && (
+              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <button onClick={()=>setContractTab("contragents")} style={{background:"none",border:"none",color:"#555575",cursor:"pointer",fontSize:18}}>←</button>
+                  <span style={{fontWeight:700,fontSize:15,color:"#e2ddd4"}}>{currentContract._mode==="newCA"?"Новое ТОО":"Редактировать ТОО"}</span>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                  {[["Название","name"],["БИН","bin"],["Банк","bank"],["БИК","bik"],["Расчётный счёт","account"],["Директор","director"],["Телефон","phone"],["Email","email"],["Адрес","address"]].map(([label,field])=>(
+                    <div key={field}>
+                      <div style={{fontSize:11,color:"#555575",marginBottom:4}}>{label}</div>
+                      <input className="fi" value={currentContract[field]||""} onChange={e=>setCurrentContract(p=>({...p,[field]:e.target.value}))} placeholder={label}/>
+                    </div>
+                  ))}
+                </div>
+                <button className="btn btn-g" onClick={()=>{
+                  const {_mode,...caData} = currentContract;
+                  const list = _mode==="newCA" ? [...contragents,caData] : contragents.map(x=>x.id===caData.id?caData:x);
+                  saveContragents(list);
+                  setContractTab("contragents");
+                }}>💾 Сохранить</button>
+              </div>
+            )}
+
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ПАНЕЛЬ АДМИНИСТРАТОРА (управление пользователями) ───────────────────────
+// Прайс редактор — карточки ниже
+
+// Карточка с полностью локальным состоянием — изолирована от родителя
+// Принимает начальные данные ОДИН РАЗ, дальше живёт сама
+// При размонтировании сохраняет данные в priceCardCache
+const priceCardCache = {};
+
     </div>
   );
 }
