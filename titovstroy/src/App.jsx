@@ -2008,7 +2008,7 @@ export default function App() {
                     const phone = proj.phone ? proj.phone.replace(/\D/g,"") : "";
                     window.open(`https://wa.me/${phone}?text=${text}`,"_blank");
                   }}
-                  style={{background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",borderRadius:8,padding:"10px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",width:"100%"}}>
+                  style={{background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",borderRadius:8,padding:"10px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",width:"100%",position:"relative",zIndex:1}}>
                     📲 Отправить в WhatsApp
                   </button>
                 )}
@@ -2065,20 +2065,19 @@ export default function App() {
                 <button style={{background:"#ddd",color:"#555",border:"none",cursor:"pointer",padding:"10px 18px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:600}} onClick={()=>setShowKP(false)}>Закрыть</button>
                 <button style={{background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",cursor:"pointer",padding:"10px 20px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:700}} onClick={()=>{
                 const el = document.getElementById("kp-print-portal");
-                const css = `
-                  @import url('https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;900&display=swap');
-                  *{box-sizing:border-box;margin:0;padding:0}
-                  body{font-family:'Golos Text','Segoe UI',sans-serif;background:#f5f2ec;color:#1a1a28;padding:24px;-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact}
-                  table{width:100%;border-collapse:collapse}
-                  @page{margin:8mm;size:A4 portrait}
-                  @media print{.no-print{display:none!important}body{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}}
-                `;
-                const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>КП TitovStroy</title><style>' + css + '</style></head><body>' + el.innerHTML + '<div class="no-print" style="margin-top:24px;text-align:center"><button onclick="window.print()" style="padding:12px 32px;background:#b8904a;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:inherit">🖨 Сохранить PDF</button></div></body></html>';
-                const w = window.open("","_blank","width=960,height=800");
-                w.document.open();
-                w.document.write(html);
-                w.document.close();
-                setTimeout(()=>w.focus(),300);
+                const css = [
+                  "@import url('https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;900&display=swap');",
+                  "*{box-sizing:border-box;margin:0;padding:0}",
+                  "body{font-family:'Golos Text','Segoe UI',sans-serif;background:#f5f2ec;color:#1a1a28;padding:24px;-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact}",
+                  "table{width:100%;border-collapse:collapse}",
+                  "@page{margin:8mm;size:A4 portrait}",
+                  "@media print{.no-print{display:none!important}body{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}}"
+                ].join(" ");
+                const html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>КП TitovStroy</title><style>" + css + "</style></head><body>" + el.innerHTML + "<div class=\"no-print\" style=\"margin-top:24px;text-align:center\"><button onclick=\"window.print()\" style=\"padding:12px 32px;background:#b8904a;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:inherit\">🖨 Сохранить PDF</button></div></body></html>";
+                const blob = new Blob([html], {type:"text/html"});
+                const url = URL.createObjectURL(blob);
+                window.open(url, "_blank");
+                setTimeout(()=>URL.revokeObjectURL(url), 10000);
               }}>Печать / PDF</button>
               </div>
             </div>
@@ -2106,7 +2105,7 @@ export default function App() {
               const ms = periodMs[statsPeriod]||Infinity;
               const base = estimates
                 .filter(e => ms===Infinity || (now-e.updatedAt)<ms)
-                .filter(e => !statsManager || (e.proj?.manager||e.createdBy||"")=== statsManager);
+                .filter(e => !statsManager || (e.proj?.manager||"")=== statsManager);
               const total = base.length;
               const withSum = base.filter(e=>e.total>0);
               const totalSum = withSum.reduce((s,e)=>s+e.total,0);
@@ -2124,10 +2123,10 @@ export default function App() {
                 }
               }
               const topCats = Object.entries(catSums).sort((a,b)=>b[1]-a[1]).slice(0,5);
-              const managers = [...new Set(estimates.map(e=>e.proj?.manager||e.createdBy||"").filter(Boolean))];
+              const managers = [...new Set(estimates.map(e=>e.proj?.manager||"").filter(Boolean))];
               // Per-manager totals for company view
               const managerStats = managers.map(m=>{
-                const mes = base.filter(e=>(e.proj?.manager||e.createdBy||"")=== m);
+                const mes = base.filter(e=>(e.proj?.manager||"")=== m);
                 return {name:m, count:mes.length, sum:mes.filter(e=>e.total>0).reduce((s,e)=>s+e.total,0), agreed:mes.filter(e=>e.status==="agreed").length};
               }).sort((a,b)=>b.sum-a.sum);
               return (
