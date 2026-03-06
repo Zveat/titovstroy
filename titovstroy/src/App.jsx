@@ -1451,7 +1451,7 @@ export default function App() {
             <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
               {saving && <span style={{fontSize:11,color:"#555575"}}>💾</span>}
               {currentUser.role === "admin" && (
-                <button className="btn btn-o" style={{padding:"6px 9px",fontSize:11}} onClick={()=>setShowAdmin(true)}>👥</button>
+                <button className="btn btn-o" style={{padding:"6px 9px",fontSize:14}} onClick={()=>setShowAdmin(true)}>⚙️</button>
               )}
               <button className="btn btn-o" style={{padding:"6px 9px",fontSize:11}} onClick={()=>setCurrentUser(null)}>Выйти</button>
               <button className="btn btn-g" style={{padding:"7px 14px",fontSize:12,whiteSpace:"nowrap"}} onClick={newEstimate}>+ Новая</button>
