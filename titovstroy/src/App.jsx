@@ -1163,7 +1163,12 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
                 <span style={{fontSize:14,fontWeight:600,letterSpacing:.5}}>ИТОГО:</span>
                 <span style={{fontSize:28,fontWeight:900,color:"#b8904a",letterSpacing:-.5}}>{fmt(final)} ₸</span>
               </div>
-              {proj.area&&Number(proj.area)>0&&<div style={{textAlign:"right",fontSize:11,color:"#666",marginTop:3}}>{fmt(final/Number(proj.area))} ₸/м²</div>}
+              {proj.area&&Number(proj.area)>0&&(
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,paddingTop:8,borderTop:"1px solid rgba(255,255,255,.08)"}}>
+                  <span style={{fontSize:12,color:"#888"}}>Цена за м² ({proj.area} м²)</span>
+                  <span style={{fontSize:14,fontWeight:700,color:"#d4a85a"}}>≈ {fmt(final/Number(proj.area))} ₸/м²</span>
+                </div>
+              )}
             </div>
           </div>
         );
@@ -1906,7 +1911,12 @@ export default function App() {
                         <span style={{fontSize:12,color:"#6060a0"}}>Итого</span>
                         <span style={{fontSize:22,fontWeight:900,color:"#b8904a"}}>{fmt(final)} ₸</span>
                       </div>
-                      {proj.area&&<div style={{textAlign:"right",fontSize:10,color:"#353550",marginTop:3}}>≈ {fmt(final/Number(proj.area))} ₸/м²</div>}
+                      {proj.area&&Number(proj.area)>0&&(
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6,padding:"5px 8px",background:"rgba(184,144,74,.07)",borderRadius:6}}>
+                          <span style={{fontSize:11,color:"#6060a0"}}>Цена за м²</span>
+                          <span style={{fontSize:13,fontWeight:700,color:"#b8904a"}}>≈ {fmt(final/Number(proj.area))} ₸</span>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
