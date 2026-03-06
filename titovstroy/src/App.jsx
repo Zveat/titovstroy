@@ -1438,12 +1438,12 @@ export default function App() {
       {screen === "list" && (
         <div style={{maxWidth:720,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
           {/* Шапка */}
-          <div className="list-header" style={{background:"#0e1122",borderBottom:"1px solid #181c2e",padding:"14px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
-            <div style={{display:"flex",alignItems:"center",gap:11,flex:1,minWidth:0}}>
-              <div style={{width:33,height:33,borderRadius:8,background:"linear-gradient(135deg,#b8904a,#d4a85a)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:15,color:"#0c0e1a",flexShrink:0}}>T</div>
+          <div className="list-header" style={{background:"#0e1122",borderBottom:"1px solid #181c2e",padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
+              <div style={{width:30,height:30,borderRadius:7,background:"linear-gradient(135deg,#b8904a,#d4a85a)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:14,color:"#0c0e1a",flexShrink:0}}>T</div>
               <div style={{minWidth:0}}>
-                <div style={{fontWeight:800,fontSize:14,whiteSpace:"nowrap"}}>TitovStroy</div>
-                <div style={{fontSize:10,color:"#353550",whiteSpace:"nowrap"}}>
+                <div style={{fontWeight:800,fontSize:13,whiteSpace:"nowrap",color:"#e2ddd4"}}>TitovStroy</div>
+                <div style={{fontSize:10,color:"#454560",whiteSpace:"nowrap"}}>
                   <span style={{color:"#b8904a"}}>{currentUser.role==="admin"?"👑":"👤"}</span>{" "}{currentUser.name}
                 </div>
               </div>
@@ -1451,16 +1451,10 @@ export default function App() {
             <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
               {saving && <span style={{fontSize:11,color:"#555575"}}>💾</span>}
               {currentUser.role === "admin" && (
-                <button className="btn btn-o" style={{padding:"7px 10px",fontSize:11}} onClick={()=>setShowAdmin(true)}>
-                  👥
-                </button>
+                <button className="btn btn-o" style={{padding:"6px 9px",fontSize:11}} onClick={()=>setShowAdmin(true)}>👥</button>
               )}
-              <button className="btn btn-o" style={{padding:"7px 10px",fontSize:11}} onClick={()=>setCurrentUser(null)}>
-                Выйти
-              </button>
-              <button className="btn btn-g" style={{padding:"8px 14px",fontSize:13,whiteSpace:"nowrap"}} onClick={newEstimate}>
-                + Новая
-              </button>
+              <button className="btn btn-o" style={{padding:"6px 9px",fontSize:11}} onClick={()=>setCurrentUser(null)}>Выйти</button>
+              <button className="btn btn-g" style={{padding:"7px 14px",fontSize:12,whiteSpace:"nowrap"}} onClick={newEstimate}>+ Новая</button>
             </div>
           </div>
 
@@ -1471,10 +1465,17 @@ export default function App() {
                 <div style={{fontSize:13}}>Загрузка смет...</div>
               </div>
             ) : (
-              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {/* Заголовок */}
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
+                  <div>
+                    <div style={{fontWeight:800,fontSize:17,color:"#e2ddd4"}}>📁 Архив смет</div>
+                    <div style={{fontSize:11,color:"#353550",marginTop:1}}>Все расчёты и коммерческие предложения</div>
+                  </div>
+                </div>
                 {/* Поиск и фильтры */}
                 {estimates.length > 0 && (
-                  <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:4}}>
+                  <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:2}}>
                     <input
                       style={{background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:8,padding:"9px 14px",fontFamily:"inherit",fontSize:13,outline:"none",width:"100%"}}
                       placeholder="🔍 Поиск по клиенту, адресу, телефону..."
@@ -1532,51 +1533,36 @@ export default function App() {
                       {filtered.map((est, i) => {
                         const hasItems = est.rows && Object.values(est.rows).some(r => Number(r?.qty) > 0);
                         const status = !hasItems ? "draft" : est.total > 0 ? "done" : "draft";
+                        const author = est.updatedBy&&est.updatedBy!==est.createdBy ? est.updatedBy : est.createdBy;
                         return (
-                          <div key={est.id} className="est-card up" style={{animationDelay:`${i*0.04}s`,paddingRight:20}}
+                          <div key={est.id} className="est-card up" style={{animationDelay:`${i*0.04}s`,padding:"10px 14px"}}
                             onClick={() => openEstimate(est)}>
-                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
-                              <div style={{flex:1,minWidth:0}}>
-                                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
-                                  <span style={{width:8,height:8,borderRadius:"50%",flexShrink:0,background:status==="done"?"#4caf7d":"#888",boxShadow:status==="done"?"0 0 6px #4caf7d":"none"}}/>
-                                  <span style={{fontWeight:700,fontSize:15,color:"#e2ddd4",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                                    {est.proj?.name || <span style={{color:"#454560",fontStyle:"italic"}}>Без названия</span>}
-                                  </span>
-                                </div>
-                                <div style={{display:"flex",gap:10,fontSize:12,color:"#555575",flexWrap:"wrap"}}>
-                                  <span>{est.proj?.type||"—"}</span>
-                                  {est.proj?.area&&<span>{est.proj.area} м²</span>}
-                                  {est.proj?.address&&<span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:200}}>{est.proj.address}</span>}
-                                </div>
-                                {est.proj?.phone&&<div style={{fontSize:11,color:"#454560",marginTop:3}}>{est.proj.phone}</div>}
-                              </div>
-                              <div style={{textAlign:"right",flexShrink:0}}>
-                                {est.total>0
-                                  ? <div style={{fontSize:16,fontWeight:800,color:"#b8904a"}}>{fmt(est.total)} ₸</div>
-                                  : <div style={{fontSize:12,color:"#454560",fontStyle:"italic"}}>черновик</div>}
-                                <div style={{fontSize:10,color:"#353550",marginTop:3}}>{fmtDate(est.updatedAt)}</div>
-                                {(est.createdBy||est.updatedBy)&&(
-                                  <div style={{fontSize:10,color:"#353550",marginTop:2}}>
-                                    {est.updatedBy&&est.updatedBy!==est.createdBy
-                                      ?<span>✏ {est.updatedBy}</span>
-                                      :est.createdBy?<span>👤 {est.createdBy}</span>:null}
-                                  </div>
-                                )}
-                              </div>
+                            {/* Строка 1: статус + имя + сумма */}
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <span style={{width:7,height:7,borderRadius:"50%",flexShrink:0,background:status==="done"?"#4caf7d":"#555",boxShadow:status==="done"?"0 0 5px #4caf7d":"none"}}/>
+                              <span style={{fontWeight:700,fontSize:14,color:"#e2ddd4",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                                {est.proj?.name || <span style={{color:"#454560",fontStyle:"italic"}}>Без названия</span>}
+                              </span>
+                              {est.total>0
+                                ? <span style={{fontSize:14,fontWeight:800,color:"#b8904a",flexShrink:0}}>{fmt(est.total)} ₸</span>
+                                : <span style={{fontSize:11,color:"#454560",fontStyle:"italic",flexShrink:0}}>черновик</span>}
                             </div>
-                            {/* Кнопки действий */}
-                            <div style={{display:"flex",gap:4,marginTop:10,justifyContent:"flex-end"}}
-                              onClick={e=>e.stopPropagation()}>
-                              <button
-                                onClick={()=>duplicateEstimate(est)}
-                                style={{background:"rgba(100,100,200,.1)",color:"#8888cc",border:"1px solid rgba(100,100,200,.2)",borderRadius:5,padding:"3px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
-                                ⧉ Копировать
+                            {/* Строка 2: мета + дата + кнопки */}
+                            <div style={{display:"flex",alignItems:"center",gap:6,marginTop:5}} onClick={e=>e.stopPropagation()}>
+                              <span style={{fontSize:11,color:"#555575",background:"rgba(255,255,255,.04)",borderRadius:4,padding:"1px 6px"}}>{est.proj?.type||"—"}</span>
+                              {est.proj?.area&&<span style={{fontSize:11,color:"#454560"}}>{est.proj.area} м²</span>}
+                              {est.proj?.address&&<span style={{fontSize:11,color:"#404058",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:160}}>{est.proj.address}</span>}
+                              <span style={{flex:1}}/>
+                              <span style={{fontSize:10,color:"#353550",whiteSpace:"nowrap"}}>{fmtDate(est.updatedAt)}</span>
+                              {author&&<span style={{fontSize:10,color:"#353550",whiteSpace:"nowrap"}}>· {author}</span>}
+                              <button onClick={()=>duplicateEstimate(est)}
+                                style={{background:"rgba(100,100,200,.1)",color:"#7777bb",border:"1px solid rgba(100,100,200,.15)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
+                                ⧉
                               </button>
                               {currentUser.role==="admin" && (
-                                <button
-                                  onClick={()=>setDeleteConfirm(est.id)}
-                                  style={{background:"rgba(200,60,60,.1)",color:"#e07070",border:"1px solid rgba(200,60,60,.2)",borderRadius:5,padding:"3px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
-                                  🗑 Удалить
+                                <button onClick={()=>setDeleteConfirm(est.id)}
+                                  style={{background:"rgba(200,60,60,.08)",color:"#c06060",border:"1px solid rgba(200,60,60,.15)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
+                                  🗑
                                 </button>
                               )}
                             </div>
