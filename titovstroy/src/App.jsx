@@ -357,6 +357,7 @@ function LoginScreen({ onLogin }) {
     );
 
     if (user) {
+      try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user, savedAt: Date.now() })); } catch(e) {}
       onLogin(user);
     } else {
       setError("Неверный логин или пароль");
@@ -1239,7 +1240,15 @@ export default function App() {
   const cats = Object.keys(Gdyn);
 
   // Авторизация
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const s = localStorage.getItem(SESSION_KEY);
+      if (!s) return null;
+      const { user, savedAt } = JSON.parse(s);
+      if (Date.now() - savedAt > 30 * 24 * 60 * 60 * 1000) { localStorage.removeItem(SESSION_KEY); return null; }
+      return user;
+    } catch(e) { return null; }
+  });
   const [showAdmin, setShowAdmin] = useState(false);
 
   // Экраны: "list" | "editor"
@@ -1545,7 +1554,7 @@ export default function App() {
               {currentUser.role === "admin" && (
                 <button className="btn btn-o" style={{padding:"6px 9px",fontSize:14}} onClick={()=>setShowAdmin(true)}>⚙️</button>
               )}
-              <button className="btn btn-o" style={{padding:"6px 9px",fontSize:11}} onClick={()=>setCurrentUser(null)}>Выйти</button>
+              <button className="btn btn-o" style={{padding:"6px 9px",fontSize:11}} onClick={()=>{ try { localStorage.removeItem(SESSION_KEY); } catch(e) {} setCurrentUser(null); }}>Выйти</button>
               <button className="btn btn-o" style={{padding:"6px 9px",fontSize:14}} onClick={()=>setShowStats(true)} title="Статистика">📊</button>
               {currentUser.role !== "viewer" && (
                 <button className="btn btn-g" style={{padding:"7px 14px",fontSize:12,whiteSpace:"nowrap"}} onClick={newEstimate}>+ Новая</button>
