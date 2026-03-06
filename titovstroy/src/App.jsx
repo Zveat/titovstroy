@@ -1783,9 +1783,19 @@ tr{page-break-inside:avoid}table{page-break-inside:auto}}
     const TITOV = {name:'ТОО "TITOVSTROY"',bin:"231040002769",bank:'АО "Kaspi Bank"',bik:"CASPKZKA",acc:"KZ38722S000030058973",addr:"Казахстан, район им.Казыбек би, улица Кирпичная, дом 8г",phone:"8707 667 8766",email:"titovstroy@mail.ru",dir:"Титов В.Е."};
 
     const sigBlock = (role1="Подрядчик:", role2="Заказчик:") => {
-      const clSigRight = isYur
-        ? `<b>${role2}</b><br><br>${clName}<br>БИН: ${clIIN}${client?.bank?`<br>Банк: ${client.bank}`:""}${client?.bik?`<br>БИК: ${client.bik}`:""}${client?.account?`<br>ИИК: ${client.account}`:""}${clAddr?`<br>Юр.Адрес: ${clAddr}`:""}${clPhone?`<br>Тел.: ${clPhone}`:""}${client?.email?`<br>Почта: ${client.email}`:""}${client?.director?`<br><br>Директор:<br>${client.directorShort||client.director} ____________________  М.П.`:""}`
-        : `<b>${role2}</b><br><br>ФИО: ${clName}<br>ИИН: ${clIIN}<br>№ документа: ${clDoc}<br>Адрес: ${clAddr}<br>Тел.: ${clPhone}<br><br>${clShort} Подпись ___________`;
+      let clSigRight = "";
+      if(isYur){
+        clSigRight = "<b>"+role2+"</b><br><br>"+clName+"<br>БИН: "+clIIN;
+        if(client?.bank) clSigRight += "<br>Банк: "+client.bank;
+        if(client?.bik)  clSigRight += "<br>БИК: "+client.bik;
+        if(client?.account) clSigRight += "<br>ИИК: "+client.account;
+        if(clAddr)  clSigRight += "<br>Юр.Адрес: "+clAddr;
+        if(clPhone) clSigRight += "<br>Тел.: "+clPhone;
+        if(client?.email) clSigRight += "<br>Почта: "+client.email;
+        if(client?.director) clSigRight += "<br><br>Директор:<br>"+(client.directorShort||client.director)+" ____________________  М.П.";
+      } else {
+        clSigRight = "<b>"+role2+"</b><br><br>ФИО: "+clName+"<br>ИИН: "+clIIN+"<br>№ документа: "+clDoc+"<br>Адрес: "+clAddr+"<br>Тел.: "+clPhone+"<br><br>"+clShort+" Подпись ___________";
+      }
       return `<table class="st"><tr>
 <td><b>${role1}</b><br>${TITOV.name}<br>БИН ${TITOV.bin}<br>Банк: ${TITOV.bank}<br>БИК: ${TITOV.bik}<br>Номер счёта: ${TITOV.acc}<br>Юр.Адрес: ${TITOV.addr}<br>Тел.: ${TITOV.phone}<br>Email: ${TITOV.email}<br><br>Генеральный директор:<br>${TITOV.dir} _______________ М.П.</td>
 <td>${clSigRight}</td>
@@ -2175,11 +2185,9 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
 ${sigBlock("Исполнитель:", "Заказчик:")}`;
     }
 
+    const printBtn = forDocx ? "" : "\n<div class=\"np\" style=\"margin-top:24px;text-align:center\">\n  <button onclick=\"window.print()\" style=\"padding:12px 36px;background:#b8904a;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;font-weight:700\">\u{1F5A8} Распечатать / Сохранить PDF</button>\n</div>";
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Договор №${c.number||""}</title><style>${CSS}</style></head>
-<body>${body}${forDocx ? "" : `
-<div class="np" style="margin-top:24px;text-align:center">
-  <button onclick="window.print()" style="padding:12px 36px;background:#b8904a;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;font-weight:700">🖨 Распечатать / Сохранить PDF</button>
-</div>`}
+<body>${body}${printBtn}
 </body></html>`;
     return html;
   };
