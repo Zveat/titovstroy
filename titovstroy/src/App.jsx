@@ -243,6 +243,13 @@ const fmtDate = (ts) => {
 };
 
 const EMPTY_PROJ = { name:"", type:"Вторичка", area:"", address:"", phone:"", manager:"" };
+
+const STATUSES = [
+  { key:"new",       label:"Новая",       color:"#5577cc", bg:"rgba(85,119,204,.15)"  },
+  { key:"progress",  label:"В работе",    color:"#d4a84a", bg:"rgba(212,168,74,.15)"  },
+  { key:"agreed",    label:"Согласовано", color:"#4caf7d", bg:"rgba(76,175,125,.15)"  },
+  { key:"rejected",  label:"Отказ",       color:"#c05050", bg:"rgba(192,80,80,.15)"   },
+];
 const STORAGE_KEY    = "titovstroy-estimates";
 const USERS_KEY      = "titovstroy-users";
 const SESSION_KEY    = "titovstroy-session";
@@ -412,6 +419,100 @@ function LoginScreen({ onLogin }) {
         </div>
         <div style={{textAlign:"center",marginTop:16,fontSize:11,color:"#2a2a40"}}>TitovStroy · Только для сотрудников</div>
       </div>
+
+      {/* ═══════════════════ СТАТИСТИКА ═══════════════════ */}
+      {showStats&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20}}
+          onClick={()=>setShowStats(false)}>
+          <div style={{background:"#161929",border:"1px solid #2a2d3e",borderRadius:14,padding:"24px 28px",maxWidth:520,width:"100%",maxHeight:"85vh",overflowY:"auto"}}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <div style={{fontWeight:800,fontSize:16,color:"#e2ddd4"}}>📊 Статистика</div>
+              <button onClick={()=>setShowStats(false)} style={{background:"none",border:"none",color:"#454560",fontSize:20,cursor:"pointer"}}>✕</button>
+            </div>
+            {(()=>{
+              const total = estimates.length;
+              const withSum = estimates.filter(e=>e.total>0);
+              const totalSum = withSum.reduce((s,e)=>s+e.total,0);
+              const avgSum = withSum.length ? Math.round(totalSum/withSum.length) : 0;
+              const now = Date.now();
+              const month = 30*24*60*60*1000;
+              const thisMonth = estimates.filter(e=>(now-e.updatedAt)<month);
+              const byStatus = {};
+              for(const s of STATUSES) byStatus[s.key]=estimates.filter(e=>(e.status||"new")===s.key).length;
+              const byType = {};
+              for(const e of estimates){ const t=e.proj?.type||"—"; byType[t]=(byType[t]||0)+1; }
+              const catSums = {};
+              for(const e of estimates){
+                const items = e.rows ? Object.entries(e.rows).filter(([,r])=>Number(r?.qty)>0) : [];
+                for(const [code,] of items){
+                  const w = getEffectiveCatalog().find(x=>x.code===code);
+                  if(w){ catSums[w.cat]=(catSums[w.cat]||0)+1; }
+                }
+              }
+              const topCats = Object.entries(catSums).sort((a,b)=>b[1]-a[1]).slice(0,5);
+              return (
+                <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                  {/* Ключевые цифры */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                    {[["Всего смет",total,"#8888cc"],["За месяц",thisMonth.length,"#b8904a"],["Средний чек",fmt(avgSum)+" ₸","#4caf7d"]].map(([l,v,c])=>(
+                      <div key={l} style={{background:"rgba(255,255,255,.04)",borderRadius:8,padding:"12px 10px",textAlign:"center"}}>
+                        <div style={{fontSize:20,fontWeight:800,color:c}}>{v}</div>
+                        <div style={{fontSize:10,color:"#454560",marginTop:3}}>{l}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Общий объём */}
+                  <div style={{background:"rgba(184,144,74,.08)",border:"1px solid rgba(184,144,74,.2)",borderRadius:8,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:13,color:"#888"}}>Общий объём</span>
+                    <span style={{fontSize:18,fontWeight:800,color:"#b8904a"}}>{fmt(totalSum)} ₸</span>
+                  </div>
+                  {/* По статусам */}
+                  <div>
+                    <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>По статусам</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                      {STATUSES.map(s=>(
+                        <div key={s.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(255,255,255,.03)",borderRadius:6}}>
+                          <span style={{fontSize:12,color:s.color,fontWeight:600}}>{s.label}</span>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <div style={{width:80,height:4,background:"rgba(255,255,255,.06)",borderRadius:2,overflow:"hidden"}}>
+                              <div style={{width:total?`${(byStatus[s.key]/total)*100}%`:"0%",height:"100%",background:s.color,borderRadius:2}}/>
+                            </div>
+                            <span style={{fontSize:12,fontWeight:700,color:"#e2ddd4",minWidth:16,textAlign:"right"}}>{byStatus[s.key]}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* По типу объекта */}
+                  <div>
+                    <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>По типу объекта</div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(
+                        <span key={t} style={{fontSize:11,fontWeight:600,padding:"3px 10px",borderRadius:20,background:"rgba(255,255,255,.06)",color:"#8888aa"}}>{t}: <strong style={{color:"#e2ddd4"}}>{n}</strong></span>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Популярные категории работ */}
+                  {topCats.length>0&&(
+                    <div>
+                      <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>Топ категорий работ</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                        {topCats.map(([cat,n])=>(
+                          <div key={cat} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 10px",background:"rgba(255,255,255,.03)",borderRadius:6}}>
+                            <span style={{color:"#888"}}>{cat}</span>
+                            <span style={{fontWeight:700,color:"#b8904a"}}>{n} смет</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -510,6 +611,100 @@ function PriceWorkCard({ w, initTiers, initFixed, onRename, onDelete }) {
             style={{marginLeft:"auto",background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
             + Диапазоны
           </button>
+        </div>
+      )}
+
+      {/* ═══════════════════ СТАТИСТИКА ═══════════════════ */}
+      {showStats&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20}}
+          onClick={()=>setShowStats(false)}>
+          <div style={{background:"#161929",border:"1px solid #2a2d3e",borderRadius:14,padding:"24px 28px",maxWidth:520,width:"100%",maxHeight:"85vh",overflowY:"auto"}}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <div style={{fontWeight:800,fontSize:16,color:"#e2ddd4"}}>📊 Статистика</div>
+              <button onClick={()=>setShowStats(false)} style={{background:"none",border:"none",color:"#454560",fontSize:20,cursor:"pointer"}}>✕</button>
+            </div>
+            {(()=>{
+              const total = estimates.length;
+              const withSum = estimates.filter(e=>e.total>0);
+              const totalSum = withSum.reduce((s,e)=>s+e.total,0);
+              const avgSum = withSum.length ? Math.round(totalSum/withSum.length) : 0;
+              const now = Date.now();
+              const month = 30*24*60*60*1000;
+              const thisMonth = estimates.filter(e=>(now-e.updatedAt)<month);
+              const byStatus = {};
+              for(const s of STATUSES) byStatus[s.key]=estimates.filter(e=>(e.status||"new")===s.key).length;
+              const byType = {};
+              for(const e of estimates){ const t=e.proj?.type||"—"; byType[t]=(byType[t]||0)+1; }
+              const catSums = {};
+              for(const e of estimates){
+                const items = e.rows ? Object.entries(e.rows).filter(([,r])=>Number(r?.qty)>0) : [];
+                for(const [code,] of items){
+                  const w = getEffectiveCatalog().find(x=>x.code===code);
+                  if(w){ catSums[w.cat]=(catSums[w.cat]||0)+1; }
+                }
+              }
+              const topCats = Object.entries(catSums).sort((a,b)=>b[1]-a[1]).slice(0,5);
+              return (
+                <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                  {/* Ключевые цифры */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                    {[["Всего смет",total,"#8888cc"],["За месяц",thisMonth.length,"#b8904a"],["Средний чек",fmt(avgSum)+" ₸","#4caf7d"]].map(([l,v,c])=>(
+                      <div key={l} style={{background:"rgba(255,255,255,.04)",borderRadius:8,padding:"12px 10px",textAlign:"center"}}>
+                        <div style={{fontSize:20,fontWeight:800,color:c}}>{v}</div>
+                        <div style={{fontSize:10,color:"#454560",marginTop:3}}>{l}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Общий объём */}
+                  <div style={{background:"rgba(184,144,74,.08)",border:"1px solid rgba(184,144,74,.2)",borderRadius:8,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:13,color:"#888"}}>Общий объём</span>
+                    <span style={{fontSize:18,fontWeight:800,color:"#b8904a"}}>{fmt(totalSum)} ₸</span>
+                  </div>
+                  {/* По статусам */}
+                  <div>
+                    <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>По статусам</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                      {STATUSES.map(s=>(
+                        <div key={s.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(255,255,255,.03)",borderRadius:6}}>
+                          <span style={{fontSize:12,color:s.color,fontWeight:600}}>{s.label}</span>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <div style={{width:80,height:4,background:"rgba(255,255,255,.06)",borderRadius:2,overflow:"hidden"}}>
+                              <div style={{width:total?`${(byStatus[s.key]/total)*100}%`:"0%",height:"100%",background:s.color,borderRadius:2}}/>
+                            </div>
+                            <span style={{fontSize:12,fontWeight:700,color:"#e2ddd4",minWidth:16,textAlign:"right"}}>{byStatus[s.key]}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* По типу объекта */}
+                  <div>
+                    <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>По типу объекта</div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(
+                        <span key={t} style={{fontSize:11,fontWeight:600,padding:"3px 10px",borderRadius:20,background:"rgba(255,255,255,.06)",color:"#8888aa"}}>{t}: <strong style={{color:"#e2ddd4"}}>{n}</strong></span>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Популярные категории работ */}
+                  {topCats.length>0&&(
+                    <div>
+                      <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>Топ категорий работ</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                        {topCats.map(([cat,n])=>(
+                          <div key={cat} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 10px",background:"rgba(255,255,255,.03)",borderRadius:6}}>
+                            <span style={{color:"#888"}}>{cat}</span>
+                            <span style={{fontWeight:700,color:"#b8904a"}}>{n} смет</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
         </div>
       )}
     </div>
@@ -1050,6 +1245,100 @@ function AdminPanel({ currentUser, onClose }) {
           </div>
         )}
       </div>
+
+      {/* ═══════════════════ СТАТИСТИКА ═══════════════════ */}
+      {showStats&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20}}
+          onClick={()=>setShowStats(false)}>
+          <div style={{background:"#161929",border:"1px solid #2a2d3e",borderRadius:14,padding:"24px 28px",maxWidth:520,width:"100%",maxHeight:"85vh",overflowY:"auto"}}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <div style={{fontWeight:800,fontSize:16,color:"#e2ddd4"}}>📊 Статистика</div>
+              <button onClick={()=>setShowStats(false)} style={{background:"none",border:"none",color:"#454560",fontSize:20,cursor:"pointer"}}>✕</button>
+            </div>
+            {(()=>{
+              const total = estimates.length;
+              const withSum = estimates.filter(e=>e.total>0);
+              const totalSum = withSum.reduce((s,e)=>s+e.total,0);
+              const avgSum = withSum.length ? Math.round(totalSum/withSum.length) : 0;
+              const now = Date.now();
+              const month = 30*24*60*60*1000;
+              const thisMonth = estimates.filter(e=>(now-e.updatedAt)<month);
+              const byStatus = {};
+              for(const s of STATUSES) byStatus[s.key]=estimates.filter(e=>(e.status||"new")===s.key).length;
+              const byType = {};
+              for(const e of estimates){ const t=e.proj?.type||"—"; byType[t]=(byType[t]||0)+1; }
+              const catSums = {};
+              for(const e of estimates){
+                const items = e.rows ? Object.entries(e.rows).filter(([,r])=>Number(r?.qty)>0) : [];
+                for(const [code,] of items){
+                  const w = getEffectiveCatalog().find(x=>x.code===code);
+                  if(w){ catSums[w.cat]=(catSums[w.cat]||0)+1; }
+                }
+              }
+              const topCats = Object.entries(catSums).sort((a,b)=>b[1]-a[1]).slice(0,5);
+              return (
+                <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                  {/* Ключевые цифры */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                    {[["Всего смет",total,"#8888cc"],["За месяц",thisMonth.length,"#b8904a"],["Средний чек",fmt(avgSum)+" ₸","#4caf7d"]].map(([l,v,c])=>(
+                      <div key={l} style={{background:"rgba(255,255,255,.04)",borderRadius:8,padding:"12px 10px",textAlign:"center"}}>
+                        <div style={{fontSize:20,fontWeight:800,color:c}}>{v}</div>
+                        <div style={{fontSize:10,color:"#454560",marginTop:3}}>{l}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Общий объём */}
+                  <div style={{background:"rgba(184,144,74,.08)",border:"1px solid rgba(184,144,74,.2)",borderRadius:8,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:13,color:"#888"}}>Общий объём</span>
+                    <span style={{fontSize:18,fontWeight:800,color:"#b8904a"}}>{fmt(totalSum)} ₸</span>
+                  </div>
+                  {/* По статусам */}
+                  <div>
+                    <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>По статусам</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                      {STATUSES.map(s=>(
+                        <div key={s.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(255,255,255,.03)",borderRadius:6}}>
+                          <span style={{fontSize:12,color:s.color,fontWeight:600}}>{s.label}</span>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <div style={{width:80,height:4,background:"rgba(255,255,255,.06)",borderRadius:2,overflow:"hidden"}}>
+                              <div style={{width:total?`${(byStatus[s.key]/total)*100}%`:"0%",height:"100%",background:s.color,borderRadius:2}}/>
+                            </div>
+                            <span style={{fontSize:12,fontWeight:700,color:"#e2ddd4",minWidth:16,textAlign:"right"}}>{byStatus[s.key]}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* По типу объекта */}
+                  <div>
+                    <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>По типу объекта</div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(
+                        <span key={t} style={{fontSize:11,fontWeight:600,padding:"3px 10px",borderRadius:20,background:"rgba(255,255,255,.06)",color:"#8888aa"}}>{t}: <strong style={{color:"#e2ddd4"}}>{n}</strong></span>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Популярные категории работ */}
+                  {topCats.length>0&&(
+                    <div>
+                      <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>Топ категорий работ</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                        {topCats.map(([cat,n])=>(
+                          <div key={cat} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 10px",background:"rgba(255,255,255,.03)",borderRadius:6}}>
+                            <span style={{color:"#888"}}>{cat}</span>
+                            <span style={{fontWeight:700,color:"#b8904a"}}>{n} смет</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1210,6 +1499,100 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
           <img src="/stamp.jpg" alt="Печать TitovStroy" style={{width:200,height:200,objectFit:"contain",opacity:.85,mixBlendMode:"multiply",marginBottom:4}}/>
         </div>
       </div>
+
+      {/* ═══════════════════ СТАТИСТИКА ═══════════════════ */}
+      {showStats&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20}}
+          onClick={()=>setShowStats(false)}>
+          <div style={{background:"#161929",border:"1px solid #2a2d3e",borderRadius:14,padding:"24px 28px",maxWidth:520,width:"100%",maxHeight:"85vh",overflowY:"auto"}}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <div style={{fontWeight:800,fontSize:16,color:"#e2ddd4"}}>📊 Статистика</div>
+              <button onClick={()=>setShowStats(false)} style={{background:"none",border:"none",color:"#454560",fontSize:20,cursor:"pointer"}}>✕</button>
+            </div>
+            {(()=>{
+              const total = estimates.length;
+              const withSum = estimates.filter(e=>e.total>0);
+              const totalSum = withSum.reduce((s,e)=>s+e.total,0);
+              const avgSum = withSum.length ? Math.round(totalSum/withSum.length) : 0;
+              const now = Date.now();
+              const month = 30*24*60*60*1000;
+              const thisMonth = estimates.filter(e=>(now-e.updatedAt)<month);
+              const byStatus = {};
+              for(const s of STATUSES) byStatus[s.key]=estimates.filter(e=>(e.status||"new")===s.key).length;
+              const byType = {};
+              for(const e of estimates){ const t=e.proj?.type||"—"; byType[t]=(byType[t]||0)+1; }
+              const catSums = {};
+              for(const e of estimates){
+                const items = e.rows ? Object.entries(e.rows).filter(([,r])=>Number(r?.qty)>0) : [];
+                for(const [code,] of items){
+                  const w = getEffectiveCatalog().find(x=>x.code===code);
+                  if(w){ catSums[w.cat]=(catSums[w.cat]||0)+1; }
+                }
+              }
+              const topCats = Object.entries(catSums).sort((a,b)=>b[1]-a[1]).slice(0,5);
+              return (
+                <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                  {/* Ключевые цифры */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                    {[["Всего смет",total,"#8888cc"],["За месяц",thisMonth.length,"#b8904a"],["Средний чек",fmt(avgSum)+" ₸","#4caf7d"]].map(([l,v,c])=>(
+                      <div key={l} style={{background:"rgba(255,255,255,.04)",borderRadius:8,padding:"12px 10px",textAlign:"center"}}>
+                        <div style={{fontSize:20,fontWeight:800,color:c}}>{v}</div>
+                        <div style={{fontSize:10,color:"#454560",marginTop:3}}>{l}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Общий объём */}
+                  <div style={{background:"rgba(184,144,74,.08)",border:"1px solid rgba(184,144,74,.2)",borderRadius:8,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:13,color:"#888"}}>Общий объём</span>
+                    <span style={{fontSize:18,fontWeight:800,color:"#b8904a"}}>{fmt(totalSum)} ₸</span>
+                  </div>
+                  {/* По статусам */}
+                  <div>
+                    <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>По статусам</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                      {STATUSES.map(s=>(
+                        <div key={s.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(255,255,255,.03)",borderRadius:6}}>
+                          <span style={{fontSize:12,color:s.color,fontWeight:600}}>{s.label}</span>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <div style={{width:80,height:4,background:"rgba(255,255,255,.06)",borderRadius:2,overflow:"hidden"}}>
+                              <div style={{width:total?`${(byStatus[s.key]/total)*100}%`:"0%",height:"100%",background:s.color,borderRadius:2}}/>
+                            </div>
+                            <span style={{fontSize:12,fontWeight:700,color:"#e2ddd4",minWidth:16,textAlign:"right"}}>{byStatus[s.key]}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* По типу объекта */}
+                  <div>
+                    <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>По типу объекта</div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(
+                        <span key={t} style={{fontSize:11,fontWeight:600,padding:"3px 10px",borderRadius:20,background:"rgba(255,255,255,.06)",color:"#8888aa"}}>{t}: <strong style={{color:"#e2ddd4"}}>{n}</strong></span>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Популярные категории работ */}
+                  {topCats.length>0&&(
+                    <div>
+                      <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>Топ категорий работ</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                        {topCats.map(([cat,n])=>(
+                          <div key={cat} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 10px",background:"rgba(255,255,255,.03)",borderRadius:6}}>
+                            <span style={{color:"#888"}}>{cat}</span>
+                            <span style={{fontWeight:700,color:"#b8904a"}}>{n} смет</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1251,6 +1634,9 @@ export default function App() {
   const [editPrices, setEditPrices] = useState(false);
   const [search, setSearch] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [estStatus, setEstStatus] = useState("new");
+  const [estComment, setEstComment] = useState("");
+  const [showStats, setShowStats] = useState(false);
   const [listSearch, setListSearch] = useState("");
   const [listFilter, setListFilter] = useState(""); // "" | "Вторичка" | "Новостройка" | "Коммерция"
   const [listSort, setListSort] = useState("date"); // "date" | "sum" | "name"
@@ -1360,6 +1746,8 @@ export default function App() {
     setRows(est.rows || {});
     setDiscount(est.discount || 0);
     setNote(est.note || "");
+    setEstStatus(est.status || "new");
+    setEstComment(est.comment || "");
     setSearch("");
     setActiveCat(cats[0]);
     setActiveSub(Object.keys(Gdyn[cats[0]]||{})[0]);
@@ -1374,6 +1762,8 @@ export default function App() {
     setRows({});
     setDiscount(0);
     setNote("");
+    setEstStatus("new");
+    setEstComment("");
     setSearch("");
     setActiveCat(cats[0]);
     setActiveSub(Object.keys(Gdyn[cats[0]]||{})[0]);
@@ -1386,6 +1776,8 @@ export default function App() {
     const updated = {
       id: currentId,
       proj, rows, discount, note,
+      status: estStatus,
+      comment: estComment,
       createdAt: exists?.createdAt || Date.now(),
       createdBy: exists?.createdBy || currentUser.name,
       updatedAt: Date.now(),
@@ -1517,6 +1909,7 @@ export default function App() {
                 <button className="btn btn-o" style={{padding:"6px 9px",fontSize:14}} onClick={()=>setShowAdmin(true)}>⚙️</button>
               )}
               <button className="btn btn-o" style={{padding:"6px 9px",fontSize:11}} onClick={()=>setCurrentUser(null)}>Выйти</button>
+              <button className="btn btn-o" style={{padding:"6px 9px",fontSize:14}} onClick={()=>setShowStats(true)} title="Статистика">📊</button>
               {currentUser.role !== "viewer" && (
                 <button className="btn btn-g" style={{padding:"7px 14px",fontSize:12,whiteSpace:"nowrap"}} onClick={newEstimate}>+ Новая</button>
               )}
@@ -1605,9 +1998,9 @@ export default function App() {
                           <div key={est.id} className="est-card up" style={{animationDelay:`${i*0.04}s`,padding:"10px 14px"}}
                             onClick={() => { if(currentUser.role==="viewer") return; openEstimate(est); }}
                             >
-                            {/* Строка 1: статус + имя + сумма */}
+                            {/* Строка 1: имя + сумма */}
                             <div style={{display:"flex",alignItems:"center",gap:8}}>
-                              <span style={{width:7,height:7,borderRadius:"50%",flexShrink:0,background:status==="done"?"#4caf7d":"#555",boxShadow:status==="done"?"0 0 5px #4caf7d":"none"}}/>
+                              {(() => { const s=STATUSES.find(x=>x.key===(est.status||"new"))||STATUSES[0]; return <span style={{fontSize:10,fontWeight:700,color:s.color,background:s.bg,borderRadius:4,padding:"1px 7px",flexShrink:0,whiteSpace:"nowrap"}}>{s.label}</span>; })()}
                               <span style={{fontWeight:700,fontSize:14,color:"#e2ddd4",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                                 {est.proj?.name || <span style={{color:"#454560",fontStyle:"italic"}}>Без названия</span>}
                               </span>
@@ -1615,6 +2008,7 @@ export default function App() {
                                 ? <span style={{fontSize:14,fontWeight:800,color:"#b8904a",flexShrink:0}}>{fmt(est.total)} ₸</span>
                                 : <span style={{fontSize:11,color:"#454560",fontStyle:"italic",flexShrink:0}}>черновик</span>}
                             </div>
+                            {est.comment&&<div style={{fontSize:11,color:"#555575",marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>💬 {est.comment}</div>}
                             {/* Строка 2: мета + дата + кнопки */}
                             <div style={{display:"flex",alignItems:"center",gap:6,marginTop:5}} onClick={e=>e.stopPropagation()}>
                               <span style={{fontSize:11,color:"#555575",background:"rgba(255,255,255,.04)",borderRadius:4,padding:"1px 6px"}}>{est.proj?.type||"—"}</span>
@@ -1920,13 +2314,54 @@ export default function App() {
                     </>
                   )}
                 </div>
+                {/* Статус сметы */}
                 <div className="card" style={{padding:14}}>
-                  <div style={{fontSize:10,color:"#353550",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:7}}>Примечание</div>
-                  <textarea className="fi" rows={3} style={{resize:"none"}} placeholder="Доп. условия..." value={note} onChange={e=>setNote(e.target.value)}/>
+                  <div style={{fontSize:10,color:"#353550",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>Статус</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                    {STATUSES.map(s=>(
+                      <button key={s.key} onClick={()=>setEstStatus(s.key)}
+                        style={{fontSize:11,fontWeight:700,padding:"4px 12px",borderRadius:6,cursor:"pointer",fontFamily:"inherit",border:`1px solid ${estStatus===s.key?s.color:"rgba(255,255,255,.08)"}`,background:estStatus===s.key?s.bg:"transparent",color:estStatus===s.key?s.color:"#454560",transition:"all .15s"}}>
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* Комментарий для менеджера */}
+                <div className="card" style={{padding:14}}>
+                  <div style={{fontSize:10,color:"#353550",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:7}}>Комментарий</div>
+                  <textarea className="fi" rows={2} style={{resize:"none"}} placeholder="Заметка для менеджера..." value={estComment} onChange={e=>setEstComment(e.target.value)}/>
+                </div>
+                <div className="card" style={{padding:14}}>
+                  <div style={{fontSize:10,color:"#353550",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:7}}>Примечание в КП</div>
+                  <textarea className="fi" rows={3} style={{resize:"none"}} placeholder="Доп. условия для клиента..." value={note} onChange={e=>setNote(e.target.value)}/>
                 </div>
                 <button className="btn btn-g" disabled={kpItems.length===0} onClick={()=>setShowKP(true)}>
                   Сформировать КП
                 </button>
+                {/* WhatsApp */}
+                {kpItems.length>0&&(
+                  <button onClick={()=>{
+                    const lines = [];
+                    lines.push("*TitovStroy — Смета*");
+                    if(proj.name) lines.push(`Клиент: ${proj.name}`);
+                    if(proj.address) lines.push(`Адрес: ${proj.address}`);
+                    if(proj.type) lines.push(`Тип: ${proj.type}`);
+                    lines.push("");
+                    const catTotals = {};
+                    for(const item of kpItems){ catTotals[item.cat]=(catTotals[item.cat]||0)+item.total; }
+                    for(const [cat,sum] of Object.entries(catTotals)) lines.push(`• ${cat}: ${fmt(sum)} ₸`);
+                    if(discount>0){ lines.push(""); lines.push(`Скидка ${discount}%: -${fmt(discAmt)} ₸`); }
+                    lines.push(""); lines.push(`*Итого: ${fmt(final)} ₸*`);
+                    if(proj.area&&Number(proj.area)>0) lines.push(`≈ ${fmt(final/Number(proj.area))} ₸/м²`);
+                    const text = encodeURIComponent(lines.join("
+"));
+                    const phone = proj.phone ? proj.phone.replace(/\D/g,"") : "";
+                    window.open(`https://wa.me/${phone}?text=${text}`,"_blank");
+                  }}
+                  style={{background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",borderRadius:8,padding:"10px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",width:"100%"}}>
+                    📲 Отправить в WhatsApp
+                  </button>
+                )}
                 <button className="btn btn-o" onClick={()=>{setRows({});setDiscount(0);setNote("");}}>
                   Сбросить позиции
                 </button>
@@ -2003,6 +2438,100 @@ export default function App() {
             <KPContent proj={proj} kpItems={kpItems} discount={discount} discAmt={discAmt} final={final} note={note}/>
           </div>
         </>
+      )}
+
+      {/* ═══════════════════ СТАТИСТИКА ═══════════════════ */}
+      {showStats&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20}}
+          onClick={()=>setShowStats(false)}>
+          <div style={{background:"#161929",border:"1px solid #2a2d3e",borderRadius:14,padding:"24px 28px",maxWidth:520,width:"100%",maxHeight:"85vh",overflowY:"auto"}}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <div style={{fontWeight:800,fontSize:16,color:"#e2ddd4"}}>📊 Статистика</div>
+              <button onClick={()=>setShowStats(false)} style={{background:"none",border:"none",color:"#454560",fontSize:20,cursor:"pointer"}}>✕</button>
+            </div>
+            {(()=>{
+              const total = estimates.length;
+              const withSum = estimates.filter(e=>e.total>0);
+              const totalSum = withSum.reduce((s,e)=>s+e.total,0);
+              const avgSum = withSum.length ? Math.round(totalSum/withSum.length) : 0;
+              const now = Date.now();
+              const month = 30*24*60*60*1000;
+              const thisMonth = estimates.filter(e=>(now-e.updatedAt)<month);
+              const byStatus = {};
+              for(const s of STATUSES) byStatus[s.key]=estimates.filter(e=>(e.status||"new")===s.key).length;
+              const byType = {};
+              for(const e of estimates){ const t=e.proj?.type||"—"; byType[t]=(byType[t]||0)+1; }
+              const catSums = {};
+              for(const e of estimates){
+                const items = e.rows ? Object.entries(e.rows).filter(([,r])=>Number(r?.qty)>0) : [];
+                for(const [code,] of items){
+                  const w = getEffectiveCatalog().find(x=>x.code===code);
+                  if(w){ catSums[w.cat]=(catSums[w.cat]||0)+1; }
+                }
+              }
+              const topCats = Object.entries(catSums).sort((a,b)=>b[1]-a[1]).slice(0,5);
+              return (
+                <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                  {/* Ключевые цифры */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                    {[["Всего смет",total,"#8888cc"],["За месяц",thisMonth.length,"#b8904a"],["Средний чек",fmt(avgSum)+" ₸","#4caf7d"]].map(([l,v,c])=>(
+                      <div key={l} style={{background:"rgba(255,255,255,.04)",borderRadius:8,padding:"12px 10px",textAlign:"center"}}>
+                        <div style={{fontSize:20,fontWeight:800,color:c}}>{v}</div>
+                        <div style={{fontSize:10,color:"#454560",marginTop:3}}>{l}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Общий объём */}
+                  <div style={{background:"rgba(184,144,74,.08)",border:"1px solid rgba(184,144,74,.2)",borderRadius:8,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:13,color:"#888"}}>Общий объём</span>
+                    <span style={{fontSize:18,fontWeight:800,color:"#b8904a"}}>{fmt(totalSum)} ₸</span>
+                  </div>
+                  {/* По статусам */}
+                  <div>
+                    <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>По статусам</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                      {STATUSES.map(s=>(
+                        <div key={s.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(255,255,255,.03)",borderRadius:6}}>
+                          <span style={{fontSize:12,color:s.color,fontWeight:600}}>{s.label}</span>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <div style={{width:80,height:4,background:"rgba(255,255,255,.06)",borderRadius:2,overflow:"hidden"}}>
+                              <div style={{width:total?`${(byStatus[s.key]/total)*100}%`:"0%",height:"100%",background:s.color,borderRadius:2}}/>
+                            </div>
+                            <span style={{fontSize:12,fontWeight:700,color:"#e2ddd4",minWidth:16,textAlign:"right"}}>{byStatus[s.key]}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* По типу объекта */}
+                  <div>
+                    <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>По типу объекта</div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(
+                        <span key={t} style={{fontSize:11,fontWeight:600,padding:"3px 10px",borderRadius:20,background:"rgba(255,255,255,.06)",color:"#8888aa"}}>{t}: <strong style={{color:"#e2ddd4"}}>{n}</strong></span>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Популярные категории работ */}
+                  {topCats.length>0&&(
+                    <div>
+                      <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>Топ категорий работ</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                        {topCats.map(([cat,n])=>(
+                          <div key={cat} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 10px",background:"rgba(255,255,255,.03)",borderRadius:6}}>
+                            <span style={{color:"#888"}}>{cat}</span>
+                            <span style={{fontWeight:700,color:"#b8904a"}}>{n} смет</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
       )}
     </div>
   );
