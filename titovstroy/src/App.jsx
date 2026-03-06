@@ -1812,12 +1812,14 @@ export default function App() {
         catMap[cat].rows.push({...w,sum});
       });
       const multiCat = catOrder.length > 1;
-      // 6 columns: № | Наименование | Ед. | Объём | Цена | Сумма
-      let html = `<table><colgroup>
-        <col style="width:5%"><col style="width:45%"><col style="width:8%"><col style="width:8%"><col style="width:17%"><col style="width:17%">
-      </colgroup><thead><tr>
-        <th>№</th><th style="text-align:left">Наименование работ</th><th>Ед.</th><th>Объём</th><th>Цена за ед.</th><th>Сумма</th>
-      </tr></thead><tbody>`;
+      let html = "<table><thead><tr>"
+        + '<th style="width:5%">№</th>'
+        + '<th style="width:45%;text-align:left">Наименование работ</th>'
+        + '<th style="width:8%">Ед.</th>'
+        + '<th style="width:8%">Объём</th>'
+        + '<th style="width:17%">Цена за ед.</th>'
+        + '<th style="width:17%">Сумма</th>'
+        + "</tr></thead><tbody>";
       let globalNum = 0;
       catOrder.forEach(cat=>{
         const {rows, total: catTotal} = catMap[cat];
@@ -1848,14 +1850,14 @@ export default function App() {
       });
       html += `</tbody></table>`;
       if(multiCat){
-        html += `<table style="margin-top:6pt;width:60%;margin-left:40%"><tbody>
-          <tr><td colspan="2" style="background:#e8e4d8;font-weight:bold;font-size:9pt">Сводка по разделам</td></tr>`;
+        html += '<table style="margin-top:6pt;width:60%;margin-left:40%"><tbody>';
+        html += '<tr><td colspan="2" style="background:#e8e4d8;font-weight:bold;font-size:9pt">Сводка по разделам</td></tr>';
         catOrder.forEach(cat=>{
-          html += `<tr><td style="font-size:9pt">${cat}</td><td class="tr" style="font-weight:bold;font-size:9pt">${fmtN(catMap[cat].total)} ₸</td></tr>`;
+          html += "<tr><td style=\"font-size:9pt\">"+cat+"</td><td class=\"tr\" style=\"font-weight:bold;font-size:9pt\">"+fmtN(catMap[cat].total)+" ₸</td></tr>";
         });
-        html += `<tr style="background:#e8e0c8"><td style="font-weight:bold">ИТОГО:</td>
-          <td class="tr" style="font-weight:bold;font-size:11pt">${fmtN(total)} ₸</td></tr>
-        </tbody></table>`;
+        html += '<tr style="background:#e8e0c8"><td style="font-weight:bold">ИТОГО:</td>';
+        html += "<td class=\"tr\" style=\"font-weight:bold;font-size:11pt\">"+fmtN(total)+" ₸</td></tr>";
+        html += "</tbody></table>";
       } else {
         html += `<p class="tr" style="font-weight:bold;font-size:11pt;padding-top:4pt">ИТОГО: ${fmtN(total)} ₸</p>`;
       }
