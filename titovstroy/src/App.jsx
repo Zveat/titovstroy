@@ -1236,7 +1236,7 @@ const DOC_TYPES = [
 ];
 const TYPE_LABELS = { repair_fiz:"Договор ремонта ФИЗ", repair_yur:"Договор ремонта ЮР", annex:"Приложение", design:"Дизайн-проект", design_add:"Доп. соглашение дизайн", reservation:"Бронь" };
 
-function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onAddClientFromEstimate, currentUserRole, fmt }) {
+function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onDocx, onWhatsApp, onAddClientFromEstimate, currentUserRole, fmt }) {
   const type = contract.type || "repair_fiz";
   const total = (contract.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
   const upd = (patch) => onUpdate(prev=>({...prev,...patch}));
@@ -1485,9 +1485,15 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       <div style={{display:"flex",gap:8}}>
         <button className="btn btn-g" style={{flex:1}} onClick={onSave}>💾 Сохранить</button>
         <button onClick={onPdf} style={{flex:1,background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.3)",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-          📄 Печать / PDF
+          📄 PDF
+        </button>
+        <button onClick={onDocx} style={{flex:1,background:"rgba(100,140,220,.1)",color:"#6699dd",border:"1px solid rgba(100,140,220,.3)",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+          📝 DOCX
         </button>
       </div>
+      <button onClick={onWhatsApp} style={{width:"100%",background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.3)",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+        📲 Отправить в WhatsApp
+      </button>
     </div>
   );
 }
@@ -1732,9 +1738,8 @@ export default function App() {
     setDeleteConfirm(null);
   };
 
-  // ── Генерация PDF договора ──
-  // ── Генератор PDF по настоящим шаблонам договоров ──
-  const generateContractPdf = (c, client, ca) => {
+  // ── Генерация договора: HTML / PDF / DOCX / WhatsApp ──
+  const buildContractHtml = (c, client, ca) => {
     const type = c.type || "repair_fiz";
     const fmtN = n => Math.round(n||0).toLocaleString("ru-RU");
     const fmtDate = s => {
@@ -2183,10 +2188,79 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
   <button onclick="window.print()" style="padding:12px 36px;background:#b8904a;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;font-weight:700">🖨 Распечатать / Сохранить PDF</button>
 </div>
 </body></html>`;
+    return html;
+  };
+
+  const generateContractPdf = (c, client, ca) => {
+    const html = buildContractHtml(c, client, ca);
     const blob = new Blob([html],{type:"text/html"});
     const url = URL.createObjectURL(blob);
     window.open(url,"_blank");
     setTimeout(()=>URL.revokeObjectURL(url),20000);
+  };
+
+  const generateContractDocx = (c, client, ca) => {
+    const html = buildContractHtml(c, client, ca);
+    if(typeof htmlDocx === "undefined") {
+      alert("Библиотека для DOCX не загружена. Проверьте подключение к интернету.");
+      return;
+    }
+    const docxBlob = htmlDocx.asBlob(html, {orientation:"portrait", margins:{top:720,right:720,bottom:720,left:1440}});
+    const url = URL.createObjectURL(docxBlob);
+    const a = document.createElement("a");
+    const clientName = client?.name || c.estClient || "договор";
+    const num = c.number || c.id?.slice(-4) || "б-н";
+    a.href = url;
+    a.download = `Договор_${num}_${clientName}.docx`.replace(/[<>:"/\\|?*]/g,"_");
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),20000);
+  };
+
+  const sendContractWhatsApp = (c, client) => {
+    const type = c.type || "repair_fiz";
+    const TYPE_NAMES = {
+      repair_fiz:"Договор ремонта (ФИЗ)", repair_yur:"Договор ремонта (ЮР)",
+      annex:"Приложение к договору", design:"Соглашение о дизайне",
+      design_add:"Доп. соглашение к дизайну", reservation:"Соглашение о резервировании"
+    };
+    const total = (c.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
+    const fmtN = n => Math.round(n||0).toLocaleString("ru-RU");
+    const lines = [];
+    lines.push(`*TitovStroy — ${TYPE_NAMES[type]||type}*`);
+    lines.push(`📋 №${c.number||"б/н"} от ${c.date ? new Date(c.date).toLocaleDateString("ru-RU") : "—"}`);
+    lines.push("");
+    if(client?.name) lines.push(`👤 Клиент: ${client.name}`);
+    if(client?.phone) lines.push(`📞 Телефон: ${client.phone}`);
+    if(client?.address) lines.push(`📍 Адрес: ${client.address}`);
+    if((c.works||[]).length>0){
+      lines.push("");
+      lines.push("*Состав работ:*");
+      const catMap={}, catOrder=[];
+      (c.works||[]).forEach(w=>{
+        const cat=w.category||"Работы";
+        if(!catMap[cat]){catMap[cat]=[];catOrder.push(cat);}
+        catMap[cat].push(w);
+      });
+      catOrder.forEach(cat=>{
+        const catSum = catMap[cat].reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
+        lines.push(`\n*${cat}* — ${fmtN(catSum)} ₸`);
+        catMap[cat].forEach(w=>{
+          lines.push(`  • ${w.name}: ${w.quantity} ${w.unit||"м²"} × ${fmtN(w.price)} = ${fmtN(Number(w.quantity)*Number(w.price))} ₸`);
+        });
+      });
+      lines.push("");
+      lines.push(`*ИТОГО: ${fmtN(total)} ₸*`);
+      if(type==="repair_fiz"||type==="repair_yur"){
+        const pct = c.advancePercent??30;
+        lines.push(`💰 Предоплата ${pct}%: ${fmtN(Math.round(total*pct/100))} ₸`);
+      }
+    }
+    if(type==="reservation") lines.push(`\n💳 Сумма резервирования: ${fmtN(c.reserveAmount||50000)} ₸`);
+    if(type==="design"||type==="design_add") lines.push(`\n💳 Предоплата: ${fmtN(c.designAdvance||25000)} ₸`);
+    lines.push("\n_TitovStroy — ваш надёжный подрядчик_");
+    const text = encodeURIComponent(lines.join("\n"));
+    const phone = (client?.phone||"").replace(/\D/g,"");
+    window.open(`https://wa.me/${phone}?text=${text}`,"_blank");
   };
 
   // ── Экспорт сметы в JSON ──
@@ -3168,6 +3242,15 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
                               const ca2 = contragents.find(x=>x.id===c.contragentId);
                               generateContractPdf(c, cl, ca2);
                             }} style={{background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>
+                            <button onClick={e=>{e.stopPropagation();
+                              const cl = contractClients.find(x=>x.id===c.clientId);
+                              const ca2 = contragents.find(x=>x.id===c.contragentId);
+                              generateContractDocx(c, cl, ca2);
+                            }} style={{background:"rgba(100,140,220,.1)",color:"#6699dd",border:"1px solid rgba(100,140,220,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📝 DOCX</button>
+                            <button onClick={e=>{e.stopPropagation();
+                              const cl = contractClients.find(x=>x.id===c.clientId);
+                              sendContractWhatsApp(c, cl);
+                            }} style={{background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📲 WA</button>
                             {currentUser.role==="admin" && (
                               <button onClick={e=>{e.stopPropagation(); if(window.confirm("Удалить договор?")) saveContracts(contracts.filter(x=>x.id!==c.id));}}
                                 style={{background:"rgba(200,60,60,.08)",color:"#c06060",border:"1px solid rgba(200,60,60,.15)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
@@ -3194,10 +3277,19 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
                   await saveContracts([...list, currentContract]);
                   setContractTab("list");
                 }}
-                onPdf={()=>{
+                onPdf={()=>{\
                   const cl = contractClients.find(x=>x.id===currentContract.clientId);
                   const ca = contragents.find(x=>x.id===currentContract.contragentId);
                   generateContractPdf(currentContract, cl, ca);
+                }}
+                onDocx={()=>{
+                  const cl = contractClients.find(x=>x.id===currentContract.clientId);
+                  const ca = contragents.find(x=>x.id===currentContract.contragentId);
+                  generateContractDocx(currentContract, cl, ca);
+                }}
+                onWhatsApp={()=>{
+                  const cl = contractClients.find(x=>x.id===currentContract.clientId);
+                  sendContractWhatsApp(currentContract, cl);
                 }}
                 onAddClientFromEstimate={async ()=>{
                   const newClient = {id:Date.now().toString(),name:currentContract.estClient||"",phone:currentContract.estPhone||"",address:currentContract.estAddress||"",iin:"",doc:"",type:"физ"};
