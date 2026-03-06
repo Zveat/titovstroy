@@ -274,7 +274,11 @@ function getEffectiveCatalog() {
     });
   const custom = (_catalogOverrides.custom||[])
     .filter(w => !(_catalogOverrides.hiddenCodes||[]).includes(w.code))
-    .map(w => ({...w, tiers: w.tiers||[], _origCat: w.cat, _origSub: w.sub}));
+    .map(w => {
+      let r = {...w, tiers: w.tiers||[], _origCat: w.cat, _origSub: w.sub};
+      if (_catalogOverrides.renames[r.code]) r = {...r, name: _catalogOverrides.renames[r.code]};
+      return r;
+    });
   return [...base, ...custom];
 }
 
