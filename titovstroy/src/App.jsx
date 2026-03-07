@@ -1235,7 +1235,7 @@ const DOC_TYPES = [
 ];
 const TYPE_LABELS = { repair_fiz:"Договор ремонта ФИЗ", repair_yur:"Договор ремонта ЮР", annex:"Приложение", design:"Дизайн-проект", design_add:"Доп. соглашение дизайн", reservation:"Бронь" };
 
-function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onDocx, onGDoc, onAddClientFromEstimate, currentUserRole, fmt }) {
+function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onGDoc, onAddClientFromEstimate, currentUserRole, fmt }) {
   const type = contract.type || "repair_fiz";
   const total = (contract.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
   const upd = (patch) => onUpdate(prev=>({...prev,...patch}));
@@ -1485,9 +1485,6 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
         <button className="btn btn-g" style={{flex:1}} onClick={onSave}>💾 Сохранить</button>
         <button onClick={onPdf} style={{flex:1,background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.3)",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
           📄 PDF
-        </button>
-        <button onClick={onDocx} style={{flex:1,background:"rgba(100,140,220,.1)",color:"#6699dd",border:"1px solid rgba(100,140,220,.3)",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-          📝 DOCX
         </button>
         <button onClick={onGDoc} style={{flex:1,background:"rgba(66,133,244,.1)",color:"#4285f4",border:"1px solid rgba(66,133,244,.3)",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
           📋 Google Doc
@@ -2647,42 +2644,76 @@ export default function App() {
     }
   };
 
-  const generateContractGDoc = (c, client, ca) => {
+  const generateContractGDoc = async (c, client, ca) => {
+    const GDOC_CLIENT_ID = "363473710949-d67codd7dq0uk9g4tfl8lhhgecgcqe98.apps.googleusercontent.com";
     const clientName = client?.name || c.estClient || "договор";
     const num = c.number || c.id?.slice(-4) || "б-н";
     const title = ("Договор_"+num+"_"+clientName).replace(/[<>:"/\\|?*]/g,"_");
     const html = buildContractHtml(c, client, ca, false);
-    const topBar = `
-<div id="gdoc-bar" style="position:fixed;top:0;left:0;right:0;background:#1a73e8;color:#fff;padding:10px 20px;font-family:Arial,sans-serif;font-size:13px;z-index:9999;display:flex;align-items:center;gap:12px;box-shadow:0 2px 8px rgba(0,0,0,.3)">
-  <span style="font-weight:700;font-size:15px">📋 Договор готов</span>
-  <button onclick="selectAll()" style="background:#fff;color:#1a73e8;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-weight:700;font-size:13px">① Выделить и скопировать</button>
-  <a href="https://docs.google.com/document/create" target="_blank" style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4);padding:6px 14px;border-radius:4px;cursor:pointer;font-weight:700;font-size:13px;text-decoration:none">② Открыть Google Docs</a>
-  <span style="opacity:.7;font-size:12px">→ вставить Ctrl+V</span>
-  <span style="flex:1"></span>
-  <button onclick="window.print()" style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px">🖨 PDF</button>
-  <button onclick="document.getElementById('gdoc-bar').style.display='none'" style="background:none;border:none;color:#fff;cursor:pointer;font-size:20px;padding:0 4px">✕</button>
-</div>
-<div style="height:56px"></div>
-<script>
-function selectAll(){
-  var range=document.createRange();
-  range.selectNode(document.getElementById('contract-body'));
-  var sel=window.getSelection();
-  sel.removeAllRanges();
-  sel.addRange(range);
-  try{document.execCommand('copy');
-    var btn=document.querySelector('#gdoc-bar button');
-    btn.textContent='✓ Скопировано!';
-    btn.style.background='#0f9d58';btn.style.color='#fff';
-    setTimeout(function(){btn.textContent='① Выделить и скопировать';btn.style.background='#fff';btn.style.color='#1a73e8';},2500);
-  }catch(e){}
-}
-<\/script>`;
-    const fullHtml = html.replace("<body>","<body>"+topBar+"<div id='contract-body'>").replace("</body>","</div></body>");
-    const blob = new Blob([fullHtml],{type:"text/html;charset=utf-8"});
-    const url = URL.createObjectURL(blob);
-    window.open(url,"_blank");
-    setTimeout(()=>URL.revokeObjectURL(url),60000);
+
+    // Загружаем Google Identity Services если ещё нет
+    const loadGIS = () => new Promise((res, rej) => {
+      if (window.google?.accounts?.oauth2) { res(); return; }
+      const s = document.createElement("script");
+      s.src = "https://accounts.google.com/gsi/client";
+      s.onload = () => res();
+      s.onerror = () => rej(new Error("Не удалось загрузить Google API"));
+      document.head.appendChild(s);
+    });
+
+    // Получаем access token
+    const getToken = () => new Promise((res, rej) => {
+      const tc = window.google.accounts.oauth2.initTokenClient({
+        client_id: GDOC_CLIENT_ID,
+        scope: "https://www.googleapis.com/auth/drive.file",
+        callback: (resp) => {
+          if (resp.error) rej(new Error("Ошибка авторизации: "+resp.error));
+          else res(resp.access_token);
+        },
+      });
+      tc.requestAccessToken({ prompt: "" });
+    });
+
+    try {
+      await loadGIS();
+      const token = await getToken();
+
+      // Создаём Google Doc через Drive API (multipart upload с HTML контентом)
+      const boundary = "titov_boundary_gdoc";
+      const meta = JSON.stringify({ name: title, mimeType: "application/vnd.google-apps.document" });
+      const body = [
+        "--"+boundary,
+        "Content-Type: application/json; charset=UTF-8",
+        "",
+        meta,
+        "--"+boundary,
+        "Content-Type: text/html; charset=UTF-8",
+        "",
+        html,
+        "--"+boundary+"--"
+      ].join("\r\n");
+
+      const resp = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer "+token,
+          "Content-Type": "multipart/related; boundary="+boundary,
+        },
+        body,
+      });
+
+      if (!resp.ok) {
+        const err = await resp.text();
+        throw new Error("Drive API ошибка "+resp.status+": "+err);
+      }
+
+      const data = await resp.json();
+      window.open("https://docs.google.com/document/d/"+data.id+"/edit", "_blank");
+
+    } catch(err) {
+      console.error("Google Doc error:", err);
+      alert("Ошибка создания Google Doc:\n"+err.message);
+    }
   };
 
   const sendContractWhatsApp = async (c, client, ca) => {
@@ -3663,11 +3694,6 @@ function selectAll(){
                             <button onClick={e=>{e.stopPropagation();
                               const cl = contractClients.find(x=>x.id===c.clientId);
                               const ca2 = contragents.find(x=>x.id===c.contragentId);
-                              generateContractDocx(c, cl, ca2);
-                            }} style={{background:"rgba(100,140,220,.1)",color:"#6699dd",border:"1px solid rgba(100,140,220,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📝 DOCX</button>
-                            <button onClick={e=>{e.stopPropagation();
-                              const cl = contractClients.find(x=>x.id===c.clientId);
-                              const ca2 = contragents.find(x=>x.id===c.contragentId);
                               generateContractGDoc(c, cl, ca2);
                             }} style={{background:"rgba(66,133,244,.1)",color:"#4285f4",border:"1px solid rgba(66,133,244,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>
                             {currentUser.role==="admin" && (
@@ -3700,11 +3726,6 @@ function selectAll(){
                   const cl = contractClients.find(x=>x.id===currentContract.clientId);
                   const ca = contragents.find(x=>x.id===currentContract.contragentId);
                   generateContractPdf(currentContract, cl, ca);
-                }}
-                onDocx={()=>{
-                  const cl = contractClients.find(x=>x.id===currentContract.clientId);
-                  const ca = contragents.find(x=>x.id===currentContract.contragentId);
-                  generateContractDocx(currentContract, cl, ca);
                 }}
                 onGDoc={()=>{
                   const cl = contractClients.find(x=>x.id===currentContract.clientId);
