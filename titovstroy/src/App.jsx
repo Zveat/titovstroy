@@ -2647,146 +2647,38 @@ export default function App() {
     }
   };
 
-  const generateContractGDoc = async (c, client, ca) => {
+  const generateContractGDoc = (c, client, ca) => {
     const clientName = client?.name || c.estClient || "договор";
     const num = c.number || c.id?.slice(-4) || "б-н";
     const title = ("Договор_"+num+"_"+clientName).replace(/[<>:"/\\|?*]/g,"_");
-
-    // Получаем Google OAuth token через Identity API
-    const getGToken = () => new Promise((res, rej) => {
-      if (!window.google?.accounts?.oauth2) {
-        const s = document.createElement("script");
-        s.src = "https://accounts.google.com/gsi/client";
-        s.onload = () => tokenClient();
-        s.onerror = () => rej(new Error("Не удалось загрузить Google API"));
-        document.head.appendChild(s);
-      } else {
-        tokenClient();
-      }
-      function tokenClient() {
-        try {
-          const tc = window.google.accounts.oauth2.initTokenClient({
-            client_id: "736574510792-autodetect", // будет заменён на нужный
-            scope: "https://www.googleapis.com/auth/drive.file",
-            callback: (resp) => {
-              if (resp.error) rej(new Error(resp.error));
-              else res(resp.access_token);
-            },
-          });
-          tc.requestAccessToken({ prompt: "consent" });
-        } catch(e) { rej(e); }
-      }
-    });
-
-    // Строим HTML содержимое договора
     const html = buildContractHtml(c, client, ca, false);
-
-    try {
-      // Создаём Google Doc через Drive API (multipart upload)
-      // Сначала запрашиваем токен
-      let token;
-      try {
-        token = await getGToken();
-      } catch(e) {
-        // Если OAuth не получилось — открываем HTML как base64 data URL
-        // и предлагаем скопировать в Google Docs
-        const b64 = btoa(unescape(encodeURIComponent(html)));
-        const dataUrl = "data:text/html;base64,"+b64;
-        const w = window.open("","_blank");
-        if(w) {
-          w.document.write(html);
-          w.document.close();
-          w.document.title = title;
-          // Показываем инструкцию
-          const div = w.document.createElement("div");
-          div.style.cssText = "position:fixed;top:0;left:0;right:0;background:#1a73e8;color:#fff;padding:12px 20px;font-family:Arial;font-size:14px;z-index:9999;display:flex;align-items:center;gap:16px";
-          div.innerHTML = `<span>💡 Чтобы сохранить в Google Docs: Ctrl+A → Ctrl+C → откройте docs.google.com → Ctrl+V</span><button onclick="this.parentElement.remove()" style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:13px">✕</button>`;
-          w.document.body.insertBefore(div, w.document.body.firstChild);
-        }
-        return;
-      }
-
-      // Создаём Doc через API
-      const boundary = "titovstroy_gdoc_boundary";
-      const docMeta = JSON.stringify({ name: title, mimeType: "application/vnd.google-apps.document" });
-      const body = [
-        "--"+boundary,
-        "Content-Type: application/json; charset=UTF-8",
-        "",
-        docMeta,
-        "--"+boundary,
-        "Content-Type: text/html; charset=UTF-8",
-        "",
-        html,
-        "--"+boundary+"--"
-      ].join("\r\n");
-
-      const resp = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
-        method: "POST",
-        headers: {
-          "Authorization": "Bearer "+token,
-          "Content-Type": "multipart/related; boundary="+boundary,
-        },
-        body,
-      });
-
-      if (!resp.ok) {
-        const err = await resp.text();
-        throw new Error("Drive API: "+resp.status+" "+err);
-      }
-
-      const data = await resp.json();
-      const docUrl = "https://docs.google.com/document/d/"+data.id+"/edit";
-      window.open(docUrl, "_blank");
-
-    } catch(err) {
-      console.error("Google Doc error:", err);
-      alert("Ошибка создания Google Doc: "+err.message+"\n\nФайл будет открыт как HTML для ручного сохранения.");
-      const blob = new Blob([html],{type:"text/html"});
-      const url = URL.createObjectURL(blob);
-      window.open(url,"_blank");
-      setTimeout(()=>URL.revokeObjectURL(url),20000);
-    }
-  };
-
-  const generateContractGDoc = async (c, client, ca) => {
-    const clientName = client?.name || c.estClient || "договор";
-    const num = c.number || c.id?.slice(-4) || "б-н";
-    const title = ("Договор_"+num+"_"+clientName).replace(/[<>:"/\\|?*]/g,"_");
-
-    // Строим HTML содержимое договора
-    const html = buildContractHtml(c, client, ca, false);
-
-    // Открываем в новом окне с кнопкой для сохранения в Google Docs
     const topBar = `
 <div id="gdoc-bar" style="position:fixed;top:0;left:0;right:0;background:#1a73e8;color:#fff;padding:10px 20px;font-family:Arial,sans-serif;font-size:13px;z-index:9999;display:flex;align-items:center;gap:12px;box-shadow:0 2px 8px rgba(0,0,0,.3)">
   <span style="font-weight:700;font-size:15px">📋 Договор готов</span>
-  <span style="opacity:.8">Выберите способ сохранения:</span>
-  <button onclick="selectAll()" style="background:#fff;color:#1a73e8;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-weight:700;font-size:13px">① Выделить всё</button>
+  <button onclick="selectAll()" style="background:#fff;color:#1a73e8;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-weight:700;font-size:13px">① Выделить и скопировать</button>
   <a href="https://docs.google.com/document/create" target="_blank" style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4);padding:6px 14px;border-radius:4px;cursor:pointer;font-weight:700;font-size:13px;text-decoration:none">② Открыть Google Docs</a>
-  <span style="opacity:.7;font-size:12px">→ Вставить Ctrl+V</span>
+  <span style="opacity:.7;font-size:12px">→ вставить Ctrl+V</span>
   <span style="flex:1"></span>
-  <button onclick="window.print()" style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px">🖨 Печать / PDF</button>
-  <button onclick="document.getElementById('gdoc-bar').remove()" style="background:none;border:none;color:#fff;cursor:pointer;font-size:18px;padding:0 4px">✕</button>
+  <button onclick="window.print()" style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px">🖨 PDF</button>
+  <button onclick="document.getElementById('gdoc-bar').style.display='none'" style="background:none;border:none;color:#fff;cursor:pointer;font-size:20px;padding:0 4px">✕</button>
 </div>
-<div style="height:52px"></div>
+<div style="height:56px"></div>
 <script>
 function selectAll(){
-  const range=document.createRange();
+  var range=document.createRange();
   range.selectNode(document.getElementById('contract-body'));
-  const sel=window.getSelection();
+  var sel=window.getSelection();
   sel.removeAllRanges();
   sel.addRange(range);
   try{document.execCommand('copy');
-    const btn=document.querySelector('#gdoc-bar button');
+    var btn=document.querySelector('#gdoc-bar button');
     btn.textContent='✓ Скопировано!';
-    btn.style.background='#0f9d58';
-    setTimeout(()=>{btn.textContent='① Выделить всё';btn.style.background='#fff';},2000);
+    btn.style.background='#0f9d58';btn.style.color='#fff';
+    setTimeout(function(){btn.textContent='① Выделить и скопировать';btn.style.background='#fff';btn.style.color='#1a73e8';},2500);
   }catch(e){}
 }
 <\/script>`;
-
-    const fullHtml = html.replace("<body>", `<body>${topBar}<div id="contract-body">`).replace("</body>","</div></body>");
+    const fullHtml = html.replace("<body>","<body>"+topBar+"<div id='contract-body'>").replace("</body>","</div></body>");
     const blob = new Blob([fullHtml],{type:"text/html;charset=utf-8"});
     const url = URL.createObjectURL(blob);
     window.open(url,"_blank");
