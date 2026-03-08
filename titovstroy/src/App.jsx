@@ -1235,6 +1235,7 @@ const DOC_TYPES = [
 const TYPE_LABELS = { repair_fiz:"Договор ремонта", annex:"Приложение", design:"Дизайн-проект", design_add:"Доп. соглашение дизайн", reservation:"Бронь" };
 
 function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onGDoc, onAddClientFromEstimate, currentUserRole, fmt }) {
+  const [withStamp, setWithStamp] = React.useState(true);
   const type = contract.type || "repair_fiz";
   const total = (contract.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
   const upd = (patch) => onUpdate(prev=>({...prev,...patch}));
@@ -1482,14 +1483,21 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       {/* Кнопки */}
       <div style={{display:"flex",gap:8}}>
         <button className="btn btn-g" style={{flex:1}} onClick={onSave}>💾 Сохранить</button>
-        <button onClick={onPdf} style={{flex:1,background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.3)",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-          📄 PDF
-        </button>
+        <div style={{flex:1,display:"flex",flexDirection:"column",gap:4}}>
+          <button onClick={()=>onPdf(withStamp)} style={{width:"100%",background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.3)",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            📄 PDF
+          </button>
+          <div onClick={()=>setWithStamp(p=>!p)} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",justifyContent:"center"}}>
+            <div style={{width:28,height:16,borderRadius:8,background:withStamp?"#b8904a":"#2a2a3a",position:"relative",transition:"background .2s",flexShrink:0}}>
+              <div style={{position:"absolute",top:2,left:withStamp?12:2,width:12,height:12,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
+            </div>
+            <span style={{fontSize:10,color:withStamp?"#b8904a":"#555575"}}>С печатью</span>
+          </div>
+        </div>
         <button onClick={onGDoc} style={{flex:1,background:"rgba(66,133,244,.1)",color:"#4285f4",border:"1px solid rgba(66,133,244,.3)",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
           📋 Google Doc
         </button>
       </div>
-    </div>
   );
 }
 
@@ -2233,8 +2241,8 @@ export default function App() {
     return html;
   };
 
-  const generateContractPdf = (c, client, ca) => {
-    const html = buildContractHtml(c, client, ca);
+  const generateContractPdf = (c, client, ca, withStamp=true) => {
+    const html = buildContractHtml(c, client, ca, false, withStamp ? stampBase64 : "");
     const blob = new Blob([html],{type:"text/html"});
     const url = URL.createObjectURL(blob);
     window.open(url,"_blank");
@@ -3776,10 +3784,10 @@ export default function App() {
                   await saveContracts([...list, currentContract]);
                   setContractTab("list");
                 }}
-                onPdf={()=>{
+                onPdf={(withStamp)=>{
                   const cl = contractClients.find(x=>x.id===currentContract.clientId);
                   const ca = contragents.find(x=>x.id===currentContract.contragentId);
-                  generateContractPdf(currentContract, cl, ca);
+                  generateContractPdf(currentContract, cl, ca, withStamp);
                 }}
                 onGDoc={()=>{
                   const cl = contractClients.find(x=>x.id===currentContract.clientId);
