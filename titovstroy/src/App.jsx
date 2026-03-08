@@ -1226,21 +1226,20 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
 
 // Типы документов
 const DOC_TYPES = [
-  { value:"repair_fiz",  label:"Договор ремонта — ФИЗ лицо" },
-  { value:"repair_yur",  label:"Договор ремонта — ЮР лицо" },
+  { value:"repair_fiz",  label:"Договор ремонта" },
   { value:"annex",       label:"Приложение (доп. работы) №2/3..." },
   { value:"design",      label:"Соглашение о дизайн-проекте" },
   { value:"design_add",  label:"Доп. соглашение к дизайн-проекту" },
   { value:"reservation", label:"Соглашение о резервировании" },
 ];
-const TYPE_LABELS = { repair_fiz:"Договор ремонта ФИЗ", repair_yur:"Договор ремонта ЮР", annex:"Приложение", design:"Дизайн-проект", design_add:"Доп. соглашение дизайн", reservation:"Бронь" };
+const TYPE_LABELS = { repair_fiz:"Договор ремонта", annex:"Приложение", design:"Дизайн-проект", design_add:"Доп. соглашение дизайн", reservation:"Бронь" };
 
 function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onGDoc, onAddClientFromEstimate, currentUserRole, fmt }) {
   const type = contract.type || "repair_fiz";
   const total = (contract.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
   const upd = (patch) => onUpdate(prev=>({...prev,...patch}));
 
-  const isRepair = type==="repair_fiz"||type==="repair_yur";
+  const isRepair = type==="repair_fiz";
   const isAnnex  = type==="annex";
   const isDesign = type==="design";
   const isDesAdd = type==="design_add";
@@ -1892,7 +1891,7 @@ export default function App() {
     };
     let body = "";
     // ─────── 1 & 2. ДОГОВОР РЕМОНТА (ФИЗ / ЮР) ───────
-    if(type==="repair_fiz"||type==="repair_yur"){
+    if(type==="repair_fiz"){
       const annex1 = `<div style="page-break-before:always;mso-break-type:page-break">
   <p class="t">Приложение №1</p>
   <p class="c b">Перечень этапов, видов и стоимость работ</p>
@@ -2359,7 +2358,7 @@ export default function App() {
 
     let children = [];
 
-    if(type==="repair_fiz" || type==="repair_yur"){
+    if(type==="repair_fiz"){
       const annex1 = [
         PC([T("Приложение №1",{sz:13,b:true})],{pb:true,sb:0}),
         PC([T("Перечень этапов, видов и стоимость работ",{sz:12,b:true})]),
