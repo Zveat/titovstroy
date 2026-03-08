@@ -2059,7 +2059,7 @@ export default function App() {
   <p class="s">14. РЕКВИЗИТЫ И ПОДПИСИ СТОРОН</p><br>
   ${sigBlock("Подрядчик:", "Заказчик:")}
   ${annex1}`;
-    // ─────── 3. ПРИЛОЖЕНИЕ №2/3 (ДОП. РАБОТЫ) ───────
+    // ─────── 3. ПРИЛОЖЕНИЕ К ДОГОВОРУ РЕМОНТА №2/3 (ДОП. РАБОТЫ) ───────
     } else if(type==="annex"){
       const an = c.appendix||2;
       const prevList = Array.from({length:an-1},(_,i)=>`№${i+1}`).join(" и ");
