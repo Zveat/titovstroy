@@ -2701,7 +2701,7 @@ export default function App() {
     const title = isAnnexG
       ? ("Приложение №"+(c.appendix||2)+" Перечень доп работ к Договору №"+(c.mainNumber||num)+(dateStrG?" от "+dateStrG:"")).replace(/[<>:"/\\|?*]/g,"_")
       : (docLabelG+" №"+num+" "+clientName+(dateStrG?" от "+dateStrG:"")).replace(/[<>:"/\\|?*]/g,"_");
-    const html = buildContractHtml(c, client, ca, true);
+    const html = buildContractHtml(c, client, ca, true, "");
 
     // Загружаем Google Identity Services если ещё нет
     const loadGIS = () => new Promise((res, rej) => {
@@ -2780,7 +2780,7 @@ export default function App() {
     if(navigator.canShare) {
       try {
         // Генерируем PDF blob через html-docx или просто HTML
-        const html = buildContractHtml(c, client, ca, true);
+        const html = buildContractHtml(c, client, ca, true, "");
         let fileToShare = null;
         const docBlob = new Blob([html], {type:"application/msword;charset=utf-8"});
         fileToShare = new File([docBlob], safeName+".doc", {type:"application/msword"});
@@ -2795,7 +2795,7 @@ export default function App() {
     }
     // Fallback: скачать DOC + открыть WhatsApp
     {
-      const html = buildContractHtml(c, client, ca, true);
+      const html = buildContractHtml(c, client, ca, true, "");
       const docBlob = new Blob([html], {type:"application/msword;charset=utf-8"});
       const url = URL.createObjectURL(docBlob);
       const a = document.createElement("a");
