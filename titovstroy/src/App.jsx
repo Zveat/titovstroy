@@ -1792,7 +1792,17 @@ export default function App() {
       if(isYur) return client.name;
       return parts[0]+" "+(parts[1]?parts[1][0]+".":"")+(parts[2]?parts[2][0]+".":"");
     })();
-    const TITOV = {name:'ТОО "TITOVSTROY"',bin:"231040002769",bank:'АО "Kaspi Bank"',bik:"CASPKZKA",acc:"KZ38722S000030058973",addr:"Казахстан, район им.Казыбек би, улица Кирпичная, дом 8г",phone:"8707 667 8766",email:"titovstroy@mail.ru",dir:"Титов В.Е."};
+    const TITOV = {
+      name: ca?.name||'ТОО "TITOVSTROY"',
+      bin:  ca?.bin||"231040002769",
+      bank: ca?.bank||'АО "Kaspi Bank"',
+      bik:  ca?.bik||"CASPKZKA",
+      acc:  ca?.account||"KZ38722S000030058973",
+      addr: ca?.address||"Казахстан, район им.Казыбек би, улица Кирпичная, дом 8г",
+      phone:ca?.phone||"8707 667 8766",
+      email:ca?.email||"titovstroy@mail.ru",
+      dir:  ca?.director||"Титов В.Е.",
+    };
     const sigBlock = (role1="Подрядчик:", role2="Заказчик:") => {
       let clSigRight = "";
       if(isYur){
@@ -1880,7 +1890,7 @@ export default function App() {
       return html;
     };
     const preambula = (role="Подрядчик") => {
-      const tit = "ТОО TITOVSTROY, БИН 231040002769 (далее — \""+role+"\"), в лице директора Василия Титова, действующего на основании Устава";
+      const tit = (ca?.name||"ТОО TITOVSTROY")+", БИН "+(ca?.bin||"231040002769")+" (далее — \""+role+"\"), в лице директора "+(ca?.director||"Василия Титова")+", действующего на основании Устава";
       const tail = "совместно именуемые \"Стороны\", а по отдельности – \"Сторона\", заключили настоящий документ о нижеследующем:";
       if(isYur){
         const clLine = clName+", БИН "+clIIN+" (далее — \"Заказчик\") в лице "+(client?.director||"Директора")+", "+(client?.directorShort||clDir)+", действующего на основании Устава, с другой стороны, "+tail;
@@ -2252,7 +2262,17 @@ export default function App() {
     const clDoc = client?.doc || "___________________";
     const clAddr = client?.address || "___________________";
     const clPhone = client?.phone || "___________________";
-    const TITOV = {name:'ТОО "TITOVSTROY"',bin:"231040002769",bank:'АО "Kaspi Bank"',bik:"CASPKZKA",acc:"KZ38722S000030058973",addr:"Казахстан, район им.Казыбек би, улица Кирпичная, дом 8г",phone:"8707 667 8766",email:"titovstroy@mail.ru",dir:"Титов В.Е."};
+    const TITOV = {
+      name: ca?.name||'ТОО "TITOVSTROY"',
+      bin:  ca?.bin||"231040002769",
+      bank: ca?.bank||'АО "Kaspi Bank"',
+      bik:  ca?.bik||"CASPKZKA",
+      acc:  ca?.account||"KZ38722S000030058973",
+      addr: ca?.address||"Казахстан, район им.Казыбек би, улица Кирпичная, дом 8г",
+      phone:ca?.phone||"8707 667 8766",
+      email:ca?.email||"titovstroy@mail.ru",
+      dir:  ca?.director||"Титов В.Е.",
+    };
     const clShort = (() => { const p=(clName).split(" "); return isYur?clName:p[0]+" "+(p[1]?p[1][0]+".":"")+(p[2]?p[2][0]+".":""); })();
 
     const fmtMo = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
@@ -2336,7 +2356,7 @@ export default function App() {
 
     // Преамбула
     const preamParas = (role="Подрядчик") => {
-      const tit = 'ТОО "TITOVSTROY", БИН 231040002769 (далее — "'+role+'"), в лице директора Василия Титова, действующего на основании Устава';
+      const tit = (ca?.name||'ТОО "TITOVSTROY"')+', БИН '+(ca?.bin||'231040002769')+'  (далее — "'+role+'"), в лице директора '+(ca?.director||'Василия Титова')+', действующего на основании Устава';
       const tail = 'совместно именуемые "Стороны", а по отдельности – "Сторона", заключили настоящий документ о нижеследующем:';
       if(isYur) return [
         P([T(tit+", с одной стороны, и")]),
