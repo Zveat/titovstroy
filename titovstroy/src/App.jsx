@@ -1564,14 +1564,17 @@ export default function App() {
   const [contractTab, setContractTab] = useState("list"); // list | editor | clients | contragents
   const [currentContract, setCurrentContract] = useState(null);
   const [contractClientsTab, setContractClientsTab] = useState("list");
-  const [stampBase64, setStampBase64] = useState("");
+  const [stampsBase64, setStampsBase64] = useState({});
   useEffect(()=>{
-    fetch("/stamp.jpg").then(r=>r.blob()).then(blob=>{
-      const reader = new FileReader();
-      reader.onload = e => setStampBase64(e.target.result);
-      reader.readAsDataURL(blob);
-    }).catch(()=>{});
+    ["stamp.jpg","stamp2.jpg"].forEach(file=>{
+      fetch("/"+file).then(r=>r.blob()).then(blob=>{
+        const reader = new FileReader();
+        reader.onload = e => setStampsBase64(prev=>({...prev,[file]:e.target.result}));
+        reader.readAsDataURL(blob);
+      }).catch(()=>{});
+    });
   },[]);
+  const stampBase64 = stampsBase64["stamp.jpg"] || "";
   const [listSearch, setListSearch] = useState("");
   const [listFilter, setListFilter] = useState(""); // "" | "Вторичка" | "Новостройка" | "Коммерция"
   const [listFilterManager, setListFilterManager] = useState(""); // "" = все
@@ -2243,7 +2246,9 @@ export default function App() {
   };
 
   const generateContractPdf = (c, client, ca, withStamp=true) => {
-    const html = buildContractHtml(c, client, ca, false, withStamp ? stampBase64 : "");
+    const stampFile = ca?.stampFile || "stamp.jpg";
+    const stamp = withStamp ? (stampsBase64[stampFile] || stampBase64) : "";
+    const html = buildContractHtml(c, client, ca, false, stamp);
     const blob = new Blob([html],{type:"text/html"});
     const url = URL.createObjectURL(blob);
     window.open(url,"_blank");
@@ -3914,6 +3919,13 @@ export default function App() {
                   <span style={{fontWeight:700,fontSize:15,color:"#e2ddd4"}}>{currentContract._mode==="newCA"?"Новое ТОО":"Редактировать ТОО"}</span>
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                  <div style={{gridColumn:"1/-1"}}>
+                    <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Файл печати</div>
+                    <select className="fi" value={currentContract.stampFile||"stamp.jpg"} onChange={e=>setCurrentContract(p=>({...p,stampFile:e.target.value}))}>
+                      <option value="stamp.jpg">stamp.jpg</option>
+                      <option value="stamp2.jpg">stamp2.jpg</option>
+                    </select>
+                  </div>
                   {[["Название","name"],["БИН","bin"],["Банк","bank"],["БИК","bik"],["Расчётный счёт","account"],["Директор","director"],["Телефон","phone"],["Email","email"],["Адрес","address"]].map(([label,field])=>(
                     <div key={field}>
                       <div style={{fontSize:11,color:"#555575",marginBottom:4}}>{label}</div>
