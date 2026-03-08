@@ -1411,7 +1411,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
         </div>
         <select className="fi" value={contract.clientId||""} onChange={e=>upd({clientId:e.target.value})}>
           <option value="">— Выбрать клиента —</option>
-          {clients.map(c=>(<option key={c.id} value={c.id}>{c.name}{c.clientType==="yur"?" (ЮР)":""}</option>))}
+          {clients.map(c=>(<option key={c.id} value={c.id}>{c.name}{c.clientType==="yur" || c.type==="юр" ? " (ЮР)" : ""}</option>))}
         </select>
         {!contract.clientId && contract.estClient && (
           <button onClick={onAddClientFromEstimate}
@@ -1780,7 +1780,7 @@ export default function App() {
   tr{page-break-inside:avoid}
   @media print{.np{display:none}body{padding:10mm 10mm 10mm 20mm}@page{size:A4;margin:0}
   tr{page-break-inside:avoid}table{page-break-inside:auto}}`
-    const isYur = client?.clientType==="yur";
+    const isYur = client?.clientType==="yur" || client?.type==="юр";
     const clName = client?.name||"___________________";
     const clIIN = client?.iin||"___________________";
     const clDoc = client?.doc||"___________________";
@@ -2168,8 +2168,7 @@ export default function App() {
   <p class="t">СОГЛАШЕНИЕ №${c.number||"___"}</p>
   <p class="t" style="font-size:13pt">о резервировании даты начала ремонтно-строительных работ</p>
   <p class="city-line">${dt.full} г.&nbsp;&nbsp;&nbsp;&nbsp;г. Караганда</p><br>
-  <p>ФИО ${clName}, ИИН ${clIIN}, № документа ${clDoc} Выдан МВД РК, (далее - "Заказчик") с одной стороны, и</p>
-  <p>ТОО TITOVSTROY, БИН 231040002769 (далее - "Исполнитель"), в лице директора Василия Титова, действующего на основании Устава, с другой стороны, совместно именуемые "Стороны", а по отдельности – "Сторона", заключили настоящее соглашение о нижеследующем:</p>
+  ${preambula("Исполнитель")}
   <p class="s">1. Общие положения</p>
   <p>1.2. Настоящее Соглашение подтверждает намерение сторон заключить договор подряда на выполнение ремонтно-строительных работ. Исполнитель обязуется зарезервировать за Заказчиком производственные ресурсы и ориентировочную дату начала работ.</p>
   <p>1.3. Стороны подтверждают, что основной договор подряда будет заключен отдельно после согласования: дизайн-проекта, сметы и технического задания.</p>
@@ -2248,7 +2247,7 @@ export default function App() {
     const CONTENT_W = 9356; // twips: A4 - margins 30+15mm
     const col = pct => Math.round(CONTENT_W * pct / 100);
 
-    const isYur = client?.clientType === "yur";
+    const isYur = client?.clientType === "yur" || client?.type === "юр";
     const clName = client?.name || "___________________";
     const clIIN = client?.iin || "___________________";
     const clDoc = client?.doc || "___________________";
