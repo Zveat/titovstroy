@@ -1601,13 +1601,13 @@ export default function App() {
     try {
       const [cr, cl, ca] = await Promise.all([storage.get(CONTRACTS_KEY), storage.get(CLIENTS_KEY), storage.get(CONTRAGENTS_KEY)]);
       if (cr) setContracts(JSON.parse(cr.value));
-      if (cl) setContractClients(JSON.parse(cl.value));
+      if (cl) { const cls = JSON.parse(cl.value); setContractClients(cls.map(c=>({...c, createdAt: c.createdAt||Date.now()}))); }
       if (ca) setContragents(JSON.parse(ca.value));
     } catch(e) { console.error(e); }
   }, []);
 
   const saveContracts = async (list) => { setContracts(list); await storage.set(CONTRACTS_KEY, JSON.stringify(list)); };
-  const saveContractClients = async (list) => { setContractClients(list); await storage.set(CLIENTS_KEY, JSON.stringify(list)); };
+  const saveContractClients = async (list) => { const patched = list.map(c=>({...c, createdAt: c.createdAt||Date.now()})); setContractClients(patched); await storage.set(CLIENTS_KEY, JSON.stringify(patched)); };
   const saveContragents = async (list) => { setContragents(list); await storage.set(CONTRAGENTS_KEY, JSON.stringify(list)); };
 
   const loadEstimates = useCallback(async () => {
@@ -3077,7 +3077,7 @@ export default function App() {
               {label:"Смет за месяц",    value:estimatesThisMonth.length,  sub:estimatesThisMonth.length>0?"из "+estimates.length+" всего":"нет смет",       color:"#8888cc"},
               {label:"Договоров за месяц",value:contractsThisMonth.length, sub:contractsThisMonth.length>0?"из "+contracts.length+" всего":"нет договоров", color:"#b8904a"},
               {label:"Объём за месяц",   value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма смет за месяц",                          color:"#4caf7d"},
-              {label:"Клиентов всего",   value:contractClients.length,     sub:newClientsCount>0?"+"+newClientsCount+" новых в этом месяце":"нет новых в этом месяце", color:"#4285f4"},
+              {label:"Клиентов за месяц",value:clientsThisMonth.length,    sub:"из "+contractClients.length+" всего", color:"#4285f4"},
             ].map((s,i)=>(
               <div key={i} style={{background:"#0f1120",border:"1px solid #161929",borderRadius:13,padding:"18px 18px 16px",position:"relative",overflow:"hidden"}}>
                 <div style={{position:"absolute",top:0,left:0,width:3,height:"100%",background:s.color,borderRadius:"3px 0 0 3px"}}/>
