@@ -1227,7 +1227,7 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
 // Типы документов
 const DOC_TYPES = [
   { value:"repair_fiz",  label:"Договор ремонта" },
-  { value:"annex",       label:"Приложение к договору ремонта (доп. работы) №2/3..." },
+  { value:"annex",       label:"Приложение (доп. работы) №2/3..." },
   { value:"design",      label:"Соглашение о дизайн-проекте" },
   { value:"design_add",  label:"Доп. соглашение к дизайн-проекту" },
   { value:"reservation", label:"Соглашение о резервировании" },
@@ -2059,7 +2059,7 @@ export default function App() {
   <p class="s">14. РЕКВИЗИТЫ И ПОДПИСИ СТОРОН</p><br>
   ${sigBlock("Подрядчик:", "Заказчик:")}
   ${annex1}`;
-    // ─────── 3. ПРИЛОЖЕНИЕ К ДОГОВОРУ РЕМОНТА №2/3 (ДОП. РАБОТЫ) ───────
+    // ─────── 3. ПРИЛОЖЕНИЕ №2/3 (ДОП. РАБОТЫ) ───────
     } else if(type==="annex"){
       const an = c.appendix||2;
       const prevList = Array.from({length:an-1},(_,i)=>`№${i+1}`).join(" и ");
@@ -2236,7 +2236,9 @@ export default function App() {
   const generateContractDocx = async (c, client, ca) => {
     const clientName = client?.name || c.estClient || "договор";
     const num = c.number || c.id?.slice(-4) || "б-н";
-    const filename = ("Договор_"+num+"_"+clientName+".docx").replace(/[<>:"/\\|?*]/g,"_");
+    const dateStr = c.date ? c.date.split("-").reverse().join(".") : "";
+    const docLabel = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Соглашение о дизайн-проекте",design_add:"Доп соглашение к дизайн-проекту",reservation:"Соглашение о резервировании"}[c.type||"repair_fiz"] || "Договор";
+    const filename = (docLabel+" №"+num+" "+clientName+(dateStr?" от "+dateStr:"")+".docx").replace(/[<>:"/\\|?*]/g,"_");
 
     try {
     if (!window.docx) {
@@ -2753,7 +2755,9 @@ export default function App() {
   const sendContractWhatsApp = async (c, client, ca) => {
     const clientName = client?.name || c.estClient || "договор";
     const num = c.number || c.id?.slice(-4) || "б-н";
-    const safeName = `Договор_${num}_${clientName}`.replace(/[<>:"/\\|?*]/g,"_");
+    const dateStr2 = c.date ? c.date.split("-").reverse().join(".") : "";
+    const docLabel2 = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Соглашение о дизайн-проекте",design_add:"Доп соглашение к дизайн-проекту",reservation:"Соглашение о резервировании"}[c.type||"repair_fiz"] || "Договор";
+    const safeName = (docLabel2+" №"+num+" "+clientName+(dateStr2?" от "+dateStr2:"")).replace(/[<>:"/\\|?*]/g,"_");
     const phone = (client?.phone||"").replace(/\D/g,"");
 
     // Пробуем Web Share API (работает на мобильных)
