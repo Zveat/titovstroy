@@ -3048,9 +3048,9 @@ export default function App() {
       {screen === "dashboard" && (()=>{
         const thisMonth = new Date().getMonth();
         const thisYear = new Date().getFullYear();
-        const estimatesThisMonth = estimates.filter(e=>{ const d=new Date(e.updatedAt||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
+        const estimatesThisMonth = estimates.filter(e=>{ const d=new Date(e.updatedAt||e.createdAt||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
         const contractsThisMonth = contracts.filter(c=>{ const d=new Date(c.date||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
-        const clientsThisMonth = contractClients.filter(c=>{ const d=new Date(c.createdAt||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
+        const clientsThisMonth = contractClients.filter(c=>{ const d=new Date(c.createdAt||0); return c.createdAt && d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
         const totalSumMonth = estimatesThisMonth.reduce((s,e)=>{
           const t = e.rows ? Object.values(e.rows).reduce((ss,r)=>ss+(Number(r.qty||0)*Number(r.manualPrice||r.price||0)),0) : 0;
           return s+t;
@@ -3078,7 +3078,7 @@ export default function App() {
             {[
               {label:"Смет за месяц",    value:estimatesThisMonth.length,  sub:estimatesThisMonth.length>0?"из "+estimates.length+" всего":"нет смет",       color:"#8888cc"},
               {label:"Договоров за месяц",value:contractsThisMonth.length, sub:contractsThisMonth.length>0?"из "+contracts.length+" всего":"нет договоров", color:"#b8904a"},
-              {label:"Объём за месяц",   value:totalSumMonth>0?fmt(Math.round(totalSumMonth))+" ₸":"—", sub:"сумма смет за месяц",                          color:"#4caf7d"},
+              {label:"Объём за месяц",   value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма смет за месяц",                          color:"#4caf7d"},
               {label:"Клиентов за месяц",value:clientsThisMonth.length,   sub:"из "+contractClients.length+" всего",                                       color:"#4285f4"},
             ].map((s,i)=>(
               <div key={i} style={{background:"#0f1120",border:"1px solid #161929",borderRadius:13,padding:"18px 18px 16px",position:"relative",overflow:"hidden"}}>
