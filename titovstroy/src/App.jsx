@@ -3051,10 +3051,7 @@ export default function App() {
         const estimatesThisMonth = estimates.filter(e=>{ const d=new Date(e.updatedAt||e.createdAt||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
         const contractsThisMonth = contracts.filter(c=>{ const d=new Date(c.date||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
         const clientsThisMonth = contractClients.filter(c=>{ const d=new Date(c.createdAt||0); return c.createdAt && d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
-        const totalSumMonth = estimatesThisMonth.reduce((s,e)=>{
-          const t = e.rows ? Object.values(e.rows).reduce((ss,r)=>ss+(Number(r.qty||0)*Number(r.manualPrice||r.price||0)),0) : 0;
-          return s+t;
-        },0);
+        const totalSumMonth = estimatesThisMonth.reduce((s,e)=> s + (e.total||0), 0);
         const recentContracts = [...contracts].sort((a,b)=>(b.date||0)>(a.date||0)?1:-1).slice(0,4);
         const recentEstimates = [...estimates].sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).slice(0,4);
         return (
@@ -3121,7 +3118,7 @@ export default function App() {
                 </div>
                 <div style={{background:"#0f1120",border:"1px solid #161929",borderRadius:12,overflow:"hidden"}}>
                   {recentEstimates.map((est,i,arr)=>{
-                    const total = est.rows ? Object.values(est.rows).reduce((s,r)=>s+(Number(r.qty||0)*Number(r.manualPrice||r.price||0)),0) : 0;
+                    const total = est.total || 0;
                     return (
                       <div key={est.id} onClick={()=>openEstimate(est)}
                         style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<arr.length-1?"1px solid #161929":"none",cursor:"pointer",transition:"background .1s"}}
