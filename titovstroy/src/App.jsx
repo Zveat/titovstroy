@@ -1227,7 +1227,7 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
 // Типы документов
 const DOC_TYPES = [
   { value:"repair_fiz",  label:"Договор ремонта" },
-  { value:"annex",       label:"Приложение (доп. работы) №2/3..." },
+  { value:"annex",       label:"Приложение к договору ремонта №2/3..." },
   { value:"design",      label:"Соглашение о дизайн-проекте" },
   { value:"design_add",  label:"Доп. соглашение к дизайн-проекту" },
   { value:"reservation", label:"Соглашение о резервировании" },
