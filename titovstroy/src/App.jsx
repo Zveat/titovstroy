@@ -2237,8 +2237,11 @@ export default function App() {
     const clientName = client?.name || c.estClient || "договор";
     const num = c.number || c.id?.slice(-4) || "б-н";
     const dateStr = c.date ? c.date.split("-").reverse().join(".") : "";
+    const isAnnexD = (c.type||"repair_fiz") === "annex";
     const docLabel = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Соглашение о дизайн-проекте",design_add:"Доп соглашение к дизайн-проекту",reservation:"Соглашение о резервировании"}[c.type||"repair_fiz"] || "Договор";
-    const filename = (docLabel+" №"+num+" "+clientName+(dateStr?" от "+dateStr:"")+".docx").replace(/[<>:"/\\|?*]/g,"_");
+    const filename = isAnnexD
+      ? ("Приложение №"+(c.appendix||2)+" Перечень доп работ к Договору №"+(c.mainNumber||num)+(dateStr?" от "+dateStr:"")+".docx").replace(/[<>:"/\\|?*]/g,"_")
+      : (docLabel+" №"+num+" "+clientName+(dateStr?" от "+dateStr:"")+".docx").replace(/[<>:"/\\|?*]/g,"_");
 
     try {
     if (!window.docx) {
@@ -2685,9 +2688,12 @@ export default function App() {
     const clientName = client?.name || c.estClient || "договор";
     const num = c.number || c.id?.slice(-4) || "б-н";
     const dateStrG = c.date ? c.date.split("-").reverse().join(".") : "";
+    const isAnnexG = (c.type||"repair_fiz") === "annex";
     const docLabelG = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Соглашение о дизайн-проекте",design_add:"Доп соглашение к дизайн-проекту",reservation:"Соглашение о резервировании"}[c.type||"repair_fiz"] || "Договор";
-    const title = (docLabelG+" №"+num+" "+clientName+(dateStrG?" от "+dateStrG:"")).replace(/[<>:"/\\|?*]/g,"_");
-    const html = buildContractHtml(c, client, ca, false);
+    const title = isAnnexG
+      ? ("Приложение №"+(c.appendix||2)+" Перечень доп работ к Договору №"+(c.mainNumber||num)+(dateStrG?" от "+dateStrG:"")).replace(/[<>:"/\\|?*]/g,"_")
+      : (docLabelG+" №"+num+" "+clientName+(dateStrG?" от "+dateStrG:"")).replace(/[<>:"/\\|?*]/g,"_");
+    const html = buildContractHtml(c, client, ca, true);
 
     // Загружаем Google Identity Services если ещё нет
     const loadGIS = () => new Promise((res, rej) => {
