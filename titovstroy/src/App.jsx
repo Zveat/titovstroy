@@ -1555,8 +1555,10 @@ export default function App() {
   const [estStatus, setEstStatus] = useState("new");
   const [estComment, setEstComment] = useState("");
   const [showStats, setShowStats] = useState(false);
-  const [statsPeriod, setStatsPeriod] = useState("all"); // all | month | week | 3month
+  const [statsPeriod, setStatsPeriod] = useState("month"); // all | month | week | 3month | custom
   const [statsManager, setStatsManager] = useState(""); // "" = все
+  const [statsDateFrom, setStatsDateFrom] = useState("");
+  const [statsDateTo, setStatsDateTo] = useState("");
   // ── Договоры ──
   const [contracts, setContracts] = useState([]);
   const [contractClients, setContractClients] = useState([]);
@@ -3010,7 +3012,7 @@ export default function App() {
         <nav style={{flex:1,padding:"10px 0",overflowY:"auto"}}>
           {NAV_ITEMS.map(item=>(
             <div key={item.id} className={"nav-item"+(screen===item.id||(!["dashboard","list","contracts"].includes(screen)&&item.id==="list")?"":"")+((screen===item.id||(screen==="editor"&&item.id==="list"))?" active":"")}
-              onClick={()=>{ if(item.id==="admin"){setShowAdmin(true);}else if(item.id==="analytics"){setShowStats(true);}else{setScreen(item.id);} }}>
+              onClick={()=>{ if(item.id==="admin"){setShowAdmin(true);}else if(item.id==="analytics"){setScreen("analytics");}else{setScreen(item.id);} }}>
               <span style={{fontSize:18,flexShrink:0,lineHeight:1}}>{item.icon}</span>
               <span className="nav-label" style={{color:screen===item.id||(screen==="editor"&&item.id==="list")?"#b8904a":"#888"}}>{item.label}</span>
             </div>
@@ -3032,7 +3034,7 @@ export default function App() {
       <div className="mob-nav">
         {NAV_ITEMS.map(item=>(
           <div key={item.id} className={"mob-nav-item"+(screen===item.id||(screen==="editor"&&item.id==="list")?" active":"")}
-            onClick={()=>{ if(item.id==="admin"){setShowAdmin(true);}else if(item.id==="analytics"){setShowStats(true);}else{setScreen(item.id);} }}>
+            onClick={()=>{ if(item.id==="admin"){setShowAdmin(true);}else if(item.id==="analytics"){setScreen("analytics");}else{setScreen(item.id);} }}>
             <span style={{fontSize:20}}>{item.icon}</span>
             <span style={{fontSize:9,color:screen===item.id||(screen==="editor"&&item.id==="list")?"#b8904a":"#454560",fontWeight:600}}>{item.label}</span>
           </div>
@@ -3096,7 +3098,7 @@ export default function App() {
               {id:"contracts", icon:"📄",title:"Договора",   desc:"Договора и соглашения",  stat:contracts.length+" договоров", color:"#b8904a",bg:"rgba(184,144,74,.07)",  border:"rgba(184,144,74,.2)"},
               {id:"analytics", icon:"📊",title:"Аналитика",  desc:"Статистика и отчёты",    stat:"За "+new Date().toLocaleDateString("ru-RU",{month:"long"}), color:"#4285f4",bg:"rgba(66,133,244,.07)",   border:"rgba(66,133,244,.2)"},
             ].map(card=>(
-              <div key={card.id} onClick={()=>{ if(card.id==="analytics") setShowStats(true); else setScreen(card.id); }}
+              <div key={card.id} onClick={()=>{ if(card.id==="analytics") setScreen("analytics"); else setScreen(card.id); }}
                 style={{background:card.bg,border:`1px solid ${card.border}`,borderRadius:14,padding:"22px 20px",cursor:"pointer",transition:"transform .15s,box-shadow .15s"}}
                 onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow=`0 10px 30px ${card.border}`;}}
                 onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
@@ -3191,7 +3193,7 @@ export default function App() {
             </div>
             <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
               {saving && <span style={{fontSize:11,color:"#555575"}}>💾</span>}
-              <button className="btn btn-o" style={{padding:"6px 9px",fontSize:14}} onClick={()=>setShowStats(true)} title="Статистика">📊</button>
+              <button className="btn btn-o" style={{padding:"6px 9px",fontSize:14}} onClick={()=>setScreen("analytics")} title="Статистика">📊</button>
               {currentUser.role !== "viewer" && (
                 <button className="btn btn-g" style={{padding:"7px 14px",fontSize:12,whiteSpace:"nowrap"}} onClick={newEstimate}>+ Новая</button>
               )}
@@ -3752,144 +3754,232 @@ export default function App() {
       )}
 
       {/* ═══════════════════ СТАТИСТИКА ═══════════════════ */}
-      {showStats&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20}}
-          onClick={()=>setShowStats(false)}>
-          <div style={{background:"#161929",border:"1px solid #2a2d3e",borderRadius:14,padding:"24px 28px",maxWidth:520,width:"100%",maxHeight:"85vh",overflowY:"auto"}}
-            onClick={e=>e.stopPropagation()}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-              <div style={{fontWeight:800,fontSize:16,color:"#e2ddd4"}}>📊 Статистика</div>
-              <button onClick={()=>setShowStats(false)} style={{background:"none",border:"none",color:"#454560",fontSize:20,cursor:"pointer"}}>✕</button>
+      {screen === "analytics" && (()=>{
+        const now = Date.now();
+        const periodMs = {all:Infinity, month:30*864e5, week:7*864e5, "3month":90*864e5};
+        let fromTs = 0, toTs = now;
+        if(statsPeriod==="custom"){
+          fromTs = statsDateFrom ? new Date(statsDateFrom).getTime() : 0;
+          toTs   = statsDateTo   ? new Date(statsDateTo).getTime()+86399999 : now;
+        } else {
+          const ms = periodMs[statsPeriod]||Infinity;
+          fromTs = ms===Infinity ? 0 : now - ms;
+        }
+        const inRange = (ts) => (ts||0) >= fromTs && (ts||0) <= toTs;
+        const baseEst = estimates
+          .filter(e => inRange(e.updatedAt||e.createdAt||0))
+          .filter(e => !statsManager || (e.proj?.manager||"")=== statsManager);
+        const baseCon = contracts
+          .filter(c => inRange(new Date(c.date||0).getTime()))
+          .filter(c => (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0);
+        const totalEst = baseEst.length;
+        const withSumEst = baseEst.filter(e=>e.total>0);
+        const totalSumEst = withSumEst.reduce((s,e)=>s+e.total,0);
+        const avgEst = withSumEst.length ? Math.round(totalSumEst/withSumEst.length) : 0;
+        const totalCon = baseCon.length;
+        const totalSumCon = baseCon.reduce((s,c)=>s+(c.works||[]).reduce((ss,w)=>ss+(w.quantity*w.price||0),0),0);
+        const avgCon = totalCon ? Math.round(totalSumCon/totalCon) : 0;
+        const byStatus = {}; for(const s of STATUSES) byStatus[s.key]=baseEst.filter(e=>(e.status||"new")===s.key).length;
+        const byType = {}; for(const e of baseEst){ const t=e.proj?.type||"—"; byType[t]=(byType[t]||0)+1; }
+        const catSums = {};
+        for(const e of baseEst){
+          const items = e.rows ? Object.entries(e.rows).filter(([,r])=>Number(r?.qty)>0) : [];
+          for(const [code,] of items){ const w=getEffectiveCatalog().find(x=>x.code===code); if(w){catSums[w.cat]=(catSums[w.cat]||0)+1;} }
+        }
+        const topCats = Object.entries(catSums).sort((a,b)=>b[1]-a[1]).slice(0,5);
+        const validManagerNames = new Set(allUsers.filter(u=>u.role!=="viewer").map(u=>u.name));
+        const managers = [...new Set(estimates.map(e=>e.proj?.manager||"").filter(m=>m&&validManagerNames.has(m)))];
+        const managerStats = managers.map(m=>{
+          const mes = baseEst.filter(e=>(e.proj?.manager||"")===m);
+          return {name:m, count:mes.length, sum:mes.filter(e=>e.total>0).reduce((s,e)=>s+e.total,0), agreed:mes.filter(e=>e.status==="agreed").length};
+        }).sort((a,b)=>b.sum-a.sum);
+        const TYPE_L = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронирование"};
+        const byConType = {}; for(const c of baseCon){ const t=TYPE_L[c.type||"repair_fiz"]||"—"; byConType[t]=(byConType[t]||0)+1; }
+        const PERIOD_BTNS = [["all","Всё время"],["month","Месяц"],["3month","3 месяца"],["week","Неделя"],["custom","Вручную"]];
+        return (
+          <div style={{maxWidth:900,margin:"0 auto",padding:"28px 24px 80px"}}>
+            {/* Заголовок */}
+            <div style={{marginBottom:24,display:"flex",alignItems:"center",gap:12}}>
+              <div>
+                <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#e2ddd4"}}>📊 Аналитика</h1>
+                <div style={{fontSize:12,color:"#454560",marginTop:4}}>Статистика по сметам и договорам</div>
+              </div>
             </div>
-            {(()=>{
-              const now = Date.now();
-              const periodMs = {all:Infinity,month:30*864e5,week:7*864e5,"3month":90*864e5};
-              const ms = periodMs[statsPeriod]||Infinity;
-              const base = estimates
-                .filter(e => ms===Infinity || (now-e.updatedAt)<ms)
-                .filter(e => !statsManager || (e.proj?.manager||"")=== statsManager);
-              const total = base.length;
-              const withSum = base.filter(e=>e.total>0);
-              const totalSum = withSum.reduce((s,e)=>s+e.total,0);
-              const avgSum = withSum.length ? Math.round(totalSum/withSum.length) : 0;
-              const byStatus = {};
-              for(const s of STATUSES) byStatus[s.key]=base.filter(e=>(e.status||"new")===s.key).length;
-              const byType = {};
-              for(const e of base){ const t=e.proj?.type||"—"; byType[t]=(byType[t]||0)+1; }
-              const catSums = {};
-              for(const e of base){
-                const items = e.rows ? Object.entries(e.rows).filter(([,r])=>Number(r?.qty)>0) : [];
-                for(const [code,] of items){
-                  const w = getEffectiveCatalog().find(x=>x.code===code);
-                  if(w){ catSums[w.cat]=(catSums[w.cat]||0)+1; }
-                }
-              }
-              const topCats = Object.entries(catSums).sort((a,b)=>b[1]-a[1]).slice(0,5);
-              const validManagerNames = new Set(allUsers.filter(u=>u.role!=="viewer").map(u=>u.name));
-              const managers = [...new Set(estimates.map(e=>e.proj?.manager||"").filter(m=>m&&validManagerNames.has(m)))];
-              // Per-manager totals for company view
-              const managerStats = managers.map(m=>{
-                const mes = base.filter(e=>(e.proj?.manager||"")=== m);
-                return {name:m, count:mes.length, sum:mes.filter(e=>e.total>0).reduce((s,e)=>s+e.total,0), agreed:mes.filter(e=>e.status==="agreed").length};
-              }).sort((a,b)=>b.sum-a.sum);
-              return (
-                <div style={{display:"flex",flexDirection:"column",gap:14}}>
-                  {/* Фильтры: период + менеджер */}
-                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                    <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                      {[["all","Всё время"],["month","Месяц"],["3month","3 месяца"],["week","Неделя"]].map(([k,l])=>(
-                        <button key={k} onClick={()=>setStatsPeriod(k)}
-                          style={{fontSize:11,fontWeight:600,padding:"3px 10px",borderRadius:6,cursor:"pointer",fontFamily:"inherit",border:`1px solid ${statsPeriod===k?"#b8904a":"rgba(255,255,255,.08)"}`,background:statsPeriod===k?"rgba(184,144,74,.15)":"transparent",color:statsPeriod===k?"#b8904a":"#555575"}}>
-                          {l}
-                        </button>
-                      ))}
-                    </div>
-                    <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                      <button onClick={()=>setStatsManager("")}
-                        style={{fontSize:11,fontWeight:600,padding:"3px 10px",borderRadius:6,cursor:"pointer",fontFamily:"inherit",border:`1px solid ${!statsManager?"#8888cc":"rgba(255,255,255,.08)"}`,background:!statsManager?"rgba(136,136,204,.15)":"transparent",color:!statsManager?"#8888cc":"#555575"}}>
-                        🏢 Компания
-                      </button>
-                      {managers.map(m=>(
-                        <button key={m} onClick={()=>setStatsManager(m)}
-                          style={{fontSize:11,fontWeight:600,padding:"3px 10px",borderRadius:6,cursor:"pointer",fontFamily:"inherit",border:`1px solid ${statsManager===m?"#8888cc":"rgba(255,255,255,.08)"}`,background:statsManager===m?"rgba(136,136,204,.15)":"transparent",color:statsManager===m?"#8888cc":"#555575"}}>
-                          👤 {m}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  {/* Ключевые цифры */}
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-                    {[["Смет",total,"#8888cc"],["Объём",fmt(totalSum)+" ₸","#b8904a"],["Средний чек",fmt(avgSum)+" ₸","#4caf7d"]].map(([l,v,c])=>(
-                      <div key={l} style={{background:"rgba(255,255,255,.04)",borderRadius:8,padding:"12px 10px",textAlign:"center"}}>
-                        <div style={{fontSize:total>999?14:20,fontWeight:800,color:c,lineHeight:1.2}}>{v}</div>
-                        <div style={{fontSize:10,color:"#454560",marginTop:3}}>{l}</div>
-                      </div>
-                    ))}
-                  </div>
-                  {/* По менеджерам (только в режиме компании) */}
-                  {!statsManager && managerStats.length>0 && (
-                    <div>
-                      <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>По менеджерам</div>
-                      <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                        {managerStats.map(m=>(
-                          <div key={m.name} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",background:"rgba(255,255,255,.03)",borderRadius:6,cursor:"pointer"}}
-                            onClick={()=>setStatsManager(m.name)}>
-                            <span style={{fontSize:12,color:"#aaa",flex:1}}>👤 {m.name}</span>
-                            <span style={{fontSize:11,color:"#555575"}}>{m.count} смет</span>
-                            <span style={{fontSize:12,fontWeight:700,color:"#b8904a"}}>{fmt(m.sum)} ₸</span>
-                            {m.agreed>0&&<span style={{fontSize:10,color:"#4caf7d",background:"rgba(76,175,125,.1)",borderRadius:4,padding:"1px 6px"}}>✓{m.agreed}</span>}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {/* По статусам */}
+
+            {/* Период */}
+            <div style={{background:"#0f1120",border:"1px solid #161929",borderRadius:12,padding:"16px 18px",marginBottom:20}}>
+              <div style={{fontSize:10,color:"#454560",textTransform:"uppercase",letterSpacing:1,marginBottom:10,fontWeight:700}}>Период</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom: statsPeriod==="custom"?12:0}}>
+                {PERIOD_BTNS.map(([k,l])=>(
+                  <button key={k} onClick={()=>setStatsPeriod(k)}
+                    style={{fontSize:12,fontWeight:600,padding:"5px 14px",borderRadius:7,cursor:"pointer",fontFamily:"inherit",
+                      border:`1px solid ${statsPeriod===k?"#b8904a":"rgba(255,255,255,.08)"}`,
+                      background:statsPeriod===k?"rgba(184,144,74,.15)":"transparent",
+                      color:statsPeriod===k?"#b8904a":"#555575"}}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+              {statsPeriod==="custom" && (
+                <div style={{display:"flex",gap:10,alignItems:"center",marginTop:10,flexWrap:"wrap"}}>
                   <div>
-                    <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>По статусам</div>
-                    <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                      {STATUSES.map(s=>(
-                        <div key={s.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(255,255,255,.03)",borderRadius:6}}>
-                          <span style={{fontSize:12,color:s.color,fontWeight:600}}>{s.label}</span>
-                          <div style={{display:"flex",alignItems:"center",gap:8}}>
-                            <div style={{width:80,height:4,background:"rgba(255,255,255,.06)",borderRadius:2,overflow:"hidden"}}>
-                              <div style={{width:total?`${(byStatus[s.key]/total)*100}%`:"0%",height:"100%",background:s.color,borderRadius:2}}/>
-                            </div>
-                            <span style={{fontSize:12,fontWeight:700,color:"#e2ddd4",minWidth:16,textAlign:"right"}}>{byStatus[s.key]}</span>
-                          </div>
+                    <div style={{fontSize:10,color:"#555575",marginBottom:4}}>С</div>
+                    <input type="date" className="fi" style={{width:"auto"}} value={statsDateFrom} onChange={e=>setStatsDateFrom(e.target.value)}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,color:"#555575",marginBottom:4}}>По</div>
+                    <input type="date" className="fi" style={{width:"auto"}} value={statsDateTo} onChange={e=>setStatsDateTo(e.target.value)}/>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Менеджеры */}
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:20}}>
+              <button onClick={()=>setStatsManager("")}
+                style={{fontSize:12,fontWeight:600,padding:"5px 14px",borderRadius:7,cursor:"pointer",fontFamily:"inherit",
+                  border:`1px solid ${!statsManager?"#8888cc":"rgba(255,255,255,.08)"}`,
+                  background:!statsManager?"rgba(136,136,204,.15)":"transparent",
+                  color:!statsManager?"#8888cc":"#555575"}}>🏢 Компания</button>
+              {managers.map(m=>(
+                <button key={m} onClick={()=>setStatsManager(m)}
+                  style={{fontSize:12,fontWeight:600,padding:"5px 14px",borderRadius:7,cursor:"pointer",fontFamily:"inherit",
+                    border:`1px solid ${statsManager===m?"#8888cc":"rgba(255,255,255,.08)"}`,
+                    background:statsManager===m?"rgba(136,136,204,.15)":"transparent",
+                    color:statsManager===m?"#8888cc":"#555575"}}>👤 {m}</button>
+              ))}
+            </div>
+
+            {/* Две колонки: Сметы + Договора */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(380px,1fr))",gap:16,marginBottom:20}}>
+
+              {/* ── СМЕТЫ ── */}
+              <div style={{background:"#0f1120",border:"1px solid #161929",borderRadius:12,padding:"18px"}}>
+                <div style={{fontSize:11,color:"#8888cc",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>📋 Сметы</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:16}}>
+                  {[["Смет",totalEst,"#8888cc"],["Объём",fmt(totalSumEst)+" ₸","#b8904a"],["Средний чек",fmt(avgEst)+" ₸","#4caf7d"]].map(([l,v,c])=>(
+                    <div key={l} style={{background:"rgba(255,255,255,.03)",borderRadius:8,padding:"10px 8px",textAlign:"center"}}>
+                      <div style={{fontSize:16,fontWeight:800,color:c,lineHeight:1.2}}>{v}</div>
+                      <div style={{fontSize:10,color:"#454560",marginTop:3}}>{l}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* По статусам */}
+                <div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По статусам</div>
+                <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:14}}>
+                  {STATUSES.map(s=>(
+                    <div key={s.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 8px",background:"rgba(255,255,255,.02)",borderRadius:5}}>
+                      <span style={{fontSize:12,color:s.color,fontWeight:600}}>{s.label}</span>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <div style={{width:60,height:3,background:"rgba(255,255,255,.06)",borderRadius:2,overflow:"hidden"}}>
+                          <div style={{width:totalEst?`${(byStatus[s.key]/totalEst)*100}%`:"0%",height:"100%",background:s.color,borderRadius:2}}/>
+                        </div>
+                        <span style={{fontSize:12,fontWeight:700,color:"#e2ddd4",minWidth:16,textAlign:"right"}}>{byStatus[s.key]}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {/* По типу объекта */}
+                {Object.keys(byType).length>0 && (
+                  <>
+                    <div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типу объекта</div>
+                    <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                      {Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(
+                        <span key={t} style={{fontSize:11,padding:"2px 8px",borderRadius:20,background:"rgba(255,255,255,.05)",color:"#8888aa"}}>{t}: <strong style={{color:"#e2ddd4"}}>{n}</strong></span>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* ── ДОГОВОРА ── */}
+              <div style={{background:"#0f1120",border:"1px solid #161929",borderRadius:12,padding:"18px"}}>
+                <div style={{fontSize:11,color:"#b8904a",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>📄 Договора</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:16}}>
+                  {[["Договоров",totalCon,"#b8904a"],["Объём",fmt(totalSumCon)+" ₸","#4caf7d"],["Средний",fmt(avgCon)+" ₸","#4285f4"]].map(([l,v,c])=>(
+                    <div key={l} style={{background:"rgba(255,255,255,.03)",borderRadius:8,padding:"10px 8px",textAlign:"center"}}>
+                      <div style={{fontSize:16,fontWeight:800,color:c,lineHeight:1.2}}>{v}</div>
+                      <div style={{fontSize:10,color:"#454560",marginTop:3}}>{l}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* По типам договоров */}
+                {Object.keys(byConType).length>0 && (
+                  <>
+                    <div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типам</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:14}}>
+                      {Object.entries(byConType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(
+                        <div key={t} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 8px",background:"rgba(255,255,255,.02)",borderRadius:5}}>
+                          <span style={{fontSize:12,color:"#aaa"}}>{t}</span>
+                          <span style={{fontSize:12,fontWeight:700,color:"#b8904a"}}>{n}</span>
                         </div>
                       ))}
                     </div>
-                  </div>
-                  {/* По типу объекта */}
-                  <div>
-                    <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>По типу объекта</div>
-                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                      {Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(
-                        <span key={t} style={{fontSize:11,fontWeight:600,padding:"3px 10px",borderRadius:20,background:"rgba(255,255,255,.06)",color:"#8888aa"}}>{t}: <strong style={{color:"#e2ddd4"}}>{n}</strong></span>
-                      ))}
-                    </div>
-                  </div>
-                  {/* Топ категорий */}
-                  {topCats.length>0&&(
-                    <div>
-                      <div style={{fontSize:10,color:"#454560",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>Топ категорий работ</div>
-                      <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                        {topCats.map(([cat,n])=>(
-                          <div key={cat} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 10px",background:"rgba(255,255,255,.03)",borderRadius:6}}>
-                            <span style={{color:"#888"}}>{cat}</span>
-                            <span style={{fontWeight:700,color:"#b8904a"}}>{n} смет</span>
+                  </>
+                )}
+                {/* Последние договора в периоде */}
+                {baseCon.length>0 && (
+                  <>
+                    <div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>Договора в периоде</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                      {[...baseCon].sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,5).map(c=>{
+                        const cl = contractClients.find(x=>x.id===c.clientId);
+                        const sum = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
+                        return (
+                          <div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 8px",background:"rgba(255,255,255,.02)",borderRadius:5,cursor:"pointer"}}
+                            onClick={()=>{ setCurrentContract({...c}); setContractTab("editor"); setScreen("contracts"); }}>
+                            <div style={{minWidth:0}}>
+                              <div style={{fontSize:12,color:"#e2ddd4",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{TYPE_L[c.type||"repair_fiz"]} №{c.number||"—"}</div>
+                              <div style={{fontSize:10,color:"#454560"}}>{cl?.name||c.estClient||"—"}</div>
+                            </div>
+                            <span style={{fontSize:12,fontWeight:700,color:"#b8904a",flexShrink:0,marginLeft:8}}>{fmt(sum)} ₸</span>
                           </div>
-                        ))}
-                      </div>
+                        );
+                      })}
                     </div>
-                  )}
-                  {total===0&&<div style={{textAlign:"center",color:"#353550",fontSize:13,padding:"20px 0"}}>Нет данных за выбранный период</div>}
+                  </>
+                )}
+                {totalCon===0 && <div style={{textAlign:"center",color:"#353550",fontSize:13,padding:"20px 0"}}>Нет договоров за период</div>}
+              </div>
+            </div>
+
+            {/* По менеджерам */}
+            {!statsManager && managerStats.length>0 && (
+              <div style={{background:"#0f1120",border:"1px solid #161929",borderRadius:12,padding:"18px"}}>
+                <div style={{fontSize:10,color:"#454560",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>По менеджерам</div>
+                <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                  {managerStats.map(m=>(
+                    <div key={m.name} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",background:"rgba(255,255,255,.03)",borderRadius:7,cursor:"pointer"}}
+                      onClick={()=>setStatsManager(m.name)}>
+                      <span style={{fontSize:13,color:"#aaa",flex:1}}>👤 {m.name}</span>
+                      <span style={{fontSize:11,color:"#555575"}}>{m.count} смет</span>
+                      <span style={{fontSize:13,fontWeight:700,color:"#b8904a"}}>{fmt(m.sum)} ₸</span>
+                      {m.agreed>0&&<span style={{fontSize:10,color:"#4caf7d",background:"rgba(76,175,125,.1)",borderRadius:4,padding:"2px 8px"}}>✓{m.agreed}</span>}
+                    </div>
+                  ))}
                 </div>
-              );
-            })()}
+              </div>
+            )}
+
+            {/* Топ категорий */}
+            {topCats.length>0 && (
+              <div style={{background:"#0f1120",border:"1px solid #161929",borderRadius:12,padding:"18px",marginTop:16}}>
+                <div style={{fontSize:10,color:"#454560",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>Топ категорий работ</div>
+                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  {topCats.map(([cat,n])=>(
+                    <div key={cat} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"6px 10px",background:"rgba(255,255,255,.03)",borderRadius:6}}>
+                      <span style={{color:"#888"}}>{cat}</span>
+                      <span style={{fontWeight:700,color:"#b8904a"}}>{n} смет</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {totalEst===0&&totalCon===0&&<div style={{textAlign:"center",color:"#353550",fontSize:13,padding:"40px 0"}}>Нет данных за выбранный период</div>}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ═══════════════════════════════════════════════════════════════════
           ЭКРАН 3: ДОГОВОРЫ
