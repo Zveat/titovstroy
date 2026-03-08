@@ -2911,6 +2911,7 @@ export default function App() {
     { id:"dashboard", icon:"⌂",  label:"Главная" },
     { id:"list",      icon:"📋", label:"Сметы" },
     { id:"contracts", icon:"📄", label:"Договора" },
+    { id:"analytics", icon:"📊", label:"Аналитика" },
     ...(currentUser.role==="admin" ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
   ];
 
@@ -3009,7 +3010,7 @@ export default function App() {
         <nav style={{flex:1,padding:"10px 0",overflowY:"auto"}}>
           {NAV_ITEMS.map(item=>(
             <div key={item.id} className={"nav-item"+(screen===item.id||(!["dashboard","list","contracts"].includes(screen)&&item.id==="list")?"":"")+((screen===item.id||(screen==="editor"&&item.id==="list"))?" active":"")}
-              onClick={()=>{ if(item.id==="admin"){setShowAdmin(true);}else{setScreen(item.id);} }}>
+              onClick={()=>{ if(item.id==="admin"){setShowAdmin(true);}else if(item.id==="analytics"){setShowStats(true);}else{setScreen(item.id);} }}>
               <span style={{fontSize:18,flexShrink:0,lineHeight:1}}>{item.icon}</span>
               <span className="nav-label" style={{color:screen===item.id||(screen==="editor"&&item.id==="list")?"#b8904a":"#888"}}>{item.label}</span>
             </div>
@@ -3031,7 +3032,7 @@ export default function App() {
       <div className="mob-nav">
         {NAV_ITEMS.map(item=>(
           <div key={item.id} className={"mob-nav-item"+(screen===item.id||(screen==="editor"&&item.id==="list")?" active":"")}
-            onClick={()=>{ if(item.id==="admin"){setShowAdmin(true);}else{setScreen(item.id);} }}>
+            onClick={()=>{ if(item.id==="admin"){setShowAdmin(true);}else if(item.id==="analytics"){setShowStats(true);}else{setScreen(item.id);} }}>
             <span style={{fontSize:20}}>{item.icon}</span>
             <span style={{fontSize:9,color:screen===item.id||(screen==="editor"&&item.id==="list")?"#b8904a":"#454560",fontWeight:600}}>{item.label}</span>
           </div>
@@ -3044,15 +3045,25 @@ export default function App() {
       {/* ═══════════════════════════════════════════════════════════════════
           ЭКРАН 0: ДАШБОРД
       ═══════════════════════════════════════════════════════════════════ */}
-      {screen === "dashboard" && (
-        <div style={{maxWidth:900,margin:"0 auto",padding:"28px 20px 60px"}}>
+      {screen === "dashboard" && (()=>{
+        const totalSumEstimates = estimates.reduce((s,e)=>{
+          const t = e.rows ? Object.values(e.rows).reduce((ss,r)=>ss+(Number(r.qty||0)*Number(r.manualPrice||r.price||0)),0) : 0;
+          return s+t;
+        },0);
+        const thisMonth = new Date().getMonth();
+        const thisYear = new Date().getFullYear();
+        const contractsThisMonth = contracts.filter(c=>{ const d=new Date(c.date||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
+        const recentContracts = [...contracts].sort((a,b)=>(b.date||0)>(a.date||0)?1:-1).slice(0,4);
+        const recentEstimates = [...estimates].sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).slice(0,4);
+        return (
+        <div style={{maxWidth:960,margin:"0 auto",padding:"28px 24px 80px"}}>
           {/* Заголовок */}
-          <div style={{marginBottom:28,display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+          <div style={{marginBottom:32,display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
             <div>
-              <h1 style={{margin:0,fontSize:24,fontWeight:900,color:"#e2ddd4",letterSpacing:-.3}}>
+              <h1 style={{margin:0,fontSize:26,fontWeight:900,color:"#e2ddd4",letterSpacing:-.5}}>
                 TitovStroy <span style={{color:"#b8904a"}}>CRM</span>
               </h1>
-              <div style={{fontSize:12,color:"#454560",marginTop:5}}>
+              <div style={{fontSize:12,color:"#454560",marginTop:6}}>
                 {new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
                 {" · "}<span style={{color:"#b8904a"}}>{currentUser.role==="admin"?"👑 Администратор":currentUser.role==="viewer"?"👁 Просмотр":"👤 "+currentUser.name}</span>
               </div>
@@ -3060,66 +3071,108 @@ export default function App() {
             {saving && <span style={{fontSize:11,color:"#555575"}}>💾 Сохранение...</span>}
           </div>
 
-          {/* Быстрые статы */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:28}}>
+          {/* Статы */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:32}}>
             {[
-              {label:"Смет всего",    value:estimates.length,        color:"#8888cc"},
-              {label:"Договоров",     value:contracts.length,        color:"#b8904a"},
-              {label:"Клиентов",      value:contractClients.length,  color:"#4caf7d"},
-              {label:"Подрядчиков",   value:contragents.length,      color:"#4285f4"},
+              {label:"Смет всего",     value:estimates.length,           sub:totalSumEstimates>0?fmt(Math.round(totalSumEstimates))+" ₸ общий объём":"",   color:"#8888cc"},
+              {label:"Договоров",      value:contracts.length,           sub:contractsThisMonth.length+" в этом месяце",                                   color:"#b8904a"},
+              {label:"Клиентов",       value:contractClients.length,     sub:"в базе",                                                                     color:"#4caf7d"},
+              {label:"Подрядчиков",    value:contragents.length,         sub:"ТОО / организаций",                                                          color:"#4285f4"},
             ].map((s,i)=>(
-              <div key={i} style={{background:"#0f1120",border:"1px solid #161929",borderRadius:12,padding:"16px 18px"}}>
-                <div style={{fontSize:10,color:"#454560",textTransform:"uppercase",letterSpacing:.8,marginBottom:8}}>{s.label}</div>
-                <div style={{fontSize:28,fontWeight:900,color:s.color,lineHeight:1}}>{s.value}</div>
+              <div key={i} style={{background:"#0f1120",border:"1px solid #161929",borderRadius:13,padding:"18px 18px 16px",position:"relative",overflow:"hidden"}}>
+                <div style={{position:"absolute",top:0,left:0,width:3,height:"100%",background:s.color,borderRadius:"3px 0 0 3px"}}/>
+                <div style={{fontSize:10,color:"#454560",textTransform:"uppercase",letterSpacing:.8,marginBottom:10}}>{s.label}</div>
+                <div style={{fontSize:30,fontWeight:900,color:s.color,lineHeight:1,marginBottom:6}}>{s.value}</div>
+                {s.sub && <div style={{fontSize:11,color:"#333350"}}>{s.sub}</div>}
               </div>
             ))}
           </div>
 
           {/* Разделы */}
-          <div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12,fontWeight:600}}>Разделы</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:12,marginBottom:32}}>
+          <div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12,fontWeight:700}}>Разделы</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:12,marginBottom:36}}>
             {[
-              {id:"list",      icon:"📋",title:"Сметы",      desc:"Расчёт и архив смет",      color:"#8888cc",bg:"rgba(136,136,204,.07)",border:"rgba(136,136,204,.18)"},
-              {id:"contracts", icon:"📄",title:"Договора",   desc:"Договора и соглашения",    color:"#b8904a",bg:"rgba(184,144,74,.07)",  border:"rgba(184,144,74,.18)"},
+              {id:"list",      icon:"📋",title:"Сметы",      desc:"Расчёт и архив смет",    stat:estimates.length+" смет",      color:"#8888cc",bg:"rgba(136,136,204,.07)",border:"rgba(136,136,204,.2)"},
+              {id:"contracts", icon:"📄",title:"Договора",   desc:"Договора и соглашения",  stat:contracts.length+" договоров", color:"#b8904a",bg:"rgba(184,144,74,.07)",  border:"rgba(184,144,74,.2)"},
+              {id:"analytics", icon:"📊",title:"Аналитика",  desc:"Статистика и отчёты",    stat:"За "+new Date().toLocaleDateString("ru-RU",{month:"long"}), color:"#4285f4",bg:"rgba(66,133,244,.07)",   border:"rgba(66,133,244,.2)"},
             ].map(card=>(
-              <div key={card.id} onClick={()=>setScreen(card.id)}
+              <div key={card.id} onClick={()=>{ if(card.id==="analytics") setShowStats(true); else setScreen(card.id); }}
                 style={{background:card.bg,border:`1px solid ${card.border}`,borderRadius:14,padding:"22px 20px",cursor:"pointer",transition:"transform .15s,box-shadow .15s"}}
-                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow=`0 8px 28px ${card.border}`;}}
+                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow=`0 10px 30px ${card.border}`;}}
                 onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
-                <div style={{fontSize:32,marginBottom:12}}>{card.icon}</div>
-                <div style={{fontWeight:700,fontSize:16,color:"#e2ddd4",marginBottom:6}}>{card.title}</div>
-                <div style={{fontSize:12,color:"#555575"}}>{card.desc}</div>
+                <div style={{fontSize:30,marginBottom:12}}>{card.icon}</div>
+                <div style={{fontWeight:700,fontSize:15,color:"#e2ddd4",marginBottom:5}}>{card.title}</div>
+                <div style={{fontSize:12,color:"#555575",marginBottom:14}}>{card.desc}</div>
+                <div style={{display:"inline-block",background:card.bg,border:`1px solid ${card.border}`,color:card.color,borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:600}}>{card.stat}</div>
               </div>
             ))}
           </div>
 
-          {/* Последние сметы */}
-          {estimates.length > 0 && (
-            <div>
-              <div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12,fontWeight:600}}>Последние сметы</div>
-              <div style={{background:"#0f1120",border:"1px solid #161929",borderRadius:12,overflow:"hidden"}}>
-                {[...estimates].sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).slice(0,5).map((est,i,arr)=>{
-                  const total = (est.rows ? Object.values(est.rows).reduce((s,r)=>s+(Number(r.qty||0)*Number(r.manualPrice||r.price||0)),0) : 0);
-                  return (
-                    <div key={est.id} onClick={()=>{openEstimate(est);}}
-                      style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<arr.length-1?"1px solid #161929":"none",cursor:"pointer",transition:"background .1s"}}
-                      onMouseEnter={e=>e.currentTarget.style.background="#14172a"}
-                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                      <div style={{width:7,height:7,borderRadius:"50%",background:"#8888cc",flexShrink:0}}/>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:13,color:"#e2ddd4",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{est.proj?.name||"Без названия"}</div>
-                        <div style={{fontSize:11,color:"#454560",marginTop:2}}>{est.updatedAt?new Date(est.updatedAt).toLocaleDateString("ru-RU"):""}</div>
+          {/* Лента активности */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:16}}>
+            {/* Последние сметы */}
+            {recentEstimates.length>0 && (
+              <div>
+                <div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12,fontWeight:700,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span>Последние сметы</span>
+                  <span onClick={()=>setScreen("list")} style={{color:"#8888cc",cursor:"pointer",textTransform:"none",fontSize:11,letterSpacing:0}}>все →</span>
+                </div>
+                <div style={{background:"#0f1120",border:"1px solid #161929",borderRadius:12,overflow:"hidden"}}>
+                  {recentEstimates.map((est,i,arr)=>{
+                    const total = est.rows ? Object.values(est.rows).reduce((s,r)=>s+(Number(r.qty||0)*Number(r.manualPrice||r.price||0)),0) : 0;
+                    return (
+                      <div key={est.id} onClick={()=>openEstimate(est)}
+                        style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<arr.length-1?"1px solid #161929":"none",cursor:"pointer",transition:"background .1s"}}
+                        onMouseEnter={e=>e.currentTarget.style.background="#14172a"}
+                        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                        <div style={{width:7,height:7,borderRadius:"50%",background:"#8888cc",flexShrink:0}}/>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13,color:"#e2ddd4",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{est.proj?.name||"Без названия"}</div>
+                          <div style={{fontSize:11,color:"#454560",marginTop:2}}>{est.updatedAt?new Date(est.updatedAt).toLocaleDateString("ru-RU"):""}</div>
+                        </div>
+                        {total>0 && <div style={{fontSize:13,fontWeight:700,color:"#b8904a",flexShrink:0}}>{fmt(total)} ₸</div>}
                       </div>
-                      {total>0 && <div style={{fontSize:13,fontWeight:700,color:"#b8904a",flexShrink:0}}>{fmt(total)} ₸</div>}
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+            {/* Последние договора */}
+            {recentContracts.length>0 && (
+              <div>
+                <div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12,fontWeight:700,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span>Последние договора</span>
+                  <span onClick={()=>setScreen("contracts")} style={{color:"#b8904a",cursor:"pointer",textTransform:"none",fontSize:11,letterSpacing:0}}>все →</span>
+                </div>
+                <div style={{background:"#0f1120",border:"1px solid #161929",borderRadius:12,overflow:"hidden"}}>
+                  {recentContracts.map((c,i,arr)=>{
+                    const cl = contractClients.find(x=>x.id===c.clientId);
+                    const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
+                    const TYPE_L = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Дизайн",design_add:"Доп. дизайн",reservation:"Бронь"};
+                    return (
+                      <div key={c.id} onClick={()=>{ setCurrentContract({...c}); setContractTab("editor"); setScreen("contracts"); }}
+                        style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<arr.length-1?"1px solid #161929":"none",cursor:"pointer",transition:"background .1s"}}
+                        onMouseEnter={e=>e.currentTarget.style.background="#14172a"}
+                        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                        <div style={{width:7,height:7,borderRadius:"50%",background:"#b8904a",flexShrink:0}}/>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13,color:"#e2ddd4",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{TYPE_L[c.type||"repair_fiz"]||"Договор"} №{c.number||"—"}</div>
+                          <div style={{fontSize:11,color:"#454560",marginTop:2}}>{cl?.name||c.estClient||"Клиент не выбран"}</div>
+                        </div>
+                        {total>0 && <div style={{fontSize:13,fontWeight:700,color:"#b8904a",flexShrink:0}}>{fmt(total)} ₸</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-      )}
+        );
+      })()}
 
+      {/* ═══════════════════════════════════════════════════════════════════
+          ЭКРАН 1: СПИСОК СМЕТ
       {/* ═══════════════════════════════════════════════════════════════════
           ЭКРАН 1: СПИСОК СМЕТ
       ═══════════════════════════════════════════════════════════════════ */}
