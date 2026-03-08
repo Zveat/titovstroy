@@ -2684,7 +2684,9 @@ export default function App() {
     const GDOC_CLIENT_ID = "363473710949-d67codd7dq0uk9g4tfl8lhhgecgcqe98.apps.googleusercontent.com";
     const clientName = client?.name || c.estClient || "договор";
     const num = c.number || c.id?.slice(-4) || "б-н";
-    const title = ("Договор_"+num+"_"+clientName).replace(/[<>:"/\\|?*]/g,"_");
+    const dateStrG = c.date ? c.date.split("-").reverse().join(".") : "";
+    const docLabelG = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Соглашение о дизайн-проекте",design_add:"Доп соглашение к дизайн-проекту",reservation:"Соглашение о резервировании"}[c.type||"repair_fiz"] || "Договор";
+    const title = (docLabelG+" №"+num+" "+clientName+(dateStrG?" от "+dateStrG:"")).replace(/[<>:"/\\|?*]/g,"_");
     const html = buildContractHtml(c, client, ca, false);
 
     // Загружаем Google Identity Services если ещё нет
