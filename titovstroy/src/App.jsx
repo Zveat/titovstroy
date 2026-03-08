@@ -1234,7 +1234,7 @@ const DOC_TYPES = [
 ];
 const TYPE_LABELS = { repair_fiz:"Договор ремонта", annex:"Приложение", design:"Дизайн-проект", design_add:"Доп. соглашение дизайн", reservation:"Бронь" };
 
-function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onGDoc, onAddClientFromEstimate, currentUserRole, fmt }) {
+function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onGDoc, onAddClientFromEstimate, currentUserRole, allUsers=[], fmt }) {
   const [withStamp, setWithStamp] = useState(true);
   const type = contract.type || "repair_fiz";
   const total = (contract.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
@@ -1475,6 +1475,16 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
           </div>
         </div>
       )}
+      {/* Менеджер */}
+      <div>
+        <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Менеджер</div>
+        <select className="fi" value={contract.manager||""} onChange={e=>upd({manager:e.target.value})}>
+          <option value="">— выбрать —</option>
+          {allUsers.filter(u=>u.role!=="viewer").map(u=>(
+            <option key={u.id} value={u.name}>{u.name}</option>
+          ))}
+        </select>
+      </div>
       {/* Примечание */}
       <div>
         <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Примечание</div>
@@ -3771,7 +3781,8 @@ export default function App() {
           .filter(e => !statsManager || (e.proj?.manager||"")=== statsManager);
         const baseCon = contracts
           .filter(c => inRange(new Date(c.date||0).getTime()))
-          .filter(c => (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0);
+          .filter(c => (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0)
+          .filter(c => !statsManager || (c.manager||"")=== statsManager);
         const totalEst = baseEst.length;
         const withSumEst = baseEst.filter(e=>e.total>0);
         const totalSumEst = withSumEst.reduce((s,e)=>s+e.total,0);
@@ -4037,6 +4048,7 @@ export default function App() {
                           </div>
                           <div style={{fontSize:11,color:"#454560",marginTop:3}}>
                             {new Date(c.date||Date.now()).toLocaleDateString("ru-RU")} · {(c.works||[]).length} позиций
+                            {c.manager && <span style={{marginLeft:6,color:"#8888cc"}}>· 👤 {c.manager}</span>}
                           </div>
                         </div>
                         <div style={{textAlign:"right",flexShrink:0}}>
@@ -4095,6 +4107,7 @@ export default function App() {
                   setCurrentContract(prev=>({...prev,clientId:newClient.id}));
                 }}
                 currentUserRole={currentUser.role}
+                allUsers={allUsers}
                 fmt={fmt}
               />
             )}
