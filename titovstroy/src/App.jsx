@@ -3073,7 +3073,7 @@ export default function App() {
           <div style={{marginBottom:32,display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
             <div>
               <h1 style={{margin:0,fontSize:26,fontWeight:900,color:"#e2ddd4",letterSpacing:-.5}}>
-                TitovStroy <span style={{color:"#b8904a"}}>CRM</span>
+                TitovStroy <span style={{color:"#b8904a"}}>ERP</span>
               </h1>
               <div style={{fontSize:12,color:"#454560",marginTop:6}}>
                 {new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
