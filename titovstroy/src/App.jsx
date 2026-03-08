@@ -3051,6 +3051,7 @@ export default function App() {
         const estimatesThisMonth = estimates.filter(e=>{ const d=new Date(e.updatedAt||e.createdAt||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
         const contractsThisMonth = contracts.filter(c=>{ const d=new Date(c.date||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
         const clientsThisMonth = contractClients.filter(c=>{ const d=new Date(c.createdAt||0); return c.createdAt && d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
+        const newClientsCount = clientsThisMonth.length;
         const totalSumMonth = estimatesThisMonth.reduce((s,e)=> s + (e.total||0), 0);
         const recentContracts = [...contracts].sort((a,b)=>(b.date||0)>(a.date||0)?1:-1).slice(0,4);
         const recentEstimates = [...estimates].sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).slice(0,4);
@@ -3076,7 +3077,7 @@ export default function App() {
               {label:"Смет за месяц",    value:estimatesThisMonth.length,  sub:estimatesThisMonth.length>0?"из "+estimates.length+" всего":"нет смет",       color:"#8888cc"},
               {label:"Договоров за месяц",value:contractsThisMonth.length, sub:contractsThisMonth.length>0?"из "+contracts.length+" всего":"нет договоров", color:"#b8904a"},
               {label:"Объём за месяц",   value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма смет за месяц",                          color:"#4caf7d"},
-              {label:"Клиентов за месяц",value:clientsThisMonth.length,   sub:"из "+contractClients.length+" всего",                                       color:"#4285f4"},
+              {label:"Клиентов всего",   value:contractClients.length,     sub:newClientsCount>0?"+"+newClientsCount+" новых в этом месяце":"нет новых в этом месяце", color:"#4285f4"},
             ].map((s,i)=>(
               <div key={i} style={{background:"#0f1120",border:"1px solid #161929",borderRadius:13,padding:"18px 18px 16px",position:"relative",overflow:"hidden"}}>
                 <div style={{position:"absolute",top:0,left:0,width:3,height:"100%",background:s.color,borderRadius:"3px 0 0 3px"}}/>
@@ -3998,7 +3999,7 @@ export default function App() {
                   generateContractGDoc(currentContract, cl, ca);
                 }}
                 onAddClientFromEstimate={async ()=>{
-                  const newClient = {id:Date.now().toString(),name:currentContract.estClient||"",phone:currentContract.estPhone||"",address:currentContract.estAddress||"",iin:"",doc:"",type:"физ"};
+                  const newClient = {id:Date.now().toString(),name:currentContract.estClient||"",phone:currentContract.estPhone||"",address:currentContract.estAddress||"",iin:"",doc:"",type:"физ",createdAt:Date.now()};
                   const list=[...contractClients,newClient];
                   await saveContractClients(list);
                   setCurrentContract(prev=>({...prev,clientId:newClient.id}));
@@ -4013,7 +4014,7 @@ export default function App() {
               <div style={{display:"flex",flexDirection:"column",gap:12}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div style={{fontWeight:700,color:"#888",fontSize:12}}>КЛИЕНТЫ ({contractClients.length})</div>
-                  <button onClick={()=>{ setCurrentContract({id:Date.now().toString(),name:"",phone:"",address:"",iin:"",doc:"",type:"физ",_mode:"newClient"}); setContractTab("clientEditor"); }}
+                  <button onClick={()=>{ setCurrentContract({id:Date.now().toString(),name:"",phone:"",address:"",iin:"",doc:"",type:"физ",createdAt:Date.now(),_mode:"newClient"}); setContractTab("clientEditor"); }}
                     className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
                 </div>
                 {contractClients.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#454560",fontSize:13}}>Клиентов пока нет</div>}
