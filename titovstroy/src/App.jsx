@@ -1555,6 +1555,14 @@ export default function App() {
   const [contractTab, setContractTab] = useState("list"); // list | editor | clients | contragents
   const [currentContract, setCurrentContract] = useState(null);
   const [contractClientsTab, setContractClientsTab] = useState("list");
+  const [stampBase64, setStampBase64] = useState("");
+  useEffect(()=>{
+    fetch("/stamp.jpg").then(r=>r.blob()).then(blob=>{
+      const reader = new FileReader();
+      reader.onload = e => setStampBase64(e.target.result);
+      reader.readAsDataURL(blob);
+    }).catch(()=>{});
+  },[]);
   const [listSearch, setListSearch] = useState("");
   const [listFilter, setListFilter] = useState(""); // "" | "Вторичка" | "Новостройка" | "Коммерция"
   const [listFilterManager, setListFilterManager] = useState(""); // "" = все
@@ -1738,7 +1746,7 @@ export default function App() {
 
 
   // ── Генерация HTML договора ──
-  const buildContractHtml = (c, client, ca, forDocx=false) => {
+  const buildContractHtml = (c, client, ca, forDocx=false, stamp=stampBase64) => {
     const type = c.type || "repair_fiz";
     const fmtN = n => Math.round(n||0).toLocaleString("ru-RU");
     const fmtDate = s => {
@@ -1818,7 +1826,7 @@ export default function App() {
         clSigRight = "<b>"+role2+"</b><br><br>ФИО: "+clName+"<br>ИИН: "+clIIN+"<br>№ документа: "+clDoc+"<br>Адрес: "+clAddr+"<br>Тел.: "+clPhone+"<br><br>"+clShort+" Подпись ___________";
       }
       const tbl = '<table class="st"><tr>';
-      const td1 = "<td><b>"+role1+"</b><br>"+TITOV.name+"<br>БИН "+TITOV.bin+"<br>Банк: "+TITOV.bank+"<br>БИК: "+TITOV.bik+"<br>Номер счёта: "+TITOV.acc+"<br>Юр.Адрес: "+TITOV.addr+"<br>Тел.: "+TITOV.phone+"<br>Email: "+TITOV.email+"<br><br>Генеральный директор:<br>"+TITOV.dir+' _______________ <img src="/stamp.jpg" style="width:80px;height:80px;object-fit:contain;vertical-align:middle;margin-left:6px;opacity:0.85" alt="М.П."/></td>';
+      const td1 = "<td><b>"+role1+"</b><br>"+TITOV.name+"<br>БИН "+TITOV.bin+"<br>Банк: "+TITOV.bank+"<br>БИК: "+TITOV.bik+"<br>Номер счёта: "+TITOV.acc+"<br>Юр.Адрес: "+TITOV.addr+"<br>Тел.: "+TITOV.phone+"<br>Email: "+TITOV.email+"<br><br>Генеральный директор:<br>"+TITOV.dir+" _______________ "+(stamp ? '<img src="'+stamp+'" style="width:100px;height:100px;object-fit:contain;vertical-align:middle;margin-left:6px;opacity:0.85;mix-blend-mode:multiply" alt=\"М.П.\"/>' : "М.П.")+"</td>";
       const td2 = "<td>"+clSigRight+"</td>";
       return tbl+td1+td2+"</tr></table>";
     };
