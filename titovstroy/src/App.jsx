@@ -3052,9 +3052,9 @@ export default function App() {
         const contractsThisMonth = contracts.filter(c=>{ const d=new Date(c.date||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
         const clientsThisMonth = contractClients.filter(c=>{ const d=new Date(c.createdAt||0); return c.createdAt && d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
         const newClientsCount = clientsThisMonth.length;
-        const totalSumMonth = estimatesThisMonth.reduce((s,e)=> s + (e.total||0), 0);
-        const recentContracts = [...contracts].sort((a,b)=>(b.date||0)>(a.date||0)?1:-1).slice(0,4);
-        const recentEstimates = [...estimates].sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).slice(0,4);
+        const totalSumMonth = estimatesThisMonth.filter(e=>(e.total||0)>0).reduce((s,e)=> s + (e.total||0), 0);
+        const recentContracts = [...contracts].filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,5);
+        const recentEstimates = [...estimates].filter(e=>(e.total||0)>0).sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0)).slice(0,5);
         return (
         <div style={{maxWidth:960,margin:"0 auto",padding:"28px 24px 80px"}}>
           {/* Заголовок */}
@@ -3074,8 +3074,8 @@ export default function App() {
           {/* Статы */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:32}}>
             {[
-              {label:"Смет за месяц",    value:estimatesThisMonth.length,  sub:estimatesThisMonth.length>0?"из "+estimates.length+" всего":"нет смет",       color:"#8888cc"},
-              {label:"Договоров за месяц",value:contractsThisMonth.length, sub:contractsThisMonth.length>0?"из "+contracts.length+" всего":"нет договоров", color:"#b8904a"},
+              {label:"Смет за месяц",    value:estimatesThisMonth.filter(e=>(e.total||0)>0).length,  sub:"из "+estimates.filter(e=>(e.total||0)>0).length+" с суммой всего", color:"#8888cc"},
+              {label:"Договоров за месяц",value:contractsThisMonth.filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).length, sub:"из "+contracts.filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).length+" с суммой всего", color:"#b8904a"},
               {label:"Объём за месяц",   value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма смет за месяц",                          color:"#4caf7d"},
               {label:"Клиентов за месяц",value:clientsThisMonth.length,    sub:"из "+contractClients.length+" всего", color:"#4285f4"},
             ].map((s,i)=>(
