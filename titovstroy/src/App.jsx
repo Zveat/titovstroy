@@ -1427,8 +1427,8 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
           {contragents.map(c=>(<option key={c.id} value={c.id}>{c.name}</option>))}
         </select>
       </div>
-      {/* Работы */}
-      <div>
+      {/* Работы — только для ремонта и приложений */}
+      {hasWorks && <div>
         <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:8}}>РАБОТЫ ({(contract.works||[]).length})</div>
         <div style={{background:"#0d1020",borderRadius:8,overflow:"hidden",border:"1px solid #1c2035"}}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 70px 55px 80px 80px 30px",padding:"8px 12px",background:"#161929",fontSize:10,color:"#454560",fontWeight:700}}>
@@ -1457,7 +1457,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
             <div style={{fontWeight:800,fontSize:16,color:"#b8904a"}}>{fmt(total)} ₸</div>
           </div>
         </div>
-      </div>
+      </div>}
       {/* Предоплата для ремонтных договоров */}
       {isRepair && (
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
@@ -2218,7 +2218,7 @@ export default function App() {
   <p class="b">Подписи сторон</p><br>
   ${sigBlock("Исполнитель:", "Заказчик:")}`;
     }
-    const printBtn = `\n<div class="np" style="margin-top:24px;text-align:center;padding:16px">\n  <button onclick="window.print()" style="padding:12px 36px;background:#b8904a;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;font-weight:700;font-family:Verdana,sans-serif">🖨 Распечатать / Сохранить PDF</button>\n</div>`;
+    const printBtn = forDocx ? "" : `\n<div class="np" style="margin-top:24px;text-align:center;padding:16px">\n  <button onclick="window.print()" style="padding:12px 36px;background:#b8904a;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;font-weight:700;font-family:Verdana,sans-serif">🖨 Распечатать / Сохранить PDF</button>\n</div>`;
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Договор №${c.number||""}</title><style>${CSS}</style></head>
   <body>${body}${printBtn}
   </body></html>`;
