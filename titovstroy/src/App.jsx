@@ -1530,7 +1530,7 @@ export default function App() {
   const [showAdmin, setShowAdmin] = useState(false);
 
   // Экраны: "list" | "editor" | "contracts"
-  const [screen, setScreen] = useState("list");
+  const [screen, setScreen] = useState("dashboard");
 
   // Пользователи для выпадающего списка менеджеров
   const [allUsers, setAllUsers] = useState(DEFAULT_USERS);
@@ -1564,6 +1564,7 @@ export default function App() {
   const [contractTab, setContractTab] = useState("list"); // list | editor | clients | contragents
   const [currentContract, setCurrentContract] = useState(null);
   const [contractClientsTab, setContractClientsTab] = useState("list");
+  const [sideCollapsed, setSideCollapsed] = useState(false);
   const [stampsBase64, setStampsBase64] = useState({});
   useEffect(()=>{
     ["stamp.jpg","stamp2.jpg"].forEach(file=>{
@@ -2906,8 +2907,15 @@ export default function App() {
   // Показать экран входа если не авторизован
   if (!currentUser) return <LoginScreen onLogin={setCurrentUser} />;
 
+  const NAV_ITEMS = [
+    { id:"dashboard", icon:"⌂",  label:"Главная" },
+    { id:"list",      icon:"📋", label:"Сметы" },
+    { id:"contracts", icon:"📄", label:"Договора" },
+    ...(currentUser.role==="admin" ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
+  ];
+
   return (
-    <div style={{fontFamily:"'Golos Text','Segoe UI',sans-serif",background:"#0c0e1a",minHeight:"100vh",color:"#ddd8ce"}}>
+    <div style={{fontFamily:"'Golos Text','Segoe UI',sans-serif",background:"#0c0e1a",minHeight:"100vh",color:"#ddd8ce",display:"flex",flexDirection:"column"}}>
       {/* Панель администратора */}
       {showAdmin && <AdminPanel currentUser={currentUser} onClose={async ()=>{ setShowAdmin(false); const u=await storage.get(USERS_KEY); if(u) setAllUsers(JSON.parse(u.value)); }}/>}
       <style>{`
@@ -2968,7 +2976,149 @@ export default function App() {
         .est-card{background:#111425;border:1px solid #1c2035;border-radius:11px;padding:16px 18px;cursor:pointer;transition:all .15s;position:relative}
         .est-card:hover{border-color:#b8904a;background:#14172e}
         .est-card:active{transform:scale(.99)}
+        .sidebar{width:220px;background:#0a0c18;border-right:1px solid #161929;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:50;transition:width .22s cubic-bezier(.4,0,.2,1)}
+        .sidebar.collapsed{width:60px}
+        .nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;margin:2px 6px;transition:all .15s;border-left:2px solid transparent}
+        .nav-item:hover{background:rgba(255,255,255,.04)}
+        .nav-item.active{background:rgba(184,144,74,.1);border-left-color:#b8904a}
+        .nav-label{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;transition:opacity .15s,width .15s}
+        .sidebar.collapsed .nav-label{opacity:0;width:0;pointer-events:none}
+        .sidebar-content{margin-left:220px;transition:margin-left .22s cubic-bezier(.4,0,.2,1);min-height:100vh}
+        .sidebar-content.collapsed{margin-left:60px}
+        @media(max-width:700px){
+          .sidebar{display:none!important}
+          .sidebar-content{margin-left:0!important;padding-bottom:68px!important}
+          .mob-nav{display:flex!important}
+        }
+        .mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:#0a0c18;border-top:1px solid #161929;z-index:50}
+        .mob-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;gap:3px;border-top:2px solid transparent;transition:all .15s}
+        .mob-nav-item.active{border-top-color:#b8904a;background:rgba(184,144,74,.07)}
       `}</style>
+
+      {/* ── SIDEBAR (десктоп) ── */}
+      <div className={"sidebar"+(sideCollapsed?" collapsed":"")}>
+        {/* Лого */}
+        <div style={{padding:"20px 14px 16px",display:"flex",alignItems:"center",gap:10,borderBottom:"1px solid #161929",minHeight:64}}>
+          <div style={{width:34,height:34,borderRadius:9,background:"linear-gradient(135deg,#b8904a,#d4a85a)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:16,color:"#0c0e1a",flexShrink:0}}>T</div>
+          <div className="nav-label" style={{lineHeight:1.2}}>
+            <div style={{fontWeight:800,fontSize:13,color:"#e2ddd4"}}>TitovStroy</div>
+            <div style={{fontSize:10,color:"#454560"}}>{currentUser.name}</div>
+          </div>
+        </div>
+        {/* Nav */}
+        <nav style={{flex:1,padding:"10px 0",overflowY:"auto"}}>
+          {NAV_ITEMS.map(item=>(
+            <div key={item.id} className={"nav-item"+(screen===item.id||(!["dashboard","list","contracts"].includes(screen)&&item.id==="list")?"":"")+((screen===item.id||(screen==="editor"&&item.id==="list"))?" active":"")}
+              onClick={()=>{ if(item.id==="admin"){setShowAdmin(true);}else{setScreen(item.id);} }}>
+              <span style={{fontSize:18,flexShrink:0,lineHeight:1}}>{item.icon}</span>
+              <span className="nav-label" style={{color:screen===item.id||(screen==="editor"&&item.id==="list")?"#b8904a":"#888"}}>{item.label}</span>
+            </div>
+          ))}
+        </nav>
+        {/* Collapse + Выйти */}
+        <div style={{borderTop:"1px solid #161929",padding:"10px 0"}}>
+          <div className="nav-item" onClick={()=>{ try{localStorage.removeItem(SESSION_KEY);}catch(e){} setCurrentUser(null); }}>
+            <span style={{fontSize:16,flexShrink:0}}>🚪</span>
+            <span className="nav-label" style={{color:"#555575",fontSize:12}}>Выйти</span>
+          </div>
+          <div className="nav-item" onClick={()=>setSideCollapsed(p=>!p)} style={{justifyContent:"center",marginTop:4}}>
+            <span style={{fontSize:13,color:"#333350"}}>{sideCollapsed?"▶":"◀"}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── МОБИЛЬНАЯ НАВИГАЦИЯ ── */}
+      <div className="mob-nav">
+        {NAV_ITEMS.map(item=>(
+          <div key={item.id} className={"mob-nav-item"+(screen===item.id||(screen==="editor"&&item.id==="list")?" active":"")}
+            onClick={()=>{ if(item.id==="admin"){setShowAdmin(true);}else{setScreen(item.id);} }}>
+            <span style={{fontSize:20}}>{item.icon}</span>
+            <span style={{fontSize:9,color:screen===item.id||(screen==="editor"&&item.id==="list")?"#b8904a":"#454560",fontWeight:600}}>{item.label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* ── КОНТЕНТ ── */}
+      <div className={"sidebar-content"+(sideCollapsed?" collapsed":"")}>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          ЭКРАН 0: ДАШБОРД
+      ═══════════════════════════════════════════════════════════════════ */}
+      {screen === "dashboard" && (
+        <div style={{maxWidth:900,margin:"0 auto",padding:"28px 20px 60px"}}>
+          {/* Заголовок */}
+          <div style={{marginBottom:28,display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+            <div>
+              <h1 style={{margin:0,fontSize:24,fontWeight:900,color:"#e2ddd4",letterSpacing:-.3}}>
+                TitovStroy <span style={{color:"#b8904a"}}>CRM</span>
+              </h1>
+              <div style={{fontSize:12,color:"#454560",marginTop:5}}>
+                {new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
+                {" · "}<span style={{color:"#b8904a"}}>{currentUser.role==="admin"?"👑 Администратор":currentUser.role==="viewer"?"👁 Просмотр":"👤 "+currentUser.name}</span>
+              </div>
+            </div>
+            {saving && <span style={{fontSize:11,color:"#555575"}}>💾 Сохранение...</span>}
+          </div>
+
+          {/* Быстрые статы */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:28}}>
+            {[
+              {label:"Смет всего",    value:estimates.length,        color:"#8888cc"},
+              {label:"Договоров",     value:contracts.length,        color:"#b8904a"},
+              {label:"Клиентов",      value:contractClients.length,  color:"#4caf7d"},
+              {label:"Подрядчиков",   value:contragents.length,      color:"#4285f4"},
+            ].map((s,i)=>(
+              <div key={i} style={{background:"#0f1120",border:"1px solid #161929",borderRadius:12,padding:"16px 18px"}}>
+                <div style={{fontSize:10,color:"#454560",textTransform:"uppercase",letterSpacing:.8,marginBottom:8}}>{s.label}</div>
+                <div style={{fontSize:28,fontWeight:900,color:s.color,lineHeight:1}}>{s.value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Разделы */}
+          <div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12,fontWeight:600}}>Разделы</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:12,marginBottom:32}}>
+            {[
+              {id:"list",      icon:"📋",title:"Сметы",      desc:"Расчёт и архив смет",      color:"#8888cc",bg:"rgba(136,136,204,.07)",border:"rgba(136,136,204,.18)"},
+              {id:"contracts", icon:"📄",title:"Договора",   desc:"Договора и соглашения",    color:"#b8904a",bg:"rgba(184,144,74,.07)",  border:"rgba(184,144,74,.18)"},
+            ].map(card=>(
+              <div key={card.id} onClick={()=>setScreen(card.id)}
+                style={{background:card.bg,border:`1px solid ${card.border}`,borderRadius:14,padding:"22px 20px",cursor:"pointer",transition:"transform .15s,box-shadow .15s"}}
+                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow=`0 8px 28px ${card.border}`;}}
+                onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
+                <div style={{fontSize:32,marginBottom:12}}>{card.icon}</div>
+                <div style={{fontWeight:700,fontSize:16,color:"#e2ddd4",marginBottom:6}}>{card.title}</div>
+                <div style={{fontSize:12,color:"#555575"}}>{card.desc}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Последние сметы */}
+          {estimates.length > 0 && (
+            <div>
+              <div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12,fontWeight:600}}>Последние сметы</div>
+              <div style={{background:"#0f1120",border:"1px solid #161929",borderRadius:12,overflow:"hidden"}}>
+                {[...estimates].sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).slice(0,5).map((est,i,arr)=>{
+                  const total = (est.rows ? Object.values(est.rows).reduce((s,r)=>s+(Number(r.qty||0)*Number(r.manualPrice||r.price||0)),0) : 0);
+                  return (
+                    <div key={est.id} onClick={()=>{openEstimate(est);}}
+                      style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<arr.length-1?"1px solid #161929":"none",cursor:"pointer",transition:"background .1s"}}
+                      onMouseEnter={e=>e.currentTarget.style.background="#14172a"}
+                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                      <div style={{width:7,height:7,borderRadius:"50%",background:"#8888cc",flexShrink:0}}/>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:13,color:"#e2ddd4",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{est.proj?.name||"Без названия"}</div>
+                        <div style={{fontSize:11,color:"#454560",marginTop:2}}>{est.updatedAt?new Date(est.updatedAt).toLocaleDateString("ru-RU"):""}</div>
+                      </div>
+                      {total>0 && <div style={{fontSize:13,fontWeight:700,color:"#b8904a",flexShrink:0}}>{fmt(total)} ₸</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ═══════════════════════════════════════════════════════════════════
           ЭКРАН 1: СПИСОК СМЕТ
@@ -2988,12 +3138,7 @@ export default function App() {
             </div>
             <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
               {saving && <span style={{fontSize:11,color:"#555575"}}>💾</span>}
-              {currentUser.role === "admin" && (
-                <button className="btn btn-o" style={{padding:"6px 9px",fontSize:14}} onClick={()=>setShowAdmin(true)}>⚙️</button>
-              )}
-              <button className="btn btn-o" style={{padding:"6px 9px",fontSize:11}} onClick={()=>{ try { localStorage.removeItem(SESSION_KEY); } catch(e) {} setCurrentUser(null); }}>Выйти</button>
               <button className="btn btn-o" style={{padding:"6px 9px",fontSize:14}} onClick={()=>setShowStats(true)} title="Статистика">📊</button>
-              <button className="btn btn-o" style={{padding:"6px 9px",fontSize:12,whiteSpace:"nowrap"}} onClick={()=>setScreen("contracts")}>📋 Договоры</button>
               {currentUser.role !== "viewer" && (
                 <button className="btn btn-g" style={{padding:"7px 14px",fontSize:12,whiteSpace:"nowrap"}} onClick={newEstimate}>+ Новая</button>
               )}
@@ -3700,7 +3845,7 @@ export default function App() {
         <div style={{maxWidth:860,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
           {/* Шапка */}
           <div style={{background:"#0e1122",borderBottom:"1px solid #181c2e",padding:"12px 20px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
-            <button onClick={()=>setScreen("list")} style={{background:"none",border:"none",color:"#555575",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
+            <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"none",color:"#555575",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
             <div style={{width:28,height:28,borderRadius:6,background:"linear-gradient(135deg,#b8904a,#d4a85a)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#0c0e1a"}}>T</div>
             <div style={{fontWeight:800,fontSize:14,color:"#e2ddd4"}}>Договоры</div>
             <div style={{flex:1}}/>
@@ -3945,6 +4090,7 @@ export default function App() {
           </div>
         </div>
       )}
+      </div>{/* /sidebar-content */}
     </div>
   );
 }
