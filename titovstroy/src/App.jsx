@@ -3777,7 +3777,7 @@ export default function App() {
               />
             )}
 
-            {/* ── КЛИЕНТЫ ── */}}
+            {/* ── КЛИЕНТЫ ── */}
             {contractTab === "clients" && (
               <div style={{display:"flex",flexDirection:"column",gap:12}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
