@@ -1498,6 +1498,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
           📋 Google Doc
         </button>
       </div>
+    </div>
   );
 }
 
