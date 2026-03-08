@@ -4010,7 +4010,7 @@ export default function App() {
 
           {/* Табы */}
           <div style={{display:"flex",gap:4,padding:"12px 20px 0",borderBottom:"1px solid #181c2e",background:"#0e1122"}}>
-            {[["list","📋 Список"],["clients","👥 Клиенты"],["contragents","🏢 ТОО"]].map(([k,l])=>(
+            {[["list","📋 Список договоров"],["clients","👥 Клиенты"],["contragents","🏢 Наши юр лица"]].map(([k,l])=>(
               <button key={k} onClick={()=>setContractTab(k)}
                 style={{background:"none",border:"none",borderBottom:`2px solid ${contractTab===k?"#b8904a":"transparent"}`,color:contractTab===k?"#b8904a":"#555575",cursor:"pointer",padding:"8px 14px",fontSize:13,fontWeight:600,fontFamily:"inherit",transition:"all .15s"}}>
                 {l}
