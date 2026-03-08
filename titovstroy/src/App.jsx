@@ -3046,13 +3046,15 @@ export default function App() {
           ЭКРАН 0: ДАШБОРД
       ═══════════════════════════════════════════════════════════════════ */}
       {screen === "dashboard" && (()=>{
-        const totalSumEstimates = estimates.reduce((s,e)=>{
+        const thisMonth = new Date().getMonth();
+        const thisYear = new Date().getFullYear();
+        const estimatesThisMonth = estimates.filter(e=>{ const d=new Date(e.updatedAt||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
+        const contractsThisMonth = contracts.filter(c=>{ const d=new Date(c.date||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
+        const clientsThisMonth = contractClients.filter(c=>{ const d=new Date(c.createdAt||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
+        const totalSumMonth = estimatesThisMonth.reduce((s,e)=>{
           const t = e.rows ? Object.values(e.rows).reduce((ss,r)=>ss+(Number(r.qty||0)*Number(r.manualPrice||r.price||0)),0) : 0;
           return s+t;
         },0);
-        const thisMonth = new Date().getMonth();
-        const thisYear = new Date().getFullYear();
-        const contractsThisMonth = contracts.filter(c=>{ const d=new Date(c.date||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
         const recentContracts = [...contracts].sort((a,b)=>(b.date||0)>(a.date||0)?1:-1).slice(0,4);
         const recentEstimates = [...estimates].sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).slice(0,4);
         return (
@@ -3074,10 +3076,10 @@ export default function App() {
           {/* Статы */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:32}}>
             {[
-              {label:"Смет всего",     value:estimates.length,           sub:totalSumEstimates>0?fmt(Math.round(totalSumEstimates))+" ₸ общий объём":"",   color:"#8888cc"},
-              {label:"Договоров",      value:contracts.length,           sub:contractsThisMonth.length+" в этом месяце",                                   color:"#b8904a"},
-              {label:"Клиентов",       value:contractClients.length,     sub:"в базе",                                                                     color:"#4caf7d"},
-              {label:"Подрядчиков",    value:contragents.length,         sub:"ТОО / организаций",                                                          color:"#4285f4"},
+              {label:"Смет за месяц",    value:estimatesThisMonth.length,  sub:estimatesThisMonth.length>0?"из "+estimates.length+" всего":"нет смет",       color:"#8888cc"},
+              {label:"Договоров за месяц",value:contractsThisMonth.length, sub:contractsThisMonth.length>0?"из "+contracts.length+" всего":"нет договоров", color:"#b8904a"},
+              {label:"Объём за месяц",   value:totalSumMonth>0?fmt(Math.round(totalSumMonth))+" ₸":"—", sub:"сумма смет за месяц",                          color:"#4caf7d"},
+              {label:"Клиентов за месяц",value:clientsThisMonth.length,   sub:"из "+contractClients.length+" всего",                                       color:"#4285f4"},
             ].map((s,i)=>(
               <div key={i} style={{background:"#0f1120",border:"1px solid #161929",borderRadius:13,padding:"18px 18px 16px",position:"relative",overflow:"hidden"}}>
                 <div style={{position:"absolute",top:0,left:0,width:3,height:"100%",background:s.color,borderRadius:"3px 0 0 3px"}}/>
