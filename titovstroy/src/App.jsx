@@ -368,22 +368,22 @@ function LoginScreen({ onLogin }) {
   };
 
   return (
-    <div style={{minHeight:"100vh",background:"#0c0e1a",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'Golos Text','Segoe UI',sans-serif"}}>
+    <div style={{minHeight:"100vh",background:"#f3efe6",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'Golos Text','Segoe UI',sans-serif"}}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;600;700;900&display=swap');*{box-sizing:border-box;margin:0;padding:0}`}</style>
       <div style={{width:"100%",maxWidth:380}}>
         {/* Лого */}
         <div style={{textAlign:"center",marginBottom:32}}>
           <div style={{width:56,height:56,borderRadius:14,background:"linear-gradient(135deg,#b8904a,#d4a85a)",display:"inline-flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:26,color:"#0c0e1a",marginBottom:12}}>T</div>
-          <div style={{fontWeight:900,fontSize:22,color:"#e2ddd4",letterSpacing:.3}}>TitovStroy</div>
-          <div style={{fontSize:12,color:"#454560",marginTop:4}}>Система расчёта смет · Вход</div>
+          <div style={{fontWeight:900,fontSize:22,color:"#1f2434",letterSpacing:.3}}>TitovStroy</div>
+          <div style={{fontSize:12,color:"#6d7487",marginTop:4}}>Система расчёта смет · Вход</div>
         </div>
 
         {/* Форма */}
-        <div style={{background:"#111425",border:"1px solid #1c2035",borderRadius:14,padding:"28px 28px"}}>
+        <div style={{background:"#fffdf8",border:"1px solid #ddd6c7",borderRadius:14,padding:"28px 28px",boxShadow:"0 8px 30px rgba(30,38,60,.08)"}}>
           <div style={{marginBottom:16}}>
-            <div style={{fontSize:11,color:"#454560",marginBottom:6,fontWeight:600,letterSpacing:.5,textTransform:"uppercase"}}>Логин</div>
+            <div style={{fontSize:11,color:"#6d7487",marginBottom:6,fontWeight:600,letterSpacing:.5,textTransform:"uppercase"}}>Логин</div>
             <input
-              style={{background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:8,padding:"11px 14px",fontFamily:"inherit",fontSize:14,width:"100%",outline:"none",transition:"border .15s"}}
+              style={{background:"#ffffff",border:"1px solid #d8dce6",color:"#1f2434",borderRadius:8,padding:"11px 14px",fontFamily:"inherit",fontSize:14,width:"100%",outline:"none",transition:"border .15s"}}
               placeholder="Введите логин"
               value={login}
               onChange={e=>{setLogin(e.target.value);setError("");}}
@@ -392,10 +392,10 @@ function LoginScreen({ onLogin }) {
             />
           </div>
           <div style={{marginBottom:20}}>
-            <div style={{fontSize:11,color:"#454560",marginBottom:6,fontWeight:600,letterSpacing:.5,textTransform:"uppercase"}}>Пароль</div>
+            <div style={{fontSize:11,color:"#6d7487",marginBottom:6,fontWeight:600,letterSpacing:.5,textTransform:"uppercase"}}>Пароль</div>
             <div style={{position:"relative"}}>
               <input
-                style={{background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:8,padding:"11px 40px 11px 14px",fontFamily:"inherit",fontSize:14,width:"100%",outline:"none",transition:"border .15s"}}
+                style={{background:"#ffffff",border:"1px solid #d8dce6",color:"#1f2434",borderRadius:8,padding:"11px 40px 11px 14px",fontFamily:"inherit",fontSize:14,width:"100%",outline:"none",transition:"border .15s"}}
                 placeholder="Введите пароль"
                 type={showPass?"text":"password"}
                 value={password}
@@ -403,7 +403,7 @@ function LoginScreen({ onLogin }) {
                 onKeyDown={e=>e.key==="Enter"&&handleLogin()}
                 autoComplete="current-password"
               />
-              <button onClick={()=>setShowPass(p=>!p)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#555575",fontSize:16}}>
+              <button onClick={()=>setShowPass(p=>!p)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#7b8297",fontSize:16}}>
                 {showPass?"🙈":"👁"}
               </button>
             </div>
@@ -422,7 +422,7 @@ function LoginScreen({ onLogin }) {
             {loading ? "Проверка..." : "Войти"}
           </button>
         </div>
-        <div style={{textAlign:"center",marginTop:16,fontSize:11,color:"#2a2a40"}}>TitovStroy · Только для сотрудников</div>
+        <div style={{textAlign:"center",marginTop:16,fontSize:11,color:"#8a90a3"}}>TitovStroy · Только для сотрудников</div>
       </div>
     </div>
   );
@@ -750,7 +750,7 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
   };
 
   const roleLabel = r => r==="admin" ? "👑 Админ" : r==="viewer" ? "👁 Наблюдатель" : "👤 Замерщик";
-  const adminContentHeight = asPage ? "calc(100vh - 300px)" : "calc(88vh - 160px)";
+  const adminContentHeight = asPage ? "calc(100vh - 230px)" : "calc(88vh - 160px)";
 
   return (
     <div style={{
@@ -2948,38 +2948,38 @@ export default function App() {
   ];
 
   return (
-    <div style={{fontFamily:"'Golos Text','Segoe UI',sans-serif",background:"#0c0e1a",minHeight:"100vh",color:"#ddd8ce",display:"flex",flexDirection:"column"}}>
+    <div style={{fontFamily:"'Golos Text','Segoe UI',sans-serif",background:"#f3efe6",minHeight:"100vh",color:"#1f2434",display:"flex",flexDirection:"column"}}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;900&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
-        html,body{background:#0c0e1a;overflow-x:hidden;width:100%}
+        html,body{background:#f3efe6;overflow-x:hidden;width:100%;color:#1f2434}
         input,select,textarea{outline:none}
         ::-webkit-scrollbar{width:4px}
         ::-webkit-scrollbar-thumb{background:#b8904a;border-radius:2px}
-        .fi{background:#14172a;border:1px solid #20243a;color:#ddd8ce;border-radius:7px;padding:8px 12px;font-family:inherit;font-size:13px;width:100%;transition:border .15s}
+        .fi{background:#fffdf8;border:1px solid #d8dce6;color:#1f2434;border-radius:7px;padding:8px 12px;font-family:inherit;font-size:13px;width:100%;transition:border .15s}
         .fi:focus{border-color:#b8904a}
-        .fi::placeholder{color:#33364d}
-        .tab-btn{background:none;border:none;cursor:pointer;padding:7px 14px;border-radius:6px;font-family:inherit;font-size:13px;font-weight:600;color:#555570;transition:all .15s;white-space:nowrap}
-        .tab-btn:hover{color:#b8b0a0;background:rgba(184,144,74,.08)}
+        .fi::placeholder{color:#8a90a3}
+        .tab-btn{background:none;border:none;cursor:pointer;padding:7px 14px;border-radius:6px;font-family:inherit;font-size:13px;font-weight:600;color:#6d7487;transition:all .15s;white-space:nowrap}
+        .tab-btn:hover{color:#7f6742;background:rgba(184,144,74,.10)}
         .tab-btn.active{background:rgba(184,144,74,.18);color:#b8904a}
-        .sub-btn{background:none;border:none;cursor:pointer;padding:5px 10px;border-radius:5px;font-family:inherit;font-size:11.5px;color:#45455e;transition:all .15s;white-space:nowrap}
-        .sub-btn:hover{color:#9090b0;background:rgba(255,255,255,.04)}
-        .sub-btn.active{background:rgba(255,255,255,.07);color:#b0b0c8;font-weight:600}
+        .sub-btn{background:none;border:none;cursor:pointer;padding:5px 10px;border-radius:5px;font-family:inherit;font-size:11.5px;color:#7b8297;transition:all .15s;white-space:nowrap}
+        .sub-btn:hover{color:#4a5163;background:rgba(31,36,52,.05)}
+        .sub-btn.active{background:rgba(31,36,52,.08);color:#1f2434;font-weight:600}
         .wrow{display:grid;align-items:start;padding:9px 14px;border-radius:7px;gap:8px;transition:background .12s;min-width:0}
-        .wrow:hover{background:rgba(255,255,255,.02)}
+        .wrow:hover{background:rgba(31,36,52,.04)}
         .wrow.on{background:rgba(184,144,74,.06)}
-        .num{background:#14172a;border:1px solid #20243a;color:#ddd8ce;border-radius:6px;padding:6px 8px;text-align:right;font-family:inherit;font-size:13px;transition:border .15s}
+        .num{background:#fffdf8;border:1px solid #d8dce6;color:#1f2434;border-radius:6px;padding:6px 8px;text-align:right;font-family:inherit;font-size:13px;transition:border .15s}
         .num:focus{border-color:#b8904a}
-        .num::placeholder{color:#33364d}
-        .cpx-sel{background:#14172a;border:1px solid #20243a;color:#7070a0;border-radius:6px;padding:4px 6px;font-family:inherit;font-size:11px;margin-top:4px;cursor:pointer;width:auto;max-width:130px}
+        .num::placeholder{color:#8a90a3}
+        .cpx-sel{background:#fffdf8;border:1px solid #d8dce6;color:#4a5163;border-radius:6px;padding:4px 6px;font-family:inherit;font-size:11px;margin-top:4px;cursor:pointer;width:auto;max-width:130px}
         .cpx-sel:focus{border-color:#b8904a}
-        .card{background:#111425;border:1px solid #1c2035;border-radius:12px;overflow:hidden}
+        .card{background:#fffdf8;border:1px solid #ddd6c7;border-radius:12px;overflow:hidden}
         .btn{border:none;cursor:pointer;padding:11px 22px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:700;transition:all .2s;letter-spacing:.2px}
         .btn-g{background:linear-gradient(135deg,#b8904a,#d4a85a);color:#0c0e1a}
         .btn-g:hover{transform:translateY(-1px);box-shadow:0 5px 20px rgba(184,144,74,.4)}
         .btn-g:disabled{opacity:.35;cursor:not-allowed;transform:none;box-shadow:none}
-        .btn-o{background:rgba(255,255,255,.05);color:#707090;border:1px solid #1c2035}
-        .btn-o:hover{background:rgba(255,255,255,.08);color:#b0b0c8}
+        .btn-o{background:#f2eee3;color:#4a5163;border:1px solid #ddd6c7}
+        .btn-o:hover{background:#ebe5d7;color:#1f2434}
         .btn-red{background:rgba(200,60,60,.12);color:#e07070;border:1px solid rgba(200,60,60,.2)}
         .btn-red:hover{background:rgba(200,60,60,.22);color:#f09090}
         .badge{background:rgba(184,144,74,.15);color:#b8904a;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700}
@@ -3004,14 +3004,14 @@ export default function App() {
           .kp-no-print{display:none!important}
           @page{margin:10mm;size:A4 portrait}
         }
-        .est-card{background:#111425;border:1px solid #1c2035;border-radius:11px;padding:16px 18px;cursor:pointer;transition:all .15s;position:relative}
-        .est-card:hover{border-color:#b8904a;background:#14172e}
+        .est-card{background:#fffdf8;border:1px solid #ddd6c7;border-radius:11px;padding:16px 18px;cursor:pointer;transition:all .15s;position:relative}
+        .est-card:hover{border-color:#b8904a;background:#fff8ea}
         .est-card:active{transform:scale(.99)}
-        .sidebar{width:220px;background:#0a0c18;border-right:1px solid #161929;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:50;transition:width .22s cubic-bezier(.4,0,.2,1)}
+        .sidebar{width:220px;background:#f8f4ea;border-right:1px solid #ddd6c7;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:50;transition:width .22s cubic-bezier(.4,0,.2,1)}
         .sidebar.collapsed{width:60px}
         .nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;margin:2px 6px;transition:all .15s;border-left:2px solid transparent}
-        .nav-item:hover{background:rgba(255,255,255,.04)}
-        .nav-item.active{background:rgba(184,144,74,.1);border-left-color:#b8904a}
+        .nav-item:hover{background:rgba(31,36,52,.05)}
+        .nav-item.active{background:rgba(184,144,74,.16);border-left-color:#b8904a}
         .nav-label{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;transition:opacity .15s,width .15s}
         .sidebar.collapsed .nav-label{opacity:0;width:0;pointer-events:none}
         .sidebar-content{margin-left:220px;transition:margin-left .22s cubic-bezier(.4,0,.2,1);min-height:100vh}
@@ -3021,9 +3021,16 @@ export default function App() {
           .sidebar-content{margin-left:0!important;padding-bottom:68px!important}
           .mob-nav{display:flex!important}
         }
-        .mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:#0a0c18;border-top:1px solid #161929;z-index:50}
+        .mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:#f8f4ea;border-top:1px solid #ddd6c7;z-index:50}
         .mob-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;gap:3px;border-top:2px solid transparent;transition:all .15s}
         .mob-nav-item.active{border-top-color:#b8904a;background:rgba(184,144,74,.07)}
+
+        /* Light theme overrides for legacy inline dark styles */
+        [style*="background:#0c0e1a"]{background:#f3efe6 !important}
+        [style*="background:#0f1120"],[style*="background:#111425"],[style*="background:#14172a"],[style*="background:#0e1122"],[style*="background:#0a0c18"],[style*="background:#0c0e1a"],[style*="background:#0b0f1d"]{background:#fffdf8 !important}
+        [style*="border:1px solid #1c2035"],[style*="border:1px solid #1a1e30"],[style*="border:1px solid #20243a"],[style*="border:1px solid #161929"],[style*="border:1px solid #1e2238"]{border:1px solid #ddd6c7 !important}
+        [style*="color:#ddd8ce"],[style*="color:#e2ddd4"]{color:#1f2434 !important}
+        [style*="color:#454560"],[style*="color:#555575"],[style*="color:#333350"],[style*="color:#707090"],[style*="color:#888"]{color:#6d7487 !important}
       `}</style>
 
       {/* ── SIDEBAR (десктоп) ── */}
