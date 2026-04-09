@@ -746,13 +746,14 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
   };
 
   const roleLabel = r => r==="admin" ? "👑 Админ" : r==="viewer" ? "👁 Наблюдатель" : "👤 Замерщик";
+  const adminContentHeight = asPage ? "calc(100vh - 300px)" : "calc(88vh - 160px)";
 
   return (
     <div style={{
       display:"flex",
-      alignItems:"center",
+      alignItems: asPage ? "stretch" : "center",
       justifyContent:"center",
-      padding:16,
+      padding: asPage ? 0 : 16,
       fontFamily:"'Golos Text','Segoe UI',sans-serif",
       width:"100%"
     }}>
@@ -761,13 +762,15 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
         border:"1px solid #1c2035",
         borderRadius:14,
         padding:"24px 28px",
-        maxWidth:520,
+        maxWidth: asPage ? 1180 : 520,
         width:"100%",
-        height: asPage ? "calc(100vh - 180px)" : "88vh",
-        maxHeight: asPage ? "calc(100vh - 180px)" : "88vh",
+        height: asPage ? "auto" : "88vh",
+        minHeight: asPage ? "calc(100vh - 220px)" : "auto",
+        maxHeight: asPage ? "none" : "88vh",
         display:"flex",
         flexDirection:"column",
-        position:"relative"
+        position:"relative",
+        boxShadow: asPage ? "0 10px 30px rgba(0,0,0,.28)" : "none"
       }}>
 
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
@@ -790,7 +793,7 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
         </div>
 
         {loading ? <div style={{textAlign:"center",padding:"30px 0",color:"#454560"}}>Загрузка...</div> : tab === "users" ? (
-          <div style={{flex:1,overflowY:"auto"}}>
+          <div style={{height:adminContentHeight,overflowY:"auto",paddingRight:4}}>
           <>
             {/* Список */}
             <div style={{marginBottom:20}}>
@@ -884,7 +887,7 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
           </div>
         ) : (
           /* ═══ ВКЛАДКА ПРАЙС-ЛИСТ ═══ */
-          <div style={{display:"flex",flexDirection:"column",height:"calc(88vh - 160px)"}}>
+          <div style={{display:"flex",flexDirection:"column",height:adminContentHeight}}>
             {!localPrices ? <div style={{textAlign:"center",padding:30,color:"#454560"}}>Загрузка...</div> : null}
             {localPrices && <>
               {/* Поиск — фиксированный */}
@@ -3744,7 +3747,7 @@ export default function App() {
 
       {/* ═══════════════════ АДМИНКА ═══════════════════ */}
       {screen === "admin" && currentUser.role === "admin" && (
-        <div style={{maxWidth:960,margin:"0 auto",padding:"28px 24px 80px"}}>
+        <div style={{maxWidth:1280,margin:"0 auto",padding:"28px 24px 80px"}}>
           <AdminPanel
             asPage
             currentUser={currentUser}
