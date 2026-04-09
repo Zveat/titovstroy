@@ -458,51 +458,56 @@ function PriceWorkCard({ w, initTiers, initFixed, onRename, onDelete }) {
   };
 
   return (
-    <div style={{background:hasChange?"rgba(184,144,74,.05)":"#14172a",border:`1px solid ${hasChange?"rgba(184,144,74,.28)":"#20243a"}`,borderRadius:8,padding:"8px 10px",marginBottom:6}}>
-      <div style={{marginBottom:7,display:"flex",alignItems:"center",gap:6}}>
+    <div style={{background:hasChange?"rgba(184,144,74,.06)":"#14172a",border:`1px solid ${hasChange?"rgba(184,144,74,.32)":"#20243a"}`,borderRadius:8,padding:"8px 10px",marginBottom:6}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr auto auto auto",gap:6,alignItems:"center",marginBottom:6}}>
         {editing ? (
           <>
             <input autoFocus value={editName} onChange={e=>setEditName(e.target.value)}
               onKeyDown={e=>{if(e.key==="Enter")submitRename();if(e.key==="Escape")setEditing(false);}}
-              style={{flex:1,background:"#0c0e1a",border:"1px solid #b8904a",color:"#ddd8ce",borderRadius:5,padding:"4px 8px",fontFamily:"inherit",fontSize:12,fontWeight:600,outline:"none"}}/>
-            <button onClick={submitRename} style={{background:"rgba(76,175,125,.15)",color:"#4caf7d",border:"none",borderRadius:5,padding:"4px 7px",cursor:"pointer",fontSize:11}}>✓</button>
-            <button onClick={()=>setEditing(false)} style={{background:"transparent",color:"#555575",border:"none",cursor:"pointer",fontSize:13,padding:"3px 7px"}}>✕</button>
+              style={{gridColumn:"1 / span 2",background:"#0c0e1a",border:"1px solid #b8904a",color:"#ddd8ce",borderRadius:5,padding:"4px 8px",fontFamily:"inherit",fontSize:12,fontWeight:600,outline:"none"}}/>
+            <button onClick={submitRename} style={{background:"rgba(76,175,125,.15)",color:"#4caf7d",border:"none",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:11}}>Сохранить</button>
+            <button onClick={()=>setEditing(false)} style={{background:"transparent",color:"#555575",border:"none",cursor:"pointer",fontSize:11,padding:"4px 8px"}}>Отмена</button>
           </>
         ) : (
           <>
-            <span style={{fontSize:12.5,fontWeight:600,color:"#ddd8ce",flex:1,lineHeight:1.2}}>{w.name}</span>
-            <span style={{fontSize:10,color:"#666486"}}>{w.unit}</span>
-            <button onClick={()=>{setEditName(w.name);setEditing(true);}} title="Переименовать"
-              style={{background:"transparent",color:"#555575",border:"none",cursor:"pointer",fontSize:11,padding:"2px 4px",lineHeight:1}}>✏️</button>
-            {onDelete && <button onClick={onDelete} title="Удалить позицию"
-              style={{background:"transparent",color:"#e07070",border:"none",cursor:"pointer",fontSize:11,padding:"2px 4px",lineHeight:1}}>🗑</button>}
+            <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
+              <span style={{fontSize:12.5,fontWeight:600,color:"#ddd8ce",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{w.name}</span>
+              <span style={{fontSize:10,color:"#666486",flexShrink:0}}>{w.unit}</span>
+            </div>
+            <button onClick={()=>{setEditName(w.name);setEditing(true);}} style={{background:"transparent",color:"#555575",border:"none",cursor:"pointer",fontSize:11,padding:"2px 4px"}}>✏️</button>
+            {onDelete ? <button onClick={onDelete} style={{background:"transparent",color:"#e07070",border:"none",cursor:"pointer",fontSize:11,padding:"2px 4px"}}>🗑</button> : <span />}
+            <span style={{fontSize:10,color:hasChange?"#b8904a":"#555575",textAlign:"right"}}>{hasChange?"изменено":""}</span>
           </>
         )}
       </div>
+
       {showTiers ? (
         <div>
-          <div style={{display:"grid",gridTemplateColumns:"64px 64px 1fr 28px",gap:4,marginBottom:4}}>
-            {["ОТ","ДО","ЦЕНА (₸)",""].map((h,i)=>(<div key={i} style={{fontSize:9,color:"#454560",textAlign:i===2?"right":"center",fontWeight:700}}>{h}</div>))}
-          </div>
           {tiers.map((t,ti)=>(
-            <div key={ti} style={{display:"grid",gridTemplateColumns:"64px 64px 1fr 28px",gap:4,marginBottom:3,alignItems:"center"}}>
+            <div key={ti} style={{display:"grid",gridTemplateColumns:"58px 58px 1fr 26px",gap:4,marginBottom:3,alignItems:"center"}}>
               <input type="number" min="0" value={t.min}
                 onChange={e=>updTiers(tiers.map((x,i)=>i===ti?{...x,min:e.target.value===""?"":Number(e.target.value)}:x))}
-                style={s({border:"1px solid #20243a",color:"#9090b0",textAlign:"center",padding:"5px 6px",fontSize:11})}/>
+                style={s({border:"1px solid #20243a",textAlign:"center",padding:"5px 6px",fontSize:11,color:"#a7a3bf"})}/>
               <input type="number" min="0" value={t.max}
                 onChange={e=>updTiers(tiers.map((x,i)=>i===ti?{...x,max:e.target.value===""?"":Number(e.target.value)}:x))}
-                style={s({border:"1px solid #20243a",color:"#9090b0",textAlign:"center",padding:"5px 6px",fontSize:11})}/>
+                style={s({border:"1px solid #20243a",textAlign:"center",padding:"5px 6px",fontSize:11,color:"#a7a3bf"})}/>
               <input type="number" min="0" value={t.price} placeholder={String(baseTiers[ti]?.price??"")}
                 onChange={e=>updTiers(tiers.map((x,i)=>i===ti?{...x,price:e.target.value===""?"":Number(e.target.value)}:x))}
                 style={s({border:`1px solid ${t.price!==""?"#b8904a":"#20243a"}`,textAlign:"right",padding:"5px 8px",fontSize:11})}/>
               <button onClick={()=>updTiers(tiers.filter((_,i)=>i!==ti))}
-                style={{background:"rgba(200,60,60,.15)",color:"#e07070",border:"none",borderRadius:5,padding:"4px",cursor:"pointer",fontSize:11}}>✕</button>
+                style={{background:"rgba(200,60,60,.15)",color:"#e07070",border:"none",borderRadius:4,padding:"4px",cursor:"pointer",fontSize:11}}>✕</button>
             </div>
           ))}
-          <button onClick={()=>{const last=tiers[tiers.length-1];const m=last?(Number(last.max)||0)+1:1;updTiers([...tiers,{min:m,max:m+49,price:""}]);}}
-            style={{marginTop:4,background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.28)",borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit",width:"100%"}}>
-            + Добавить диапазон
-          </button>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
+            <button onClick={()=>{const last=tiers[tiers.length-1];const m=last?(Number(last.max)||0)+1:1;updTiers([...tiers,{min:m,max:m+49,price:""}]);}}
+              style={{background:"transparent",color:"#b8904a",border:"none",padding:0,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+              + Диапазон
+            </button>
+            <button onClick={()=>updTiers([])}
+              style={{background:"transparent",color:"#666486",border:"none",padding:0,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+              Убрать диапазоны
+            </button>
+          </div>
         </div>
       ) : (
         <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -511,12 +516,11 @@ function PriceWorkCard({ w, initTiers, initFixed, onRename, onDelete }) {
             style={{background:"#0c0e1a",border:`1px solid ${fixedVal!==""?"#b8904a":"#20243a"}`,color:"#ddd8ce",borderRadius:6,padding:"6px 10px",fontFamily:"inherit",fontSize:12,outline:"none",width:140,textAlign:"right"}}/>
           <span style={{fontSize:11,color:"#454560"}}>₸</span>
           <button onClick={()=>updTiers([{min:1,max:50,price:""}])}
-            style={{marginLeft:"auto",background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.28)",borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-            + Диапазоны
+            style={{marginLeft:"auto",background:"transparent",color:"#b8904a",border:"none",padding:0,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+            Перейти на диапазоны
           </button>
         </div>
       )}
-
     </div>
   );
 }
@@ -893,17 +897,78 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
           <div style={{display:"flex",flexDirection:"column",height:adminContentHeight}}>
             {!localPrices ? <div style={{textAlign:"center",padding:30,color:"#454560"}}>Загрузка...</div> : null}
             {localPrices && <>
-              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:10}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:8,alignItems:"center",marginBottom:10}}>
                 <input
-                  style={{flex:1,width:"100%",boxSizing:"border-box",background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:7,padding:"8px 12px",fontFamily:"inherit",fontSize:12,outline:"none"}}
+                  style={{width:"100%",boxSizing:"border-box",background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:7,padding:"8px 12px",fontFamily:"inherit",fontSize:12,outline:"none"}}
                   placeholder="🔍 Поиск по названию, категории или подкатегории..."
                   value={priceSearch}
                   onChange={e=>setPriceSearch(e.target.value)}
                 />
+                <button onClick={()=>setShowAddWork(p=>!p)}
+                  style={{background:"rgba(184,144,74,.12)",color:"#b8904a",border:"1px solid rgba(184,144,74,.25)",borderRadius:7,padding:"8px 10px",fontFamily:"inherit",fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                  {showAddWork ? "Скрыть форму" : "+ Позиция"}
+                </button>
                 <div style={{fontSize:11,color:"#555575",whiteSpace:"nowrap"}}>
                   Изменено: <span style={{color:Object.keys(priceCardCache).length?"#b8904a":"#666",fontWeight:700}}>{Object.keys(priceCardCache).length}</span>
                 </div>
               </div>
+
+              {showAddWork && (
+                <div style={{marginBottom:10,background:"#0e1122",border:"1px solid #1a1e30",borderRadius:9,padding:"12px 14px"}}>
+                  {(() => {
+                    const allW = getEffectiveCatalog();
+                    const cats = [...new Set(allW.map(w=>w.cat))];
+                    const subs = newWork.cat ? [...new Set(allW.filter(w=>w.cat===newWork.cat).map(w=>w.sub))] : [];
+                    const inpStyle = {background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:7,padding:"8px 10px",fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",boxSizing:"border-box"};
+                    const selStyle = {...inpStyle, cursor:"pointer"};
+                    return (
+                      <>
+                        <div style={{fontSize:11,fontWeight:700,color:"#b8904a",letterSpacing:.8,textTransform:"uppercase",marginBottom:10}}>Новая позиция</div>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                          <select value={newWork.cat} onChange={e=>setNewWork(p=>({...p,cat:e.target.value,sub:""}))} style={selStyle}>
+                            <option value="">Категория</option>
+                            {cats.map(c=><option key={c} value={c}>{c}</option>)}
+                            <option value="__new__">+ Новая категория...</option>
+                          </select>
+                          {newWork.cat==="__new__" ? (
+                            <input autoFocus placeholder="Новая категория" value={newWork.catNew||""}
+                              onChange={e=>setNewWork(p=>({...p,catNew:e.target.value}))}
+                              style={inpStyle}/>
+                          ) : (
+                            <select value={newWork.sub} onChange={e=>setNewWork(p=>({...p,sub:e.target.value}))} style={selStyle}
+                              disabled={!newWork.cat}>
+                              <option value="">Подкатегория</option>
+                              {subs.map(s=><option key={s} value={s}>{s}</option>)}
+                              <option value="__new__">+ Новая подкатегория...</option>
+                            </select>
+                          )}
+                          {newWork.cat!=="__new__" && newWork.sub==="__new__" && (
+                            <input autoFocus placeholder="Новая подкатегория" value={newWork.subNew||""}
+                              onChange={e=>setNewWork(p=>({...p,subNew:e.target.value}))}
+                              style={inpStyle}/>
+                          )}
+                          <input placeholder="Название работы" value={newWork.name}
+                            onChange={e=>setNewWork(p=>({...p,name:e.target.value}))}
+                            style={inpStyle}/>
+                          <select value={newWork.unit} onChange={e=>setNewWork(p=>({...p,unit:e.target.value}))} style={selStyle}>
+                            {["м²","м.п.","шт","усл.","кг","л"].map(u=><option key={u} value={u}>{u}</option>)}
+                          </select>
+                        </div>
+                        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                          <button onClick={()=>{setShowAddWork(false);setNewWork({cat:"",sub:"",name:"",unit:"м²"});}}
+                            style={{background:"transparent",color:"#666486",border:"none",padding:"6px 8px",fontFamily:"inherit",fontSize:12,cursor:"pointer"}}>
+                            Отмена
+                          </button>
+                          <button onClick={addCustomWork}
+                            style={{background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:7,padding:"8px 14px",fontFamily:"inherit",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                            Добавить
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
               {/* Список — скроллится */}
               <div className="price-scroll" style={{flex:1,overflowY:"scroll",paddingRight:4,scrollbarWidth:"auto",scrollbarColor:"#b8904a #1a1e30"}}>
                 <style>{`
@@ -996,87 +1061,9 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
                     );
                   });
                 })()}
-                {/* Форма добавления новой позиции */}
-                <div style={{marginTop:8,border:"1px dashed rgba(184,144,74,.3)",borderRadius:8,padding:"10px 12px",marginBottom:8}}>
-                  {!showAddWork ? (
-                    <button onClick={()=>setShowAddWork(true)}
-                      style={{width:"100%",background:"transparent",color:"#b8904a",border:"none",padding:"6px",fontFamily:"inherit",fontSize:12,cursor:"pointer",fontWeight:700}}>
-                      ＋ Добавить позицию в каталог
-                    </button>
-                  ) : (() => {
-                    const allW = getEffectiveCatalog();
-                    const cats = [...new Set(allW.map(w=>w.cat))];
-                    const subs = newWork.cat ? [...new Set(allW.filter(w=>w.cat===newWork.cat).map(w=>w.sub))] : [];
-                    const inpStyle = {background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:6,padding:"6px 9px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%",boxSizing:"border-box"};
-                    const selStyle = {...inpStyle, cursor:"pointer"};
-                    return (
-                      <div>
-                        <div style={{fontSize:11,fontWeight:700,color:"#b8904a",marginBottom:10}}>Новая позиция</div>
-
-                        {/* Категория */}
-                        <div style={{marginBottom:6}}>
-                          <div style={{fontSize:10,color:"#555575",marginBottom:3}}>Категория</div>
-                          <select value={newWork.cat} onChange={e=>setNewWork(p=>({...p,cat:e.target.value,sub:""}))} style={selStyle}>
-                            <option value="">— выбрать существующую —</option>
-                            {cats.map(c=><option key={c} value={c}>{c}</option>)}
-                            <option value="__new__">＋ Новая категория...</option>
-                          </select>
-                          {newWork.cat==="__new__" && (
-                            <input autoFocus placeholder="Введите название категории" value={newWork.catNew||""}
-                              onChange={e=>setNewWork(p=>({...p,catNew:e.target.value}))}
-                              style={{...inpStyle,marginTop:4}}/>
-                          )}
-                        </div>
-
-                        {/* Подкатегория */}
-                        <div style={{marginBottom:6}}>
-                          <div style={{fontSize:10,color:"#555575",marginBottom:3}}>Подкатегория</div>
-                          <select value={newWork.sub} onChange={e=>setNewWork(p=>({...p,sub:e.target.value}))} style={selStyle}
-                            disabled={!newWork.cat||newWork.cat==="__new__"&&!newWork.catNew}>
-                            <option value="">— выбрать существующую —</option>
-                            {subs.map(s=><option key={s} value={s}>{s}</option>)}
-                            <option value="__new__">＋ Новая подкатегория...</option>
-                          </select>
-                          {newWork.sub==="__new__" && (
-                            <input autoFocus placeholder="Введите название подкатегории" value={newWork.subNew||""}
-                              onChange={e=>setNewWork(p=>({...p,subNew:e.target.value}))}
-                              style={{...inpStyle,marginTop:4}}/>
-                          )}
-                        </div>
-
-                        {/* Название и единица */}
-                        <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:6,marginBottom:10}}>
-                          <div>
-                            <div style={{fontSize:10,color:"#555575",marginBottom:3}}>Название работы</div>
-                            <input placeholder="напр. Укладка паркета" value={newWork.name}
-                              onChange={e=>setNewWork(p=>({...p,name:e.target.value}))}
-                              style={inpStyle}/>
-                          </div>
-                          <div>
-                            <div style={{fontSize:10,color:"#555575",marginBottom:3}}>Единица</div>
-                            <select value={newWork.unit} onChange={e=>setNewWork(p=>({...p,unit:e.target.value}))} style={{...selStyle,width:80}}>
-                              {["м²","м.п.","шт","усл.","кг","л"].map(u=><option key={u} value={u}>{u}</option>)}
-                            </select>
-                          </div>
-                        </div>
-
-                        <div style={{display:"flex",gap:6}}>
-                          <button onClick={addCustomWork}
-                            style={{flex:1,background:"rgba(184,144,74,.15)",color:"#b8904a",border:"1px solid rgba(184,144,74,.3)",borderRadius:6,padding:"7px",fontFamily:"inherit",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-                            ✓ Добавить
-                          </button>
-                          <button onClick={()=>{setShowAddWork(false);setNewWork({cat:"",sub:"",name:"",unit:"м²"});}}
-                            style={{background:"rgba(200,60,60,.1)",color:"#e07070",border:"1px solid rgba(200,60,60,.2)",borderRadius:6,padding:"7px 12px",fontFamily:"inherit",fontSize:12,cursor:"pointer"}}>
-                            Отмена
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
               </div>
               {/* Кнопка сохранить — фиксирована снизу */}
-              <div style={{paddingTop:10,borderTop:"1px solid #1c2035",marginTop:6,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <div style={{paddingTop:10,borderTop:"1px solid #1c2035",marginTop:6,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",position:"sticky",bottom:0,background:"#111425"}}>
                 <div style={{fontSize:11,color:"#555575",flex:1,minWidth:220}}>
                   Сохранятся только подтвержденные изменения цены и диапазонов.
                 </div>
