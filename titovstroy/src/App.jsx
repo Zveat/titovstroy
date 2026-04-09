@@ -758,10 +758,10 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
       width:"100%"
     }}>
       <div style={{
-        background:"#111425",
-        border:"1px solid #1c2035",
-        borderRadius:14,
-        padding:"24px 28px",
+        background:"linear-gradient(180deg,#12162a 0%, #101425 100%)",
+        border:"1px solid #1e2440",
+        borderRadius:16,
+        padding:"20px 20px 16px",
         maxWidth: asPage ? 1180 : 520,
         width:"100%",
         height: asPage ? "auto" : "88vh",
@@ -770,24 +770,27 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
         display:"flex",
         flexDirection:"column",
         position:"relative",
-        boxShadow: asPage ? "0 10px 30px rgba(0,0,0,.28)" : "none"
+        boxShadow: asPage ? "0 16px 50px rgba(0,0,0,.35)" : "none"
       }}>
 
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-          <div style={{fontWeight:800,fontSize:16,color:"#e2ddd4"}}>⚙️ Администрирование</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,paddingBottom:12,borderBottom:"1px solid #222842"}}>
+          <div>
+            <div style={{fontWeight:900,fontSize:18,color:"#ece7dc",letterSpacing:-.2}}>⚙️ Администрирование</div>
+            <div style={{fontSize:11,color:"#6f6b8c",marginTop:3}}>Управление сотрудниками и прайс-листом</div>
+          </div>
           {!asPage && (
             <button onClick={onClose} style={{background:"none",border:"none",color:"#555575",cursor:"pointer",fontSize:20}}>×</button>
           )}
         </div>
 
         {/* Вкладки */}
-        <div style={{display:"flex",gap:4,marginBottom:16,background:"#0c0e1a",borderRadius:8,padding:4}}>
+        <div style={{display:"flex",gap:6,marginBottom:14,background:"#0b0e1c",border:"1px solid #1d2238",borderRadius:10,padding:5}}>
           {[["users","👥 Сотрудники"],["prices","💰 Прайс-лист"]].map(([t,label])=>(
             <button key={t} onClick={()=>setTab(t)} style={{
-              flex:1,padding:"8px",borderRadius:6,border:"none",cursor:"pointer",
-              fontFamily:"inherit",fontSize:12,fontWeight:700,
+              flex:1,padding:"10px 8px",borderRadius:8,border:"none",cursor:"pointer",
+              fontFamily:"inherit",fontSize:12,fontWeight:800,
               background: tab===t ? "linear-gradient(135deg,#b8904a,#d4a85a)" : "transparent",
-              color: tab===t ? "#0c0e1a" : "#555575",transition:"all .15s"
+              color: tab===t ? "#0c0e1a" : "#656184",transition:"all .15s"
             }}>{label}</button>
           ))}
         </div>
@@ -890,22 +893,29 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
           <div style={{display:"flex",flexDirection:"column",height:adminContentHeight}}>
             {!localPrices ? <div style={{textAlign:"center",padding:30,color:"#454560"}}>Загрузка...</div> : null}
             {localPrices && <>
-              <div style={{background:"#0f1222",border:"1px solid #1b2036",borderRadius:10,padding:10,marginBottom:10}}>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:8,flexWrap:"wrap"}}>
-                  <div style={{fontSize:11,color:"#6e6a8c"}}>Редактируйте цены, диапазоны и структуру каталога в одном месте</div>
-                  {Object.keys(priceCardCache).length > 0 && (
-                    <div style={{fontSize:11,color:"#b8904a",fontWeight:700}}>Изменено: {Object.keys(priceCardCache).length}</div>
-                  )}
+              <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:8,marginBottom:10,alignItems:"stretch"}}>
+                <div style={{background:"#0d1120",border:"1px solid #212843",borderRadius:11,padding:"10px 12px"}}>
+                  <div style={{fontSize:10,color:"#817ca3",fontWeight:700,letterSpacing:.6,textTransform:"uppercase",marginBottom:6}}>Поиск</div>
+                  <input
+                    style={{width:"100%",boxSizing:"border-box",background:"#151a2e",border:"1px solid #2b3352",color:"#ece7dc",borderRadius:8,padding:"10px 12px",fontFamily:"inherit",fontSize:12,outline:"none"}}
+                    placeholder="Название, категория или подкатегория..."
+                    value={priceSearch}
+                    onChange={e=>setPriceSearch(e.target.value)}
+                  />
                 </div>
-                <input
-                  style={{width:"100%",boxSizing:"border-box",background:"#14172a",border:"1px solid #252944",color:"#ddd8ce",borderRadius:8,padding:"10px 12px",fontFamily:"inherit",fontSize:12,outline:"none"}}
-                  placeholder="🔍 Поиск по названию, категории или подкатегории..."
-                  value={priceSearch}
-                  onChange={e=>setPriceSearch(e.target.value)}
-                />
+                <div style={{background:"#0d1120",border:"1px solid #212843",borderRadius:11,padding:"10px 12px",minWidth:150,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+                  <div style={{fontSize:10,color:"#817ca3",fontWeight:700,letterSpacing:.6,textTransform:"uppercase"}}>Изменения</div>
+                  <div style={{fontSize:22,fontWeight:900,color:Object.keys(priceCardCache).length ? "#b8904a" : "#5a5876",lineHeight:1.1,marginTop:4}}>
+                    {Object.keys(priceCardCache).length}
+                  </div>
+                </div>
+                <div style={{background:"#0d1120",border:"1px solid #212843",borderRadius:11,padding:"10px 12px",minWidth:180,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+                  <div style={{fontSize:10,color:"#817ca3",fontWeight:700,letterSpacing:.6,textTransform:"uppercase"}}>Подсказка</div>
+                  <div style={{fontSize:11,color:"#b8b4d1",marginTop:4,lineHeight:1.3}}>Для диапазонов оставляйте цену пустой, если хотите убрать ступень.</div>
+                </div>
               </div>
               {/* Список — скроллится */}
-              <div className="price-scroll" style={{flex:1,overflowY:"scroll",paddingRight:6,scrollbarWidth:"auto",scrollbarColor:"#b8904a #1a1e30",background:"#0e1120",border:"1px solid #1a1f33",borderRadius:10,padding:"10px 10px 6px"}}>
+              <div className="price-scroll" style={{flex:1,overflowY:"scroll",paddingRight:6,scrollbarWidth:"auto",scrollbarColor:"#b8904a #1a1e30",background:"#0b0f1d",border:"1px solid #1e2440",borderRadius:12,padding:"12px 12px 8px"}}>
                 <style>{`
                   .price-scroll::-webkit-scrollbar{width:10px}
                   .price-scroll::-webkit-scrollbar-track{background:#1a1e30;border-radius:5px}
@@ -936,7 +946,7 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
                   return Object.entries(catGroups).map(([cat, catData]) => {
                     const origCat = catData._origCat;
                     return (
-                    <div key={cat} style={{marginBottom:16,background:"#101427",border:"1px solid #1d2239",borderRadius:10,padding:"10px 10px 4px"}}>
+                    <div key={cat} style={{marginBottom:16,background:"linear-gradient(180deg,#12182d 0%, #11162a 100%)",border:"1px solid #252d4a",borderRadius:12,padding:"10px 10px 6px"}}>
                       {/* Заголовок категории */}
                       {editingCat?.key===origCat ? (
                         <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:6}}>
@@ -948,8 +958,8 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
                           <button onClick={()=>setEditingCat(null)} style={{...btnS,color:"#555575"}}>✕</button>
                         </div>
                       ) : (
-                        <div style={{display:"flex",alignItems:"center",gap:4,padding:"6px 2px",borderBottom:"1px solid #252a43",marginBottom:8}}>
-                          <span style={{fontSize:10,fontWeight:800,color:"#b8904a",letterSpacing:1,textTransform:"uppercase",flex:1}}>{cat}</span>
+                        <div style={{display:"flex",alignItems:"center",gap:4,padding:"6px 2px",borderBottom:"1px solid #2e3658",marginBottom:10}}>
+                          <span style={{fontSize:11,fontWeight:900,color:"#d4ab63",letterSpacing:1,textTransform:"uppercase",flex:1}}>{cat}</span>
                           <button onClick={()=>setEditingCat({key:origCat,val:cat})} title="Переименовать категорию" style={{...btnS,color:"#555575"}}>✏️</button>
                           <button onClick={()=>{ if(window.confirm(`Удалить всю категорию "${cat}"?`)) deleteCat(origCat); }} title="Удалить категорию" style={{...btnS,color:"#c84848"}}>🗑</button>
                         </div>
@@ -958,7 +968,7 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
                       {Object.entries(catData.subs).map(([sub, subData]) => {
                         const origSub = subData._origSub;
                         return (
-                        <div key={sub} style={{marginBottom:12,background:"#0e1120",border:"1px solid #1a1f33",borderRadius:8,padding:"8px 8px 4px"}}>
+                        <div key={sub} style={{marginBottom:12,background:"#0d1223",border:"1px solid #1f2641",borderRadius:10,padding:"8px 8px 5px"}}>
                           {editingSub?.cat===origCat&&editingSub?.key===origSub ? (
                             <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:4,paddingLeft:8}}>
                               <input autoFocus value={editingSub.val}
@@ -969,8 +979,8 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
                               <button onClick={()=>setEditingSub(null)} style={{...btnS,color:"#555575"}}>✕</button>
                             </div>
                           ) : (
-                            <div style={{display:"flex",alignItems:"center",gap:3,paddingLeft:8,marginBottom:6}}>
-                              <span style={{fontSize:10,fontWeight:700,color:"#737096",letterSpacing:.8,textTransform:"uppercase",flex:1}}>{sub}</span>
+                            <div style={{display:"flex",alignItems:"center",gap:3,paddingLeft:8,marginBottom:8}}>
+                              <span style={{fontSize:10,fontWeight:700,color:"#8a86aa",letterSpacing:.8,textTransform:"uppercase",flex:1}}>{sub}</span>
                               <button onClick={()=>setEditingSub({cat:origCat,key:origSub,val:sub})} title="Переименовать подкатегорию" style={{...btnS,color:"#404058",fontSize:10}}>✏️</button>
                               <button onClick={()=>{ if(window.confirm(`Удалить подкатегорию "${sub}"?`)) deleteSub(origCat,origSub); }} title="Удалить подкатегорию" style={{...btnS,color:"#7a3030",fontSize:10}}>🗑</button>
                             </div>
@@ -997,10 +1007,10 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
                   });
                 })()}
                 {/* Форма добавления новой позиции */}
-                <div style={{marginTop:10,border:"1px dashed rgba(184,144,74,.3)",borderRadius:8,padding:"10px 12px",marginBottom:8,background:"rgba(184,144,74,.04)"}}>
+                <div style={{marginTop:10,border:"1px dashed rgba(184,144,74,.35)",borderRadius:10,padding:"11px 12px",marginBottom:8,background:"rgba(184,144,74,.05)"}}>
                   {!showAddWork ? (
                     <button onClick={()=>setShowAddWork(true)}
-                      style={{width:"100%",background:"transparent",color:"#b8904a",border:"none",padding:"6px",fontFamily:"inherit",fontSize:12,cursor:"pointer",fontWeight:700}}>
+                      style={{width:"100%",background:"transparent",color:"#d4ab63",border:"none",padding:"6px",fontFamily:"inherit",fontSize:12,cursor:"pointer",fontWeight:800}}>
                       ＋ Добавить позицию в каталог
                     </button>
                   ) : (() => {
@@ -1076,10 +1086,13 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
                 </div>
               </div>
               {/* Кнопка сохранить — фиксирована снизу */}
-              <div style={{paddingTop:10,borderTop:"1px solid #2a3047",marginTop:8,background:"linear-gradient(180deg,rgba(12,14,26,0),#0f1222 35%)"}}>
-                {priceMsg && <div style={{textAlign:"center",fontSize:12,color:"#4caf7d",fontWeight:700,marginBottom:6}}>{priceMsg}</div>}
+              <div style={{marginTop:10,background:"#0d1120",border:"1px solid #222844",borderRadius:10,padding:"10px 12px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <div style={{fontSize:11,color:"#7c789c",flex:1,minWidth:220}}>
+                  Сохранятся только подтвержденные изменения цены и диапазонов.
+                </div>
+                {priceMsg && <div style={{fontSize:12,color:"#4caf7d",fontWeight:700}}>{priceMsg}</div>}
                 <button onClick={savePrices} disabled={priceSaving}
-                  style={{width:"100%",background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:9,padding:"12px",fontFamily:"inherit",fontSize:13,fontWeight:800,cursor:"pointer",boxShadow:"0 8px 20px rgba(184,144,74,.25)"}}>
+                  style={{background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:9,padding:"11px 18px",fontFamily:"inherit",fontSize:13,fontWeight:900,cursor:"pointer",boxShadow:"0 8px 20px rgba(184,144,74,.25)"}}>
                   {priceSaving ? "💾 Сохранение..." : "💾 Сохранить прайс"}
                 </button>
               </div>
