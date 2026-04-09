@@ -521,7 +521,7 @@ function PriceWorkCard({ w, initTiers, initFixed, onRename, onDelete }) {
   );
 }
 
-function AdminPanel({ currentUser, onClose }) {
+function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
   const [tab, setTab] = useState("users"); // "users" | "prices"
   const [users, setUsers]     = useState([]);
   const [loading, setLoading] = useState(true);
@@ -582,6 +582,7 @@ function AdminPanel({ currentUser, onClose }) {
   const saveUsers = async (list) => {
     setSaving(true);
     await storage.set(USERS_KEY, JSON.stringify(list));
+    onUsersChange?.(list);
     setSaving(false);
   };
 
@@ -747,12 +748,33 @@ function AdminPanel({ currentUser, onClose }) {
   const roleLabel = r => r==="admin" ? "👑 Админ" : r==="viewer" ? "👁 Наблюдатель" : "👤 Замерщик";
 
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:16,fontFamily:"'Golos Text','Segoe UI',sans-serif"}}>
-      <div style={{background:"#111425",border:"1px solid #1c2035",borderRadius:14,padding:"24px 28px",maxWidth:520,width:"100%",height:"88vh",display:"flex",flexDirection:"column",position:"relative"}}>
+    <div style={{
+      display:"flex",
+      alignItems:"center",
+      justifyContent:"center",
+      padding:16,
+      fontFamily:"'Golos Text','Segoe UI',sans-serif",
+      width:"100%"
+    }}>
+      <div style={{
+        background:"#111425",
+        border:"1px solid #1c2035",
+        borderRadius:14,
+        padding:"24px 28px",
+        maxWidth:520,
+        width:"100%",
+        height: asPage ? "calc(100vh - 180px)" : "88vh",
+        maxHeight: asPage ? "calc(100vh - 180px)" : "88vh",
+        display:"flex",
+        flexDirection:"column",
+        position:"relative"
+      }}>
 
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
           <div style={{fontWeight:800,fontSize:16,color:"#e2ddd4"}}>⚙️ Администрирование</div>
-          <button onClick={onClose} style={{background:"none",border:"none",color:"#555575",cursor:"pointer",fontSize:20}}>×</button>
+          {!asPage && (
+            <button onClick={onClose} style={{background:"none",border:"none",color:"#555575",cursor:"pointer",fontSize:20}}>×</button>
+          )}
         </div>
 
         {/* Вкладки */}
@@ -1537,8 +1559,6 @@ export default function App() {
       return user;
     } catch(e) { return null; }
   });
-  const [showAdmin, setShowAdmin] = useState(false);
-
   // Экраны: "list" | "editor" | "contracts"
   const [screen, setScreen] = useState("dashboard");
 
@@ -2929,8 +2949,6 @@ export default function App() {
 
   return (
     <div style={{fontFamily:"'Golos Text','Segoe UI',sans-serif",background:"#0c0e1a",minHeight:"100vh",color:"#ddd8ce",display:"flex",flexDirection:"column"}}>
-      {/* Панель администратора */}
-      {showAdmin && <AdminPanel currentUser={currentUser} onClose={async ()=>{ setShowAdmin(false); const u=await storage.get(USERS_KEY); if(u) setAllUsers(JSON.parse(u.value)); }}/>}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;900&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
@@ -3022,7 +3040,7 @@ export default function App() {
         <nav style={{flex:1,padding:"10px 0",overflowY:"auto"}}>
           {NAV_ITEMS.map(item=>(
             <div key={item.id} className={"nav-item"+(screen===item.id||(!["dashboard","list","contracts"].includes(screen)&&item.id==="list")?"":"")+((screen===item.id||(screen==="editor"&&item.id==="list"))?" active":"")}
-              onClick={()=>{ if(item.id==="admin"){setShowAdmin(true);}else if(item.id==="analytics"){setScreen("analytics");}else{setScreen(item.id);} }}>
+              onClick={()=>{ if(item.id==="analytics"){setScreen("analytics");}else{setScreen(item.id);} }}>
               <span style={{fontSize:18,flexShrink:0,lineHeight:1}}>{item.icon}</span>
               <span className="nav-label" style={{color:screen===item.id||(screen==="editor"&&item.id==="list")?"#b8904a":"#888"}}>{item.label}</span>
             </div>
@@ -3044,7 +3062,7 @@ export default function App() {
       <div className="mob-nav">
         {NAV_ITEMS.map(item=>(
           <div key={item.id} className={"mob-nav-item"+(screen===item.id||(screen==="editor"&&item.id==="list")?" active":"")}
-            onClick={()=>{ if(item.id==="admin"){setShowAdmin(true);}else if(item.id==="analytics"){setScreen("analytics");}else{setScreen(item.id);} }}>
+            onClick={()=>{ if(item.id==="analytics"){setScreen("analytics");}else{setScreen(item.id);} }}>
             <span style={{fontSize:20}}>{item.icon}</span>
             <span style={{fontSize:9,color:screen===item.id||(screen==="editor"&&item.id==="list")?"#b8904a":"#454560",fontWeight:600}}>{item.label}</span>
           </div>
@@ -3721,6 +3739,17 @@ export default function App() {
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ═══════════════════ АДМИНКА ═══════════════════ */}
+      {screen === "admin" && currentUser.role === "admin" && (
+        <div style={{maxWidth:960,margin:"0 auto",padding:"28px 24px 80px"}}>
+          <AdminPanel
+            asPage
+            currentUser={currentUser}
+            onUsersChange={setAllUsers}
+          />
         </div>
       )}
 
