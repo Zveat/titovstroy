@@ -458,60 +458,60 @@ function PriceWorkCard({ w, initTiers, initFixed, onRename, onDelete }) {
   };
 
   return (
-    <div style={{background:hasChange?"rgba(184,144,74,.05)":"transparent",border:`1px solid ${hasChange?"rgba(184,144,74,.25)":"#1a1e30"}`,borderRadius:8,padding:"10px 12px",marginBottom:6}}>
-      <div style={{marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
+    <div style={{background:hasChange?"rgba(184,144,74,.07)":"#111526",border:`1px solid ${hasChange?"rgba(184,144,74,.35)":"#1e2238"}`,borderRadius:10,padding:"12px 12px",marginBottom:8,boxShadow:hasChange?"0 0 0 1px rgba(184,144,74,.12) inset":"none"}}>
+      <div style={{marginBottom:10,display:"flex",alignItems:"center",gap:8}}>
         {editing ? (
           <>
             <input autoFocus value={editName} onChange={e=>setEditName(e.target.value)}
               onKeyDown={e=>{if(e.key==="Enter")submitRename();if(e.key==="Escape")setEditing(false);}}
-              style={{flex:1,background:"#0c0e1a",border:"1px solid #b8904a",color:"#ddd8ce",borderRadius:5,padding:"3px 8px",fontFamily:"inherit",fontSize:13,fontWeight:600,outline:"none"}}/>
-            <button onClick={submitRename} style={{background:"rgba(76,175,125,.15)",color:"#4caf7d",border:"none",borderRadius:5,padding:"3px 8px",cursor:"pointer",fontSize:12}}>✓</button>
-            <button onClick={()=>setEditing(false)} style={{background:"transparent",color:"#555575",border:"none",cursor:"pointer",fontSize:14}}>✕</button>
+              style={{flex:1,background:"#0c0e1a",border:"1px solid #b8904a",color:"#ddd8ce",borderRadius:6,padding:"6px 10px",fontFamily:"inherit",fontSize:13,fontWeight:600,outline:"none"}}/>
+            <button onClick={submitRename} style={{background:"rgba(76,175,125,.15)",color:"#4caf7d",border:"1px solid rgba(76,175,125,.35)",borderRadius:6,padding:"6px 9px",cursor:"pointer",fontSize:12}}>✓</button>
+            <button onClick={()=>setEditing(false)} style={{background:"transparent",color:"#555575",border:"1px solid #252944",borderRadius:6,cursor:"pointer",fontSize:14,padding:"5px 9px"}}>✕</button>
           </>
         ) : (
           <>
-            <span style={{fontSize:13,fontWeight:600,color:hasChange?"#ddd8ce":"#9090b0",flex:1}}>{w.name}</span>
-            <span style={{fontSize:10,color:"#454560"}}>{w.unit}</span>
+            <span style={{fontSize:13,fontWeight:700,color:hasChange?"#e4dfd5":"#c7c4db",flex:1,lineHeight:1.25}}>{w.name}</span>
+            <span style={{fontSize:10,color:"#8e86a8",background:"#0c0e1a",border:"1px solid #252944",borderRadius:20,padding:"2px 8px"}}>{w.unit}</span>
             <button onClick={()=>{setEditName(w.name);setEditing(true);}} title="Переименовать"
-              style={{background:"transparent",color:"#454560",border:"none",cursor:"pointer",fontSize:11,padding:"2px 4px",lineHeight:1}}>✏️</button>
+              style={{background:"#0c0e1a",color:"#7d789c",border:"1px solid #252944",cursor:"pointer",fontSize:11,padding:"4px 7px",lineHeight:1,borderRadius:6}}>✏️</button>
             {onDelete && <button onClick={onDelete} title="Удалить позицию"
-              style={{background:"transparent",color:"#e07070",border:"none",cursor:"pointer",fontSize:11,padding:"2px 4px",lineHeight:1}}>🗑</button>}
+              style={{background:"rgba(200,60,60,.12)",color:"#e07070",border:"1px solid rgba(200,60,60,.25)",cursor:"pointer",fontSize:11,padding:"4px 7px",lineHeight:1,borderRadius:6}}>🗑</button>}
           </>
         )}
       </div>
       {showTiers ? (
         <div>
-          <div style={{display:"grid",gridTemplateColumns:"70px 70px 1fr 28px",gap:4,marginBottom:4}}>
+          <div style={{display:"grid",gridTemplateColumns:"76px 76px 1fr 32px",gap:6,marginBottom:6}}>
             {["ОТ","ДО","ЦЕНА (₸)",""].map((h,i)=>(<div key={i} style={{fontSize:9,color:"#454560",textAlign:i===2?"right":"center",fontWeight:700}}>{h}</div>))}
           </div>
           {tiers.map((t,ti)=>(
-            <div key={ti} style={{display:"grid",gridTemplateColumns:"70px 70px 1fr 28px",gap:4,marginBottom:3,alignItems:"center"}}>
+            <div key={ti} style={{display:"grid",gridTemplateColumns:"76px 76px 1fr 32px",gap:6,marginBottom:5,alignItems:"center"}}>
               <input type="number" min="0" value={t.min}
                 onChange={e=>updTiers(tiers.map((x,i)=>i===ti?{...x,min:e.target.value===""?"":Number(e.target.value)}:x))}
-                style={s({border:"1px solid #20243a",color:"#9090b0",textAlign:"center"})}/>
+                style={s({border:"1px solid #252944",color:"#b1abc9",textAlign:"center",padding:"6px 8px"})}/>
               <input type="number" min="0" value={t.max}
                 onChange={e=>updTiers(tiers.map((x,i)=>i===ti?{...x,max:e.target.value===""?"":Number(e.target.value)}:x))}
-                style={s({border:"1px solid #20243a",color:"#9090b0",textAlign:"center"})}/>
+                style={s({border:"1px solid #252944",color:"#b1abc9",textAlign:"center",padding:"6px 8px"})}/>
               <input type="number" min="0" value={t.price} placeholder={String(baseTiers[ti]?.price??"")}
                 onChange={e=>updTiers(tiers.map((x,i)=>i===ti?{...x,price:e.target.value===""?"":Number(e.target.value)}:x))}
-                style={s({border:`1px solid ${t.price!==""?"#b8904a":"#20243a"}`,textAlign:"right"})}/>
+                style={s({border:`1px solid ${t.price!==""?"#b8904a":"#252944"}`,textAlign:"right",padding:"6px 10px"})}/>
               <button onClick={()=>updTiers(tiers.filter((_,i)=>i!==ti))}
-                style={{background:"rgba(200,60,60,.15)",color:"#e07070",border:"none",borderRadius:5,padding:"5px",cursor:"pointer",fontSize:11}}>✕</button>
+                style={{background:"rgba(200,60,60,.15)",color:"#e07070",border:"1px solid rgba(200,60,60,.25)",borderRadius:6,padding:"6px",cursor:"pointer",fontSize:11}}>✕</button>
             </div>
           ))}
           <button onClick={()=>{const last=tiers[tiers.length-1];const m=last?(Number(last.max)||0)+1:1;updTiers([...tiers,{min:m,max:m+49,price:""}]);}}
-            style={{marginTop:4,background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit",width:"100%"}}>
+            style={{marginTop:6,background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.35)",borderRadius:7,padding:"7px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit",width:"100%",fontWeight:600}}>
             + Добавить диапазон
           </button>
         </div>
       ) : (
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
           <input type="number" min="0" placeholder={w.fixedPrice!=null?String(w.fixedPrice):"нет цены"}
             value={fixedVal} onChange={e=>updFixed(e.target.value)}
-            style={{background:"#0c0e1a",border:`1px solid ${fixedVal!==""?"#b8904a":"#20243a"}`,color:"#ddd8ce",borderRadius:6,padding:"6px 10px",fontFamily:"inherit",fontSize:13,outline:"none",width:150,textAlign:"right"}}/>
-          <span style={{fontSize:11,color:"#454560"}}>₸</span>
+            style={{background:"#0c0e1a",border:`1px solid ${fixedVal!==""?"#b8904a":"#252944"}`,color:"#ddd8ce",borderRadius:7,padding:"8px 10px",fontFamily:"inherit",fontSize:13,outline:"none",width:170,textAlign:"right"}}/>
+          <span style={{fontSize:11,color:"#696487"}}>₸</span>
           <button onClick={()=>updTiers([{min:1,max:50,price:""}])}
-            style={{marginLeft:"auto",background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+            style={{marginLeft:"auto",background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.35)",borderRadius:7,padding:"7px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",fontWeight:600}}>
             + Диапазоны
           </button>
         </div>
@@ -890,15 +890,22 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
           <div style={{display:"flex",flexDirection:"column",height:adminContentHeight}}>
             {!localPrices ? <div style={{textAlign:"center",padding:30,color:"#454560"}}>Загрузка...</div> : null}
             {localPrices && <>
-              {/* Поиск — фиксированный */}
-              <input
-                style={{width:"100%",boxSizing:"border-box",background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:7,padding:"8px 12px",fontFamily:"inherit",fontSize:12,outline:"none",marginBottom:8}}
-                placeholder="🔍 Поиск по названию..."
-                value={priceSearch}
-                onChange={e=>setPriceSearch(e.target.value)}
-              />
+              <div style={{background:"#0f1222",border:"1px solid #1b2036",borderRadius:10,padding:10,marginBottom:10}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+                  <div style={{fontSize:11,color:"#6e6a8c"}}>Редактируйте цены, диапазоны и структуру каталога в одном месте</div>
+                  {Object.keys(priceCardCache).length > 0 && (
+                    <div style={{fontSize:11,color:"#b8904a",fontWeight:700}}>Изменено: {Object.keys(priceCardCache).length}</div>
+                  )}
+                </div>
+                <input
+                  style={{width:"100%",boxSizing:"border-box",background:"#14172a",border:"1px solid #252944",color:"#ddd8ce",borderRadius:8,padding:"10px 12px",fontFamily:"inherit",fontSize:12,outline:"none"}}
+                  placeholder="🔍 Поиск по названию, категории или подкатегории..."
+                  value={priceSearch}
+                  onChange={e=>setPriceSearch(e.target.value)}
+                />
+              </div>
               {/* Список — скроллится */}
-              <div className="price-scroll" style={{flex:1,overflowY:"scroll",paddingRight:4,scrollbarWidth:"auto",scrollbarColor:"#b8904a #1a1e30"}}>
+              <div className="price-scroll" style={{flex:1,overflowY:"scroll",paddingRight:6,scrollbarWidth:"auto",scrollbarColor:"#b8904a #1a1e30",background:"#0e1120",border:"1px solid #1a1f33",borderRadius:10,padding:"10px 10px 6px"}}>
                 <style>{`
                   .price-scroll::-webkit-scrollbar{width:10px}
                   .price-scroll::-webkit-scrollbar-track{background:#1a1e30;border-radius:5px}
@@ -929,7 +936,7 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
                   return Object.entries(catGroups).map(([cat, catData]) => {
                     const origCat = catData._origCat;
                     return (
-                    <div key={cat} style={{marginBottom:16}}>
+                    <div key={cat} style={{marginBottom:16,background:"#101427",border:"1px solid #1d2239",borderRadius:10,padding:"10px 10px 4px"}}>
                       {/* Заголовок категории */}
                       {editingCat?.key===origCat ? (
                         <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:6}}>
@@ -941,8 +948,8 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
                           <button onClick={()=>setEditingCat(null)} style={{...btnS,color:"#555575"}}>✕</button>
                         </div>
                       ) : (
-                        <div style={{display:"flex",alignItems:"center",gap:4,padding:"4px 0",borderBottom:"1px solid #1c2035",marginBottom:6}}>
-                          <span style={{fontSize:10,fontWeight:700,color:"#b8904a",letterSpacing:1,textTransform:"uppercase",flex:1}}>{cat}</span>
+                        <div style={{display:"flex",alignItems:"center",gap:4,padding:"6px 2px",borderBottom:"1px solid #252a43",marginBottom:8}}>
+                          <span style={{fontSize:10,fontWeight:800,color:"#b8904a",letterSpacing:1,textTransform:"uppercase",flex:1}}>{cat}</span>
                           <button onClick={()=>setEditingCat({key:origCat,val:cat})} title="Переименовать категорию" style={{...btnS,color:"#555575"}}>✏️</button>
                           <button onClick={()=>{ if(window.confirm(`Удалить всю категорию "${cat}"?`)) deleteCat(origCat); }} title="Удалить категорию" style={{...btnS,color:"#c84848"}}>🗑</button>
                         </div>
@@ -951,7 +958,7 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
                       {Object.entries(catData.subs).map(([sub, subData]) => {
                         const origSub = subData._origSub;
                         return (
-                        <div key={sub} style={{marginBottom:10}}>
+                        <div key={sub} style={{marginBottom:12,background:"#0e1120",border:"1px solid #1a1f33",borderRadius:8,padding:"8px 8px 4px"}}>
                           {editingSub?.cat===origCat&&editingSub?.key===origSub ? (
                             <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:4,paddingLeft:8}}>
                               <input autoFocus value={editingSub.val}
@@ -962,8 +969,8 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
                               <button onClick={()=>setEditingSub(null)} style={{...btnS,color:"#555575"}}>✕</button>
                             </div>
                           ) : (
-                            <div style={{display:"flex",alignItems:"center",gap:3,paddingLeft:8,marginBottom:4}}>
-                              <span style={{fontSize:9,fontWeight:700,color:"#555575",letterSpacing:.8,textTransform:"uppercase",flex:1}}>{sub}</span>
+                            <div style={{display:"flex",alignItems:"center",gap:3,paddingLeft:8,marginBottom:6}}>
+                              <span style={{fontSize:10,fontWeight:700,color:"#737096",letterSpacing:.8,textTransform:"uppercase",flex:1}}>{sub}</span>
                               <button onClick={()=>setEditingSub({cat:origCat,key:origSub,val:sub})} title="Переименовать подкатегорию" style={{...btnS,color:"#404058",fontSize:10}}>✏️</button>
                               <button onClick={()=>{ if(window.confirm(`Удалить подкатегорию "${sub}"?`)) deleteSub(origCat,origSub); }} title="Удалить подкатегорию" style={{...btnS,color:"#7a3030",fontSize:10}}>🗑</button>
                             </div>
@@ -990,7 +997,7 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
                   });
                 })()}
                 {/* Форма добавления новой позиции */}
-                <div style={{marginTop:8,border:"1px dashed rgba(184,144,74,.3)",borderRadius:8,padding:"10px 12px",marginBottom:8}}>
+                <div style={{marginTop:10,border:"1px dashed rgba(184,144,74,.3)",borderRadius:8,padding:"10px 12px",marginBottom:8,background:"rgba(184,144,74,.04)"}}>
                   {!showAddWork ? (
                     <button onClick={()=>setShowAddWork(true)}
                       style={{width:"100%",background:"transparent",color:"#b8904a",border:"none",padding:"6px",fontFamily:"inherit",fontSize:12,cursor:"pointer",fontWeight:700}}>
@@ -1069,10 +1076,10 @@ function AdminPanel({ currentUser, onClose, onUsersChange, asPage = false }) {
                 </div>
               </div>
               {/* Кнопка сохранить — фиксирована снизу */}
-              <div style={{paddingTop:10,borderTop:"1px solid #1c2035",marginTop:6}}>
+              <div style={{paddingTop:10,borderTop:"1px solid #2a3047",marginTop:8,background:"linear-gradient(180deg,rgba(12,14,26,0),#0f1222 35%)"}}>
                 {priceMsg && <div style={{textAlign:"center",fontSize:12,color:"#4caf7d",fontWeight:700,marginBottom:6}}>{priceMsg}</div>}
                 <button onClick={savePrices} disabled={priceSaving}
-                  style={{width:"100%",background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:8,padding:"11px",fontFamily:"inherit",fontSize:13,fontWeight:800,cursor:"pointer"}}>
+                  style={{width:"100%",background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:9,padding:"12px",fontFamily:"inherit",fontSize:13,fontWeight:800,cursor:"pointer",boxShadow:"0 8px 20px rgba(184,144,74,.25)"}}>
                   {priceSaving ? "💾 Сохранение..." : "💾 Сохранить прайс"}
                 </button>
               </div>
