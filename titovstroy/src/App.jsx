@@ -4266,8 +4266,6 @@ export default function App() {
         );
       })()}
 
-ВОРЫ
-      ═══════════════════════════════════════════════════════════════════ */}
       {screen === "contracts" && (
         <div style={{maxWidth:860,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
           {/* Шапка */}
