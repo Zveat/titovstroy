@@ -4130,7 +4130,7 @@ export default function App() {
             <KPContent proj={proj} kpItems={kpItems} discount={discount} discAmt={discAmt} final={final} note={note}/>
           </div>
         </>
-     
+      )}
 
       {/* ЭКРАН: АНАЛИТИКА */}
       {screen === "analytics" && (()=>{
