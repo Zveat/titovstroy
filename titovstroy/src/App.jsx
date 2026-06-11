@@ -1290,7 +1290,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
   const roleColor = r => r==="admin" ? "#b8904a" : r==="viewer" ? "#4285f4" : "#8888cc";
 
   return (
-    <div style={{maxWidth:820,margin:"0 auto",padding:"28px 24px 80px"}}>
+    <div style={{padding:"28px 24px 80px"}}>
       <div style={{marginBottom:24}}>
         <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#e2ddd4"}}>⚙️ Администрирование</h1>
         <div style={{fontSize:12,color:"#454560",marginTop:4}}>Сотрудники и прайс-лист</div>
@@ -1397,11 +1397,86 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
       ) : (
         /* ПРАЙС-ЛИСТ */
         <div style={{paddingBottom:90}}>
-          <input className="fi" placeholder="🔍 Поиск по названию..." value={priceSearch} onChange={e=>setPriceSearch(e.target.value)} style={{marginBottom:16}}/>
+          {/* Поиск + кнопка добавить */}
+          <div style={{display:"flex",gap:10,marginBottom:16,alignItems:"center"}}>
+            <input className="fi" placeholder="🔍 Поиск по названию, подкатегории..." value={priceSearch} onChange={e=>setPriceSearch(e.target.value)} style={{flex:1}}/>
+            <button onClick={()=>{
+              const allW = getEffectiveCatalog();
+              const cats = [...new Set(allW.map(w=>w.cat))];
+              setNewWork({cat:cats[0]||"",catNew:"",sub:"",subNew:"",name:"",unit:"м²",cost:"",margin:40});
+              setShowAddWork(true);
+            }} style={{background:"rgba(184,144,74,.15)",color:"#b8904a",border:"1px solid rgba(184,144,74,.3)",borderRadius:8,padding:"9px 16px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+              ＋ Добавить позицию
+            </button>
+          </div>
+
+          {/* Форма добавления */}
+          {showAddWork && (()=>{
+            const allW = getEffectiveCatalog();
+            const cats = [...new Set(allW.map(w=>w.cat))];
+            const subs = newWork.cat ? [...new Set(allW.filter(w=>w.cat===newWork.cat).map(w=>w.sub))] : [];
+            const inp = {background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:6,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"};
+            return (
+              <div style={{background:"#0f1120",border:"1px solid rgba(184,144,74,.3)",borderRadius:10,padding:"16px",marginBottom:16}}>
+                <div style={{fontSize:13,fontWeight:700,color:"#b8904a",marginBottom:12}}>Новая позиция</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:12}}>
+                  <div>
+                    <div style={{fontSize:10,color:"#555575",marginBottom:4}}>Категория</div>
+                    <select value={newWork.cat} onChange={e=>setNewWork(p=>({...p,cat:e.target.value,sub:""}))} style={{...inp,width:"100%",cursor:"pointer"}}>
+                      {cats.map(c=><option key={c} value={c}>{c}</option>)}
+                      <option value="__new__">＋ Новая категория...</option>
+                    </select>
+                    {newWork.cat==="__new__"&&<input autoFocus placeholder="Название" value={newWork.catNew||""} onChange={e=>setNewWork(p=>({...p,catNew:e.target.value}))} style={{...inp,width:"100%",marginTop:6}}/>}
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,color:"#555575",marginBottom:4}}>Подкатегория</div>
+                    <select value={newWork.sub} onChange={e=>setNewWork(p=>({...p,sub:e.target.value}))} style={{...inp,width:"100%",cursor:"pointer"}} disabled={!newWork.cat}>
+                      <option value="">— выбрать —</option>
+                      {subs.map(s=><option key={s} value={s}>{s}</option>)}
+                      <option value="__new__">＋ Новая подкатегория...</option>
+                    </select>
+                    {newWork.sub==="__new__"&&<input autoFocus placeholder="Название" value={newWork.subNew||""} onChange={e=>setNewWork(p=>({...p,subNew:e.target.value}))} style={{...inp,width:"100%",marginTop:6}}/>}
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,color:"#555575",marginBottom:4}}>Название работы</div>
+                    <input placeholder="напр. Укладка паркета" value={newWork.name} onChange={e=>setNewWork(p=>({...p,name:e.target.value}))} style={{...inp,width:"100%"}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,color:"#555575",marginBottom:4}}>Ед. измерения</div>
+                    <select value={newWork.unit} onChange={e=>setNewWork(p=>({...p,unit:e.target.value}))} style={{...inp,width:"100%",cursor:"pointer"}}>
+                      {["м²","м.п.","шт","усл.","кг","л"].map(u=><option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,color:"#555575",marginBottom:4}}>Себестоимость ₸</div>
+                    <input type="number" min="0" placeholder="0" value={newWork.cost||""} onChange={e=>setNewWork(p=>({...p,cost:e.target.value}))} style={{...inp,width:"100%"}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,color:"#555575",marginBottom:4}}>Маржа %</div>
+                    <input type="number" min="0" max="100" placeholder="40" value={newWork.margin||""} onChange={e=>setNewWork(p=>({...p,margin:e.target.value}))} style={{...inp,width:"100%"}}/>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={addCustomWork} style={{flex:1,background:"rgba(184,144,74,.15)",color:"#b8904a",border:"1px solid rgba(184,144,74,.3)",borderRadius:8,padding:"10px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>✓ Добавить</button>
+                  <button onClick={()=>{setShowAddWork(false);setNewWork({cat:"",sub:"",name:"",unit:"м²"});}} style={{background:"rgba(200,60,60,.1)",color:"#e07070",border:"1px solid rgba(200,60,60,.2)",borderRadius:8,padding:"10px 16px",fontFamily:"inherit",fontSize:13,cursor:"pointer"}}>Отмена</button>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Таблица */}
           <div style={{overflowX:"auto"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,tableLayout:"fixed"}}>
+              <colgroup>
+                <col style={{width:"14%"}}/>
+                <col style={{width:"28%"}}/>
+                <col style={{width:"5%"}}/>
+                <col style={{width:"12%"}}/>
+                <col style={{width:"9%"}}/>
+                <col style={{width:"13%"}}/>
+                <col style={{width:"13%"}}/>
+                <col style={{width:"6%"}}/>
+              </colgroup>
               <thead>
                 <tr style={{background:"#0a0c18",position:"sticky",top:0,zIndex:5}}>
                   {["Подкатегория","Название работы","Ед.","Себестоимость ₸","Маржа %","Цена для клиента ₸","Валовая прибыль ₸",""].map((h,i)=>(
@@ -1416,105 +1491,167 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                   const allWorks = getEffectiveCatalog();
                   const q = priceSearch.toLowerCase();
                   const filtered = allWorks.filter(w => !q || w.name.toLowerCase().includes(q) || w.sub.toLowerCase().includes(q) || w.cat.toLowerCase().includes(q));
-                  // Group by cat
                   const catOrder = []; const catMap = {};
                   for(const w of filtered){
-                    if(!catMap[w.cat]){catMap[w.cat]=[];catOrder.push(w.cat);}
-                    catMap[w.cat].push(w);
+                    if(!catMap[w.cat]){catMap[w.cat]={_origCat:w._origCat||w.cat,works:[]};catOrder.push(w.cat);}
+                    catMap[w.cat].works.push(w);
                   }
+                  const btnS = {background:"transparent",border:"none",cursor:"pointer",padding:"2px 5px",lineHeight:1};
                   const rows = [];
                   catOrder.forEach(cat=>{
-                    // Cat header row
+                    const origCat = catMap[cat]._origCat;
+                    // Category header
                     rows.push(
-                      <tr key={"cat-"+cat} style={{background:"rgba(184,144,74,.08)"}}>
-                        <td colSpan={8} style={{padding:"8px 12px",fontSize:11,fontWeight:800,color:"#b8904a",letterSpacing:.8,textTransform:"uppercase"}}>
-                          {cat}
+                      <tr key={"cat-"+cat}>
+                        <td colSpan={8} style={{padding:"10px 12px 6px",paddingTop:rows.length===0?10:20}}>
+                          <div style={{display:"flex",alignItems:"center",gap:6}}>
+                            {editingCat?.key===origCat ? (
+                              <>
+                                <input autoFocus value={editingCat.val} onChange={e=>setEditingCat(p=>({...p,val:e.target.value}))}
+                                  onKeyDown={e=>{if(e.key==="Enter")renameCat(origCat,editingCat.val);if(e.key==="Escape")setEditingCat(null);}}
+                                  style={{background:"#0c0e1a",border:"1px solid #b8904a",color:"#b8904a",borderRadius:5,padding:"3px 10px",fontFamily:"inherit",fontSize:12,fontWeight:800,outline:"none",width:200}}/>
+                                <button onClick={()=>renameCat(origCat,editingCat.val)} style={{...btnS,color:"#4caf7d",fontSize:14}}>✓</button>
+                                <button onClick={()=>setEditingCat(null)} style={{...btnS,color:"#555575",fontSize:14}}>✕</button>
+                              </>
+                            ) : (
+                              <>
+                                <span style={{fontSize:11,fontWeight:800,color:"#b8904a",letterSpacing:1,textTransform:"uppercase"}}>{cat}</span>
+                                <button onClick={()=>setEditingCat({key:origCat,val:cat})} title="Переименовать" style={{...btnS,color:"#b8904a",opacity:.5,fontSize:11}}>✏️</button>
+                                <button onClick={()=>{if(window.confirm(`Удалить категорию "${cat}"?`))deleteCat(origCat);}} title="Удалить" style={{...btnS,color:"#e07070",opacity:.5,fontSize:11}}>🗑</button>
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
-                    catMap[cat].forEach((w,i)=>{
-                      // Get overridden or base values
-                      const ov = localPrices?.[w.code];
-                      const baseCost = w.cost ?? null;
-                      const baseMargin = w.margin ?? 0.4;
-                      const ovCost = ov?.cost !== undefined ? ov.cost : baseCost;
-                      const ovMargin = ov?.margin !== undefined ? ov.margin : baseMargin;
-                      const price = (ovCost !== null && ovCost !== "") ? Math.round(Number(ovCost) / (1 - Number(ovMargin))) : (ov?.fixedPrice || w.fixedPrice || null);
-                      const profit = (ovCost !== null && ovCost !== "" && price) ? price - Number(ovCost) : null;
-                      const isEven = i % 2 === 0;
-                      const hasCostChange = ov?.cost !== undefined || ov?.margin !== undefined;
-                      rows.push(
-                        <tr key={w.code} style={{background:hasCostChange?"rgba(184,144,74,.05)":isEven?"transparent":"rgba(255,255,255,.015)",borderBottom:"1px solid rgba(255,255,255,.04)"}}>
-                          <td style={{padding:"7px 12px",color:"#555575",fontSize:11,whiteSpace:"nowrap"}}>{w.sub}</td>
-                          <td style={{padding:"7px 12px",color:"#ddd8ce"}}>{w.name}</td>
-                          <td style={{padding:"7px 12px",color:"#454560",fontSize:11,whiteSpace:"nowrap"}}>{w.unit}</td>
-                          <td style={{padding:"7px 12px",textAlign:"right"}}>
-                            <input
-                              type="number" min="0"
-                              placeholder={baseCost !== null ? String(baseCost) : "—"}
-                              defaultValue={ovCost !== null && ovCost !== undefined ? ovCost : (baseCost !== null ? baseCost : "")}
-                              onChange={e=>{
-                                const val = e.target.value === "" ? null : Number(e.target.value);
-                                setLocalPrices(prev=>({...prev,[w.code]:{...(prev?.[w.code]||{}),cost:val}}));
-                                priceCardCache[w.code] = {...(priceCardCache[w.code]||{}), cost:val, margin: ovMargin};
-                              }}
-                              style={{width:90,background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:5,padding:"4px 8px",textAlign:"right",fontFamily:"inherit",fontSize:12,outline:"none"}}
-                            />
-                          </td>
-                          <td style={{padding:"7px 12px",textAlign:"right"}}>
-                            <input
-                              type="number" min="0" max="100" step="1"
-                              placeholder={String(Math.round(baseMargin*100))}
-                              defaultValue={Math.round(ovMargin*100)}
-                              onChange={e=>{
-                                const val = e.target.value === "" ? baseMargin : Number(e.target.value)/100;
-                                setLocalPrices(prev=>({...prev,[w.code]:{...(prev?.[w.code]||{}),margin:val}}));
-                                priceCardCache[w.code] = {...(priceCardCache[w.code]||{}), margin:val, cost: ovCost};
-                              }}
-                              style={{width:60,background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:5,padding:"4px 8px",textAlign:"right",fontFamily:"inherit",fontSize:12,outline:"none"}}
-                            />
-                            <span style={{color:"#454560",marginLeft:3,fontSize:11}}>%</span>
-                          </td>
-                          <td style={{padding:"7px 12px",textAlign:"right",fontWeight:700,color:"#b8904a",whiteSpace:"nowrap"}}>
-                            {price ? new Intl.NumberFormat("ru-RU").format(price)+" ₸" : "—"}
-                          </td>
-                          <td style={{padding:"7px 12px",textAlign:"right",color:"#4caf7d",whiteSpace:"nowrap"}}>
-                            {profit ? new Intl.NumberFormat("ru-RU").format(Math.round(profit))+" ₸" : "—"}
-                          </td>
-                          <td style={{padding:"7px 12px"}}>
-                            {currentUser.role==="admin" && (
+                    // Group by sub within cat
+                    const subOrder = []; const subMap = {};
+                    catMap[cat].works.forEach(w=>{
+                      if(!subMap[w.sub]){subMap[w.sub]={_origSub:w._origSub||w.sub,works:[]};subOrder.push(w.sub);}
+                      subMap[w.sub].works.push(w);
+                    });
+                    subOrder.forEach(sub=>{
+                      const origSub = subMap[sub]._origSub;
+                      subMap[sub].works.forEach((w,i)=>{
+                        const ov = localPrices?.[w.code];
+                        const baseCost = w.cost ?? null;
+                        const baseMargin = w.margin ?? 0.4;
+                        const ovCost = ov?.cost !== undefined ? ov.cost : baseCost;
+                        const ovMargin = ov?.margin !== undefined ? ov.margin : baseMargin;
+                        const price = (ovCost !== null && ovCost !== "" && Number(ovCost) > 0) ? Math.round(Number(ovCost) / (1 - Number(ovMargin))) : (ov?.fixedPrice || w.fixedPrice || null);
+                        const profit = (ovCost !== null && ovCost !== "" && Number(ovCost) > 0 && price) ? price - Number(ovCost) : null;
+                        const isEven = rows.length % 2 === 0;
+                        rows.push(
+                          <tr key={w.code} style={{background:isEven?"transparent":"rgba(255,255,255,.015)",borderBottom:"1px solid rgba(255,255,255,.04)"}}>
+                            {/* Подкатегория (только на первой строке саб) */}
+                            {i===0 ? (
+                              <td rowSpan={subMap[sub].works.length} style={{padding:"8px 12px",verticalAlign:"top",borderRight:"1px solid #161929"}}>
+                                <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
+                                  {editingSub?.cat===origCat&&editingSub?.key===origSub ? (
+                                    <>
+                                      <input autoFocus value={editingSub.val} onChange={e=>setEditingSub(p=>({...p,val:e.target.value}))}
+                                        onKeyDown={e=>{if(e.key==="Enter")renameSub(origCat,origSub,editingSub.val);if(e.key==="Escape")setEditingSub(null);}}
+                                        style={{background:"#0c0e1a",border:"1px solid #6060a0",color:"#9090c0",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%"}}/>
+                                      <button onClick={()=>renameSub(origCat,origSub,editingSub.val)} style={{...btnS,color:"#4caf7d",fontSize:12}}>✓</button>
+                                      <button onClick={()=>setEditingSub(null)} style={{...btnS,color:"#555575",fontSize:12}}>✕</button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span style={{color:"#888",fontSize:11}}>{sub}</span>
+                                      <button onClick={()=>setEditingSub({cat:origCat,key:origSub,val:sub})} style={{...btnS,color:"#555575",fontSize:10,opacity:.6}}>✏️</button>
+                                      <button onClick={()=>{if(window.confirm(`Удалить подкатегорию "${sub}"?`))deleteSub(origCat,origSub);}} style={{...btnS,color:"#c84848",fontSize:10,opacity:.6}}>🗑</button>
+                                    </>
+                                  )}
+                                </div>
+                              </td>
+                            ) : null}
+                            {/* Название работы */}
+                            <td style={{padding:"6px 12px"}}>
+                              {editingUser?.id===w.code ? (
+                                <div style={{display:"flex",gap:4}}>
+                                  <input autoFocus value={editingUser.name} onChange={e=>setEditingUser(p=>({...p,name:e.target.value}))}
+                                    onKeyDown={e=>{if(e.key==="Enter"){renameWork(w.code,editingUser.name);setEditingUser(null);}if(e.key==="Escape")setEditingUser(null);}}
+                                    style={{flex:1,background:"#0c0e1a",border:"1px solid #b8904a",color:"#ddd8ce",borderRadius:5,padding:"3px 8px",fontFamily:"inherit",fontSize:12,outline:"none"}}/>
+                                  <button onClick={()=>{renameWork(w.code,editingUser.name);setEditingUser(null);}} style={{...btnS,color:"#4caf7d",fontSize:13}}>✓</button>
+                                  <button onClick={()=>setEditingUser(null)} style={{...btnS,color:"#555575",fontSize:13}}>✕</button>
+                                </div>
+                              ) : (
+                                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                                  <span style={{color:"#ddd8ce",flex:1}}>{w.name}</span>
+                                  <button onClick={()=>setEditingUser({id:w.code,name:w.name})} style={{...btnS,color:"#555575",fontSize:10,opacity:.5,flexShrink:0}}>✏️</button>
+                                </div>
+                              )}
+                            </td>
+                            {/* Ед. */}
+                            <td style={{padding:"6px 8px",color:"#454560",textAlign:"center",fontSize:11}}>{w.unit}</td>
+                            {/* Себестоимость */}
+                            <td style={{padding:"6px 8px",textAlign:"right"}}>
+                              <input type="number" min="0"
+                                placeholder={baseCost !== null ? String(baseCost) : "—"}
+                                defaultValue={ovCost !== null && ovCost !== undefined ? ovCost : (baseCost !== null ? baseCost : "")}
+                                onChange={e=>{
+                                  const val = e.target.value === "" ? null : Number(e.target.value);
+                                  setLocalPrices(prev=>({...prev,[w.code]:{...(prev?.[w.code]||{}),cost:val}}));
+                                  priceCardCache[w.code] = {...(priceCardCache[w.code]||{}), cost:val, margin:ovMargin};
+                                }}
+                                style={{width:"100%",background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:5,padding:"4px 8px",textAlign:"right",fontFamily:"inherit",fontSize:12,outline:"none"}}
+                              />
+                            </td>
+                            {/* Маржа */}
+                            <td style={{padding:"6px 8px",textAlign:"right"}}>
+                              <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:3}}>
+                                <input type="number" min="0" max="100" step="1"
+                                  placeholder={String(Math.round(baseMargin*100))}
+                                  defaultValue={Math.round(ovMargin*100)}
+                                  onChange={e=>{
+                                    const val = e.target.value===""?baseMargin:Number(e.target.value)/100;
+                                    setLocalPrices(prev=>({...prev,[w.code]:{...(prev?.[w.code]||{}),margin:val}}));
+                                    priceCardCache[w.code] = {...(priceCardCache[w.code]||{}), margin:val, cost:ovCost};
+                                  }}
+                                  style={{width:50,background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:5,padding:"4px 6px",textAlign:"right",fontFamily:"inherit",fontSize:12,outline:"none"}}
+                                />
+                                <span style={{color:"#454560",fontSize:10}}>%</span>
+                              </div>
+                            </td>
+                            {/* Цена для клиента */}
+                            <td style={{padding:"6px 12px",textAlign:"right",fontWeight:700,color:"#b8904a",whiteSpace:"nowrap"}}>
+                              {price ? new Intl.NumberFormat("ru-RU").format(price)+" ₸" : "—"}
+                            </td>
+                            {/* Валовая прибыль */}
+                            <td style={{padding:"6px 12px",textAlign:"right",color:"#4caf7d",whiteSpace:"nowrap"}}>
+                              {profit ? new Intl.NumberFormat("ru-RU").format(Math.round(profit))+" ₸" : "—"}
+                            </td>
+                            {/* Удалить */}
+                            <td style={{padding:"6px 8px",textAlign:"center"}}>
                               <button onClick={()=>{
+                                if(!window.confirm(`Удалить "${w.name}"?`))return;
                                 if(w.code.startsWith("CUSTOM-")) deleteCustomWork(w.code);
                                 else { const hc=[...new Set([...((localCatalog||{}).hiddenCodes||[]),w.code])]; saveCatalog({...(localCatalog||{}),hiddenCodes:hc}); }
-                              }} style={{background:"transparent",border:"none",color:"#c84848",cursor:"pointer",fontSize:12,padding:"2px 4px"}}>🗑</button>
-                            )}
-                          </td>
-                        </tr>
-                      );
+                              }} style={{...btnS,color:"#c84848",fontSize:13}}>🗑</button>
+                            </td>
+                          </tr>
+                        );
+                      });
                     });
                   });
+                  if(rows.length===0) rows.push(<tr key="empty"><td colSpan={8} style={{textAlign:"center",padding:"40px",color:"#353550"}}>Ничего не найдено</td></tr>);
                   return rows;
                 })()}
               </tbody>
             </table>
           </div>
 
-          {/* Сохранить прайс — прилипает снизу */}
+          {/* Кнопка сохранить */}
           <div style={{position:"fixed",bottom:0,left:"220px",right:0,background:"#0c0e1a",borderTop:"1px solid #161929",padding:"12px 24px",zIndex:20}}>
             {priceMsg && <div style={{textAlign:"center",fontSize:13,color:"#4caf7d",fontWeight:700,marginBottom:8}}>{priceMsg}</div>}
             <button onClick={savePrices} disabled={priceSaving}
-              style={{width:"100%",maxWidth:820,margin:"0 auto",display:"block",background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:9,padding:"13px",fontFamily:"inherit",fontSize:14,fontWeight:800,cursor:"pointer"}}>
+              style={{width:"100%",display:"block",background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:9,padding:"13px",fontFamily:"inherit",fontSize:14,fontWeight:800,cursor:"pointer"}}>
               {priceSaving ? "💾 Сохранение..." : "💾 Сохранить прайс"}
             </button>
           </div>
         </div>
-      )}
-    </div>
-  );
-}
-
-
-// ─── ГЛАВНЫЙ КОМПОНЕНТ ───────────────────────────────────────────────────────
+      )}\n    </div>\n  );\n}\n\n\n// ─── ГЛАВНЫЙ КОМПОНЕНТ
+ ───────────────────────────────────────────────────────
 
 // Типы документов
 const DOC_TYPES = [
