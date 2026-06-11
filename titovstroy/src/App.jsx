@@ -1543,28 +1543,28 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                         const isEven = rows.length % 2 === 0;
                         rows.push(
                           <tr key={w.code} style={{background:isEven?"transparent":"rgba(255,255,255,.015)",borderBottom:"1px solid rgba(255,255,255,.04)"}}>
-                            {/* Подкатегория (только на первой строке саб) */}
-                            {i===0 ? (
-                              <td rowSpan={subMap[sub].works.length} style={{padding:"8px 12px",verticalAlign:"top",borderRight:"1px solid #161929"}}>
+                            {/* Подкатегория */}
+                            <td style={{padding:"8px 12px",verticalAlign:"top",borderRight:"1px solid #161929",color:i===0?"#888":"transparent",fontSize:11}}>
+                              {i===0 && (
                                 <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
                                   {editingSub?.cat===origCat&&editingSub?.key===origSub ? (
-                                    <>
+                                    <span style={{display:"contents"}}>
                                       <input autoFocus value={editingSub.val} onChange={e=>setEditingSub(p=>({...p,val:e.target.value}))}
                                         onKeyDown={e=>{if(e.key==="Enter")renameSub(origCat,origSub,editingSub.val);if(e.key==="Escape")setEditingSub(null);}}
-                                        style={{background:"#0c0e1a",border:"1px solid #6060a0",color:"#9090c0",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%"}}/>
+                                        style={{background:"#0c0e1a",border:"1px solid #6060a0",color:"#9090c0",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",fontSize:11,outline:"none",width:120}}/>
                                       <button onClick={()=>renameSub(origCat,origSub,editingSub.val)} style={{...btnS,color:"#4caf7d",fontSize:12}}>✓</button>
                                       <button onClick={()=>setEditingSub(null)} style={{...btnS,color:"#555575",fontSize:12}}>✕</button>
-                                    </>
+                                    </span>
                                   ) : (
-                                    <>
+                                    <span style={{display:"contents"}}>
                                       <span style={{color:"#888",fontSize:11}}>{sub}</span>
                                       <button onClick={()=>setEditingSub({cat:origCat,key:origSub,val:sub})} style={{...btnS,color:"#555575",fontSize:10,opacity:.6}}>✏️</button>
-                                      <button onClick={()=>{if(window.confirm(`Удалить подкатегорию "${sub}"?`))deleteSub(origCat,origSub);}} style={{...btnS,color:"#c84848",fontSize:10,opacity:.6}}>🗑</button>
-                                    </>
+                                      <button onClick={()=>{if(window.confirm("Удалить подкатегорию?"))deleteSub(origCat,origSub);}} style={{...btnS,color:"#c84848",fontSize:10,opacity:.6}}>🗑</button>
+                                    </span>
                                   )}
                                 </div>
-                              </td>
-                            ) : null}
+                              )}
+                            </td>
                             {/* Название работы */}
                             <td style={{padding:"6px 12px"}}>
                               {editingUser?.id===w.code ? (
