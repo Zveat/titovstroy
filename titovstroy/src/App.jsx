@@ -15,154 +15,154 @@ let _fbDb = null;
 try { _fbDb = getDatabase(initializeApp(firebaseConfig)); } catch(e) {}
 
 const WORKS_DATA = [
-  { code:"DEM-001", cat:"Черновые", sub:"Демонтаж", name:"Снятие обоев (не до основания)", unit:"м²", tiers:[], fixedPrice:333 },
-  { code:"DEM-002", cat:"Черновые", sub:"Демонтаж", name:"Снятие краски (водоэмульсия / старая побелка)", unit:"м²", tiers:[], fixedPrice:1167 },
-  { code:"DEM-003", cat:"Черновые", sub:"Демонтаж", name:"Снятие краски (советская / старая)", unit:"м²", tiers:[], fixedPrice:3167 },
-  { code:"DEM-004", cat:"Черновые", sub:"Демонтаж", name:"Снятие краски (сложный демонтаж)", unit:"м²", tiers:[], fixedPrice:6667 },
-  { code:"DEM-005", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж плитки, керамогранит", unit:"м²", tiers:[], fixedPrice:3333 },
-  { code:"DEM-006", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж декоративных покрытий", unit:"м²", tiers:[], fixedPrice:1833 },
-  { code:"DEM-007", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж гипсокартонных конструкций", unit:"м²", tiers:[], fixedPrice:2333 },
-  { code:"DEM-008", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж натяжных потолков", unit:"м²", tiers:[], fixedPrice:500 },
-  { code:"DEM-009", cat:"Черновые", sub:"Демонтаж", name:"Удаление штукатурки", unit:"м²", tiers:[], fixedPrice:3167 },
-  { code:"DEM-010", cat:"Черновые", sub:"Демонтаж", name:"Снятие старой стяжки (пол до основания)", unit:"м²", tiers:[], fixedPrice:7500 },
-  { code:"DEM-011", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж линолеума", unit:"м²", tiers:[], fixedPrice:833 },
-  { code:"DEM-012", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж ламината", unit:"м²", tiers:[], fixedPrice:750 },
-  { code:"DEM-013", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж паркета", unit:"м²", tiers:[], fixedPrice:1500 },
-  { code:"DEM-014", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж плинтусов", unit:"м.п.", tiers:[], fixedPrice:333 },
-  { code:"DEM-015", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж галтели", unit:"м.п.", tiers:[], fixedPrice:167 },
-  { code:"DEM-016", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж межкомнатных дверей (старые)", unit:"шт", tiers:[], fixedPrice:6667 },
-  { code:"DEM-017", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж межкомнатных дверей (новые)", unit:"шт", tiers:[], fixedPrice:5000 },
-  { code:"DEM-018", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж дверей (железные)", unit:"шт", tiers:[], fixedPrice:10000 },
-  { code:"DEM-019", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж дверей с сохранением для повторной установки", unit:"шт", tiers:[], fixedPrice:13333 },
-  { code:"DEM-020", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж сантехприборов", unit:"шт", tiers:[], fixedPrice:3333 },
-  { code:"DEM-021", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж розеток, выключателей", unit:"шт", tiers:[], fixedPrice:500 },
-  { code:"DEM-022", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж перегородок (ГКЛ)", unit:"м²", tiers:[], fixedPrice:2333 },
-  { code:"DEM-023", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж перегородок (монолит)", unit:"м²", tiers:[], fixedPrice:20000 },
-  { code:"DEM-024", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж перегородок (кирпич)", unit:"м²", tiers:[], fixedPrice:6667 },
-  { code:"DEM-025", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж перегородок (газоблок)", unit:"м²", tiers:[], fixedPrice:5000 },
-  { code:"DEM-026", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж радиатора отопления", unit:"шт", tiers:[], fixedPrice:8333 },
-  { code:"DEM-027", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж маяков (стены)", unit:"м²", tiers:[], fixedPrice:300 },
-  { code:"DEM-028", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж маяков (пол)", unit:"м²", tiers:[], fixedPrice:250 },
-  { code:"MUS-001", cat:"Черновые", sub:"Вынос/мусор", name:"Вынос строительного мусора", unit:"усл.", tiers:[], fixedPrice:33333 },
-  { code:"MUS-002", cat:"Черновые", sub:"Вынос/мусор", name:"Вывоз строительного мусора", unit:"усл.", tiers:[], fixedPrice:33333 },
-  { code:"WALL-001", cat:"Черновые", sub:"Выравнивание стен", name:"Грунтовка основания стен", unit:"м²", tiers:[], fixedPrice:333 },
-  { code:"WALL-002", cat:"Черновые", sub:"Выравнивание стен", name:"Монтаж маяков", unit:"м²", tiers:[], fixedPrice:750 },
-  { code:"WALL-003", cat:"Черновые", sub:"Выравнивание стен", name:"Штукатурка стен (1–3 см)", unit:"м²", tiers:[], fixedPrice:2833 },
-  { code:"WALL-004", cat:"Черновые", sub:"Выравнивание стен", name:"Штукатурка стен (4–8 см)", unit:"м²", tiers:[], fixedPrice:5000 },
-  { code:"WALL-005", cat:"Черновые", sub:"Выравнивание стен", name:"Армирование сеткой (стены)", unit:"м²", tiers:[], fixedPrice:833 },
-  { code:"WALL-006", cat:"Черновые", sub:"Выравнивание стен", name:"Шпаклёвка стен", unit:"м²", tiers:[], fixedPrice:2000 },
-  { code:"WALL-007", cat:"Черновые", sub:"Выравнивание стен", name:"Ошкуривание стен", unit:"м²", tiers:[], fixedPrice:667 },
-  { code:"WALL-008", cat:"Черновые", sub:"Выравнивание стен", name:"Восстановление углов", unit:"м.п.", tiers:[], fixedPrice:1333 },
-  { code:"WALL-009", cat:"Черновые", sub:"Выравнивание стен", name:"Откосы под окна/двери", unit:"м.п.", tiers:[], fixedPrice:3000 },
-  { code:"FLOOR-001", cat:"Черновые", sub:"Выравнивание пола", name:"Гидроизоляция пола", unit:"м²", tiers:[], fixedPrice:833 },
-  { code:"FLOOR-002", cat:"Черновые", sub:"Выравнивание пола", name:"Армирование сеткой (пол)", unit:"м²", tiers:[], fixedPrice:1000 },
-  { code:"FLOOR-003", cat:"Черновые", sub:"Выравнивание пола", name:"Монтаж маяков (пол)", unit:"м.п.", tiers:[], fixedPrice:750 },
-  { code:"FLOOR-004", cat:"Черновые", sub:"Выравнивание пола", name:"Стяжка ц/п до 80 мм (под керамзит)", unit:"м²", tiers:[], fixedPrice:3333 },
-  { code:"FLOOR-005", cat:"Черновые", sub:"Выравнивание пола", name:"Стяжка ц/п 5–8 см", unit:"м²", tiers:[], fixedPrice:5000 },
-  { code:"FLOOR-006", cat:"Черновые", sub:"Выравнивание пола", name:"Стяжка ц/п 9–12 см", unit:"м²", tiers:[], fixedPrice:6500 },
-  { code:"FLOOR-007", cat:"Черновые", sub:"Выравнивание пола", name:"Засыпка керамзита до 100 мм", unit:"м²", tiers:[], fixedPrice:1667 },
-  { code:"FLOOR-008", cat:"Черновые", sub:"Выравнивание пола", name:"Наливной пол (выравнивание под покрытия)", unit:"м²", tiers:[], fixedPrice:3000 },
-  { code:"EL-001", cat:"Черновые", sub:"Электромонтаж", name:"Составление схемы электрики", unit:"шт", tiers:[] },
-  { code:"EL-002", cat:"Черновые", sub:"Электромонтаж", name:"Штробление стен и потолков", unit:"м.п.", tiers:[] },
-  { code:"EL-003", cat:"Черновые", sub:"Электромонтаж", name:"Прокладка кабелей", unit:"м.п.", tiers:[] },
-  { code:"EL-004", cat:"Черновые", sub:"Электромонтаж", name:"Установка подрозетников", unit:"шт", tiers:[] },
-  { code:"EL-005", cat:"Черновые", sub:"Электромонтаж", name:"Прокладка линий под кондиционер", unit:"шт", tiers:[] },
-  { code:"EL-006", cat:"Черновые", sub:"Электромонтаж", name:"Монтаж кабеля под интернет/тв", unit:"шт", tiers:[] },
-  { code:"ELSH-001", cat:"Черновые", sub:"Электрощит", name:"Сборка электрощита", unit:"шт", tiers:[] },
-  { code:"ELSH-002", cat:"Черновые", sub:"Электрощит", name:"Автоматы, УЗО, дифавтоматы", unit:"шт", tiers:[] },
-  { code:"ELSH-003", cat:"Черновые", sub:"Электрощит", name:"Распределение групп нагрузки", unit:"шт", tiers:[] },
-  { code:"OUT-001", cat:"Черновые", sub:"Выводы", name:"Розетки (вывод)", unit:"шт", tiers:[] },
-  { code:"OUT-002", cat:"Черновые", sub:"Выводы", name:"Выключатели (вывод)", unit:"шт", tiers:[] },
-  { code:"OUT-003", cat:"Черновые", sub:"Выводы", name:"Выводы под светильники", unit:"шт", tiers:[] },
-  { code:"SAN-001", cat:"Черновые", sub:"Водоснабжение", name:"Разводка труб холодной и горячей воды", unit:"м.п.", tiers:[] },
-  { code:"SAN-002", cat:"Черновые", sub:"Водоснабжение", name:"Коллекторная система", unit:"шт", tiers:[] },
-  { code:"SAN-003", cat:"Черновые", sub:"Водоснабжение", name:"Замена стояков", unit:"шт", tiers:[] },
-  { code:"KAN-001", cat:"Черновые", sub:"Канализация", name:"Прокладка канализационных труб", unit:"м.п.", tiers:[] },
-  { code:"KAN-002", cat:"Черновые", sub:"Канализация", name:"Выводы под сантехнику", unit:"шт", tiers:[] },
-  { code:"SU-001", cat:"Черновые", sub:"Подготовка санузла", name:"Ниши под инсталляцию", unit:"шт", tiers:[] },
-  { code:"SU-002", cat:"Черновые", sub:"Подготовка санузла", name:"Перенос точек", unit:"шт", tiers:[] },
-  { code:"SU-003", cat:"Черновые", sub:"Подготовка санузла", name:"Выводы под стиральную/посудомоечную машину", unit:"шт", tiers:[] },
-  { code:"GID-001", cat:"Черновые", sub:"Гидроизоляция", name:"Поднятие гидроизоляции на стены 20–30 см", unit:"м²", tiers:[], fixedPrice:2167 },
-  { code:"GID-002", cat:"Черновые", sub:"Гидроизоляция", name:"Обработка углов и примыканий", unit:"м.п.", tiers:[], fixedPrice:833 },
-  { code:"GID-003", cat:"Черновые", sub:"Гидроизоляция", name:"Гидроизоляция под ванной и душем", unit:"м²", tiers:[], fixedPrice:833 },
-  { code:"GID-004", cat:"Черновые", sub:"Гидроизоляция", name:"Герметизация трубных выводов", unit:"шт", tiers:[], fixedPrice:1000 },
-  { code:"PREP-001", cat:"Черновые", sub:"Подготовка оснований", name:"Идеальная плоскость под покраску", unit:"м²", tiers:[], fixedPrice:3333 },
-  { code:"PREP-002", cat:"Черновые", sub:"Подготовка оснований", name:"Подготовка под поклейку обоев", unit:"м²", tiers:[], fixedPrice:1500 },
-  { code:"PREP-003", cat:"Черновые", sub:"Подготовка оснований", name:"Шпаклёвка потолка", unit:"м²", tiers:[], fixedPrice:2167 },
-  { code:"PREP-004", cat:"Черновые", sub:"Подготовка оснований", name:"Подготовка под натяжной потолок", unit:"м²", tiers:[], fixedPrice:833 },
-  { code:"PREP-005", cat:"Черновые", sub:"Подготовка оснований", name:"Выравнивание перепадов пола", unit:"м²", tiers:[], fixedPrice:1667 },
-  { code:"PREP-006", cat:"Черновые", sub:"Подготовка оснований", name:"Ошкуривание потолка", unit:"м²", tiers:[], fixedPrice:667 },
-  { code:"PREP-007", cat:"Черновые", sub:"Подготовка оснований", name:"Грунтовка пола", unit:"м²", tiers:[], fixedPrice:417 },
-  { code:"PREP-008", cat:"Черновые", sub:"Подготовка оснований", name:"Грунтовка потолка", unit:"м²", tiers:[], fixedPrice:417 },
-  { code:"ADD-001", cat:"Черновые", sub:"Дополнительно", name:"Перегородки из ГКЛ (монтаж/перенос)", unit:"м²", tiers:[], fixedPrice:6667 },
-  { code:"ADD-002", cat:"Черновые", sub:"Дополнительно", name:"Перегородки из кирпича (монтаж/перенос)", unit:"м²", tiers:[], fixedPrice:9167 },
-  { code:"ADD-003", cat:"Черновые", sub:"Дополнительно", name:"Перегородки из газоблока (монтаж/перенос)", unit:"м²", tiers:[], fixedPrice:5833 },
-  { code:"ADD-004", cat:"Черновые", sub:"Дополнительно", name:"Шумоизоляция стен и потолков", unit:"м²", tiers:[], fixedPrice:3000 },
-  { code:"ADD-005", cat:"Черновые", sub:"Дополнительно", name:"Утепление лоджий", unit:"м²", tiers:[], fixedPrice:2667 },
-  { code:"ADD-006", cat:"Черновые", sub:"Дополнительно", name:"Подготовка ниш под освещение", unit:"шт", tiers:[], fixedPrice:4167 },
-  { code:"ADD-007", cat:"Черновые", sub:"Дополнительно", name:"Короба и конструкции из ГКЛ", unit:"м.п.", tiers:[], fixedPrice:8000 },
-  { code:"OB-001", cat:"Чистовые", sub:"Стены — Обои", name:"Поклейка обоев", unit:"м²", tiers:[], fixedPrice:2000 },
-  { code:"PA-001", cat:"Чистовые", sub:"Стены — Покраска", name:"Нанесение грунтовки", unit:"м²", tiers:[], fixedPrice:500 },
-  { code:"PA-002", cat:"Чистовые", sub:"Стены — Покраска", name:"Покраска в 1 слой", unit:"м²", tiers:[], fixedPrice:667 },
-  { code:"PA-003", cat:"Чистовые", sub:"Стены — Покраска", name:"Покраска в 2–3 слоя", unit:"м²", tiers:[], fixedPrice:1667 },
-  { code:"PA-004", cat:"Чистовые", sub:"Стены — Покраска", name:"Окраска откосов и ниш", unit:"м.п.", tiers:[], fixedPrice:1083 },
-  { code:"DEC-001", cat:"Чистовые", sub:"Стены — Декоративные", name:"Декоративная штукатурка", unit:"м²", tiers:[], fixedPrice:4167 },
-  { code:"DEC-002", cat:"Чистовые", sub:"Стены — Декоративные", name:"Микробетон", unit:"м²", tiers:[], fixedPrice:8333 },
-  { code:"DEC-003", cat:"Чистовые", sub:"Стены — Декоративные", name:"Венецианка", unit:"м²", tiers:[], fixedPrice:10000 },
-  { code:"DEC-004", cat:"Чистовые", sub:"Стены — Декоративные", name:"Акцентные стены", unit:"м²", tiers:[], fixedPrice:3333 },
-  { code:"PAN-001", cat:"Чистовые", sub:"Стены — Панели", name:"МДФ/ПВХ панели", unit:"м²", tiers:[], fixedPrice:2333 },
-  { code:"PAN-002", cat:"Чистовые", sub:"Стены — Панели", name:"Рейки", unit:"м²", tiers:[], fixedPrice:4167 },
-  { code:"PAN-003", cat:"Чистовые", sub:"Стены — Панели", name:"3D панели", unit:"м²", tiers:[], fixedPrice:3333 },
-  { code:"CEIL-001", cat:"Чистовые", sub:"Потолки", name:"Покраска потолка", unit:"м²", tiers:[], fixedPrice:1833 },
-  { code:"CEIL-002", cat:"Чистовые", sub:"Потолки", name:"Монтаж трековых систем", unit:"м.п.", tiers:[], fixedPrice:4167 },
-  { code:"CEIL-003", cat:"Чистовые", sub:"Потолки", name:"Монтаж световых линий", unit:"м.п.", tiers:[], fixedPrice:5833 },
-  { code:"CEIL-004", cat:"Чистовые", sub:"Потолки", name:"Установка потолочных плинтусов (галтель)", unit:"м.п.", tiers:[], fixedPrice:1167 },
-  { code:"CEIL-005", cat:"Чистовые", sub:"Потолки", name:"Монтаж гипсокартонных коробов и ниш", unit:"м²", tiers:[], fixedPrice:8000 },
-  { code:"FLR-001", cat:"Чистовые", sub:"Полы — Покрытия", name:"Укладка линолеума", unit:"м²", tiers:[], fixedPrice:2250 },
-  { code:"FLR-002", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж ламината", unit:"м²", tiers:[], fixedPrice:2333 },
-  { code:"FLR-003", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж кварц-винила", unit:"м²", tiers:[], fixedPrice:2833 },
-  { code:"FLR-004", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж паркетной доски", unit:"м²", tiers:[], fixedPrice:4167 },
-  { code:"FLR-005", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж инженерной доски", unit:"м²", tiers:[], fixedPrice:5833 },
-  { code:"FLR-006", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж керамогранита", unit:"м²", tiers:[], fixedPrice:6667 },
-  { code:"FLR-007", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж плитки (пол)", unit:"м²", tiers:[], fixedPrice:5833 },
-  { code:"FLRA-001", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Подложка", unit:"м²", tiers:[], fixedPrice:300 },
-  { code:"FLRA-002", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Порожки", unit:"шт", tiers:[], fixedPrice:2333 },
-  { code:"FLRA-003", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Монтаж плинтусов ПВХ", unit:"м.п.", tiers:[], fixedPrice:1000 },
-  { code:"FLRA-004", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Монтаж плинтусов МДФ", unit:"м.п.", tiers:[], fixedPrice:1417 },
-  { code:"FLRA-005", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Монтаж плинтусов полиуретановых/декор", unit:"м.п.", tiers:[], fixedPrice:1667 },
-  { code:"FLRA-006", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Монтаж плинтусов деревянных", unit:"м.п.", tiers:[], fixedPrice:2000 },
-  { code:"FLRA-007", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Герметизация примыканий", unit:"м.п.", tiers:[], fixedPrice:833 },
-  { code:"SN-001", cat:"Чистовые", sub:"Сантехника — Установка", name:"Унитаз (вкл. инсталляцию)", unit:"шт", tiers:[] },
-  { code:"SN-002", cat:"Чистовые", sub:"Сантехника — Установка", name:"Ванна", unit:"шт", tiers:[] },
-  { code:"SN-003", cat:"Чистовые", sub:"Сантехника — Установка", name:"Раковина", unit:"шт", tiers:[] },
-  { code:"SN-004", cat:"Чистовые", sub:"Сантехника — Установка", name:"Смесители", unit:"шт", tiers:[] },
-  { code:"SN-005", cat:"Чистовые", sub:"Сантехника — Установка", name:"Душевые системы", unit:"шт", tiers:[] },
-  { code:"SN-006", cat:"Чистовые", sub:"Сантехника — Установка", name:"Трапы", unit:"шт", tiers:[] },
-  { code:"SN-007", cat:"Чистовые", sub:"Сантехника — Установка", name:"Полотенцесушитель", unit:"шт", tiers:[] },
-  { code:"SN-008", cat:"Чистовые", sub:"Сантехника — Установка", name:"Монтаж радиатора отопления", unit:"шт", tiers:[], fixedPrice:25000 },
-  { code:"SN-009", cat:"Чистовые", sub:"Сантехника — Установка", name:"Монтаж радиатора (с заменой труб/подводки)", unit:"шт", tiers:[], fixedPrice:41667 },
-  { code:"SNA-001", cat:"Чистовые", sub:"Сантехника — Дополнительно", name:"Монтаж экранов", unit:"шт", tiers:[] },
-  { code:"SNA-002", cat:"Чистовые", sub:"Сантехника — Дополнительно", name:"Подключение стиралки/посудомойки", unit:"шт", tiers:[] },
-  { code:"ELC-001", cat:"Чистовые", sub:"Электрика чистовая", name:"Установка розеток", unit:"шт", tiers:[] },
-  { code:"ELC-002", cat:"Чистовые", sub:"Электрика чистовая", name:"Установка выключателей", unit:"шт", tiers:[] },
-  { code:"ELC-003", cat:"Чистовые", sub:"Электрика чистовая", name:"Подключение светильников", unit:"шт", tiers:[] },
-  { code:"ELC-004", cat:"Чистовые", sub:"Электрика чистовая", name:"Люстры, бра, треки", unit:"шт", tiers:[] },
-  { code:"ELC-005", cat:"Чистовые", sub:"Электрика чистовая", name:"Монтаж точечных светильников", unit:"шт", tiers:[] },
-  { code:"ELC-006", cat:"Чистовые", sub:"Электрика чистовая", name:"Подключение вытяжки", unit:"шт", tiers:[] },
-  { code:"ELC-007", cat:"Чистовые", sub:"Электрика чистовая", name:"Установка терморегуляторов тёплого пола", unit:"шт", tiers:[] },
-  { code:"DR-001", cat:"Чистовые", sub:"Двери и проёмы", name:"Установка межкомнатных дверей (базовые)", unit:"шт", tiers:[], fixedPrice:25000 },
-  { code:"DR-002", cat:"Чистовые", sub:"Двери и проёмы", name:"Установка межкомнатных дверей (скрытый монтаж)", unit:"шт", tiers:[], fixedPrice:41667 },
-  { code:"DR-003", cat:"Чистовые", sub:"Двери и проёмы", name:"Доборы", unit:"шт", tiers:[], fixedPrice:3333 },
-  { code:"DR-004", cat:"Чистовые", sub:"Двери и проёмы", name:"Наличники", unit:"шт", tiers:[], fixedPrice:4167 },
-  { code:"DR-005", cat:"Чистовые", sub:"Двери и проёмы", name:"Установка входной двери", unit:"шт", tiers:[], fixedPrice:41667 },
-  { code:"DR-006", cat:"Чистовые", sub:"Двери и проёмы", name:"Оформление проёмов и порталов", unit:"шт", tiers:[], fixedPrice:15000 },
-  { code:"TL-001", cat:"Чистовые", sub:"Плиточные работы", name:"Укладка плитки на стены", unit:"м²", tiers:[], fixedPrice:5333 },
-  { code:"TL-002", cat:"Чистовые", sub:"Плиточные работы", name:"Укладка плитки на пол", unit:"м²", tiers:[], fixedPrice:5333 },
-  { code:"TL-003", cat:"Чистовые", sub:"Плиточные работы", name:"Раскладка под 45° (запил, диагональ)", unit:"м²", tiers:[], fixedPrice:7500 },
-  { code:"TL-004", cat:"Чистовые", sub:"Плиточные работы", name:"Декоративные вставки", unit:"шт", tiers:[], fixedPrice:1667 },
-  { code:"TL-005", cat:"Чистовые", sub:"Плиточные работы", name:"Затирка швов", unit:"м²", tiers:[], fixedPrice:833 },
-  { code:"TL-006", cat:"Чистовые", sub:"Плиточные работы", name:"Монтаж фартука на кухне", unit:"м²", tiers:[], fixedPrice:5833 },
-  { code:"TL-007", cat:"Чистовые", sub:"Плиточные работы", name:"Монтаж декоративных бордюров", unit:"м.п.", tiers:[], fixedPrice:2000 },
+  { code:"DEM-001", cat:"Черновые", sub:"Демонтаж", name:"Снятие обоев (не до основания)", unit:"м²", tiers:[], cost:200, margin:0.4, fixedPrice:333 },
+  { code:"DEM-002", cat:"Черновые", sub:"Демонтаж", name:"Снятие краски (водоэмульсия / старая побелка)", unit:"м²", tiers:[], cost:700, margin:0.4, fixedPrice:1167 },
+  { code:"DEM-003", cat:"Черновые", sub:"Демонтаж", name:"Снятие краски (советская / старая)", unit:"м²", tiers:[], cost:1900, margin:0.4, fixedPrice:3167 },
+  { code:"DEM-004", cat:"Черновые", sub:"Демонтаж", name:"Снятие краски (сложный демонтаж)", unit:"м²", tiers:[], cost:4000, margin:0.4, fixedPrice:6667 },
+  { code:"DEM-005", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж плитки, керамогранит", unit:"м²", tiers:[], cost:2000, margin:0.4, fixedPrice:3333 },
+  { code:"DEM-006", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж декоративных покрытий", unit:"м²", tiers:[], cost:1100, margin:0.4, fixedPrice:1833 },
+  { code:"DEM-007", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж гипсокартонных конструкций", unit:"м²", tiers:[], cost:1400, margin:0.4, fixedPrice:2333 },
+  { code:"DEM-008", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж натяжных потолков", unit:"м²", tiers:[], cost:300, margin:0.4, fixedPrice:500 },
+  { code:"DEM-009", cat:"Черновые", sub:"Демонтаж", name:"Удаление штукатурки", unit:"м²", tiers:[], cost:1900, margin:0.4, fixedPrice:3167 },
+  { code:"DEM-010", cat:"Черновые", sub:"Демонтаж", name:"Снятие старой стяжки (пол до основания)", unit:"м²", tiers:[], cost:4500, margin:0.4, fixedPrice:7500 },
+  { code:"DEM-011", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж линолеума", unit:"м²", tiers:[], cost:500, margin:0.4, fixedPrice:833 },
+  { code:"DEM-012", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж ламината", unit:"м²", tiers:[], cost:450, margin:0.4, fixedPrice:750 },
+  { code:"DEM-013", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж паркета", unit:"м²", tiers:[], cost:900, margin:0.4, fixedPrice:1500 },
+  { code:"DEM-014", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж плинтусов", unit:"м.п.", tiers:[], cost:200, margin:0.4, fixedPrice:333 },
+  { code:"DEM-015", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж галтели", unit:"м.п.", tiers:[], cost:100, margin:0.4, fixedPrice:167 },
+  { code:"DEM-016", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж межкомнатных дверей (старые)", unit:"шт", tiers:[], cost:4000, margin:0.4, fixedPrice:6667 },
+  { code:"DEM-017", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж межкомнатных дверей (новые)", unit:"шт", tiers:[], cost:3000, margin:0.4, fixedPrice:5000 },
+  { code:"DEM-018", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж дверей (железные)", unit:"шт", tiers:[], cost:6000, margin:0.4, fixedPrice:10000 },
+  { code:"DEM-019", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж дверей с сохранением для повторной установки", unit:"шт", tiers:[], cost:8000, margin:0.4, fixedPrice:13333 },
+  { code:"DEM-020", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж сантехприборов", unit:"шт", tiers:[], cost:2000, margin:0.4, fixedPrice:3333 },
+  { code:"DEM-021", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж розеток, выключателей", unit:"шт", tiers:[], cost:300, margin:0.4, fixedPrice:500 },
+  { code:"DEM-022", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж перегородок (ГКЛ)", unit:"м²", tiers:[], cost:1400, margin:0.4, fixedPrice:2333 },
+  { code:"DEM-023", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж перегородок (монолит)", unit:"м²", tiers:[], cost:12000, margin:0.4, fixedPrice:20000 },
+  { code:"DEM-024", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж перегородок (кирпич)", unit:"м²", tiers:[], cost:4000, margin:0.4, fixedPrice:6667 },
+  { code:"DEM-025", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж перегородок (газоблок)", unit:"м²", tiers:[], cost:3000, margin:0.4, fixedPrice:5000 },
+  { code:"DEM-026", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж радиатора отопления", unit:"шт", tiers:[], cost:5000, margin:0.4, fixedPrice:8333 },
+  { code:"DEM-027", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж маяков (стены)", unit:"м²", tiers:[], cost:180, margin:0.4, fixedPrice:300 },
+  { code:"DEM-028", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж маяков (пол)", unit:"м²", tiers:[], cost:150, margin:0.4, fixedPrice:250 },
+  { code:"MUS-001", cat:"Черновые", sub:"Вынос/мусор", name:"Вынос строительного мусора", unit:"усл.", tiers:[], cost:20000, margin:0.4, fixedPrice:33333 },
+  { code:"MUS-002", cat:"Черновые", sub:"Вынос/мусор", name:"Вывоз строительного мусора", unit:"усл.", tiers:[], cost:20000, margin:0.4, fixedPrice:33333 },
+  { code:"WALL-001", cat:"Черновые", sub:"Выравнивание стен", name:"Грунтовка основания стен", unit:"м²", tiers:[], cost:200, margin:0.4, fixedPrice:333 },
+  { code:"WALL-002", cat:"Черновые", sub:"Выравнивание стен", name:"Монтаж маяков", unit:"м²", tiers:[], cost:450, margin:0.4, fixedPrice:750 },
+  { code:"WALL-003", cat:"Черновые", sub:"Выравнивание стен", name:"Штукатурка стен (1–3 см)", unit:"м²", tiers:[], cost:1700, margin:0.4, fixedPrice:2833 },
+  { code:"WALL-004", cat:"Черновые", sub:"Выравнивание стен", name:"Штукатурка стен (4–8 см)", unit:"м²", tiers:[], cost:3000, margin:0.4, fixedPrice:5000 },
+  { code:"WALL-005", cat:"Черновые", sub:"Выравнивание стен", name:"Армирование сеткой (стены)", unit:"м²", tiers:[], cost:500, margin:0.4, fixedPrice:833 },
+  { code:"WALL-006", cat:"Черновые", sub:"Выравнивание стен", name:"Шпаклёвка стен", unit:"м²", tiers:[], cost:1200, margin:0.4, fixedPrice:2000 },
+  { code:"WALL-007", cat:"Черновые", sub:"Выравнивание стен", name:"Ошкуривание стен", unit:"м²", tiers:[], cost:400, margin:0.4, fixedPrice:667 },
+  { code:"WALL-008", cat:"Черновые", sub:"Выравнивание стен", name:"Восстановление углов", unit:"м.п.", tiers:[], cost:800, margin:0.4, fixedPrice:1333 },
+  { code:"WALL-009", cat:"Черновые", sub:"Выравнивание стен", name:"Откосы под окна/двери", unit:"м.п.", tiers:[], cost:1800, margin:0.4, fixedPrice:3000 },
+  { code:"FLOOR-001", cat:"Черновые", sub:"Выравнивание пола", name:"Гидроизоляция пола", unit:"м²", tiers:[], cost:500, margin:0.4, fixedPrice:833 },
+  { code:"FLOOR-002", cat:"Черновые", sub:"Выравнивание пола", name:"Армирование сеткой (пол)", unit:"м²", tiers:[], cost:600, margin:0.4, fixedPrice:1000 },
+  { code:"FLOOR-003", cat:"Черновые", sub:"Выравнивание пола", name:"Монтаж маяков (пол)", unit:"м.п.", tiers:[], cost:450, margin:0.4, fixedPrice:750 },
+  { code:"FLOOR-004", cat:"Черновые", sub:"Выравнивание пола", name:"Стяжка ц/п до 80 мм (под керамзит)", unit:"м²", tiers:[], cost:2000, margin:0.4, fixedPrice:3333 },
+  { code:"FLOOR-005", cat:"Черновые", sub:"Выравнивание пола", name:"Стяжка ц/п 5–8 см", unit:"м²", tiers:[], cost:3000, margin:0.4, fixedPrice:5000 },
+  { code:"FLOOR-006", cat:"Черновые", sub:"Выравнивание пола", name:"Стяжка ц/п 9–12 см", unit:"м²", tiers:[], cost:3900, margin:0.4, fixedPrice:6500 },
+  { code:"FLOOR-007", cat:"Черновые", sub:"Выравнивание пола", name:"Засыпка керамзита до 100 мм", unit:"м²", tiers:[], cost:1000, margin:0.4, fixedPrice:1667 },
+  { code:"FLOOR-008", cat:"Черновые", sub:"Выравнивание пола", name:"Наливной пол (выравнивание под покрытия)", unit:"м²", tiers:[], cost:1800, margin:0.4, fixedPrice:3000 },
+  { code:"EL-001", cat:"Черновые", sub:"Электромонтаж", name:"Составление схемы электрики", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"EL-002", cat:"Черновые", sub:"Электромонтаж", name:"Штробление стен и потолков", unit:"м.п.", tiers:[], cost:null, margin:0.4 },
+  { code:"EL-003", cat:"Черновые", sub:"Электромонтаж", name:"Прокладка кабелей", unit:"м.п.", tiers:[], cost:null, margin:0.4 },
+  { code:"EL-004", cat:"Черновые", sub:"Электромонтаж", name:"Установка подрозетников", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"EL-005", cat:"Черновые", sub:"Электромонтаж", name:"Прокладка линий под кондиционер", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"EL-006", cat:"Черновые", sub:"Электромонтаж", name:"Монтаж кабеля под интернет/тв", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"ELSH-001", cat:"Черновые", sub:"Электрощит", name:"Сборка электрощита", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"ELSH-002", cat:"Черновые", sub:"Электрощит", name:"Автоматы, УЗО, дифавтоматы", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"ELSH-003", cat:"Черновые", sub:"Электрощит", name:"Распределение групп нагрузки", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"OUT-001", cat:"Черновые", sub:"Выводы", name:"Розетки (вывод)", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"OUT-002", cat:"Черновые", sub:"Выводы", name:"Выключатели (вывод)", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"OUT-003", cat:"Черновые", sub:"Выводы", name:"Выводы под светильники", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"SAN-001", cat:"Черновые", sub:"Водоснабжение", name:"Разводка труб холодной и горячей воды", unit:"м.п.", tiers:[], cost:null, margin:0.4 },
+  { code:"SAN-002", cat:"Черновые", sub:"Водоснабжение", name:"Коллекторная система", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"SAN-003", cat:"Черновые", sub:"Водоснабжение", name:"Замена стояков", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"KAN-001", cat:"Черновые", sub:"Канализация", name:"Прокладка канализационных труб", unit:"м.п.", tiers:[], cost:null, margin:0.4 },
+  { code:"KAN-002", cat:"Черновые", sub:"Канализация", name:"Выводы под сантехнику", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"SU-001", cat:"Черновые", sub:"Подготовка санузла", name:"Ниши под инсталляцию", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"SU-002", cat:"Черновые", sub:"Подготовка санузла", name:"Перенос точек", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"SU-003", cat:"Черновые", sub:"Подготовка санузла", name:"Выводы под стиральную/посудомоечную машину", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"GID-001", cat:"Черновые", sub:"Гидроизоляция", name:"Поднятие гидроизоляции на стены 20–30 см", unit:"м²", tiers:[], cost:1300, margin:0.4, fixedPrice:2167 },
+  { code:"GID-002", cat:"Черновые", sub:"Гидроизоляция", name:"Обработка углов и примыканий", unit:"м.п.", tiers:[], cost:500, margin:0.4, fixedPrice:833 },
+  { code:"GID-003", cat:"Черновые", sub:"Гидроизоляция", name:"Гидроизоляция под ванной и душем", unit:"м²", tiers:[], cost:500, margin:0.4, fixedPrice:833 },
+  { code:"GID-004", cat:"Черновые", sub:"Гидроизоляция", name:"Герметизация трубных выводов", unit:"шт", tiers:[], cost:600, margin:0.4, fixedPrice:1000 },
+  { code:"PREP-001", cat:"Черновые", sub:"Подготовка оснований", name:"Идеальная плоскость под покраску", unit:"м²", tiers:[], cost:2000, margin:0.4, fixedPrice:3333 },
+  { code:"PREP-002", cat:"Черновые", sub:"Подготовка оснований", name:"Подготовка под поклейку обоев", unit:"м²", tiers:[], cost:900, margin:0.4, fixedPrice:1500 },
+  { code:"PREP-003", cat:"Черновые", sub:"Подготовка оснований", name:"Шпаклёвка потолка", unit:"м²", tiers:[], cost:1300, margin:0.4, fixedPrice:2167 },
+  { code:"PREP-004", cat:"Черновые", sub:"Подготовка оснований", name:"Подготовка под натяжной потолок", unit:"м²", tiers:[], cost:500, margin:0.4, fixedPrice:833 },
+  { code:"PREP-005", cat:"Черновые", sub:"Подготовка оснований", name:"Выравнивание перепадов пола", unit:"м²", tiers:[], cost:1000, margin:0.4, fixedPrice:1667 },
+  { code:"PREP-006", cat:"Черновые", sub:"Подготовка оснований", name:"Ошкуривание потолка", unit:"м²", tiers:[], cost:400, margin:0.4, fixedPrice:667 },
+  { code:"PREP-007", cat:"Черновые", sub:"Подготовка оснований", name:"Грунтовка пола", unit:"м²", tiers:[], cost:250, margin:0.4, fixedPrice:417 },
+  { code:"PREP-008", cat:"Черновые", sub:"Подготовка оснований", name:"Грунтовка потолка", unit:"м²", tiers:[], cost:250, margin:0.4, fixedPrice:417 },
+  { code:"ADD-001", cat:"Черновые", sub:"Дополнительно", name:"Перегородки из ГКЛ (монтаж/перенос)", unit:"м²", tiers:[], cost:4000, margin:0.4, fixedPrice:6667 },
+  { code:"ADD-002", cat:"Черновые", sub:"Дополнительно", name:"Перегородки из кирпича (монтаж/перенос)", unit:"м²", tiers:[], cost:5500, margin:0.4, fixedPrice:9167 },
+  { code:"ADD-003", cat:"Черновые", sub:"Дополнительно", name:"Перегородки из газоблока (монтаж/перенос)", unit:"м²", tiers:[], cost:3500, margin:0.4, fixedPrice:5833 },
+  { code:"ADD-004", cat:"Черновые", sub:"Дополнительно", name:"Шумоизоляция стен и потолков", unit:"м²", tiers:[], cost:1800, margin:0.4, fixedPrice:3000 },
+  { code:"ADD-005", cat:"Черновые", sub:"Дополнительно", name:"Утепление лоджий", unit:"м²", tiers:[], cost:1600, margin:0.4, fixedPrice:2667 },
+  { code:"ADD-006", cat:"Черновые", sub:"Дополнительно", name:"Подготовка ниш под освещение", unit:"шт", tiers:[], cost:2500, margin:0.4, fixedPrice:4167 },
+  { code:"ADD-007", cat:"Черновые", sub:"Дополнительно", name:"Короба и конструкции из ГКЛ", unit:"м.п.", tiers:[], cost:4800, margin:0.4, fixedPrice:8000 },
+  { code:"OB-001", cat:"Чистовые", sub:"Стены — Обои", name:"Поклейка обоев", unit:"м²", tiers:[], cost:1200, margin:0.4, fixedPrice:2000 },
+  { code:"PA-001", cat:"Чистовые", sub:"Стены — Покраска", name:"Нанесение грунтовки", unit:"м²", tiers:[], cost:300, margin:0.4, fixedPrice:500 },
+  { code:"PA-002", cat:"Чистовые", sub:"Стены — Покраска", name:"Покраска в 1 слой", unit:"м²", tiers:[], cost:400, margin:0.4, fixedPrice:667 },
+  { code:"PA-003", cat:"Чистовые", sub:"Стены — Покраска", name:"Покраска в 2–3 слоя", unit:"м²", tiers:[], cost:1000, margin:0.4, fixedPrice:1667 },
+  { code:"PA-004", cat:"Чистовые", sub:"Стены — Покраска", name:"Окраска откосов и ниш", unit:"м.п.", tiers:[], cost:650, margin:0.4, fixedPrice:1083 },
+  { code:"DEC-001", cat:"Чистовые", sub:"Стены — Декоративные", name:"Декоративная штукатурка", unit:"м²", tiers:[], cost:2500, margin:0.4, fixedPrice:4167 },
+  { code:"DEC-002", cat:"Чистовые", sub:"Стены — Декоративные", name:"Микробетон", unit:"м²", tiers:[], cost:5000, margin:0.4, fixedPrice:8333 },
+  { code:"DEC-003", cat:"Чистовые", sub:"Стены — Декоративные", name:"Венецианка", unit:"м²", tiers:[], cost:6000, margin:0.4, fixedPrice:10000 },
+  { code:"DEC-004", cat:"Чистовые", sub:"Стены — Декоративные", name:"Акцентные стены", unit:"м²", tiers:[], cost:2000, margin:0.4, fixedPrice:3333 },
+  { code:"PAN-001", cat:"Чистовые", sub:"Стены — Панели", name:"МДФ/ПВХ панели", unit:"м²", tiers:[], cost:1400, margin:0.4, fixedPrice:2333 },
+  { code:"PAN-002", cat:"Чистовые", sub:"Стены — Панели", name:"Рейки", unit:"м²", tiers:[], cost:2500, margin:0.4, fixedPrice:4167 },
+  { code:"PAN-003", cat:"Чистовые", sub:"Стены — Панели", name:"3D панели", unit:"м²", tiers:[], cost:2000, margin:0.4, fixedPrice:3333 },
+  { code:"CEIL-001", cat:"Чистовые", sub:"Потолки", name:"Покраска потолка", unit:"м²", tiers:[], cost:1100, margin:0.4, fixedPrice:1833 },
+  { code:"CEIL-002", cat:"Чистовые", sub:"Потолки", name:"Монтаж трековых систем", unit:"м.п.", tiers:[], cost:2500, margin:0.4, fixedPrice:4167 },
+  { code:"CEIL-003", cat:"Чистовые", sub:"Потолки", name:"Монтаж световых линий", unit:"м.п.", tiers:[], cost:3500, margin:0.4, fixedPrice:5833 },
+  { code:"CEIL-004", cat:"Чистовые", sub:"Потолки", name:"Установка потолочных плинтусов (галтель)", unit:"м.п.", tiers:[], cost:700, margin:0.4, fixedPrice:1167 },
+  { code:"CEIL-005", cat:"Чистовые", sub:"Потолки", name:"Монтаж гипсокартонных коробов и ниш", unit:"м²", tiers:[], cost:4800, margin:0.4, fixedPrice:8000 },
+  { code:"FLR-001", cat:"Чистовые", sub:"Полы — Покрытия", name:"Укладка линолеума", unit:"м²", tiers:[], cost:1350, margin:0.4, fixedPrice:2250 },
+  { code:"FLR-002", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж ламината", unit:"м²", tiers:[], cost:1400, margin:0.4, fixedPrice:2333 },
+  { code:"FLR-003", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж кварц-винила", unit:"м²", tiers:[], cost:1700, margin:0.4, fixedPrice:2833 },
+  { code:"FLR-004", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж паркетной доски", unit:"м²", tiers:[], cost:2500, margin:0.4, fixedPrice:4167 },
+  { code:"FLR-005", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж инженерной доски", unit:"м²", tiers:[], cost:3500, margin:0.4, fixedPrice:5833 },
+  { code:"FLR-006", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж керамогранита", unit:"м²", tiers:[], cost:4000, margin:0.4, fixedPrice:6667 },
+  { code:"FLR-007", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж плитки (пол)", unit:"м²", tiers:[], cost:3500, margin:0.4, fixedPrice:5833 },
+  { code:"FLRA-001", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Подложка", unit:"м²", tiers:[], cost:180, margin:0.4, fixedPrice:300 },
+  { code:"FLRA-002", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Порожки", unit:"шт", tiers:[], cost:1400, margin:0.4, fixedPrice:2333 },
+  { code:"FLRA-003", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Монтаж плинтусов ПВХ", unit:"м.п.", tiers:[], cost:600, margin:0.4, fixedPrice:1000 },
+  { code:"FLRA-004", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Монтаж плинтусов МДФ", unit:"м.п.", tiers:[], cost:850, margin:0.4, fixedPrice:1417 },
+  { code:"FLRA-005", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Монтаж плинтусов полиуретановых/декор", unit:"м.п.", tiers:[], cost:1000, margin:0.4, fixedPrice:1667 },
+  { code:"FLRA-006", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Монтаж плинтусов деревянных", unit:"м.п.", tiers:[], cost:1200, margin:0.4, fixedPrice:2000 },
+  { code:"FLRA-007", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Герметизация примыканий", unit:"м.п.", tiers:[], cost:500, margin:0.4, fixedPrice:833 },
+  { code:"SN-001", cat:"Чистовые", sub:"Сантехника — Установка", name:"Унитаз (вкл. инсталляцию)", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"SN-002", cat:"Чистовые", sub:"Сантехника — Установка", name:"Ванна", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"SN-003", cat:"Чистовые", sub:"Сантехника — Установка", name:"Раковина", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"SN-004", cat:"Чистовые", sub:"Сантехника — Установка", name:"Смесители", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"SN-005", cat:"Чистовые", sub:"Сантехника — Установка", name:"Душевые системы", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"SN-006", cat:"Чистовые", sub:"Сантехника — Установка", name:"Трапы", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"SN-007", cat:"Чистовые", sub:"Сантехника — Установка", name:"Полотенцесушитель", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"SN-008", cat:"Чистовые", sub:"Сантехника — Установка", name:"Монтаж радиатора отопления", unit:"шт", tiers:[], cost:15000, margin:0.4, fixedPrice:25000 },
+  { code:"SN-009", cat:"Чистовые", sub:"Сантехника — Установка", name:"Монтаж радиатора (с заменой труб/подводки)", unit:"шт", tiers:[], cost:25000, margin:0.4, fixedPrice:41667 },
+  { code:"SNA-001", cat:"Чистовые", sub:"Сантехника — Дополнительно", name:"Монтаж экранов", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"SNA-002", cat:"Чистовые", sub:"Сантехника — Дополнительно", name:"Подключение стиралки/посудомойки", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"ELC-001", cat:"Чистовые", sub:"Электрика чистовая", name:"Установка розеток", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"ELC-002", cat:"Чистовые", sub:"Электрика чистовая", name:"Установка выключателей", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"ELC-003", cat:"Чистовые", sub:"Электрика чистовая", name:"Подключение светильников", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"ELC-004", cat:"Чистовые", sub:"Электрика чистовая", name:"Люстры, бра, треки", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"ELC-005", cat:"Чистовые", sub:"Электрика чистовая", name:"Монтаж точечных светильников", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"ELC-006", cat:"Чистовые", sub:"Электрика чистовая", name:"Подключение вытяжки", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"ELC-007", cat:"Чистовые", sub:"Электрика чистовая", name:"Установка терморегуляторов тёплого пола", unit:"шт", tiers:[], cost:null, margin:0.4 },
+  { code:"DR-001", cat:"Чистовые", sub:"Двери и проёмы", name:"Установка межкомнатных дверей (базовые)", unit:"шт", tiers:[], cost:15000, margin:0.4, fixedPrice:25000 },
+  { code:"DR-002", cat:"Чистовые", sub:"Двери и проёмы", name:"Установка межкомнатных дверей (скрытый монтаж)", unit:"шт", tiers:[], cost:25000, margin:0.4, fixedPrice:41667 },
+  { code:"DR-003", cat:"Чистовые", sub:"Двери и проёмы", name:"Доборы", unit:"шт", tiers:[], cost:2000, margin:0.4, fixedPrice:3333 },
+  { code:"DR-004", cat:"Чистовые", sub:"Двери и проёмы", name:"Наличники", unit:"шт", tiers:[], cost:2500, margin:0.4, fixedPrice:4167 },
+  { code:"DR-005", cat:"Чистовые", sub:"Двери и проёмы", name:"Установка входной двери", unit:"шт", tiers:[], cost:25000, margin:0.4, fixedPrice:41667 },
+  { code:"DR-006", cat:"Чистовые", sub:"Двери и проёмы", name:"Оформление проёмов и порталов", unit:"шт", tiers:[], cost:9000, margin:0.4, fixedPrice:15000 },
+  { code:"TL-001", cat:"Чистовые", sub:"Плиточные работы", name:"Укладка плитки на стены", unit:"м²", tiers:[], cost:3200, margin:0.4, fixedPrice:5333 },
+  { code:"TL-002", cat:"Чистовые", sub:"Плиточные работы", name:"Укладка плитки на пол", unit:"м²", tiers:[], cost:3200, margin:0.4, fixedPrice:5333 },
+  { code:"TL-003", cat:"Чистовые", sub:"Плиточные работы", name:"Раскладка под 45° (запил, диагональ)", unit:"м²", tiers:[], cost:4500, margin:0.4, fixedPrice:7500 },
+  { code:"TL-004", cat:"Чистовые", sub:"Плиточные работы", name:"Декоративные вставки", unit:"шт", tiers:[], cost:1000, margin:0.4, fixedPrice:1667 },
+  { code:"TL-005", cat:"Чистовые", sub:"Плиточные работы", name:"Затирка швов", unit:"м²", tiers:[], cost:500, margin:0.4, fixedPrice:833 },
+  { code:"TL-006", cat:"Чистовые", sub:"Плиточные работы", name:"Монтаж фартука на кухне", unit:"м²", tiers:[], cost:3500, margin:0.4, fixedPrice:5833 },
+  { code:"TL-007", cat:"Чистовые", sub:"Плиточные работы", name:"Монтаж декоративных бордюров", unit:"м.п.", tiers:[], cost:1200, margin:0.4, fixedPrice:2000 },
 ];
 
 // Метки сложности точно как в Google Script
@@ -195,6 +195,8 @@ function getEffectiveWork(work) {
     ...renamed,
     fixedPrice: ov.fixedPrice !== undefined ? ov.fixedPrice : renamed.fixedPrice,
     tiers: ov.tiers !== undefined ? ov.tiers : renamed.tiers,
+    cost: ov.cost !== undefined ? ov.cost : renamed.cost,
+    margin: ov.margin !== undefined ? ov.margin : renamed.margin,
   };
 }
 
@@ -431,98 +433,11 @@ function LoginScreen({ onLogin }) {
   );
 }
 
+// PriceWorkCard — not used in new table UI, kept for AdminPanel legacy
 function PriceWorkCard({ w, initTiers, initFixed, onRename, onDelete }) {
-  const code = w.code;
-  const baseTiers = w.tiers || [];
-
-  const [tiers, setTiers] = useState(() => {
-    if (priceCardCache[code]) return priceCardCache[code].tiers;
-    return initTiers;
-  });
-  const [fixedVal, setFixed] = useState(() => {
-    if (priceCardCache[code]) return priceCardCache[code].fixedPrice;
-    return initFixed;
-  });
-
-  // Синхронизируем кэш при каждом изменении
-  const updTiers = (t) => { priceCardCache[code] = {tiers:t, fixedPrice:fixedVal}; setTiers(t); };
-  const updFixed = (v) => { priceCardCache[code] = {tiers, fixedPrice:v}; setFixed(v); };
-
-  const showTiers = tiers.length > 0;
-  const hasChange = !!priceCardCache[code];
-  const s = (extra) => ({background:"#0c0e1a",color:"#ddd8ce",borderRadius:5,padding:"5px 8px",fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",...extra});
-
-  const [editing, setEditing] = useState(false);
-  const [editName, setEditName] = useState(w.name);
-
-  const submitRename = () => {
-    if (editName.trim() && editName.trim() !== w.name) onRename(editName.trim());
-    setEditing(false);
-  };
-
-  return (
-    <div style={{background:hasChange?"rgba(184,144,74,.05)":"transparent",border:`1px solid ${hasChange?"rgba(184,144,74,.25)":"#1a1e30"}`,borderRadius:8,padding:"10px 12px",marginBottom:6}}>
-      <div style={{marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
-        {editing ? (
-          <>
-            <input autoFocus value={editName} onChange={e=>setEditName(e.target.value)}
-              onKeyDown={e=>{if(e.key==="Enter")submitRename();if(e.key==="Escape")setEditing(false);}}
-              style={{flex:1,background:"#0c0e1a",border:"1px solid #b8904a",color:"#ddd8ce",borderRadius:5,padding:"3px 8px",fontFamily:"inherit",fontSize:13,fontWeight:600,outline:"none"}}/>
-            <button onClick={submitRename} style={{background:"rgba(76,175,125,.15)",color:"#4caf7d",border:"none",borderRadius:5,padding:"3px 8px",cursor:"pointer",fontSize:12}}>✓</button>
-            <button onClick={()=>setEditing(false)} style={{background:"transparent",color:"#555575",border:"none",cursor:"pointer",fontSize:14}}>✕</button>
-          </>
-        ) : (
-          <>
-            <span style={{fontSize:13,fontWeight:600,color:hasChange?"#ddd8ce":"#9090b0",flex:1}}>{w.name}</span>
-            <span style={{fontSize:10,color:"#454560"}}>{w.unit}</span>
-            <button onClick={()=>{setEditName(w.name);setEditing(true);}} title="Переименовать"
-              style={{background:"transparent",color:"#454560",border:"none",cursor:"pointer",fontSize:11,padding:"2px 4px",lineHeight:1}}>✏️</button>
-            {onDelete && <button onClick={onDelete} title="Удалить позицию"
-              style={{background:"transparent",color:"#e07070",border:"none",cursor:"pointer",fontSize:11,padding:"2px 4px",lineHeight:1}}>🗑</button>}
-          </>
-        )}
-      </div>
-      {showTiers ? (
-        <div>
-          <div style={{display:"grid",gridTemplateColumns:"70px 70px 1fr 28px",gap:4,marginBottom:4}}>
-            {["ОТ","ДО","ЦЕНА (₸)",""].map((h,i)=>(<div key={i} style={{fontSize:9,color:"#454560",textAlign:i===2?"right":"center",fontWeight:700}}>{h}</div>))}
-          </div>
-          {tiers.map((t,ti)=>(
-            <div key={ti} style={{display:"grid",gridTemplateColumns:"70px 70px 1fr 28px",gap:4,marginBottom:3,alignItems:"center"}}>
-              <input type="number" min="0" value={t.min}
-                onChange={e=>updTiers(tiers.map((x,i)=>i===ti?{...x,min:e.target.value===""?"":Number(e.target.value)}:x))}
-                style={s({border:"1px solid #20243a",color:"#9090b0",textAlign:"center"})}/>
-              <input type="number" min="0" value={t.max}
-                onChange={e=>updTiers(tiers.map((x,i)=>i===ti?{...x,max:e.target.value===""?"":Number(e.target.value)}:x))}
-                style={s({border:"1px solid #20243a",color:"#9090b0",textAlign:"center"})}/>
-              <input type="number" min="0" value={t.price} placeholder={String(baseTiers[ti]?.price??"")}
-                onChange={e=>updTiers(tiers.map((x,i)=>i===ti?{...x,price:e.target.value===""?"":Number(e.target.value)}:x))}
-                style={s({border:`1px solid ${t.price!==""?"#b8904a":"#20243a"}`,textAlign:"right"})}/>
-              <button onClick={()=>updTiers(tiers.filter((_,i)=>i!==ti))}
-                style={{background:"rgba(200,60,60,.15)",color:"#e07070",border:"none",borderRadius:5,padding:"5px",cursor:"pointer",fontSize:11}}>✕</button>
-            </div>
-          ))}
-          <button onClick={()=>{const last=tiers[tiers.length-1];const m=last?(Number(last.max)||0)+1:1;updTiers([...tiers,{min:m,max:m+49,price:""}]);}}
-            style={{marginTop:4,background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit",width:"100%"}}>
-            + Добавить диапазон
-          </button>
-        </div>
-      ) : (
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <input type="number" min="0" placeholder={w.fixedPrice!=null?String(w.fixedPrice):"нет цены"}
-            value={fixedVal} onChange={e=>updFixed(e.target.value)}
-            style={{background:"#0c0e1a",border:`1px solid ${fixedVal!==""?"#b8904a":"#20243a"}`,color:"#ddd8ce",borderRadius:6,padding:"6px 10px",fontFamily:"inherit",fontSize:13,outline:"none",width:150,textAlign:"right"}}/>
-          <span style={{fontSize:11,color:"#454560"}}>₸</span>
-          <button onClick={()=>updTiers([{min:1,max:50,price:""}])}
-            style={{marginLeft:"auto",background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px dashed rgba(184,144,74,.3)",borderRadius:6,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-            + Диапазоны
-          </button>
-        </div>
-      )}
-
-    </div>
-  );
+  return null;
 }
+
 
 function AdminPanel({ currentUser, onClose }) {
   const [tab, setTab] = useState("users"); // "users" | "prices"
@@ -1311,6 +1226,19 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
     const overrides = {...savedOverrides};
     for (const [code, src] of Object.entries(priceCardCache)) {
       const allW = getEffectiveCatalog(); const w = allW.find(x => x.code === code); if (!w) continue;
+      // New table-based: cost + margin → fixedPrice
+      if (src.cost !== undefined || src.margin !== undefined) {
+        const cost = src.cost !== null && src.cost !== undefined ? Number(src.cost) : (w.cost ?? null);
+        const margin = src.margin !== undefined ? Number(src.margin) : (w.margin ?? 0.4);
+        if (cost !== null && !isNaN(cost) && cost > 0) {
+          const price = Math.round(cost / (1 - margin));
+          overrides[code] = { cost, margin, fixedPrice: price, tiers: [] };
+        } else {
+          delete overrides[code];
+        }
+        continue;
+      }
+      // Legacy tiers support
       const validTiers = (src.tiers||[]).filter(t => t.price!==""&&t.price!==undefined&&!isNaN(Number(t.price))&&t.min!==""&&t.max!=="").map(t=>({min:Number(t.min),max:Number(t.max),price:Number(t.price)}));
       if (validTiers.length > 0) { overrides[code] = {tiers: validTiers}; }
       else if (src.fixedPrice!==""&&src.fixedPrice!==undefined&&!isNaN(Number(src.fixedPrice))) { overrides[code] = {fixedPrice: Number(src.fixedPrice), tiers:[]}; }
@@ -1468,137 +1396,117 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
         </div>
       ) : (
         /* ПРАЙС-ЛИСТ */
-        <div>
-          {!localPrices ? <div style={{textAlign:"center",padding:40,color:"#454560"}}>Загрузка...</div> : <>
-            <input className="fi" placeholder="🔍 Поиск по названию работы..." value={priceSearch} onChange={e=>setPriceSearch(e.target.value)} style={{marginBottom:16}}/>
-            <div style={{display:"flex",flexDirection:"column",gap:0}}>
-              {(() => {
-                const allWorks = getEffectiveCatalog();
-                const q = priceSearch.toLowerCase();
-                const filtered = allWorks.filter(w => !q || w.name.toLowerCase().includes(q) || w.sub.toLowerCase().includes(q) || w.cat.toLowerCase().includes(q));
-                const catGroups = {};
-                for (const w of filtered) {
-                  if (!catGroups[w.cat]) catGroups[w.cat] = { _origCat: w._origCat||w.cat, subs:{} };
-                  if (!catGroups[w.cat].subs[w.sub]) catGroups[w.cat].subs[w.sub] = { _origSub: w._origSub||w.sub, works:[] };
-                  catGroups[w.cat].subs[w.sub].works.push(w);
-                }
-                const btnS = {background:"transparent",border:"none",cursor:"pointer",padding:"2px 6px",fontSize:11,lineHeight:1};
-                return Object.entries(catGroups).map(([cat, catData]) => {
-                  const origCat = catData._origCat;
-                  return (
-                    <div key={cat} style={{marginBottom:20}}>
-                      {editingCat?.key===origCat ? (
-                        <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:8}}>
-                          <input autoFocus value={editingCat.val} onChange={e=>setEditingCat(p=>({...p,val:e.target.value}))}
-                            onKeyDown={e=>{if(e.key==="Enter")renameCat(origCat,editingCat.val);if(e.key==="Escape")setEditingCat(null);}}
-                            style={{flex:1,background:"#0c0e1a",border:"1px solid #b8904a",color:"#b8904a",borderRadius:6,padding:"4px 10px",fontFamily:"inherit",fontSize:12,fontWeight:700,outline:"none"}}/>
-                          <button onClick={()=>renameCat(origCat,editingCat.val)} style={{...btnS,color:"#4caf7d",fontSize:14}}>✓</button>
-                          <button onClick={()=>setEditingCat(null)} style={{...btnS,color:"#555575",fontSize:14}}>✕</button>
-                        </div>
-                      ) : (
-                        <div style={{display:"flex",alignItems:"center",gap:6,padding:"8px 10px",background:"rgba(184,144,74,.08)",borderRadius:8,marginBottom:8,border:"1px solid rgba(184,144,74,.15)"}}>
-                          <span style={{fontSize:11,fontWeight:800,color:"#b8904a",letterSpacing:1,textTransform:"uppercase",flex:1}}>{cat}</span>
-                          <button onClick={()=>setEditingCat({key:origCat,val:cat})} title="Переименовать" style={{...btnS,color:"#b8904a",opacity:.6}}>✏️</button>
-                          <button onClick={()=>{ if(window.confirm(`Удалить категорию "${cat}"?`)) deleteCat(origCat); }} title="Удалить" style={{...btnS,color:"#e07070",opacity:.6}}>🗑</button>
-                        </div>
-                      )}
-                      {Object.entries(catData.subs).map(([sub, subData]) => {
-                        const origSub = subData._origSub;
-                        return (
-                          <div key={sub} style={{marginBottom:12,paddingLeft:4}}>
-                            {editingSub?.cat===origCat&&editingSub?.key===origSub ? (
-                              <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:6}}>
-                                <input autoFocus value={editingSub.val} onChange={e=>setEditingSub(p=>({...p,val:e.target.value}))}
-                                  onKeyDown={e=>{if(e.key==="Enter")renameSub(origCat,origSub,editingSub.val);if(e.key==="Escape")setEditingSub(null);}}
-                                  style={{flex:1,background:"#0c0e1a",border:"1px solid #6060a0",color:"#9090c0",borderRadius:5,padding:"3px 8px",fontFamily:"inherit",fontSize:11,outline:"none"}}/>
-                                <button onClick={()=>renameSub(origCat,origSub,editingSub.val)} style={{...btnS,color:"#4caf7d"}}>✓</button>
-                                <button onClick={()=>setEditingSub(null)} style={{...btnS,color:"#555575"}}>✕</button>
-                              </div>
-                            ) : (
-                              <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:6}}>
-                                <span style={{fontSize:10,fontWeight:700,color:"#555575",letterSpacing:.8,textTransform:"uppercase",flex:1}}>{sub}</span>
-                                <button onClick={()=>setEditingSub({cat:origCat,key:origSub,val:sub})} style={{...btnS,color:"#454560",fontSize:10}}>✏️</button>
-                                <button onClick={()=>{ if(window.confirm(`Удалить подкатегорию "${sub}"?`)) deleteSub(origCat,origSub); }} style={{...btnS,color:"#7a3030",fontSize:10}}>🗑</button>
-                              </div>
+        <div style={{paddingBottom:90}}>
+          <input className="fi" placeholder="🔍 Поиск по названию..." value={priceSearch} onChange={e=>setPriceSearch(e.target.value)} style={{marginBottom:16}}/>
+
+          {/* Таблица */}
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead>
+                <tr style={{background:"#0a0c18",position:"sticky",top:0,zIndex:5}}>
+                  {["Подкатегория","Название работы","Ед.","Себестоимость ₸","Маржа %","Цена для клиента ₸","Валовая прибыль ₸",""].map((h,i)=>(
+                    <th key={i} style={{padding:"10px 12px",textAlign:i>=3&&i<=6?"right":"left",fontSize:10,fontWeight:700,color:"#555575",textTransform:"uppercase",letterSpacing:.5,borderBottom:"2px solid #161929",whiteSpace:"nowrap"}}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(()=>{
+                  const allWorks = getEffectiveCatalog();
+                  const q = priceSearch.toLowerCase();
+                  const filtered = allWorks.filter(w => !q || w.name.toLowerCase().includes(q) || w.sub.toLowerCase().includes(q) || w.cat.toLowerCase().includes(q));
+                  // Group by cat
+                  const catOrder = []; const catMap = {};
+                  for(const w of filtered){
+                    if(!catMap[w.cat]){catMap[w.cat]=[];catOrder.push(w.cat);}
+                    catMap[w.cat].push(w);
+                  }
+                  const rows = [];
+                  catOrder.forEach(cat=>{
+                    // Cat header row
+                    rows.push(
+                      <tr key={"cat-"+cat} style={{background:"rgba(184,144,74,.08)"}}>
+                        <td colSpan={8} style={{padding:"8px 12px",fontSize:11,fontWeight:800,color:"#b8904a",letterSpacing:.8,textTransform:"uppercase"}}>
+                          {cat}
+                        </td>
+                      </tr>
+                    );
+                    catMap[cat].forEach((w,i)=>{
+                      // Get overridden or base values
+                      const ov = localPrices?.[w.code];
+                      const baseCost = w.cost ?? null;
+                      const baseMargin = w.margin ?? 0.4;
+                      const ovCost = ov?.cost !== undefined ? ov.cost : baseCost;
+                      const ovMargin = ov?.margin !== undefined ? ov.margin : baseMargin;
+                      const price = (ovCost !== null && ovCost !== "") ? Math.round(Number(ovCost) / (1 - Number(ovMargin))) : (ov?.fixedPrice || w.fixedPrice || null);
+                      const profit = (ovCost !== null && ovCost !== "" && price) ? price - Number(ovCost) : null;
+                      const isEven = i % 2 === 0;
+                      const hasCostChange = ov?.cost !== undefined || ov?.margin !== undefined;
+                      rows.push(
+                        <tr key={w.code} style={{background:hasCostChange?"rgba(184,144,74,.05)":isEven?"transparent":"rgba(255,255,255,.015)",borderBottom:"1px solid rgba(255,255,255,.04)"}}>
+                          <td style={{padding:"7px 12px",color:"#555575",fontSize:11,whiteSpace:"nowrap"}}>{w.sub}</td>
+                          <td style={{padding:"7px 12px",color:"#ddd8ce"}}>{w.name}</td>
+                          <td style={{padding:"7px 12px",color:"#454560",fontSize:11,whiteSpace:"nowrap"}}>{w.unit}</td>
+                          <td style={{padding:"7px 12px",textAlign:"right"}}>
+                            <input
+                              type="number" min="0"
+                              placeholder={baseCost !== null ? String(baseCost) : "—"}
+                              defaultValue={ovCost !== null && ovCost !== undefined ? ovCost : (baseCost !== null ? baseCost : "")}
+                              onChange={e=>{
+                                const val = e.target.value === "" ? null : Number(e.target.value);
+                                setLocalPrices(prev=>({...prev,[w.code]:{...(prev?.[w.code]||{}),cost:val}}));
+                                priceCardCache[w.code] = {...(priceCardCache[w.code]||{}), cost:val, margin: ovMargin};
+                              }}
+                              style={{width:90,background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:5,padding:"4px 8px",textAlign:"right",fontFamily:"inherit",fontSize:12,outline:"none"}}
+                            />
+                          </td>
+                          <td style={{padding:"7px 12px",textAlign:"right"}}>
+                            <input
+                              type="number" min="0" max="100" step="1"
+                              placeholder={String(Math.round(baseMargin*100))}
+                              defaultValue={Math.round(ovMargin*100)}
+                              onChange={e=>{
+                                const val = e.target.value === "" ? baseMargin : Number(e.target.value)/100;
+                                setLocalPrices(prev=>({...prev,[w.code]:{...(prev?.[w.code]||{}),margin:val}}));
+                                priceCardCache[w.code] = {...(priceCardCache[w.code]||{}), margin:val, cost: ovCost};
+                              }}
+                              style={{width:60,background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:5,padding:"4px 8px",textAlign:"right",fontFamily:"inherit",fontSize:12,outline:"none"}}
+                            />
+                            <span style={{color:"#454560",marginLeft:3,fontSize:11}}>%</span>
+                          </td>
+                          <td style={{padding:"7px 12px",textAlign:"right",fontWeight:700,color:"#b8904a",whiteSpace:"nowrap"}}>
+                            {price ? new Intl.NumberFormat("ru-RU").format(price)+" ₸" : "—"}
+                          </td>
+                          <td style={{padding:"7px 12px",textAlign:"right",color:"#4caf7d",whiteSpace:"nowrap"}}>
+                            {profit ? new Intl.NumberFormat("ru-RU").format(Math.round(profit))+" ₸" : "—"}
+                          </td>
+                          <td style={{padding:"7px 12px"}}>
+                            {currentUser.role==="admin" && (
+                              <button onClick={()=>{
+                                if(w.code.startsWith("CUSTOM-")) deleteCustomWork(w.code);
+                                else { const hc=[...new Set([...((localCatalog||{}).hiddenCodes||[]),w.code])]; saveCatalog({...(localCatalog||{}),hiddenCodes:hc}); }
+                              }} style={{background:"transparent",border:"none",color:"#c84848",cursor:"pointer",fontSize:12,padding:"2px 4px"}}>🗑</button>
                             )}
-                            {subData.works.map(w => (
-                              <PriceWorkCard key={w.code} w={w}
-                                initTiers={localPrices?.[w.code]?.tiers || []}
-                                initFixed={localPrices?.[w.code]?.fixedPrice || ""}
-                                onRename={newName => renameWork(w.code, newName)}
-                                onDelete={()=>{
-                                  if(w.code.startsWith("CUSTOM-")) deleteCustomWork(w.code);
-                                  else { const hc = [...new Set([...((localCatalog||{}).hiddenCodes||[]), w.code])]; saveCatalog({...(localCatalog||{}), hiddenCodes:hc}); }
-                                }}
-                              />
-                            ))}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                });
-              })()}
-
-              {/* Добавить позицию */}
-              <div style={{border:"1px dashed rgba(184,144,74,.3)",borderRadius:10,padding:"14px",marginBottom:80}}>
-                {!showAddWork ? (
-                  <button onClick={()=>setShowAddWork(true)} style={{width:"100%",background:"transparent",color:"#b8904a",border:"none",padding:"8px",fontFamily:"inherit",fontSize:13,cursor:"pointer",fontWeight:700}}>
-                    ＋ Добавить позицию в каталог
-                  </button>
-                ) : (() => {
-                  const allW = getEffectiveCatalog();
-                  const cats = [...new Set(allW.map(w=>w.cat))];
-                  const subs = newWork.cat ? [...new Set(allW.filter(w=>w.cat===newWork.cat).map(w=>w.sub))] : [];
-                  const inpStyle = {background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:6,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none",width:"100%",boxSizing:"border-box"};
-                  return (
-                    <div>
-                      <div style={{fontSize:13,fontWeight:700,color:"#b8904a",marginBottom:12}}>Новая позиция</div>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-                        <div>
-                          <div style={{fontSize:10,color:"#555575",marginBottom:4}}>Категория</div>
-                          <select value={newWork.cat} onChange={e=>setNewWork(p=>({...p,cat:e.target.value,sub:""}))} style={{...inpStyle,cursor:"pointer"}}>
-                            <option value="">— выбрать —</option>{cats.map(c=><option key={c} value={c}>{c}</option>)}<option value="__new__">＋ Новая...</option>
-                          </select>
-                          {newWork.cat==="__new__" && <input autoFocus placeholder="Название категории" value={newWork.catNew||""} onChange={e=>setNewWork(p=>({...p,catNew:e.target.value}))} style={{...inpStyle,marginTop:6}}/>}
-                        </div>
-                        <div>
-                          <div style={{fontSize:10,color:"#555575",marginBottom:4}}>Подкатегория</div>
-                          <select value={newWork.sub} onChange={e=>setNewWork(p=>({...p,sub:e.target.value}))} style={{...inpStyle,cursor:"pointer"}} disabled={!newWork.cat}>
-                            <option value="">— выбрать —</option>{subs.map(s=><option key={s} value={s}>{s}</option>)}<option value="__new__">＋ Новая...</option>
-                          </select>
-                          {newWork.sub==="__new__" && <input autoFocus placeholder="Название подкатегории" value={newWork.subNew||""} onChange={e=>setNewWork(p=>({...p,subNew:e.target.value}))} style={{...inpStyle,marginTop:6}}/>}
-                        </div>
-                        <div>
-                          <div style={{fontSize:10,color:"#555575",marginBottom:4}}>Название работы</div>
-                          <input placeholder="напр. Укладка паркета" value={newWork.name} onChange={e=>setNewWork(p=>({...p,name:e.target.value}))} style={inpStyle}/>
-                        </div>
-                        <div>
-                          <div style={{fontSize:10,color:"#555575",marginBottom:4}}>Единица измерения</div>
-                          <select value={newWork.unit} onChange={e=>setNewWork(p=>({...p,unit:e.target.value}))} style={{...inpStyle,cursor:"pointer"}}>
-                            {["м²","м.п.","шт","усл.","кг","л"].map(u=><option key={u} value={u}>{u}</option>)}
-                          </select>
-                        </div>
-                      </div>
-                      <div style={{display:"flex",gap:8}}>
-                        <button onClick={addCustomWork} style={{flex:1,background:"rgba(184,144,74,.15)",color:"#b8904a",border:"1px solid rgba(184,144,74,.3)",borderRadius:8,padding:"10px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>✓ Добавить</button>
-                        <button onClick={()=>{setShowAddWork(false);setNewWork({cat:"",sub:"",name:"",unit:"м²"});}} style={{background:"rgba(200,60,60,.1)",color:"#e07070",border:"1px solid rgba(200,60,60,.2)",borderRadius:8,padding:"10px 16px",fontFamily:"inherit",fontSize:13,cursor:"pointer"}}>Отмена</button>
-                      </div>
-                    </div>
-                  );
+                          </td>
+                        </tr>
+                      );
+                    });
+                  });
+                  return rows;
                 })()}
-              </div>
-            </div>
+              </tbody>
+            </table>
+          </div>
 
-            {/* Сохранить прайс — прилипает снизу */}
-            <div style={{position:"fixed",bottom:0,left:"220px",right:0,background:"#0c0e1a",borderTop:"1px solid #161929",padding:"12px 24px",zIndex:20}}>
-              {priceMsg && <div style={{textAlign:"center",fontSize:13,color:"#4caf7d",fontWeight:700,marginBottom:8}}>{priceMsg}</div>}
-              <button onClick={savePrices} disabled={priceSaving}
-                style={{width:"100%",maxWidth:820,margin:"0 auto",display:"block",background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:9,padding:"13px",fontFamily:"inherit",fontSize:14,fontWeight:800,cursor:"pointer"}}>
-                {priceSaving ? "💾 Сохранение..." : "💾 Сохранить прайс"}
-              </button>
-            </div>
-          </>}
+          {/* Сохранить прайс — прилипает снизу */}
+          <div style={{position:"fixed",bottom:0,left:"220px",right:0,background:"#0c0e1a",borderTop:"1px solid #161929",padding:"12px 24px",zIndex:20}}>
+            {priceMsg && <div style={{textAlign:"center",fontSize:13,color:"#4caf7d",fontWeight:700,marginBottom:8}}>{priceMsg}</div>}
+            <button onClick={savePrices} disabled={priceSaving}
+              style={{width:"100%",maxWidth:820,margin:"0 auto",display:"block",background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:9,padding:"13px",fontFamily:"inherit",fontSize:14,fontWeight:800,cursor:"pointer"}}>
+              {priceSaving ? "💾 Сохранение..." : "💾 Сохранить прайс"}
+            </button>
+          </div>
         </div>
       )}
     </div>
