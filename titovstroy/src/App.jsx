@@ -3363,30 +3363,30 @@ export default function App() {
         .fi{background:#f3f4f6;border:1px solid #e5e7eb;color:#ffffff;border-radius:7px;padding:8px 12px;font-family:inherit;font-size:13px;width:100%;transition:border .15s}
         .fi:focus{border-color:#9ca3af}
         .fi::placeholder{color:#374151}
-        .tab-btn{background:none;border:none;cursor:pointer;padding:7px 14px;border-radius:6px;font-family:inherit;font-size:13px;font-weight:600;color:#9ca3af;transition:all .15s;white-space:nowrap}
-        .tab-btn:hover{color:#9ca3af;background:rgba(184,144,74,.08)}
-        .tab-btn.active{background:rgba(184,144,74,.18);color:#2563eb}
+        .tab-btn{background:none;border:none;cursor:pointer;padding:7px 16px;border-radius:6px;font-family:inherit;font-size:13px;font-weight:500;color:#6b7280;transition:all .1s;white-space:nowrap}
+        .tab-btn:hover{color:#374151;background:#f3f4f6}
+        .tab-btn.active{background:#eff6ff;color:#2563eb;font-weight:600}
         .sub-btn{background:none;border:none;cursor:pointer;padding:5px 10px;border-radius:5px;font-family:inherit;font-size:11.5px;color:#374151;transition:all .15s;white-space:nowrap}
-        .sub-btn:hover{color:#9ca3af;background:rgba(0,0,0,.03)}
-        .sub-btn.active{background:rgba(255,255,255,.07);color:#9ca3af;font-weight:600}
+        .sub-btn:hover{color:#374151;background:#f3f4f6}
+        .sub-btn.active{background:#e5e7eb;color:#111827;font-weight:600}
         .wrow{display:grid;align-items:start;padding:9px 14px;border-radius:7px;gap:8px;transition:background .12s;min-width:0}
-        .wrow:hover{background:rgba(0,0,0,.02)}
-        .wrow.on{background:rgba(184,144,74,.06)}
-        .num{background:#f3f4f6;border:1px solid #e5e7eb;color:#ffffff;border-radius:6px;padding:6px 8px;text-align:right;font-family:inherit;font-size:13px;transition:border .15s}
+        .wrow:hover{background:#f9fafb}
+        .wrow.on{background:#f0f9ff}
+        .num{background:#ffffff;border:1px solid #e5e7eb;color:#111827;border-radius:6px;padding:6px 8px;text-align:right;font-family:inherit;font-size:13px;transition:border .1s;outline:none}
         .num:focus{border-color:#9ca3af}
-        .num::placeholder{color:#374151}
-        .cpx-sel{background:#f3f4f6;border:1px solid #e5e7eb;color:#9ca3af;border-radius:6px;padding:4px 6px;font-family:inherit;font-size:11px;margin-top:4px;cursor:pointer;width:auto;max-width:130px}
+        .num::placeholder{color:#9ca3af}
+        .cpx-sel{background:#ffffff;border:1px solid #e5e7eb;color:#374151;border-radius:6px;padding:4px 6px;font-family:inherit;font-size:11px;margin-top:4px;cursor:pointer;width:auto;max-width:130px}
         .cpx-sel:focus{border-color:#9ca3af}
         .card{background:#ffffff;box-shadow:0 1px 3px rgba(0,0,0,.08),0 4px 12px rgba(0,0,0,.04);border:1px solid #e5e7eb;border-radius:6px;overflow:hidden}
         .btn{border:none;cursor:pointer;padding:11px 22px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:700;transition:all .2s;letter-spacing:.2px}
-        .btn-g{background:#2563eb;color:#f3f4f6}
-        .btn-g:hover{transform:translateY(-1px);box-shadow:0 5px 20px rgba(184,144,74,.4)}
+        .btn-g{background:#2563eb;color:#ffffff}
+        .btn-g:hover{background:#1d4ed8}
         .btn-g:disabled{opacity:.35;cursor:not-allowed;transform:none;box-shadow:none}
-        .btn-o{background:rgba(0,0,0,.04);color:#9ca3af;border:1px solid #e5e7eb}
-        .btn-o:hover{background:rgba(0,0,0,.04);color:#9ca3af}
+        .btn-o{background:#ffffff;color:#374151;border:1px solid #e5e7eb}
+        .btn-o:hover{background:#f9fafb;color:#111827}
         .btn-red{background:rgba(220,38,38,.1);color:#dc2626;border:1px solid rgba(220,38,38,.1)}
         .btn-red:hover{background:rgba(200,60,60,.22);color:#dc2626}
-        .badge{background:#eff6ff;color:#2563eb;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700}
+        .badge{background:#eff6ff;color:#2563eb;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600}
         @keyframes up{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
         .up{animation:up .22s ease forwards}
         @media(min-width:900px){.main-grid{grid-template-columns:minmax(0,1fr) 295px!important}}
