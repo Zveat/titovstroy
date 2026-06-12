@@ -2135,6 +2135,8 @@ export default function App() {
   const [statsDateTo, setStatsDateTo] = useState("");
   // ── Договоры ──
   const [contracts, setContracts] = useState([]);
+  const contractsRef = useRef([]);
+  useEffect(() => { contractsRef.current = contracts; }, [contracts]);
   const [contractClients, setContractClients] = useState([]);
   const [contragents, setContragents] = useState([{id:"1",name:"ТОО TITOVSTROY",bin:"231040002769",bank:'АО "Kaspi Bank"',bik:"CASPKZKA",account:"KZ38722S000030058973",director:"Титов В.Е.",phone:"8707 667 8766",email:"titovstroy@mail.ru",address:"Казахстан, район им.Казыбек би, улица Кирпичная, дом 8г"}]);
   const [contractTab, setContractTab] = useState("list"); // list | editor | clients | contragents
@@ -2228,7 +2230,7 @@ export default function App() {
     if (!currentContract || currentContract._mode) return;
     if (_contractAutoSave.current) clearTimeout(_contractAutoSave.current);
     _contractAutoSave.current = setTimeout(async () => {
-      const list = contracts.filter(x=>x.id!==currentContract.id);
+      const list = contractsRef.current.filter(x=>x.id!==currentContract.id);
       await saveContracts([...list, currentContract]);
     }, 1500);
     return () => clearTimeout(_contractAutoSave.current);
@@ -2270,7 +2272,7 @@ export default function App() {
 
   const rowPrice = (work) => {
     const r = rows[work.name] || {};
-    if (r.manualPrice !== undefined && r.manualPrice !== "") return Number(r.manualPrice);
+    if (r.manualPrice !== undefined && r.manualPrice !== "") { const n = Number(r.manualPrice); return isNaN(n) ? null : n; }
     const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
     return getPrice(work, Number(r.qty || 0), r.complexity || "std", cpxPct);
   };
@@ -2301,8 +2303,9 @@ export default function App() {
           const qty = Number(r.qty || 0);
           if (!qty) continue;
           const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
-          const price = (r.manualPrice !== undefined && r.manualPrice !== "")
-            ? Number(r.manualPrice)
+          const mp = Number(r.manualPrice);
+          const price = (r.manualPrice !== undefined && r.manualPrice !== "" && !isNaN(mp))
+            ? mp
             : getPrice(w, qty, r.complexity || "std", cpxPct);
           if (price) subTotal += qty * price;
         }
@@ -2321,7 +2324,7 @@ export default function App() {
   const grandWithMarkup = grand + markupAmt; // база для клиента (markup скрыт)
   const discAmt = grandWithMarkup * discount / 100;
   const final = grandWithMarkup - discAmt;
-  const kpItems = useMemo(() => {
+  const kpData = useMemo(() => {
     const mm = 1 + markup / 100;
     const out = [];
     const fromOut = [];
@@ -2339,9 +2342,10 @@ export default function App() {
         if (pf) fromOut.push({ ...w, name: displayName, unit: displayUnit, qty, priceFrom: pf });
       }
     }
-    out._fromItems = fromOut;
-    return out;
+    return { items: out, fromItems: fromOut };
   }, [rows, markup]);
+  const kpItems = kpData.items;
+  const kpFromItems = kpData.fromItems;
   const filledCount = useMemo(() => Object.values(rows).filter(r => Number(r?.qty) > 0).length, [rows]);
   const nonViewerUsers = useMemo(() => allUsers.filter(u => u.role !== "viewer"), [allUsers]);
   const debouncedSearch = useDebounce(search, 250);
@@ -2465,6 +2469,8 @@ export default function App() {
     const newList = exists
       ? cur.map(e => e.id === currentId ? updated : e)
       : [updated, ...cur];
+    if (_autoSaveRef.current) clearTimeout(_autoSaveRef.current);
+    estimatesRef.current = newList;
     setEstimates(newList);
     await saveEstimates(newList);
     setScreen("list");
@@ -3666,7 +3672,12 @@ export default function App() {
       updatedAt: Date.now(),
       updatedBy: currentUser.name,
     };
-    const newList = [copy, ...estimates];
+    // Копия не должна оставаться ДС того же родителя (иначе дубль dsNumber)
+    delete copy.parentId;
+    delete copy.dsNumber;
+    const cur = estimatesRef.current;
+    const newList = [copy, ...cur];
+    estimatesRef.current = newList;
     setEstimates(newList);
     await saveEstimates(newList);
   };
@@ -4055,16 +4066,20 @@ export default function App() {
                   const filtered = filteredEstimates;
                   // Группировка: строим из ВСЕХ смет, фильтрованные определяют видимость
                   const filteredIds = new Set(filtered.map(e=>e.id));
-                  const allById = Object.fromEntries(estimates.map(e=>[e.id,e]));
                   const dsMap = {}; // parentId -> [child, ...]
-                  estimates.forEach(e=>{ if(e.parentId){ (dsMap[e.parentId]||(dsMap[e.parentId]=[])).push(e); } });
+                  const estById = {};
+                  estimates.forEach(e=>{ estById[e.id]=e; if(e.parentId){ (dsMap[e.parentId]||(dsMap[e.parentId]=[])).push(e); } });
                   // Корневые сметы из filtered (без parentId)
-                  const visibleRoots = filtered.filter(e=>!e.parentId);
+                  const roots = filtered.filter(e=>!e.parentId);
                   // ДС из filtered у которых родитель НЕ в filtered — показываем как корень
-                  filtered.filter(e=>e.parentId && !filteredIds.has(e.parentId)).forEach(e=>{ if(!visibleRoots.find(r=>r.id===e.id)) visibleRoots.push(e); });
+                  const orphanDs = filtered.filter(e=>e.parentId && !filteredIds.has(e.parentId) && !roots.find(r=>r.id===e.id));
+                  const visibleRoots = [...roots, ...orphanDs];
 
                   const renderCard = (est, isChild=false) => {
                     const author = est.updatedBy&&est.updatedBy!==est.createdBy ? est.updatedBy : est.createdBy;
+                    // ДС наследует актуальные данные клиента из родителя (имя, тип, площадь, адрес)
+                    const parentProj = est.parentId ? estById[est.parentId]?.proj : null;
+                    const dProj = parentProj ? {...(est.proj||{}), name:parentProj.name, type:parentProj.type, area:parentProj.area, address:parentProj.address, phone:parentProj.phone} : (est.proj||{});
                     return (
                       <div key={est.id}>
                         {isChild && <div style={{display:"flex",alignItems:"center",gap:6,marginLeft:16,marginBottom:2,marginTop:4}}>
@@ -4077,7 +4092,7 @@ export default function App() {
                           <div style={{display:"flex",alignItems:"center",gap:8}}>
                             {(() => { const s=STATUSES.find(x=>x.key===(est.status||"new"))||STATUSES[0]; return <span style={{fontSize:10,fontWeight:700,color:s.color,background:s.bg,borderRadius:4,padding:"1px 7px",flexShrink:0,whiteSpace:"nowrap"}}>{s.label}</span>; })()}
                             <span style={{fontWeight:700,fontSize:14,color:"#111827",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                              {est.proj?.name || <span style={{color:"#9ca3af",fontStyle:"italic"}}>Без названия</span>}
+                              {dProj?.name || <span style={{color:"#9ca3af",fontStyle:"italic"}}>Без названия</span>}
                             </span>
                             {est.total>0
                               ? <span style={{fontSize:14,fontWeight:800,color:"#2563eb",flexShrink:0}}>{fmt(est.total)} ₸</span>
@@ -4086,9 +4101,9 @@ export default function App() {
                           {est.comment&&<div style={{fontSize:11,color:"#9ca3af",marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>💬 {est.comment}</div>}
                           {/* Строка 2: мета + дата + кнопки */}
                           <div style={{display:"flex",alignItems:"center",gap:6,marginTop:5}} onClick={e=>e.stopPropagation()}>
-                            <span style={{fontSize:11,color:"#9ca3af",background:"rgba(0,0,0,.03)",borderRadius:4,padding:"1px 6px"}}>{est.proj?.type||"—"}</span>
-                            {est.proj?.area&&<span style={{fontSize:11,color:"#9ca3af"}}>{est.proj.area} м²</span>}
-                            {est.proj?.address&&<span style={{fontSize:11,color:"#374151",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:160}}>{est.proj.address}</span>}
+                            <span style={{fontSize:11,color:"#9ca3af",background:"rgba(0,0,0,.03)",borderRadius:4,padding:"1px 6px"}}>{dProj?.type||"—"}</span>
+                            {dProj?.area&&<span style={{fontSize:11,color:"#9ca3af"}}>{dProj.area} м²</span>}
+                            {dProj?.address&&<span style={{fontSize:11,color:"#374151",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:160}}>{dProj.address}</span>}
                             <span style={{flex:1}}/>
                             <span style={{fontSize:10,color:"#9ca3af",whiteSpace:"nowrap"}}>{fmtDate(est.updatedAt)}</span>
                             {author&&<span style={{fontSize:10,color:"#9ca3af",whiteSpace:"nowrap"}}>· {author}</span>}
@@ -4114,7 +4129,10 @@ export default function App() {
                               // ДС → тип annex, номер приложения = dsNumber+1 (т.к. №1 — основное)
                               const sibCount = isDs ? (dsMap[est.parentId]||[]).filter(e=>e.dsNumber<=(est.dsNumber||1)).length : 0;
                               const annexNum = isDs ? (est.dsNumber||1) + 1 : 1;
-                              const newContract = {id:Date.now().toString(),number:"",date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works,discount:est.discount||0,appendix:annexNum,estId:est.id,estClient:est.proj?.name||"",estPhone:est.proj?.phone||"",estAddress:est.proj?.address||"",note:"",type:isDs?"annex":"repair_fiz"};
+                              // Для приложения подтягиваем номер основного договора из договора родительской сметы
+                              const parentContract = isDs ? contracts.find(c=>c.estId===est.parentId && (c.type||"repair_fiz")!=="annex") : null;
+                              const mainNumber = parentContract?.number || "";
+                              const newContract = {id:Date.now().toString(),number:"",date:new Date().toISOString().split("T")[0],clientId:parentContract?.clientId||"",contragentId:parentContract?.contragentId||contragents[0]?.id||"",works,discount:est.discount||0,appendix:annexNum,estId:est.id,estClient:dProj?.name||"",estPhone:dProj?.phone||"",estAddress:dProj?.address||"",note:"",type:isDs?"annex":"repair_fiz",...(isDs?{mainNumber}:{})};
                               setCurrentContract(newContract);
                               setContractTab("editor");
                               setScreen("contracts");
@@ -4150,9 +4168,11 @@ export default function App() {
                   return (
                     <>
                       <div style={{fontSize:11,color:"#9ca3af",marginBottom:2}}>
-                        {filtered.length !== estimates.filter(e=>!e.parentId).length
-                          ? `Найдено: ${filtered.length}`
-                          : `Всего смет: ${estimates.filter(e=>!e.parentId).length}`}
+                        {(() => {
+                          const totalRoots = estimates.filter(e=>!e.parentId).length;
+                          const foundRoots = filtered.filter(e=>!e.parentId).length;
+                          return foundRoots !== totalRoots ? `Найдено: ${foundRoots}` : `Всего смет: ${totalRoots}`;
+                        })()}
                       </div>
                       {visibleRoots.length === 0 && (
                         <div style={{textAlign:"center",padding:"40px 0",color:"#374151",fontSize:13}}>Ничего не найдено</div>
@@ -4219,7 +4239,7 @@ export default function App() {
               <span className="proj-name" style={{fontSize:11,color:"#9ca3af"}}>
                 {currentUser.role==="admin"?"👑":currentUser.role==="viewer"?"👁":"👤"} {currentUser.name}
               </span>
-              <button className="btn btn-o" style={{padding:"8px 16px",fontSize:13}} onClick={()=>setScreen("list")}>← Назад</button>
+              <button className="btn btn-o" style={{padding:"8px 16px",fontSize:13}} onClick={saveAndBack}>← Назад</button>
               {saving && <span style={{fontSize:11,color:"#9ca3af"}}>💾</span>}
             </div>
           </div>
@@ -4655,7 +4675,7 @@ export default function App() {
             onClick={()=>setShowKP(false)}>
             <div style={{background:"#ffffff",color:"#111827",borderRadius:8,padding:"24px 28px",maxWidth:700,width:"100%",maxHeight:"90vh",overflowY:"auto",fontFamily:"'Inter','Segoe UI',sans-serif"}}
               onClick={e=>e.stopPropagation()}>
-              <KPContent proj={proj} kpItems={kpItems} fromItems={kpItems._fromItems||[]} discount={discount} discAmt={discAmt} final={final} note={note}/>
+              <KPContent proj={proj} kpItems={kpItems} fromItems={kpFromItems} discount={discount} discAmt={discAmt} final={final} note={note}/>
               <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:20}}>
                 <button style={{background:"#e5e7eb",color:"#9ca3af",border:"none",cursor:"pointer",padding:"10px 18px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:600}} onClick={()=>setShowKP(false)}>Закрыть</button>
                 <button style={{background:"#2563eb",color:"#f3f4f6",border:"none",cursor:"pointer",padding:"10px 20px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:700}} onClick={async ()=>{
@@ -4694,7 +4714,7 @@ export default function App() {
           </div>
           {/* Портал для печати — точная копия, отображается только при print */}
           <div id="kp-print-portal" style={{display:"none",fontFamily:"'Inter','Segoe UI',sans-serif",background:"#ffffff",padding:"20px 24px",color:"#111827"}}>
-            <KPContent proj={proj} kpItems={kpItems} fromItems={kpItems._fromItems||[]} discount={discount} discAmt={discAmt} final={final} note={note}/>
+            <KPContent proj={proj} kpItems={kpItems} fromItems={kpFromItems} discount={discount} discAmt={discAmt} final={final} note={note}/>
           </div>
         </>
       )}
