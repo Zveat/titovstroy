@@ -1818,12 +1818,14 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       {/* Основные поля — номер и дата */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         <div>
-          <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>{isDesAdd?"Номер доп. соглашения":"Номер договора/соглашения"}</div>
-          <input className="fi" value={contract.number||""} onChange={e=>upd({number:e.target.value})} placeholder="0001#202020"/>
+          <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>{isAnnex?"Приложение №":isDesAdd?"Номер доп. соглашения":"Номер договора/соглашения"}</div>
+          {isAnnex
+            ? <input className="fi" type="number" min="2" value={contract.appendix||2} onChange={e=>upd({appendix:parseInt(e.target.value)||2})}/>
+            : <input className="fi" value={contract.number||""} onChange={e=>upd({number:e.target.value})} placeholder="0001#202020"/>}
         </div>
         <div>
-          <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Дата</div>
-          <input className="fi" type="date" value={contract.date||""} onChange={e=>upd({date:e.target.value})}/>
+          <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>{isAnnex?"Дата приложения":"Дата"}</div>
+          <input className="fi" type="date" value={isAnnex?(contract.annexDate||contract.date||""):(contract.date||"")} onChange={e=>upd(isAnnex?{annexDate:e.target.value}:{date:e.target.value})}/>
         </div>
       </div>
 
@@ -1837,20 +1839,6 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
           <div>
             <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>{isDesAdd?"Дата соглашения о дизайне":"Дата основного договора"}</div>
             <input className="fi" type="date" value={contract.mainDate||""} onChange={e=>upd({mainDate:e.target.value})}/>
-          </div>
-        </div>
-      )}
-
-      {/* Номер приложения для Annex */}
-      {isAnnex && (
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <div>
-            <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Приложение №</div>
-            <input className="fi" type="number" min="2" value={contract.appendix||2} onChange={e=>upd({appendix:parseInt(e.target.value)||2})}/>
-          </div>
-          <div>
-            <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Дата приложения</div>
-            <input className="fi" type="date" value={contract.annexDate||contract.date||""} onChange={e=>upd({annexDate:e.target.value})}/>
           </div>
         </div>
       )}
