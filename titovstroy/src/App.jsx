@@ -1784,8 +1784,9 @@ const DOC_TYPES = [
 ];
 const TYPE_LABELS = { repair_fiz:"Договор ремонта", annex:"Приложение", design:"Дизайн-проект", design_add:"Доп. соглашение дизайн", reservation:"Бронь" };
 
-function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onGDoc, onAddClientFromEstimate, currentUserRole, fmt }) {
+function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onGDoc, onAddClientFromEstimate, onUpdateClient, currentUserRole, fmt }) {
   const [withStamp, setWithStamp] = useState(true);
+  const [showClientForm, setShowClientForm] = useState(false);
   const type = contract.type || "repair_fiz";
   const total = (contract.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
   const upd = (patch) => onUpdate(prev=>({...prev,...patch}));
@@ -1947,16 +1948,52 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
             <div style={{fontSize:11,color:"#d97706"}}>⚠ Из сметы: {contract.estClient}</div>
           )}
         </div>
-        <select className="fi" value={contract.clientId||""} onChange={e=>upd({clientId:e.target.value})}>
-          <option value="">— Выбрать клиента —</option>
-          {clients.map(c=>(<option key={c.id} value={c.id}>{c.name}{c.clientType==="yur" || c.type==="юр" ? " (ЮР)" : ""}</option>))}
-        </select>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          <select className="fi" style={{flex:1}} value={contract.clientId||""} onChange={e=>upd({clientId:e.target.value})}>
+            <option value="">— Выбрать клиента —</option>
+            {clients.map(c=>(<option key={c.id} value={c.id}>{c.name}{c.clientType==="yur" || c.type==="юр" ? " (ЮР)" : ""}</option>))}
+          </select>
+          {contract.clientId && (
+            <button onClick={()=>setShowClientForm(s=>!s)}
+              style={{background:showClientForm?"#eff6ff":"#f3f4f6",color:"#2563eb",border:"1px solid #e5e7eb",borderRadius:6,padding:"8px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+              ✎ Данные
+            </button>
+          )}
+        </div>
         {!contract.clientId && contract.estClient && (
-          <button onClick={onAddClientFromEstimate}
+          <button onClick={async ()=>{ await onAddClientFromEstimate(); setShowClientForm(true); }}
             style={{marginTop:6,background:"#eff6ff",color:"#059669",border:"1px solid #eff6ff",borderRadius:6,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
             + Создать клиента из сметы ({contract.estClient})
           </button>
         )}
+        {/* Инлайн-форма данных выбранного клиента */}
+        {contract.clientId && showClientForm && (() => {
+          const cl = clients.find(c=>c.id===contract.clientId);
+          if(!cl) return null;
+          const updCl = (patch)=>onUpdateClient({...cl,...patch});
+          const isYur = cl.type==="юр";
+          const fields = isYur
+            ? [["ФИО / Название","name"],["Телефон","phone"],["Адрес","address"],["БИН","iin"],["Директор (полностью)","director"],["Директор (кратко)","directorShort"],["Банк","bank"],["БИК","bik"],["ИИК (счёт)","account"],["Почта","email"]]
+            : [["ФИО","name"],["Телефон","phone"],["Адрес","address"],["ИИН","iin"],["Документ (уд. личности)","doc"]];
+          return (
+            <div style={{marginTop:8,padding:"12px 14px",background:"#f3f4f6",border:"1px solid #e5e7eb",borderRadius:8,display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div>
+                <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Тип</div>
+                <select className="fi" value={cl.type||"физ"} onChange={e=>updCl({type:e.target.value})}>
+                  <option value="физ">Физ. лицо</option>
+                  <option value="юр">Юр. лицо</option>
+                </select>
+              </div>
+              {fields.map(([label,field])=>(
+                <div key={field}>
+                  <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>{label}</div>
+                  <input className="fi" value={cl[field]||""} onChange={e=>updCl({[field]:e.target.value})} placeholder={label}/>
+                </div>
+              ))}
+              <div style={{gridColumn:"1 / -1",fontSize:10,color:"#9ca3af"}}>✓ Изменения сохраняются автоматически в карточку клиента</div>
+            </div>
+          );
+        })()}
       </div>
       {/* Подрядчик */}
       <div>
@@ -4911,6 +4948,9 @@ export default function App() {
                   const list=[...contractClients,newClient];
                   await saveContractClients(list);
                   setCurrentContract(prev=>({...prev,clientId:newClient.id}));
+                }}
+                onUpdateClient={(updated)=>{
+                  saveContractClients(contractClients.map(x=>x.id===updated.id?updated:x));
                 }}
                 currentUserRole={currentUser.role}
                 fmt={fmt}
