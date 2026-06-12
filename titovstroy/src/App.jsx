@@ -3901,9 +3901,9 @@ export default function App() {
           ЭКРАН 1: СПИСОК СМЕТ
       ═══════════════════════════════════════════════════════════════════ */}
       {screen === "list" && (
-        <div style={{maxWidth:720,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
+        <div style={{maxWidth:960,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
           {/* Шапка */}
-          <div className="list-header" style={{background:"#f3f4f6",borderBottom:"1px solid #e5e7eb",padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
+          <div className="list-header" style={{background:"#f3f4f6",borderBottom:"1px solid #e5e7eb",padding:"12px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
             <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
               <div style={{width:28,height:28,borderRadius:6,background:"#2563eb",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,color:"#ffffff",flexShrink:0}}>T</div>
               <div style={{minWidth:0}}>
@@ -3922,7 +3922,7 @@ export default function App() {
             </div>
           </div>
 
-          <div style={{padding:"20px 20px 0"}}>
+          <div style={{padding:"20px 24px 0"}}>
             {loadingList ? (
               <div style={{textAlign:"center",padding:"60px 0",color:"#9ca3af"}}>
                 <div style={{fontSize:24,marginBottom:10}}>⏳</div>
@@ -4700,9 +4700,9 @@ export default function App() {
       })()}
 
       {screen === "contracts" && (
-        <div style={{maxWidth:860,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
+        <div style={{maxWidth:960,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
           {/* Шапка */}
-          <div style={{background:"#f3f4f6",borderBottom:"1px solid #e5e7eb",padding:"12px 20px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
+          <div style={{background:"#f3f4f6",borderBottom:"1px solid #e5e7eb",padding:"12px 24px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
             <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
             <div style={{width:28,height:28,borderRadius:6,background:"#2563eb",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#f3f4f6"}}>T</div>
             <div style={{fontWeight:800,fontSize:14,color:"#111827"}}>Договоры</div>
@@ -4722,7 +4722,7 @@ export default function App() {
             ))}
           </div>
 
-          <div style={{padding:"20px"}}>
+          <div style={{padding:"20px 24px"}}>
 
             {/* ── СПИСОК ДОГОВОРОВ ── */}
             {contractTab === "list" && (
