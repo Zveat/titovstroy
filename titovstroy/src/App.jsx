@@ -268,6 +268,7 @@ const STATUSES = [
   { key:"rejected",  label:"Отказ",       color:"#dc2626", bg:"rgba(220,38,38,.12)"   },
 ];
 const STORAGE_KEY    = "titovstroy-estimates";
+const BACKUPS_KEY    = "titovstroy-estimates-backups"; // снимки архива для восстановления
 const USERS_KEY      = "titovstroy-users";
 const SESSION_KEY    = "titovstroy-session";
 const PRICES_KEY     = "titovstroy-prices";  // переопределённые цены {code: {fixedPrice?, tiers?}}
@@ -2181,6 +2182,7 @@ export default function App() {
   },[]);
   const stampBase64 = stampsBase64["stamp.jpg"] || "";
   const [listSearch, setListSearch] = useState("");
+  const [backupsModal, setBackupsModal] = useState(null); // null | массив снимков
   const [listFilter, setListFilter] = useState(""); // "" | "Вторичка" | "Новостройка" | "Коммерция"
   const [listFilterManager, setListFilterManager] = useState(""); // "" = все
   const [listFilterStatus, setListFilterStatus] = useState(""); // "" = все статусы
@@ -2225,6 +2227,10 @@ export default function App() {
     _autoSaveRef.current = setTimeout(() => {
       const cur = estimatesRef.current;
       const exists = cur.find(e => e.id === currentId);
+      // ЗАЩИТА: не затирать смету с позициями пустой версией (если не явный сброс)
+      if (exists && countFilled(exists.rows) > 0 && countFilled(rows) === 0 && !_allowEmptySave.current) {
+        return;
+      }
       // parentId/dsNumber берём из стейта (новая ДС) ИЛИ из сохранённой записи (открытая ДС)
       const pId = currentParentId || exists?.parentId;
       const dsN = currentDsNumber || exists?.dsNumber;
@@ -2287,10 +2293,54 @@ export default function App() {
   const saveEstimates = useCallback(async (list) => {
     setSaving(true);
     try {
+      // Авто-бэкап: перед перезаписью сохраняем снимок предыдущего архива (последние 20)
+      try {
+        const prev = await storage.get(STORAGE_KEY);
+        if (prev && prev.value) {
+          const bRaw = await storage.get(BACKUPS_KEY);
+          let backups = [];
+          try { if (bRaw && bRaw.value) backups = JSON.parse(bRaw.value); } catch {}
+          if (!Array.isArray(backups)) backups = [];
+          const last = backups[0];
+          // не плодим одинаковые снимки подряд
+          if (!last || last.data !== prev.value) {
+            backups.unshift({ ts: Date.now(), by: currentUser?.name || "", count: (()=>{try{return JSON.parse(prev.value).length;}catch{return 0;}})(), data: prev.value });
+            backups = backups.slice(0, 20);
+            await storage.set(BACKUPS_KEY, JSON.stringify(backups));
+          }
+        }
+      } catch(e) { console.warn("backup err", e); }
       await storage.set(STORAGE_KEY, JSON.stringify(list));
     } catch(e) { console.error(e); }
     setSaving(false);
-  }, []);
+  }, [currentUser]);
+
+  // Сколько позиций (с qty>0) в наборе rows
+  const countFilled = (rws) => Object.values(rws||{}).filter(r => Number(r?.qty) > 0).length;
+  const _allowEmptySave = useRef(false); // явное разрешение сохранить пустую смету (Сбросить позиции)
+
+  // ── Бэкапы / восстановление ──
+  const openBackups = async () => {
+    try {
+      const bRaw = await storage.get(BACKUPS_KEY);
+      let backups = [];
+      try { if (bRaw && bRaw.value) backups = JSON.parse(bRaw.value); } catch {}
+      if (!Array.isArray(backups)) backups = [];
+      setBackupsModal(backups);
+    } catch(e) { setBackupsModal([]); }
+  };
+  const restoreBackup = async (snap) => {
+    if (!snap || !snap.data) return;
+    let list;
+    try { list = JSON.parse(snap.data); } catch { window.alert("Не удалось прочитать бэкап"); return; }
+    if (!Array.isArray(list)) { window.alert("Бэкап повреждён"); return; }
+    if (!window.confirm(`Восстановить архив на момент ${new Date(snap.ts).toLocaleString("ru-RU")}?\nСметы: ${list.length}. Текущая версия уйдёт в бэкап и её можно вернуть обратно.`)) return;
+    estimatesRef.current = list;
+    setEstimates(list);
+    await saveEstimates(list); // текущая версия попадёт в бэкап автоматически
+    setBackupsModal(null);
+    window.alert("Архив восстановлен ✓");
+  };
 
   // ── Вычисления текущей сметы ──
   const setRow = useCallback((name, field, val) =>
@@ -2478,6 +2528,12 @@ export default function App() {
   const saveAndBack = async () => {
     const cur = estimatesRef.current;
     const exists = cur.find(e => e.id === currentId);
+    // ЗАЩИТА: не затирать смету с позициями пустой версией (если не явный сброс)
+    if (exists && countFilled(exists.rows) > 0 && countFilled(rows) === 0 && !_allowEmptySave.current) {
+      if (_autoSaveRef.current) clearTimeout(_autoSaveRef.current);
+      setScreen("list");
+      return;
+    }
     const pId = currentParentId || exists?.parentId;
     const dsN = currentDsNumber || exists?.dsNumber;
     const updated = {
@@ -4019,6 +4075,12 @@ export default function App() {
                     <div style={{fontWeight:800,fontSize:17,color:"#111827"}}>📁 Архив смет</div>
                     <div style={{fontSize:11,color:"#9ca3af",marginTop:1}}>Все расчёты и коммерческие предложения</div>
                   </div>
+                  {currentUser.role==="admin" && (
+                    <button onClick={openBackups}
+                      style={{background:"rgba(0,0,0,.03)",color:"#6b7280",border:"1px solid #e5e7eb",borderRadius:8,padding:"7px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                      🕘 Бэкапы
+                    </button>
+                  )}
                 </div>
                 {/* Поиск и фильтры */}
                 {estimates.length > 0 && (
@@ -4741,7 +4803,13 @@ export default function App() {
                   Сформировать КП
                 </button>
 
-                <button className="btn btn-o" onClick={()=>{setRows({});setDiscount(0);setNote("");}}>
+                <button className="btn btn-o" onClick={()=>{
+                  if(countFilled(rows)===0 || window.confirm("Очистить все позиции этой сметы? Действие можно откатить через «Бэкапы».")){
+                    _allowEmptySave.current = true;
+                    setRows({});setDiscount(0);setNote("");
+                    setTimeout(()=>{ _allowEmptySave.current = false; }, 3000);
+                  }
+                }}>
                   Сбросить позиции
                 </button>
               </div>
@@ -4782,6 +4850,35 @@ export default function App() {
       {/* ═══════════════════════════════════════════════════════════════════
           КП МОДАЛ
       ═══════════════════════════════════════════════════════════════════ */}
+      {backupsModal!==null && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:320,padding:16}}
+          onClick={()=>setBackupsModal(null)}>
+          <div style={{background:"#fff",borderRadius:10,padding:"20px 22px",maxWidth:520,width:"100%",maxHeight:"80vh",overflowY:"auto"}}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={{fontWeight:800,fontSize:16,color:"#111827"}}>🕘 Бэкапы архива</div>
+              <button onClick={()=>setBackupsModal(null)} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#9ca3af"}}>✕</button>
+            </div>
+            <div style={{fontSize:12,color:"#9ca3af",marginBottom:14}}>Снимки архива перед каждой записью (последние 20). Можно откатиться к любому.</div>
+            {backupsModal.length===0 && <div style={{textAlign:"center",padding:"30px 0",color:"#9ca3af",fontSize:13}}>Бэкапов пока нет</div>}
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {backupsModal.map((snap,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"10px 12px",background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:8}}>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:600,color:"#111827"}}>{new Date(snap.ts).toLocaleString("ru-RU")}</div>
+                    <div style={{fontSize:11,color:"#9ca3af"}}>Смет: {snap.count}{snap.by?` · ${snap.by}`:""}{i===0?" · последний":""}</div>
+                  </div>
+                  <button onClick={()=>restoreBackup(snap)}
+                    style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(37,99,235,.2)",borderRadius:6,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                    Восстановить
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {showKP&&(
         <>
           {/* Overlay + modal для экрана */}
