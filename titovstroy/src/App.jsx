@@ -4116,8 +4116,10 @@ export default function App() {
                           {/* Строка 1: имя + сумма */}
                           <div style={{display:"flex",alignItems:"center",gap:8}}>
                             {(() => { const s=STATUSES.find(x=>x.key===(est.status||"new"))||STATUSES[0]; return <span style={{fontSize:10,fontWeight:700,color:s.color,background:s.bg,borderRadius:4,padding:"1px 7px",flexShrink:0,whiteSpace:"nowrap"}}>{s.label}</span>; })()}
-                            <span style={{fontWeight:700,fontSize:14,color:"#111827",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                              {dProj?.name || <span style={{color:"#9ca3af",fontStyle:"italic"}}>Без названия</span>}
+                            <span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                              <span style={{fontWeight:700,fontSize:14,color:"#111827"}}>{dProj?.name || <span style={{color:"#9ca3af",fontStyle:"italic"}}>Без названия</span>}</span>
+                              {dProj?.address && <span style={{fontSize:12,color:"#6b7280",fontWeight:500}}> · 📍 {dProj.address}</span>}
+                              {dProj?.phone && <span style={{fontSize:12,color:"#6b7280",fontWeight:500}}> · 📞 {dProj.phone}</span>}
                             </span>
                             {est.total>0
                               ? <span style={{fontSize:14,fontWeight:800,color:"#2563eb",flexShrink:0}}>{fmt(est.total)} ₸</span>
@@ -4128,7 +4130,6 @@ export default function App() {
                           <div style={{display:"flex",alignItems:"center",gap:6,marginTop:5}} onClick={e=>e.stopPropagation()}>
                             <span style={{fontSize:11,color:"#9ca3af",background:"rgba(0,0,0,.03)",borderRadius:4,padding:"1px 6px"}}>{dProj?.type||"—"}</span>
                             {dProj?.area&&<span style={{fontSize:11,color:"#9ca3af"}}>{dProj.area} м²</span>}
-                            {dProj?.address&&<span style={{fontSize:11,color:"#374151",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:160}}>{dProj.address}</span>}
                             <span style={{flex:1}}/>
                             <span style={{fontSize:10,color:"#9ca3af",whiteSpace:"nowrap"}}>{fmtDate(est.updatedAt)}</span>
                             {author&&<span style={{fontSize:10,color:"#9ca3af",whiteSpace:"nowrap"}}>· {author}</span>}
