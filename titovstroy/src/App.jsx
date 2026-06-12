@@ -204,6 +204,7 @@ function getEffectiveWork(work) {
     tiers: ov.tiers !== undefined ? ov.tiers : renamed.tiers,
     cost: ov.cost !== undefined ? ov.cost : renamed.cost,
     margin: ov.margin !== undefined ? ov.margin : renamed.margin,
+    priceFrom: ov.priceFrom !== undefined ? ov.priceFrom : renamed.priceFrom,
   };
 }
 
@@ -991,7 +992,7 @@ function AdminPanel({ currentUser, onClose }) {
 }
 
 // ─── КОМПОНЕНТ КП (используется в модале и при печати) ───────────────────────
-function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
+function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note }) {
   const CONDITIONS = [
     "Стоимость рассчитана исходя из указанных объемов работ без учета НДС.",
     "В стоимость работ могут входить расходы на материалы, оборудование, доставку и иные затраты, необходимые для выполнения работ, если иное прямо указано в договоре.",
@@ -1090,6 +1091,29 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
                 </div>
               ))}
             </div>
+
+            {/* Позиции "от" — не входят в итог */}
+            {fromItems&&fromItems.length>0&&(
+              <div style={{marginTop:12,marginBottom:4}}>
+                <div style={{background:"#f0ece0",borderRadius:"6px 6px 0 0",padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontWeight:700,fontSize:12,color:"#888",letterSpacing:.5,textTransform:"uppercase"}}>Уточняется по факту</span>
+                  <span style={{fontSize:11,color:"#aaa"}}>не включено в итог</span>
+                </div>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                  <tbody>
+                    {fromItems.map((item,i)=>(
+                      <tr key={i} style={{background:i%2===0?"#f5f2ec":"#ede9e0",borderBottom:"1px solid #ddd9d0"}}>
+                        <td style={{padding:"6px 8px",color:"#8855aa",fontSize:11,fontWeight:500,width:"18%"}}>{item.sub}</td>
+                        <td style={{padding:"6px 8px",fontWeight:600,fontSize:12}}>{item.name}</td>
+                        <td style={{padding:"6px 8px",textAlign:"center",color:"#888",fontSize:11,width:"6%"}}>{item.unit}</td>
+                        <td style={{padding:"6px 8px",textAlign:"center",fontWeight:500,width:"8%"}}>{item.qty}</td>
+                        <td style={{padding:"6px 8px",textAlign:"right",color:"#b8904a",fontWeight:700,whiteSpace:"nowrap",width:"20%"}}>от {fmt(item.priceFrom)} ₸</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             {/* Итог */}
             <div style={{background:"#1a1a28",borderRadius:10,padding:"13px 18px",color:"#f5f2ec",marginTop:8}}>
@@ -1241,13 +1265,16 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
     const overrides = {...savedOverrides};
     for (const [code, src] of Object.entries(priceCardCache)) {
       const allW = getEffectiveCatalog(); const w = allW.find(x => x.code === code); if (!w) continue;
-      // New table-based: cost + margin → fixedPrice
-      if (src.cost !== undefined || src.margin !== undefined) {
+      // New table-based: cost + margin → fixedPrice, optional priceFrom
+      if (src.cost !== undefined || src.margin !== undefined || src.priceFrom !== undefined) {
         const cost = src.cost !== null && src.cost !== undefined ? Number(src.cost) : (w.cost ?? null);
         const margin = src.margin !== undefined ? Number(src.margin) : (w.margin ?? 0.4);
+        const priceFrom = src.priceFrom !== undefined ? (src.priceFrom ? Number(src.priceFrom) : null) : (w.priceFrom ?? null);
         if (cost !== null && !isNaN(cost) && cost > 0) {
           const price = Math.round(cost / (1 - margin));
-          overrides[code] = { cost, margin, fixedPrice: price, tiers: [] };
+          overrides[code] = { cost, margin, fixedPrice: price, tiers: [], ...(priceFrom ? {priceFrom} : {}) };
+        } else if (priceFrom) {
+          overrides[code] = { ...(overrides[code]||{}), priceFrom };
         } else {
           delete overrides[code];
         }
@@ -1277,8 +1304,9 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
     const cost = Number(newWork.cost) || 0;
     const marginPct = Math.min(99, Math.max(0, Number(newWork.margin) || 40));
     const fixedPrice = cost > 0 ? Math.round(cost / (1 - marginPct / 100)) : null;
-    await saveCatalog({ ...(localCatalog||{}), custom: [...((localCatalog||{}).custom||[]), { code:"CUSTOM-"+Date.now(), cat:finalCat, sub:finalSub, name:newWork.name.trim(), unit:newWork.unit||"м²", tiers:[], cost, margin: marginPct/100, fixedPrice }] });
-    setNewWork({cat:"", catNew:"", sub:"", subNew:"", name:"", unit:"м²", cost:"", margin:40}); setShowAddWork(false);
+    const priceFrom = newWork.priceFrom ? (Number(newWork.priceFrom) || null) : null;
+    await saveCatalog({ ...(localCatalog||{}), custom: [...((localCatalog||{}).custom||[]), { code:"CUSTOM-"+Date.now(), cat:finalCat, sub:finalSub, name:newWork.name.trim(), unit:newWork.unit||"м²", tiers:[], cost, margin: marginPct/100, fixedPrice, ...(priceFrom ? {priceFrom} : {}) }] });
+    setNewWork({cat:"", catNew:"", sub:"", subNew:"", name:"", unit:"м²", cost:"", margin:40, priceFrom:""}); setShowAddWork(false);
     Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
   const deleteCustomWork = async (code) => { await saveCatalog({ ...(localCatalog||{}), custom: ((localCatalog||{}).custom||[]).filter(w=>w.code!==code) }); Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]); };
@@ -1489,6 +1517,10 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                     <div style={{fontSize:10,color:"#9ca3af",marginBottom:4}}>Маржа %</div>
                     <input type="number" min="0" max="100" placeholder="40" value={newWork.margin||""} onChange={e=>setNewWork(p=>({...p,margin:e.target.value}))} style={{...inp,width:"100%"}}/>
                   </div>
+                  <div>
+                    <div style={{fontSize:10,color:"#b8904a",marginBottom:4}}>Цена от ₸ <span style={{color:"#9ca3af"}}>(если нет точной)</span></div>
+                    <input type="number" min="0" placeholder="необязательно" value={newWork.priceFrom||""} onChange={e=>setNewWork(p=>({...p,priceFrom:e.target.value}))} style={{...inp,width:"100%"}}/>
+                  </div>
                 </div>
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={addCustomWork} style={{flex:1,background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>✓ Добавить</button>
@@ -1502,19 +1534,20 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
           <div style={{overflowX:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,tableLayout:"fixed"}}>
               <colgroup>
-                <col style={{width:"14%"}}/>
-                <col style={{width:"28%"}}/>
+                <col style={{width:"13%"}}/>
+                <col style={{width:"24%"}}/>
                 <col style={{width:"5%"}}/>
+                <col style={{width:"11%"}}/>
+                <col style={{width:"8%"}}/>
                 <col style={{width:"12%"}}/>
-                <col style={{width:"9%"}}/>
-                <col style={{width:"13%"}}/>
-                <col style={{width:"13%"}}/>
-                <col style={{width:"6%"}}/>
+                <col style={{width:"11%"}}/>
+                <col style={{width:"11%"}}/>
+                <col style={{width:"5%"}}/>
               </colgroup>
               <thead>
                 <tr style={{background:"#ffffff",position:"sticky",top:0,zIndex:5}}>
-                  {["Подкатегория","Название работы","Ед.","Себестоимость ₸","Маржа %","Цена для клиента ₸","Валовая прибыль ₸",""].map((h,i)=>(
-                    <th key={i} style={{padding:"10px 12px",textAlign:i>=3&&i<=6?"right":"left",fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:.5,borderBottom:"2px solid #e5e7eb",whiteSpace:"nowrap"}}>
+                  {["Подкатегория","Название работы","Ед.","Себестоимость ₸","Маржа %","Цена для клиента ₸","Цена от ₸","Валовая прибыль ₸",""].map((h,i)=>(
+                    <th key={i} style={{padding:"10px 12px",textAlign:i>=3&&i<=7?"right":"left",fontSize:10,fontWeight:700,color:h==="Цена от ₸"?"#b8904a":"#9ca3af",textTransform:"uppercase",letterSpacing:.5,borderBottom:"2px solid #e5e7eb",whiteSpace:"nowrap"}}>
                       {h}
                     </th>
                   ))}
@@ -1651,6 +1684,19 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                             <td style={{padding:"6px 12px",textAlign:"right",fontWeight:700,color:"#111827",whiteSpace:"nowrap"}}>
                               {price ? new Intl.NumberFormat("ru-RU").format(price)+" ₸" : "—"}
                             </td>
+                            {/* Цена от */}
+                            <td style={{padding:"6px 8px",textAlign:"right"}}>
+                              <input type="number" min="0"
+                                placeholder="—"
+                                defaultValue={ov?.priceFrom !== undefined ? ov.priceFrom : (w.priceFrom || "")}
+                                onChange={e=>{
+                                  const val = e.target.value === "" ? undefined : Number(e.target.value);
+                                  setLocalPrices(prev=>({...prev,[w.code]:{...(prev?.[w.code]||{}),priceFrom:val}}));
+                                  priceCardCache[w.code] = {...(priceCardCache[w.code]||{}), priceFrom:val};
+                                }}
+                                style={{width:"100%",background:"#fffbf0",border:"1px solid #e5d78e",color:"#92610a",borderRadius:5,padding:"4px 8px",textAlign:"right",fontFamily:"inherit",fontSize:12,outline:"none"}}
+                              />
+                            </td>
                             {/* Валовая прибыль */}
                             <td style={{padding:"6px 12px",textAlign:"right",color:"#059669",whiteSpace:"nowrap"}}>
                               {profit ? new Intl.NumberFormat("ru-RU").format(Math.round(profit))+" ₸" : "—"}
@@ -1668,7 +1714,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                       });
                     });
                   });
-                  if(rows.length===0) rows.push(<tr key="empty"><td colSpan={8} style={{textAlign:"center",padding:"40px",color:"#9ca3af"}}>Ничего не найдено</td></tr>);
+                  if(rows.length===0) rows.push(<tr key="empty"><td colSpan={9} style={{textAlign:"center",padding:"40px",color:"#9ca3af"}}>Ничего не найдено</td></tr>);
                   return rows;
                 })()}
               </tbody>
@@ -2151,6 +2197,14 @@ export default function App() {
     const price = rowPrice(work);
     return qty > 0 && price ? qty * price : 0;
   };
+  // Возвращает "цену от" если у работы нет точной цены (не идёт в расчёт)
+  const rowPriceFrom = (work) => {
+    const r = rows[work.name] || {};
+    if (r.manualPrice !== undefined && r.manualPrice !== "") return null; // ручная цена — точная
+    const w = getEffectiveWork(work);
+    if (w.fixedPrice || (w.tiers && w.tiers.length > 0) || w.cost) return null; // есть точная цена
+    return w.priceFrom || null;
+  };
   // Единый проход по каталогу — вычисляет все суммы за O(n) один раз при изменении rows
   const allSumMap = useMemo(() => {
     const subMap = {};
@@ -2188,13 +2242,21 @@ export default function App() {
   const kpItems = useMemo(() => {
     const mm = 1 + markup / 100;
     const out = [];
+    const fromOut = [];
     for (const cat of cats) for (const sub of Object.keys(Gdyn[cat]||{})) for (const w of Gdyn[cat]?.[sub]||[]) {
       const qty = Number((rows[w.name]||{}).qty||0);
+      if (qty <= 0) continue;
       const price = rowPrice(w);
-      if (qty > 0 && price) out.push({ ...w, qty, price: price * mm, total: qty * price * mm });
+      if (price) {
+        out.push({ ...w, qty, price: price * mm, total: qty * price * mm });
+      } else {
+        const pf = rowPriceFrom(w);
+        if (pf) fromOut.push({ ...w, qty, priceFrom: pf });
+      }
     }
+    out._fromItems = fromOut;
     return out;
-  }, [rows]);
+  }, [rows, markup]);
   const filledCount = useMemo(() => Object.values(rows).filter(r => Number(r?.qty) > 0).length, [rows]);
   const nonViewerUsers = useMemo(() => allUsers.filter(u => u.role !== "viewer"), [allUsers]);
   const debouncedSearch = useDebounce(search, 250);
@@ -4112,6 +4174,11 @@ export default function App() {
                         <span style={{fontSize:12,color:r.manualPrice!==undefined?"#2563eb":"#374151",fontWeight:r.manualPrice!==undefined?700:400}}>{fmt(displayPrice)}</span>
                         {currentUser.role!=="viewer" && <span onClick={()=>setEditingPriceRow(work.name)} title="Изменить цену" style={{cursor:"pointer",fontSize:10,color:"#9ca3af",opacity:.7,lineHeight:1}}>✏</span>}
                       </div>
+                    ) : rowPriceFrom(work) ? (
+                      <div style={{display:"flex",alignItems:"center",gap:4,justifyContent:"flex-end"}}>
+                        <span style={{fontSize:11,color:"#b8904a",fontStyle:"italic"}}>от {fmt(rowPriceFrom(work))}</span>
+                        {currentUser.role!=="viewer" && <span onClick={()=>setEditingPriceRow(work.name)} title="Ввести точную цену" style={{cursor:"pointer",fontSize:10,color:"#9ca3af"}}>✏</span>}
+                      </div>
                     ) : (
                       <div style={{display:"flex",alignItems:"center",gap:4,justifyContent:"flex-end"}}>
                         <span style={{fontSize:10,color:"#9ca3af",fontStyle:"italic"}}>нет цены</span>
@@ -4383,7 +4450,7 @@ export default function App() {
             onClick={()=>setShowKP(false)}>
             <div style={{background:"#ffffff",color:"#111827",borderRadius:8,padding:"24px 28px",maxWidth:700,width:"100%",maxHeight:"90vh",overflowY:"auto",fontFamily:"'Inter','Segoe UI',sans-serif"}}
               onClick={e=>e.stopPropagation()}>
-              <KPContent proj={proj} kpItems={kpItems} discount={discount} discAmt={discAmt} final={final} note={note}/>
+              <KPContent proj={proj} kpItems={kpItems} fromItems={kpItems._fromItems||[]} discount={discount} discAmt={discAmt} final={final} note={note}/>
               <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:20}}>
                 <button style={{background:"#e5e7eb",color:"#9ca3af",border:"none",cursor:"pointer",padding:"10px 18px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:600}} onClick={()=>setShowKP(false)}>Закрыть</button>
                 <button style={{background:"#2563eb",color:"#f3f4f6",border:"none",cursor:"pointer",padding:"10px 20px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:700}} onClick={()=>{
@@ -4407,7 +4474,7 @@ export default function App() {
           </div>
           {/* Портал для печати — точная копия, отображается только при print */}
           <div id="kp-print-portal" style={{display:"none",fontFamily:"'Inter','Segoe UI',sans-serif",background:"#ffffff",padding:"20px 24px",color:"#111827"}}>
-            <KPContent proj={proj} kpItems={kpItems} discount={discount} discAmt={discAmt} final={final} note={note}/>
+            <KPContent proj={proj} kpItems={kpItems} fromItems={kpItems._fromItems||[]} discount={discount} discAmt={discAmt} final={final} note={note}/>
           </div>
         </>
       )}
