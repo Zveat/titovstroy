@@ -3979,7 +3979,7 @@ export default function App() {
                     const nameBlock = (
                       <div style={{minWidth:0}}>
                         {showBreadcrumb && <div style={{fontSize:10,color:"#374151",marginBottom:2}}>{work.cat} › {work.sub}</div>}
-                        <div style={{fontSize:13,color:filled?"#ffffff":"#9ca3af",lineHeight:1.3}}>{work.name}</div>
+                        <div style={{fontSize:13,color:filled?"#111827":"#9ca3af",lineHeight:1.3}}>{work.name}</div>
                         {tierHint && <div style={{fontSize:10,color:"#374151",marginTop:1}}>{tierHint}</div>}
                         {qty > 0 && (
                           <select className="cpx-sel" value={cpx}
