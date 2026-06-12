@@ -1166,26 +1166,31 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
 
   useEffect(() => {
     (async () => {
-      try { const res = await storage.get(USERS_KEY); setUsers(res ? JSON.parse(res.value) : DEFAULT_USERS); } catch { setUsers(DEFAULT_USERS); }
       try {
-        const cat = await storage.get(CATALOG_KEY);
-        if (cat) { const parsed = JSON.parse(cat.value); setCatalogOverrides(parsed); setLocalCatalog(parsed); }
-        else setLocalCatalog({ renames:{}, custom:[], hiddenCodes:[] });
-      } catch { setLocalCatalog({ renames:{}, custom:[], hiddenCodes:[] }); }
-      try {
-        const pr = await storage.get(PRICES_KEY);
-        const ov = pr ? JSON.parse(pr.value) : {};
-        setSavedOverrides(ov);
-        const allWorks = getEffectiveCatalog();
-        const lp = {};
-        for (const w of allWorks) {
-          const saved = ov[w.code];
-          lp[w.code] = {
-            tiers: saved?.tiers !== undefined ? saved.tiers.map(t=>({...t})) : (w.tiers||[]).map(t=>({...t})),
-            fixedPrice: saved?.fixedPrice !== undefined ? String(saved.fixedPrice) : w.fixedPrice !== undefined ? String(w.fixedPrice) : ""
-          };
-        }
-        setLocalPrices(lp);
+        const [res, cat, pr] = await Promise.all([
+          storage.get(USERS_KEY),
+          storage.get(CATALOG_KEY),
+          storage.get(PRICES_KEY),
+        ]);
+        try { setUsers(res ? JSON.parse(res.value) : DEFAULT_USERS); } catch { setUsers(DEFAULT_USERS); }
+        try {
+          if (cat) { const parsed = JSON.parse(cat.value); setCatalogOverrides(parsed); setLocalCatalog(parsed); }
+          else setLocalCatalog({ renames:{}, custom:[], hiddenCodes:[] });
+        } catch { setLocalCatalog({ renames:{}, custom:[], hiddenCodes:[] }); }
+        try {
+          const ov = pr ? JSON.parse(pr.value) : {};
+          setSavedOverrides(ov);
+          const allWorks = getEffectiveCatalog();
+          const lp = {};
+          for (const w of allWorks) {
+            const saved = ov[w.code];
+            lp[w.code] = {
+              tiers: saved?.tiers !== undefined ? saved.tiers.map(t=>({...t})) : (w.tiers||[]).map(t=>({...t})),
+              fixedPrice: saved?.fixedPrice !== undefined ? String(saved.fixedPrice) : w.fixedPrice !== undefined ? String(w.fixedPrice) : ""
+            };
+          }
+          setLocalPrices(lp);
+        } catch {}
       } catch {}
       setLoading(false);
     })();
@@ -2046,26 +2051,19 @@ export default function App() {
   const loadEstimates = useCallback(async () => {
     setLoadingList(true);
     try {
-      const result = await storage.get(STORAGE_KEY);
-      if (result) setEstimates(JSON.parse(result.value));
+      const [result, u, pr, cat] = await Promise.all([
+        storage.get(STORAGE_KEY),
+        storage.get(USERS_KEY),
+        storage.get(PRICES_KEY),
+        storage.get(CATALOG_KEY),
+      ]);
+      try { if (result) setEstimates(JSON.parse(result.value)); else setEstimates([]); } catch { setEstimates([]); }
+      try { if (u) setAllUsers(JSON.parse(u.value)); } catch {}
+      try { if (pr) setPriceOverrides(JSON.parse(pr.value)); } catch {}
+      try { if (cat) setCatalogOverrides(JSON.parse(cat.value)); } catch {}
     } catch(e) {
       setEstimates([]);
     }
-    // Загружаем пользователей для списка менеджеров
-    try {
-      const u = await storage.get(USERS_KEY);
-      if (u) setAllUsers(JSON.parse(u.value));
-    } catch {}
-    // Загружаем переопределения цен
-    try {
-      const pr = await storage.get(PRICES_KEY);
-      if (pr) setPriceOverrides(JSON.parse(pr.value));
-      // Загружаем каталог
-      try {
-        const cat = await storage.get(CATALOG_KEY);
-        if (cat) setCatalogOverrides(JSON.parse(cat.value));
-      } catch {}
-    } catch {}
     setLoadingList(false);
   }, []);
 
