@@ -1221,7 +1221,10 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
             const saved = ov[w.code];
             lp[w.code] = {
               tiers: saved?.tiers !== undefined ? saved.tiers.map(t=>({...t})) : (w.tiers||[]).map(t=>({...t})),
-              fixedPrice: saved?.fixedPrice !== undefined ? String(saved.fixedPrice) : w.fixedPrice !== undefined ? String(w.fixedPrice) : ""
+              fixedPrice: saved?.fixedPrice !== undefined ? String(saved.fixedPrice) : w.fixedPrice !== undefined ? String(w.fixedPrice) : "",
+              cost: saved?.cost !== undefined ? saved.cost : undefined,
+              margin: saved?.margin !== undefined ? saved.margin : undefined,
+              priceFrom: saved?.priceFrom !== undefined ? saved.priceFrom : undefined,
             };
           }
           setLocalPrices(lp);
@@ -1288,6 +1291,14 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
     }
     await storage.set(PRICES_KEY, JSON.stringify(overrides));
     setPriceOverrides(overrides); setSavedOverrides(overrides);
+    // Sync localPrices with saved cost/margin/priceFrom so inputs don't revert to base values
+    setLocalPrices(prev => {
+      const lp = {...prev};
+      for (const [code, entry] of Object.entries(overrides)) {
+        lp[code] = { ...(lp[code]||{}), cost: entry.cost, margin: entry.margin, priceFrom: entry.priceFrom };
+      }
+      return lp;
+    });
     Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
     setPriceSaving(false); setPriceMsg("✓ Прайс сохранён!"); setTimeout(()=>setPriceMsg(""),3000);
   };
@@ -1655,7 +1666,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                             <td style={{padding:"6px 8px",textAlign:"right"}}>
                               <input type="number" min="0"
                                 placeholder={baseCost !== null ? String(baseCost) : "—"}
-                                defaultValue={ovCost !== null && ovCost !== undefined ? ovCost : (baseCost !== null ? baseCost : "")}
+                                value={ovCost !== null && ovCost !== undefined ? ovCost : ""}
                                 onChange={e=>{
                                   const val = e.target.value === "" ? null : Number(e.target.value);
                                   setLocalPrices(prev=>({...prev,[w.code]:{...(prev?.[w.code]||{}),cost:val}}));
@@ -1668,8 +1679,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                             <td style={{padding:"6px 8px",textAlign:"right"}}>
                               <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:3}}>
                                 <input type="number" min="0" max="100" step="1"
-                                  placeholder={String(Math.round(baseMargin*100))}
-                                  defaultValue={Math.round(ovMargin*100)}
+                                  value={Math.round(ovMargin*100)}
                                   onChange={e=>{
                                     const val = e.target.value===""?baseMargin:Number(e.target.value)/100;
                                     setLocalPrices(prev=>({...prev,[w.code]:{...(prev?.[w.code]||{}),margin:val}}));
@@ -1688,7 +1698,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                             <td style={{padding:"6px 8px",textAlign:"right"}}>
                               <input type="number" min="0"
                                 placeholder="—"
-                                defaultValue={ov?.priceFrom !== undefined ? ov.priceFrom : (w.priceFrom || "")}
+                                value={ov?.priceFrom !== undefined ? ov.priceFrom : (w.priceFrom || "")}
                                 onChange={e=>{
                                   const val = e.target.value === "" ? undefined : Number(e.target.value);
                                   setLocalPrices(prev=>({...prev,[w.code]:{...(prev?.[w.code]||{}),priceFrom:val}}));
