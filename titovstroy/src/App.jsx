@@ -1487,6 +1487,14 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
             }} className="btn btn-g" style={{whiteSpace:"nowrap"}}>
               ＋ Добавить позицию
             </button>
+            {((localCatalog?.hiddenCats||[]).length > 0 || (localCatalog?.hiddenSubs||[]).length > 0) && (
+              <button onClick={async ()=>{
+                if (!window.confirm(`Показать все скрытые категории и подкатегории?\nСкрыто категорий: ${(localCatalog?.hiddenCats||[]).length}, подкатегорий: ${(localCatalog?.hiddenSubs||[]).length}`)) return;
+                await saveCatalog({...(localCatalog||{}), hiddenCats:[], hiddenSubs:[]});
+              }} className="btn btn-o" style={{whiteSpace:"nowrap",color:"#dc2626",borderColor:"#fca5a5"}}>
+                👁 Показать скрытые ({(localCatalog?.hiddenCats||[]).length + (localCatalog?.hiddenSubs||[]).length})
+              </button>
+            )}
           </div>
 
           {/* Быстрая навигация по категориям */}
