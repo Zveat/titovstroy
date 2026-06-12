@@ -2490,7 +2490,7 @@ export default function App() {
       works.forEach(w=>{
         const cat = w.category||"Работы";
         if(!catMap[cat]){ catMap[cat]={total:0,rows:[]}; catOrder.push(cat); }
-        const sum = Number(w.quantity||0)*Number(w.price||0);
+        const sum = w.priceFrom ? 0 : Number(w.quantity||0)*Number(w.price||0);
         catMap[cat].total += sum;
         catMap[cat].rows.push(Object.assign({},w,{sum:sum}));
       });
@@ -2527,8 +2527,8 @@ export default function App() {
             + (forDocx ? '<td width="45%"' : '<td') + ' style="font-size:8pt'+tdS+'">' + (w.name||"") + "</td>"
             + (forDocx ? '<td width="8%"' : '<td') + ' class="tc" style="font-size:8pt'+tdS+'">' + (w.unit||"\u043c\xb2") + "</td>"
             + (forDocx ? '<td width="8%"' : '<td') + ' class="tc" style="font-size:8pt'+tdS+'">' + (w.quantity||"") + "</td>"
-            + (forDocx ? '<td width="17%"' : '<td') + ' class="tr" style="font-size:8pt'+tdS+'">' + fmtN(w.price) + " \u20b8</td>"
-            + (forDocx ? '<td width="17%"' : '<td') + ' class="tr" style="font-size:8pt;font-weight:bold'+tdS+'">' + fmtN(w.sum) + " \u20b8</td>"
+            + (forDocx ? '<td width="17%"' : '<td') + ' class="tr" style="font-size:8pt'+tdS+'">' + (w.priceFrom ? "\u043e\u0442 "+fmtN(w.priceFrom)+" \u20b8" : fmtN(w.price) + " \u20b8") + "</td>"
+            + (forDocx ? '<td width="17%"' : '<td') + ' class="tr" style="font-size:8pt;font-weight:bold'+tdS+'">' + (w.priceFrom ? "\u0443\u0442\u043e\u0447\u043d\u044f\u0435\u0442\u0441\u044f" : fmtN(w.sum) + " \u20b8") + "</td>"
             + "</tr>";
         });
         html += "<tr style=\"background:#f3f4f6\">"
@@ -2979,7 +2979,7 @@ export default function App() {
       works.forEach(w=>{
         const cat=w.category||"\u0420\u0430\u0431\u043e\u0442\u044b";
         if(!catMap[cat]){catMap[cat]={total:0,rows:[]};catOrder.push(cat);}
-        const sum=Number(w.quantity||0)*Number(w.price||0);
+        const sum=w.priceFrom ? 0 : Number(w.quantity||0)*Number(w.price||0);
         catMap[cat].total+=sum; catMap[cat].rows.push(Object.assign({},w,{sum:sum}));
       });
       const rows=[];
@@ -2993,7 +2993,7 @@ export default function App() {
           if(w.subcategory&&w.subcategory!==lastSub){lastSub=w.subcategory;rows.push(new D.TableRow({children:[TC(w.subcategory,100,{span:6,i:true,bg:"e8e4f0",col:"5a3a8a"})]}));}
           n++;
           var bg=i%2===0?"f8f6f0":"f0ede5";
-          rows.push(new D.TableRow({children:[TC(String(n),5,{bg:bg,al:D.AlignmentType.CENTER}),TC(w.name||"",45,{bg:bg}),TC(w.unit||"\u043c\xb2",8,{bg:bg,al:D.AlignmentType.CENTER}),TC(String(w.quantity||""),8,{bg:bg,al:D.AlignmentType.CENTER}),TC(fmtN2(w.price)+" \u20b8",17,{bg:bg,al:D.AlignmentType.RIGHT}),TC(fmtN2(w.sum)+" \u20b8",17,{bg:bg,b:true,al:D.AlignmentType.RIGHT})]}));
+          rows.push(new D.TableRow({children:[TC(String(n),5,{bg:bg,al:D.AlignmentType.CENTER}),TC(w.name||"",45,{bg:bg}),TC(w.unit||"\u043c\xb2",8,{bg:bg,al:D.AlignmentType.CENTER}),TC(String(w.quantity||""),8,{bg:bg,al:D.AlignmentType.CENTER}),TC(w.priceFrom ? "\u043e\u0442 "+fmtN2(w.priceFrom)+" \u20b8" : fmtN2(w.price)+" \u20b8",17,{bg:bg,al:D.AlignmentType.RIGHT}),TC(w.priceFrom ? "\u0443\u0442\u043e\u0447\u043d\u044f\u0435\u0442\u0441\u044f" : fmtN2(w.sum)+" \u20b8",17,{bg:bg,b:true,al:D.AlignmentType.RIGHT})]}));
         });
         rows.push(new D.TableRow({children:[TC("\u0418\u0442\u043e\u0433\u043e \u043f\u043e \u0440\u0430\u0437\u0434\u0435\u043b\u0443 \u00ab"+cat+"\u00bb:",83,{span:5,i:true,bg:"ede8d5",al:D.AlignmentType.RIGHT}),TC(fmtN2(ct)+" \u20b8",17,{bg:"ede8d5",b:true,al:D.AlignmentType.RIGHT})]}));
       });
@@ -3967,8 +3967,14 @@ export default function App() {
                                   const w = catalog.find(x=>x.name===key)||catalog.find(x=>x.code===key);
                                   if(!w) return null;
                                   const qty = Number(r.qty||0);
-                                  const price = getPrice(w,qty,r.complexity||"std");
-                                  return {name:w.name,category:w.cat||"",subcategory:w.sub||"",quantity:qty,unit:w.unit||"м²",price:price?Math.round(price):0};
+                                  const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
+                                  const price = r.manualPrice !== undefined && r.manualPrice !== ""
+                                    ? Number(r.manualPrice)
+                                    : getPrice(w, qty, r.complexity||"std", cpxPct);
+                                  const ew = getEffectiveWork(w);
+                                  const pf = (!price && ew.priceFrom) ? ew.priceFrom : null;
+                                  const displayName = r.manualName !== undefined ? r.manualName : w.name;
+                                  return {name:displayName,category:w.cat||"",subcategory:w.sub||"",quantity:qty,unit:w.unit||"м²",price:price?Math.round(price):0,priceFrom:pf||undefined};
                                 }).filter(Boolean);
                                 const newContract = {id:Date.now().toString(),number:"",date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works,appendix:1,estId:est.id,estClient:est.proj?.name||"",estPhone:est.proj?.phone||"",estAddress:est.proj?.address||"",note:""};
                                 setCurrentContract(newContract);
