@@ -2108,6 +2108,8 @@ export default function App() {
 
   // Текущая смета в редакторе
   const [currentId, setCurrentId] = useState(null);
+  const [currentParentId, setCurrentParentId] = useState(null);
+  const [currentDsNumber, setCurrentDsNumber] = useState(null);
   const [activeCat, setActiveCat] = useState(cats[0]);
   const [activeSub, setActiveSub] = useState(Object.keys(Gdyn[cats[0]]||{})[0]);
   const [rows, setRows] = useState({});
@@ -2191,7 +2193,7 @@ export default function App() {
     if (_autoSaveRef.current) clearTimeout(_autoSaveRef.current);
     _autoSaveRef.current = setTimeout(() => {
       const exists = estimates.find(e => e.id === currentId);
-      const updated = { id:currentId, proj, rows, discount, markup, note, status:estStatus, comment:estComment, createdAt:exists?.createdAt||Date.now(), createdBy:exists?.createdBy||currentUser?.name, updatedAt:Date.now(), updatedBy:currentUser?.name, total:final, ...(exists?.parentId ? {parentId:exists.parentId, dsNumber:exists.dsNumber} : {}) };
+      const updated = { id:currentId, proj, rows, discount, markup, note, status:estStatus, comment:estComment, createdAt:exists?.createdAt||Date.now(), createdBy:exists?.createdBy||currentUser?.name, updatedAt:Date.now(), updatedBy:currentUser?.name, total:final, ...(currentParentId ? {parentId:currentParentId, dsNumber:currentDsNumber} : {}) };
       const newList = exists ? estimates.map(e=>e.id===currentId?updated:e) : [updated,...estimates];
       setEstimates(newList);
       saveEstimates(newList);
@@ -2399,6 +2401,8 @@ export default function App() {
   // ── Открыть смету на редактирование ──
   const openEstimate = (est) => {
     setCurrentId(est.id);
+    setCurrentParentId(est.parentId || null);
+    setCurrentDsNumber(est.dsNumber || null);
     const validNames = new Set(nonViewerUsers.map(u=>u.name));
     const p = est.proj || {...EMPTY_PROJ};
     setProj({...p, manager: validNames.has(p.manager||"") ? p.manager : ""});
@@ -2418,6 +2422,8 @@ export default function App() {
   const newEstimate = () => {
     const id = genId();
     setCurrentId(id);
+    setCurrentParentId(null);
+    setCurrentDsNumber(null);
     setProj({...EMPTY_PROJ, manager: currentUser.name, _createdBy: currentUser.name, _createdById: currentUser.id});
     setRows({});
     setDiscount(0);
@@ -2455,10 +2461,12 @@ export default function App() {
 
   // ── Новая доп. смета (ДС) к существующей ──
   const newSupplementaryEstimate = (parentEst) => {
-    const siblings = estimates.filter(e => e.parentId === parentEst.id || e.id === parentEst.id);
-    const dsNumber = siblings.filter(e => e.parentId === parentEst.id).length + 1;
+    const siblings = estimates.filter(e => e.parentId === parentEst.id);
+    const dsNumber = siblings.length + 1;
     const id = genId();
     setCurrentId(id);
+    setCurrentParentId(parentEst.id);
+    setCurrentDsNumber(dsNumber);
     setProj({...(parentEst.proj||EMPTY_PROJ), manager: currentUser.name});
     setRows({});
     setDiscount(0);
