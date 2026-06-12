@@ -4059,7 +4059,8 @@ export default function App() {
                                   const ew = getEffectiveWork(w);
                                   const pf = (!price && ew.priceFrom) ? Math.round(ew.priceFrom * mm) : null;
                                   const displayName = r.manualName !== undefined ? r.manualName : w.name;
-                                  return {name:displayName,category:w.cat||"",subcategory:w.sub||"",quantity:qty,unit:w.unit||"м²",price:price?Math.round(price):0,priceFrom:pf||undefined};
+                                  const displayUnit = r.manualUnit !== undefined ? r.manualUnit : (w.unit||"м²");
+                                  return {name:displayName,category:w.cat||"",subcategory:w.sub||"",quantity:qty,unit:displayUnit,price:price?Math.round(price):0,priceFrom:pf||undefined};
                                 }).filter(Boolean);
                                 const newContract = {id:Date.now().toString(),number:"",date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works,discount:est.discount||0,appendix:1,estId:est.id,estClient:est.proj?.name||"",estPhone:est.proj?.phone||"",estAddress:est.proj?.address||"",note:""};
                                 setCurrentContract(newContract);
@@ -4331,7 +4332,23 @@ export default function App() {
                         {/* Desktop: 5 cols via CSS class; Mobile: overridden to 2 cols */}
                         <style>{`@media(min-width:701px){.wrow{grid-template-columns:1fr 50px 120px 76px 90px}}.wrow-mob-extra{display:none}@media(max-width:700px){.wrow{grid-template-columns:1fr auto!important}.wrow-mob-extra{display:flex!important}}`}</style>
                         {nameBlock}
-                        <div className="wrow-desk" style={{textAlign:"center",fontSize:12,color:"#9ca3af",paddingTop:3}}>{work.unit}</div>
+                        <div className="wrow-desk" style={{textAlign:"center",fontSize:12,paddingTop:3,display:"flex",alignItems:"center",justifyContent:"center",gap:3}}>
+                          {r.editingUnit ? (
+                            <div style={{display:"flex",alignItems:"center",gap:3}}>
+                              <input autoFocus style={{width:46,background:"#f3f4f6",border:"1px solid #2563eb",borderRadius:4,padding:"2px 5px",fontSize:11,fontFamily:"inherit",outline:"none",textAlign:"center",color:"#111827"}}
+                                value={r.manualUnit !== undefined ? r.manualUnit : work.unit}
+                                onChange={e=>setRow(work.name,"manualUnit",e.target.value)}
+                                onBlur={()=>setRow(work.name,"editingUnit",false)}
+                                onKeyDown={e=>{if(e.key==="Enter"||e.key==="Escape")setRow(work.name,"editingUnit",false);}}/>
+                              {r.manualUnit !== undefined && <span onClick={()=>{setRow(work.name,"manualUnit",undefined);setRow(work.name,"editingUnit",false);}} title="Сбросить" style={{cursor:"pointer",fontSize:10,color:"#ef4444"}}>✕</span>}
+                            </div>
+                          ) : (
+                            <>
+                              <span style={{color:r.manualUnit!==undefined?"#2563eb":"#9ca3af",fontWeight:r.manualUnit!==undefined?700:400}}>{r.manualUnit !== undefined ? r.manualUnit : work.unit}</span>
+                              {currentUser.role!=="viewer" && <span onClick={()=>setRow(work.name,"editingUnit",true)} title="Изменить ед. изм." style={{cursor:"pointer",fontSize:10,color:"#9ca3af",opacity:.6,lineHeight:1}}>✏</span>}
+                            </>
+                          )}
+                        </div>
                         <div className="wrow-desk" style={{textAlign:"right",paddingTop:2}}>{priceCell}</div>
                         <div className="wrow-desk" style={{textAlign:"right"}}>{qtyInput}</div>
                         <div className="wrow-desk" style={{textAlign:"right",paddingTop:3}}>
