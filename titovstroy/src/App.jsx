@@ -4481,8 +4481,12 @@ export default function App() {
                 let stampB64 = "";
                 try {
                   const resp = await fetch("/stamp.jpg");
-                  const buf = await resp.arrayBuffer();
-                  stampB64 = "data:image/jpeg;base64," + btoa(String.fromCharCode(...new Uint8Array(buf)));
+                  const blob = await resp.blob();
+                  stampB64 = await new Promise(res => {
+                    const r = new FileReader();
+                    r.onload = () => res(r.result);
+                    r.readAsDataURL(blob);
+                  });
                 } catch(e) {}
                 const css = [
                   "@import url('https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;900&display=swap');",
