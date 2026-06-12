@@ -799,8 +799,7 @@ function AdminPanel({ currentUser, onClose }) {
                   <option value="viewer">👁 Наблюдатель</option>
                 </select>
               </div>
-              <button onClick={addUser}
-                style={{width:"100%",background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:7,padding:"9px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+              <button onClick={addUser} className="btn btn-g" style={{width:"100%",marginTop:4}}>
                 + Добавить
               </button>
             </div>
@@ -916,8 +915,7 @@ function AdminPanel({ currentUser, onClose }) {
                 {/* Форма добавления новой позиции */}
                 <div style={{marginTop:8,border:"1px dashed #eff6ff",borderRadius:8,padding:"10px 12px",marginBottom:8}}>
                   {!showAddWork ? (
-                    <button onClick={()=>setShowAddWork(true)}
-                      style={{width:"100%",background:"transparent",color:"#9ca3af",border:"none",padding:"6px",fontFamily:"inherit",fontSize:12,cursor:"pointer",fontWeight:600}}>
+                    <button onClick={()=>setShowAddWork(true)} className="btn btn-g" style={{width:"100%"}}>
                       ＋ Добавить позицию в каталог
                     </button>
                   ) : (() => {
@@ -1466,7 +1464,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                 </select>
               </div>
             </div>
-            <button onClick={addUser} style={{width:"100%",background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:8,padding:"11px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+            <button onClick={addUser} className="btn btn-g" style={{width:"100%"}}>
               + Добавить сотрудника
             </button>
           </div>
@@ -1485,7 +1483,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
               const cats = [...new Set(allW.map(w=>w.cat))];
               setNewWork({cat:cats[0]||"",catNew:"",sub:"",subNew:"",name:"",unit:"м²",cost:"",margin:40});
               setShowAddWork(true);
-            }} style={{background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:8,padding:"9px 16px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+            }} className="btn btn-g" style={{whiteSpace:"nowrap"}}>
               ＋ Добавить позицию
             </button>
           </div>
@@ -2004,7 +2002,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
           ))}
           <div style={{padding:"8px 12px",borderTop:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <button onClick={()=>upd({works:[...(contract.works||[]),{name:"",quantity:0,unit:"м²",price:0}]})}
-              style={{background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:6,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+              className="btn btn-g" style={{fontSize:11,padding:"5px 12px"}}>
               + Добавить позицию
             </button>
             <div style={{display:"flex",alignItems:"center",gap:12}}>
@@ -2052,7 +2050,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       <div style={{display:"flex",gap:8}}>
         <button className="btn btn-o" style={{flex:1}} onClick={onBack}>← Назад</button>
         <div style={{flex:1,display:"flex",flexDirection:"column",gap:4}}>
-          <button onClick={()=>onPdf(withStamp)} style={{width:"100%",background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+          <button onClick={()=>onPdf(withStamp)} className="btn btn-o" style={{width:"100%"}}>
             📄 PDF
           </button>
           <div onClick={()=>setWithStamp(p=>!p)} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",justifyContent:"center"}}>
@@ -2062,7 +2060,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
             <span style={{fontSize:10,color:withStamp?"#2563eb":"#9ca3af"}}>С печатью</span>
           </div>
         </div>
-        <button onClick={onGDoc} style={{flex:1,background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+        <button onClick={onGDoc} className="btn btn-o" style={{flex:1}}>
           📋 Google Doc
         </button>
       </div>
