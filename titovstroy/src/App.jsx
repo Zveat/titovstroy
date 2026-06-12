@@ -2256,12 +2256,14 @@ export default function App() {
     for (const cat of cats) for (const sub of Object.keys(Gdyn[cat]||{})) for (const w of Gdyn[cat]?.[sub]||[]) {
       const qty = Number((rows[w.name]||{}).qty||0);
       if (qty <= 0) continue;
+      const r = rows[w.name]||{};
+      const displayName = r.manualName !== undefined ? r.manualName : w.name;
       const price = rowPrice(w);
       if (price) {
-        out.push({ ...w, qty, price: price * mm, total: qty * price * mm });
+        out.push({ ...w, name: displayName, qty, price: price * mm, total: qty * price * mm });
       } else {
         const pf = rowPriceFrom(w);
-        if (pf) fromOut.push({ ...w, qty, priceFrom: pf });
+        if (pf) fromOut.push({ ...w, name: displayName, qty, priceFrom: pf });
       }
     }
     out._fromItems = fromOut;
@@ -4200,7 +4202,21 @@ export default function App() {
                     const nameBlock = (
                       <div style={{minWidth:0}}>
                         {showBreadcrumb && <div style={{fontSize:10,color:"#374151",marginBottom:2}}>{work.cat} › {work.sub}</div>}
-                        <div style={{fontSize:13,color:filled?"#111827":"#9ca3af",lineHeight:1.3}}>{work.name}</div>
+                        {r.editingName ? (
+                          <div style={{display:"flex",alignItems:"center",gap:4}}>
+                            <input autoFocus style={{fontSize:13,background:"#f3f4f6",border:"1px solid #2563eb",color:"#111827",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",outline:"none",width:"100%",minWidth:0}}
+                              value={r.manualName !== undefined ? r.manualName : work.name}
+                              onChange={e=>setRow(work.name,"manualName",e.target.value)}
+                              onBlur={()=>setRow(work.name,"editingName",false)}
+                              onKeyDown={e=>{if(e.key==="Enter"||e.key==="Escape")setRow(work.name,"editingName",false);}}/>
+                            {r.manualName !== undefined && <span onClick={()=>{setRow(work.name,"manualName",undefined);setRow(work.name,"editingName",false);}} title="Сбросить" style={{cursor:"pointer",fontSize:10,color:"#ef4444",flexShrink:0}}>✕</span>}
+                          </div>
+                        ) : (
+                          <div style={{display:"flex",alignItems:"center",gap:4}}>
+                            <span style={{fontSize:13,color:filled?"#111827":"#9ca3af",lineHeight:1.3}}>{r.manualName !== undefined ? r.manualName : work.name}</span>
+                            {currentUser.role!=="viewer" && <span onClick={()=>setRow(work.name,"editingName",true)} title="Изменить название" style={{cursor:"pointer",fontSize:10,color:"#9ca3af",opacity:.6,flexShrink:0,lineHeight:1}}>✏</span>}
+                          </div>
+                        )}
                         {tierHint && <div style={{fontSize:10,color:"#374151",marginTop:1}}>{tierHint}</div>}
                         {qty > 0 && currentUser.role!=="viewer" && (
                           <div style={{display:"flex",alignItems:"center",gap:4,marginTop:4}}>
