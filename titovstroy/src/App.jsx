@@ -214,10 +214,12 @@ function getBasePrice(work) {
   return null;
 }
 
-function getPrice(work, qty, complexity) {
+function getPrice(work, qty, complexity, cpxPct) {
   if (!qty || qty <= 0) return null;
   const w = getEffectiveWork(work);
-  const mult = COMPLEXITY.find(c => c.key === complexity)?.mult || 1;
+  const mult = cpxPct !== undefined && cpxPct !== null
+    ? 1 + cpxPct / 100
+    : (COMPLEXITY.find(c => c.key === complexity)?.mult || 1);
   let price = null;
   if (w.tiers && w.tiers.length > 0) {
     for (const t of w.tiers) {
@@ -1043,7 +1045,7 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
                     <thead>
                       <tr style={{background:"#2a2a3a",color:"#aaa"}}>
-                        {["№","Раздел","Наименование","Ед.","Объём","Слож.","Цена","Сумма"].map(h=>(
+                        {["№","Раздел","Наименование","Ед.","Объём","Цена","Сумма"].map(h=>(
                           <th key={h} style={{padding:"6px 8px",textAlign:["№","Ед.","Объём"].includes(h)?"center":"left",fontSize:10,fontWeight:600,letterSpacing:.3}}>{h}</th>
                         ))}
                       </tr>
@@ -1058,7 +1060,6 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
                             <td style={{padding:"6px 8px",fontWeight:600,fontSize:12}}>{item.name}</td>
                             <td style={{padding:"6px 8px",textAlign:"center",color:"#888",fontSize:11}}>{item.unit}</td>
                             <td style={{padding:"6px 8px",textAlign:"center",fontWeight:500}}>{item.qty}</td>
-                            <td style={{padding:"6px 8px",fontSize:11,color:"#888"}}>{COMPLEXITY.find(c=>c.key===item.cpx)?.label.split(" ")[0]||"Стандарт"}</td>
                             <td style={{padding:"6px 8px",textAlign:"right",color:"#555"}}>{fmt(item.price)} ₸</td>
                             <td style={{padding:"6px 8px",textAlign:"right",fontWeight:700,fontSize:12}}>{fmt(item.total)} ₸</td>
                           </tr>
@@ -1067,7 +1068,7 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
                     </tbody>
                     <tfoot>
                       <tr style={{background:"#e8e4da",borderTop:"2px solid #ccc"}}>
-                        <td colSpan={7} style={{padding:"7px 8px",fontSize:12,fontWeight:700,color:"#444",textAlign:"right"}}>Итого по разделу «{cat}»:</td>
+                        <td colSpan={6} style={{padding:"7px 8px",fontSize:12,fontWeight:700,color:"#444",textAlign:"right"}}>Итого по разделу «{cat}»:</td>
                         <td style={{padding:"7px 8px",textAlign:"right",fontWeight:800,fontSize:13,color:"#b8904a"}}>{fmt(catTotal)} ₸</td>
                       </tr>
                     </tfoot>
@@ -1992,6 +1993,7 @@ export default function App() {
   const [rows, setRows] = useState({});
   const [proj, setProj] = useState({...EMPTY_PROJ});
   const [discount, setDiscount] = useState(0);
+  const [markup, setMarkup] = useState(0); // внутреннее повышение цены — клиенту не показывается
   const [note, setNote] = useState("");
   const [showKP, setShowKP] = useState(false);
   const [editPrices, setEditPrices] = useState(false);
@@ -2113,7 +2115,8 @@ export default function App() {
   const rowPrice = (work) => {
     const r = rows[work.name] || {};
     if (r.manualPrice !== undefined && r.manualPrice !== "") return Number(r.manualPrice);
-    return getPrice(work, Number(r.qty || 0), r.complexity || "std");
+    const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
+    return getPrice(work, Number(r.qty || 0), r.complexity || "std", cpxPct);
   };
   const rowTotal = (work) => {
     const qty = Number((rows[work.name] || {}).qty || 0);
@@ -2133,9 +2136,10 @@ export default function App() {
           const r = rows[w.name] || {};
           const qty = Number(r.qty || 0);
           if (!qty) continue;
+          const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
           const price = (r.manualPrice !== undefined && r.manualPrice !== "")
             ? Number(r.manualPrice)
-            : getPrice(w, qty, r.complexity || "std");
+            : getPrice(w, qty, r.complexity || "std", cpxPct);
           if (price) subTotal += qty * price;
         }
         subMap[cat+"||"+sub] = subTotal;
@@ -2149,14 +2153,17 @@ export default function App() {
   const subSum = (cat, sub) => allSumMap.subMap[cat+"||"+sub] || 0;
   const catSum = (cat) => allSumMap.catMap[cat] || 0;
   const grand = allSumMap.grand;
-  const discAmt = grand * discount / 100;
-  const final = grand - discAmt;
+  const markupAmt = grand * markup / 100;
+  const grandWithMarkup = grand + markupAmt; // база для клиента (markup скрыт)
+  const discAmt = grandWithMarkup * discount / 100;
+  const final = grandWithMarkup - discAmt;
   const kpItems = useMemo(() => {
+    const mm = 1 + markup / 100;
     const out = [];
     for (const cat of cats) for (const sub of Object.keys(Gdyn[cat]||{})) for (const w of Gdyn[cat]?.[sub]||[]) {
       const qty = Number((rows[w.name]||{}).qty||0);
       const price = rowPrice(w);
-      if (qty > 0 && price) out.push({ ...w, qty, price, total: qty * price, cpx: (rows[w.name]||{}).complexity||"std" });
+      if (qty > 0 && price) out.push({ ...w, qty, price: price * mm, total: qty * price * mm });
     }
     return out;
   }, [rows]);
@@ -2231,6 +2238,7 @@ export default function App() {
     setProj({...p, manager: validNames.has(p.manager||"") ? p.manager : ""});
     setRows(est.rows || {});
     setDiscount(est.discount || 0);
+    setMarkup(est.markup || 0);
     setNote(est.note || "");
     setEstStatus(est.status || "new");
     setEstComment(est.comment || "");
@@ -2247,6 +2255,7 @@ export default function App() {
     setProj({...EMPTY_PROJ, manager: currentUser.name, _createdBy: currentUser.name, _createdById: currentUser.id});
     setRows({});
     setDiscount(0);
+    setMarkup(0);
     setNote("");
     setEstStatus("new");
     setEstComment("");
@@ -2261,7 +2270,7 @@ export default function App() {
     const exists = estimates.find(e => e.id === currentId);
     const updated = {
       id: currentId,
-      proj, rows, discount, note,
+      proj, rows, discount, markup, note,
       status: estStatus,
       comment: estComment,
       createdAt: exists?.createdAt || Date.now(),
@@ -4043,6 +4052,7 @@ export default function App() {
                     const r = rows[work.name]||{};
                     const qty = Number(r.qty||0);
                     const cpx = r.complexity||"std";
+                    const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : (cpx==="mid"?20:cpx==="hard"?50:0);
                     const price = rowPrice(work);
                     const basePrice = getBasePrice(work);
                     const displayPrice = price ?? basePrice;
@@ -4087,11 +4097,15 @@ export default function App() {
                         {showBreadcrumb && <div style={{fontSize:10,color:"#374151",marginBottom:2}}>{work.cat} › {work.sub}</div>}
                         <div style={{fontSize:13,color:filled?"#111827":"#9ca3af",lineHeight:1.3}}>{work.name}</div>
                         {tierHint && <div style={{fontSize:10,color:"#374151",marginTop:1}}>{tierHint}</div>}
-                        {qty > 0 && (
-                          <select className="cpx-sel" value={cpx}
-                            onChange={e=>{setRow(work.name,"complexity",e.target.value);setRow(work.name,"manualPrice",undefined);}}>
-                            {COMPLEXITY.map(c=><option key={c.key} value={c.key}>{c.label}</option>)}
-                          </select>
+                        {qty > 0 && currentUser.role!=="viewer" && (
+                          <div style={{display:"flex",alignItems:"center",gap:4,marginTop:4}}>
+                            <span style={{fontSize:10,color:"#9ca3af"}}>Надбавка:</span>
+                            <input className="num" type="number" min="-50" max="300" step="5"
+                              style={{width:52,fontSize:11,padding:"2px 6px",textAlign:"right"}}
+                              value={cpxPct}
+                              onChange={e=>{setRow(work.name,"cpxPct",Number(e.target.value));setRow(work.name,"manualPrice",undefined);}}/>
+                            <span style={{fontSize:10,color:"#9ca3af"}}>%</span>
+                          </div>
                         )}
                         {showFinancial && currentUser.role!=="viewer" && qty > 0 && (
                           <div style={{display:"flex",flexWrap:"wrap",gap:"4px 12px",marginTop:4,fontSize:10,color:"#6b7280"}}>
@@ -4205,6 +4219,18 @@ export default function App() {
                       {discount>0&&(
                         <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#dc2626",marginTop:6}}>
                           <span>Скидка {discount}%</span><span>− {fmt(discAmt)} ₸</span>
+                        </div>
+                      )}
+                      {currentUser.role!=="viewer" && (
+                        <div style={{marginTop:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <span style={{fontSize:12,color:"#9ca3af"}}>Повышение % <span style={{fontSize:10,color:"#d97706"}}>🔒</span></span>
+                          <input className="num" style={{width:54}} type="number" min="0" max="300"
+                            value={markup} onChange={e=>setMarkup(Math.max(0,Number(e.target.value)))}/>
+                        </div>
+                      )}
+                      {markup>0&&currentUser.role!=="viewer"&&(
+                        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#d97706",marginTop:4}}>
+                          <span>Повышение {markup}%</span><span>+ {fmt(markupAmt)} ₸</span>
                         </div>
                       )}
                       <div style={{borderTop:"1px solid #e5e7eb",marginTop:12,paddingTop:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
