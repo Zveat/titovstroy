@@ -322,8 +322,18 @@ const simpleHash = (s) => btoa(encodeURIComponent(s)).split("").reverse().join("
 const _mem = {};
 const _race = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(null), ms))]);
 const _fbKey = (k) => k.replace(/[^a-zA-Z0-9_]/g, "_"); // Firebase: только буквы/цифры/_
+const _TS_SUFFIX = "__wts"; // timestamp последней локальной записи
 const storage = {
   async get(key) {
+    // Если localStorage была записана менее 30с назад — использовать её (свежая локальная запись)
+    try {
+      const ts = parseInt(localStorage.getItem(key + _TS_SUFFIX) || "0");
+      if (Date.now() - ts < 30000) {
+        const v = localStorage.getItem(key);
+        if (v) return { value: v };
+      }
+    } catch(e) {}
+    // Иначе пробуем Firebase (для синхронизации между устройствами)
     try {
       if (_fbDb) {
         const snap = await _race(get(ref(_fbDb, _fbKey(key))), 5000);
@@ -335,13 +345,13 @@ const storage = {
   },
   async set(key, value) {
     const parsed = (() => { try { return JSON.parse(value); } catch { return value; } })();
-    try {
-      if (_fbDb) {
-        await _race(set(ref(_fbDb, _fbKey(key)), parsed), 5000);
-      }
-    } catch(e) { console.warn("FB set error:", e); }
-    try { localStorage.setItem(key, value); } catch(e) {}
+    // Сначала localStorage — всегда надёжно и мгновенно
+    try { localStorage.setItem(key, value); localStorage.setItem(key + _TS_SUFFIX, Date.now().toString()); } catch(e) {}
     _mem[key] = value;
+    // Firebase в фоне — не блокируем UI, но обеспечиваем синхронизацию
+    if (_fbDb) {
+      set(ref(_fbDb, _fbKey(key)), parsed).catch(e => console.warn("FB set error:", e));
+    }
     return { value };
   },
 };
