@@ -1995,7 +1995,23 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
               style={{background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:6,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
               + Добавить позицию
             </button>
-            <div style={{fontWeight:800,fontSize:16,color:"#111827"}}>{fmt(total)} ₸</div>
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              <div style={{display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#9ca3af"}}>
+                <span>Скидка</span>
+                <input type="number" min="0" max="100" value={contract.discount||0}
+                  onChange={e=>upd({discount:Math.min(100,Math.max(0,Number(e.target.value)||0))})}
+                  style={{width:46,background:"#f3f4f6",border:"1px solid #e5e7eb",color:"#111827",borderRadius:4,padding:"3px 6px",fontSize:11,textAlign:"right",fontFamily:"inherit",outline:"none"}}/>
+                <span>%</span>
+              </div>
+              {(contract.discount||0)>0 ? (
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:11,color:"#dc2626"}}>− {fmt(Math.round(total*(contract.discount||0)/100))} ₸</div>
+                  <div style={{fontWeight:800,fontSize:16,color:"#111827"}}>{fmt(Math.round(total*(1-(contract.discount||0)/100)))} ₸</div>
+                </div>
+              ) : (
+                <div style={{fontWeight:800,fontSize:16,color:"#111827"}}>{fmt(total)} ₸</div>
+              )}
+            </div>
           </div>
         </div>
       </div>}
