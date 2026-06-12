@@ -609,10 +609,13 @@ function AdminPanel({ currentUser, onClose }) {
     const finalSub = newWork.sub === "__new__" ? (newWork.subNew||"").trim() : newWork.sub.trim();
     if (!newWork.name.trim() || !finalCat || !finalSub) return;
     const code = "CUSTOM-" + Date.now();
-    const work = { code, cat:finalCat, sub:finalSub, name:newWork.name.trim(), unit:newWork.unit||"м²", tiers:[], fixedPrice:null };
+    const cost = Number(newWork.cost) || 0;
+    const marginPct = Math.min(99, Math.max(0, Number(newWork.margin) || 40));
+    const fixedPrice = cost > 0 ? Math.round(cost / (1 - marginPct / 100)) : null;
+    const work = { code, cat:finalCat, sub:finalSub, name:newWork.name.trim(), unit:newWork.unit||"м²", tiers:[], cost, margin: marginPct/100, fixedPrice };
     const cat = { ...(localCatalog||{}), custom: [...((localCatalog||{}).custom||[]), work] };
     await saveCatalog(cat);
-    setNewWork({cat:"", catNew:"", sub:"", subNew:"", name:"", unit:"м²"});
+    setNewWork({cat:"", catNew:"", sub:"", subNew:"", name:"", unit:"м²", cost:"", margin:40});
     setShowAddWork(false);
     Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
@@ -1410,7 +1413,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
         /* ПРАЙС-ЛИСТ */
         <div style={{paddingBottom:90}}>
           {/* Поиск + кнопка добавить */}
-          <div style={{display:"flex",gap:10,marginBottom:16,alignItems:"center"}}>
+          <div style={{display:"flex",gap:10,marginBottom:10,alignItems:"center"}}>
             <input className="fi" placeholder="🔍 Поиск по названию, подкатегории..." value={priceSearch} onChange={e=>setPriceSearch(e.target.value)} style={{flex:1}}/>
             <button onClick={()=>{
               const allW = getEffectiveCatalog();
@@ -1421,6 +1424,22 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
               ＋ Добавить позицию
             </button>
           </div>
+
+          {/* Быстрая навигация по категориям */}
+          {!priceSearch && (()=>{
+            const navCats = [...new Set(getEffectiveCatalog().map(w=>w.cat))];
+            return navCats.length > 1 ? (
+              <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:12,padding:"8px 10px",background:"#f3f4f6",borderRadius:8,border:"1px solid #e5e7eb"}}>
+                <span style={{fontSize:10,color:"#9ca3af",alignSelf:"center",marginRight:4,whiteSpace:"nowrap"}}>↓ Перейти:</span>
+                {navCats.map(cat=>(
+                  <button key={cat} onClick={()=>document.getElementById("price-cat-"+cat.replace(/\s/g,"_"))?.scrollIntoView({behavior:"smooth",block:"start"})}
+                    style={{fontSize:11,padding:"3px 10px",borderRadius:5,border:"1px solid #e5e7eb",background:"#ffffff",color:"#374151",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            ) : null;
+          })()}
 
           {/* Форма добавления */}
           {showAddWork && (()=>{
@@ -1514,7 +1533,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                     const origCat = catMap[cat]._origCat;
                     // Category header
                     rows.push(
-                      <tr key={"cat-"+cat}>
+                      <tr key={"cat-"+cat} id={"price-cat-"+cat.replace(/\s/g,"_")}>
                         <td colSpan={8} style={{padding:"10px 12px 6px",paddingTop:rows.length===0?10:20}}>
                           <div style={{display:"flex",alignItems:"center",gap:6}}>
                             {editingCat?.key===origCat ? (
@@ -1652,6 +1671,12 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
               </tbody>
             </table>
           </div>
+
+          {/* ↑ Наверх */}
+          <button onClick={()=>document.getElementById("price-cat-"+getEffectiveCatalog().map(w=>w.cat)[0]?.replace(/\s/g,"_"))?.scrollIntoView({behavior:"smooth",block:"start"})}
+            style={{position:"fixed",bottom:80,right:32,background:"#2563eb",color:"#f3f4f6",border:"none",borderRadius:999,width:40,height:40,fontSize:18,cursor:"pointer",boxShadow:"0 2px 10px rgba(0,0,0,.2)",zIndex:30,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            ↑
+          </button>
 
           {/* Кнопка сохранить */}
           <div style={{position:"fixed",bottom:0,left:"220px",right:0,background:"#f3f4f6",borderTop:"1px solid #e5e7eb",padding:"12px 24px",zIndex:20}}>
