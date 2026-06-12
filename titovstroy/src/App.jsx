@@ -697,18 +697,18 @@ function AdminPanel({ currentUser, onClose }) {
                       <div style={{fontWeight:700,fontSize:13,color:"#111111"}}>{u.name}</div>
                       <div style={{fontSize:11,color:"#666666",marginTop:2}}>
                         @{u.login} · {roleLabel(u.role)}
-                        {u.id === currentUser.id && <span style={{color:"#2563eb",marginLeft:6}}>(вы)</span>}
+                        {u.id === currentUser.id && <span style={{color:"#aaaaaa",marginLeft:6}}>(вы)</span>}
                       </div>
                     </div>
                     <div style={{display:"flex",gap:6,alignItems:"center"}}>
                       <button
                         onClick={()=>{setEditingUser(editingUser?.id===u.id?null:{id:u.id,name:u.name,login:u.login});setEditingPass(null);}}
-                        style={{background:"rgba(37,99,235,.1)",color:"#2563eb",border:"1px solid rgba(100,100,200,.2)",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+                        style={{background:"#f2f2f1",color:"#555555",border:"1px solid #e8e7e5",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
                         ✏ Изменить
                       </button>
                       <button
                         onClick={()=>{setEditingPass(editingPass?.id===u.id?null:{id:u.id,val:""});setEditingUser(null);}}
-                        style={{background:"rgba(37,99,235,.08)",color:"#2563eb",border:"1px solid rgba(37,99,235,.1)",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+                        style={{background:"#f2f2f1",color:"#555555",border:"1px solid #e8e7e5",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
                         🔑
                       </button>
                       {u.id !== currentUser.id && (
@@ -757,7 +757,7 @@ function AdminPanel({ currentUser, onClose }) {
 
             {/* Добавить */}
             <div style={{background:"#f8f8f7",border:"1px solid #e8e7e5",borderRadius:9,padding:"14px 16px"}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#2563eb",letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>+ Новый пользователь</div>
+              <div style={{fontSize:11,fontWeight:700,color:"#666666",letterSpacing:.8,textTransform:"uppercase",marginBottom:10}}>+ Новый пользователь</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
                 <input style={{background:"#ffffff",border:"1px solid #e8e7e5",color:"#111111",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none"}} placeholder="Имя" value={newName} onChange={e=>setNewName(e.target.value)}/>
                 <input style={{background:"#ffffff",border:"1px solid #e8e7e5",color:"#111111",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none"}} placeholder="Логин" value={newLogin} onChange={e=>setNewLogin(e.target.value)}/>
@@ -769,7 +769,7 @@ function AdminPanel({ currentUser, onClose }) {
                 </select>
               </div>
               <button onClick={addUser}
-                style={{width:"100%",background:"rgba(37,99,235,.1)",color:"#2563eb",border:"1px solid rgba(37,99,235,.12)",borderRadius:7,padding:"9px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                style={{width:"100%",background:"#f2f2f1",color:"#555555",border:"1px solid #e8e7e5",borderRadius:7,padding:"9px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>
                 + Добавить
               </button>
             </div>
@@ -791,12 +791,12 @@ function AdminPanel({ currentUser, onClose }) {
                 onChange={e=>setPriceSearch(e.target.value)}
               />
               {/* Список — скроллится */}
-              <div className="price-scroll" style={{flex:1,overflowY:"scroll",paddingRight:4,scrollbarWidth:"auto",scrollbarColor:"#2563eb #e8e7e5"}}>
+              <div className="price-scroll" style={{flex:1,overflowY:"scroll",paddingRight:4,scrollbarWidth:"auto",scrollbarColor:"#d4d4d2 #f5f5f4"}}>
                 <style>{`
                   .price-scroll::-webkit-scrollbar{width:10px}
                   .price-scroll::-webkit-scrollbar-track{background:#e8e7e5;border-radius:5px}
-                  .price-scroll::-webkit-scrollbar-thumb{background:#2563eb;border-radius:5px;min-height:40px}
-                  .price-scroll::-webkit-scrollbar-thumb:hover{background:#2563eb}
+                  .price-scroll::-webkit-scrollbar-thumb{background:#d4d4d2;border-radius:5px;min-height:40px}
+                  .price-scroll::-webkit-scrollbar-thumb:hover{background:#aaaaaa}
                 `}</style>
                 {(() => {
                   const allWorks = getEffectiveCatalog();
@@ -829,13 +829,13 @@ function AdminPanel({ currentUser, onClose }) {
                           <input autoFocus value={editingCat.val}
                             onChange={e=>setEditingCat(p=>({...p,val:e.target.value}))}
                             onKeyDown={e=>{if(e.key==="Enter")renameCat(origCat,editingCat.val);if(e.key==="Escape")setEditingCat(null);}}
-                            style={{flex:1,background:"#f8f8f7",border:"1px solid #2563eb",color:"#2563eb",borderRadius:5,padding:"3px 8px",fontFamily:"inherit",fontSize:11,fontWeight:700,outline:"none"}}/>
+                            style={{flex:1,background:"#f8f8f7",border:"1px solid #e8e7e5",color:"#111111",borderRadius:5,padding:"3px 8px",fontFamily:"inherit",fontSize:11,fontWeight:700,outline:"none"}}/>
                           <button onClick={()=>renameCat(origCat,editingCat.val)} style={{...btnS,color:"#16a34a"}}>✓</button>
                           <button onClick={()=>setEditingCat(null)} style={{...btnS,color:"#666666"}}>✕</button>
                         </div>
                       ) : (
                         <div style={{display:"flex",alignItems:"center",gap:4,padding:"4px 0",borderBottom:"1px solid #e8e7e5",marginBottom:6}}>
-                          <span style={{fontSize:10,fontWeight:700,color:"#2563eb",letterSpacing:1,textTransform:"uppercase",flex:1}}>{cat}</span>
+                          <span style={{fontSize:10,fontWeight:700,color:"#666666",letterSpacing:.8,textTransform:"uppercase",flex:1}}>{cat}</span>
                           <button onClick={()=>setEditingCat({key:origCat,val:cat})} title="Переименовать категорию" style={{...btnS,color:"#666666"}}>✏️</button>
                           <button onClick={()=>{ if(window.confirm(`Удалить всю категорию "${cat}"?`)) deleteCat(origCat); }} title="Удалить категорию" style={{...btnS,color:"#dc2626"}}>🗑</button>
                         </div>
@@ -850,7 +850,7 @@ function AdminPanel({ currentUser, onClose }) {
                               <input autoFocus value={editingSub.val}
                                 onChange={e=>setEditingSub(p=>({...p,val:e.target.value}))}
                                 onKeyDown={e=>{if(e.key==="Enter")renameSub(origCat,origSub,editingSub.val);if(e.key==="Escape")setEditingSub(null);}}
-                                style={{flex:1,background:"#f8f8f7",border:"1px solid #2563eb",color:"#aaaaaa",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",fontSize:10,outline:"none"}}/>
+                                style={{flex:1,background:"#f8f8f7",border:"1px solid #e8e7e5",color:"#aaaaaa",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",fontSize:10,outline:"none"}}/>
                               <button onClick={()=>renameSub(origCat,origSub,editingSub.val)} style={{...btnS,color:"#16a34a"}}>✓</button>
                               <button onClick={()=>setEditingSub(null)} style={{...btnS,color:"#666666"}}>✕</button>
                             </div>
@@ -886,7 +886,7 @@ function AdminPanel({ currentUser, onClose }) {
                 <div style={{marginTop:8,border:"1px dashed rgba(37,99,235,.15)",borderRadius:8,padding:"10px 12px",marginBottom:8}}>
                   {!showAddWork ? (
                     <button onClick={()=>setShowAddWork(true)}
-                      style={{width:"100%",background:"transparent",color:"#2563eb",border:"none",padding:"6px",fontFamily:"inherit",fontSize:12,cursor:"pointer",fontWeight:700}}>
+                      style={{width:"100%",background:"transparent",color:"#555555",border:"none",padding:"6px",fontFamily:"inherit",fontSize:12,cursor:"pointer",fontWeight:600}}>
                       ＋ Добавить позицию в каталог
                     </button>
                   ) : (() => {
@@ -897,7 +897,7 @@ function AdminPanel({ currentUser, onClose }) {
                     const selStyle = {...inpStyle, cursor:"pointer"};
                     return (
                       <div>
-                        <div style={{fontSize:11,fontWeight:700,color:"#2563eb",marginBottom:10}}>Новая позиция</div>
+                        <div style={{fontSize:11,fontWeight:600,color:"#333333",marginBottom:10}}>Новая позиция</div>
 
                         {/* Категория */}
                         <div style={{marginBottom:6}}>
@@ -948,7 +948,7 @@ function AdminPanel({ currentUser, onClose }) {
 
                         <div style={{display:"flex",gap:6}}>
                           <button onClick={addCustomWork}
-                            style={{flex:1,background:"rgba(37,99,235,.12)",color:"#2563eb",border:"1px solid rgba(37,99,235,.15)",borderRadius:6,padding:"7px",fontFamily:"inherit",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                            style={{flex:1,background:"#f2f2f1",color:"#555555",border:"1px solid #e8e7e5",borderRadius:6,padding:"7px",fontFamily:"inherit",fontSize:12,fontWeight:700,cursor:"pointer"}}>
                             ✓ Добавить
                           </button>
                           <button onClick={()=>{setShowAddWork(false);setNewWork({cat:"",sub:"",name:"",unit:"м²"});}}
@@ -998,9 +998,9 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
           <div style={{fontSize:12,color:"#aaaaaa",marginTop:3}}>на услуги ремонта и отделки недвижимости</div>
         </div>
         <div style={{textAlign:"right"}}>
-          <div style={{fontWeight:900,fontSize:16,color:"#2563eb"}}>TitovStroy</div>
+          <div style={{fontWeight:900,fontSize:16,color:"#111111"}}>TitovStroy</div>
           <div style={{fontSize:11,color:"#666666",marginTop:2}}>БИН 231040002769</div>
-          <div style={{fontSize:11,color:"#666666"}}>WA: <span style={{color:"#2563eb"}}>+7 707 982 4915</span></div>
+          <div style={{fontSize:11,color:"#666666"}}>WA: <span style={{color:"#555555"}}>+7 707 982 4915</span></div>
         </div>
       </div>
 
@@ -1031,7 +1031,7 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
                   {/* Заголовок категории */}
                   <div style={{background:"#ffffff",color:"#111111",padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center",borderRadius:"6px 6px 0 0"}}>
                     <span style={{fontWeight:700,fontSize:13,letterSpacing:.5,textTransform:"uppercase"}}>{cat}</span>
-                    <span style={{fontWeight:700,fontSize:13,color:"#2563eb"}}>{fmt(catTotal)} ₸</span>
+                    <span style={{fontWeight:700,fontSize:13,color:"#111111"}}>{fmt(catTotal)} ₸</span>
                   </div>
                   {/* Строки работ */}
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
@@ -1048,7 +1048,7 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
                         return (
                           <tr key={i} style={{background:i%2===0?"#ffffff":"#f8f8f7",borderBottom:"1px solid #f2f2f1"}}>
                             <td style={{padding:"6px 8px",textAlign:"center",color:"#aaaaaa",fontSize:11}}>{rowNum}</td>
-                            <td style={{padding:"6px 8px",color:"#2563eb",fontSize:11,fontWeight:500}}>{item.sub}</td>
+                            <td style={{padding:"6px 8px",color:"#666666",fontSize:11,fontWeight:500}}>{item.sub}</td>
                             <td style={{padding:"6px 8px",fontWeight:600,fontSize:12}}>{item.name}</td>
                             <td style={{padding:"6px 8px",textAlign:"center",color:"#aaaaaa",fontSize:11}}>{item.unit}</td>
                             <td style={{padding:"6px 8px",textAlign:"center",fontWeight:500}}>{item.qty}</td>
@@ -1062,7 +1062,7 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
                     <tfoot>
                       <tr style={{background:"#f2f2f1",borderTop:"2px solid #e8e7e5"}}>
                         <td colSpan={7} style={{padding:"7px 8px",fontSize:12,fontWeight:700,color:"#333333",textAlign:"right"}}>Итого по разделу «{cat}»:</td>
-                        <td style={{padding:"7px 8px",textAlign:"right",fontWeight:800,fontSize:13,color:"#2563eb"}}>{fmt(catTotal)} ₸</td>
+                        <td style={{padding:"7px 8px",textAlign:"right",fontWeight:800,fontSize:13,color:"#111111"}}>{fmt(catTotal)} ₸</td>
                       </tr>
                     </tfoot>
                   </table>
@@ -1086,12 +1086,12 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
               {discount>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#dc2626",marginBottom:6}}><span>Скидка {discount}%</span><span>− {fmt(discAmt)} ₸</span></div>}
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <span style={{fontSize:14,fontWeight:600,letterSpacing:.5}}>ИТОГО:</span>
-                <span style={{fontSize:28,fontWeight:900,color:"#2563eb",letterSpacing:-.5}}>{fmt(final)} ₸</span>
+                <span style={{fontSize:28,fontWeight:900,color:"#111111",letterSpacing:-.5}}>{fmt(final)} ₸</span>
               </div>
               {proj.area&&Number(proj.area)>0&&(
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,paddingTop:8,borderTop:"1px solid rgba(0,0,0,.04)"}}>
                   <span style={{fontSize:12,color:"#aaaaaa"}}>Цена за м² ({proj.area} м²)</span>
-                  <span style={{fontSize:14,fontWeight:700,color:"#2563eb"}}>≈ {fmt(final/Number(proj.area))} ₸/м²</span>
+                  <span style={{fontSize:14,fontWeight:700,color:"#111111"}}>≈ {fmt(final/Number(proj.area))} ₸/м²</span>
                 </div>
               )}
             </div>
@@ -1107,12 +1107,12 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
         <div style={{fontWeight:700,color:"#ffffff",marginBottom:10,fontSize:13}}>Условия:</div>
         {CONDITIONS.map((text, i) => (
           <div key={i} style={{display:"flex",gap:10,marginBottom:5}}>
-            <span style={{color:"#2563eb",fontWeight:700,minWidth:18,flexShrink:0}}>{i+1}.</span>
+            <span style={{color:"#aaaaaa",fontWeight:500,minWidth:18,flexShrink:0}}>{i+1}.</span>
             <span>{text}</span>
           </div>
         ))}
         <div style={{display:"flex",gap:10,marginTop:5}}>
-          <span style={{color:"#2563eb",fontWeight:700,minWidth:18,flexShrink:0}}>7.</span>
+          <span style={{color:"#aaaaaa",fontWeight:500,minWidth:18,flexShrink:0}}>7.</span>
           <span>Ссылка для ознакомления с договором (шаблон):{" "}
             <a href="https://drive.google.com/file/d/1qmhQhn6LE3F3lnU_BBEDXqCiyj-LDjSC/view?usp=sharing"
               target="_blank" rel="noreferrer"
@@ -1287,7 +1287,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
     await saveCatalog({ ...(localCatalog||{}), hiddenSubs:hs, custom:((localCatalog||{}).custom||[]).filter(w => !(w.cat===curCat && w.sub===curSub)) }); Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
   const roleLabel = r => r==="admin" ? "👑 Администратор" : r==="viewer" ? "👁 Наблюдатель" : "👤 Замерщик";
-  const roleColor = r => r==="admin" ? "#2563eb" : r==="viewer" ? "#2563eb" : "#2563eb";
+  const roleColor = r => r==="admin" ? "#111111" : r==="viewer" ? "#aaaaaa" : "#555555";
 
   return (
     <div style={{padding:"32px 28px 80px"}}>
@@ -1327,17 +1327,17 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
                       <span style={{fontWeight:700,fontSize:14,color:"#111111"}}>{u.name}</span>
                       <span style={{fontSize:10,fontWeight:700,color:roleColor(u.role),background:"rgba(0,0,0,.04)",borderRadius:4,padding:"2px 7px"}}>{roleLabel(u.role)}</span>
-                      {u.id === currentUser.id && <span style={{fontSize:10,color:"#2563eb",background:"rgba(37,99,235,.08)",borderRadius:4,padding:"2px 7px"}}>вы</span>}
+                      {u.id === currentUser.id && <span style={{fontSize:10,color:"#555555",background:"#f2f2f1",borderRadius:4,padding:"2px 7px"}}>вы</span>}
                     </div>
                     <div style={{fontSize:11,color:"#aaaaaa",marginTop:2}}>@{u.login}</div>
                   </div>
                   <div style={{display:"flex",gap:6}}>
                     <button onClick={()=>{setEditingUser(editingUser?.id===u.id?null:{id:u.id,name:u.name,login:u.login});setEditingPass(null);}}
-                      style={{background:"rgba(37,99,235,.08)",color:"#2563eb",border:"1px solid rgba(37,99,235,.1)",borderRadius:7,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+                      style={{background:"#f2f2f1",color:"#555555",border:"1px solid #e8e7e5",borderRadius:7,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
                       ✏ Изменить
                     </button>
                     <button onClick={()=>{setEditingPass(editingPass?.id===u.id?null:{id:u.id,val:""});setEditingUser(null);}}
-                      style={{background:"rgba(37,99,235,.08)",color:"#2563eb",border:"1px solid rgba(37,99,235,.1)",borderRadius:7,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+                      style={{background:"#f2f2f1",color:"#555555",border:"1px solid #e8e7e5",borderRadius:7,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
                       🔑
                     </button>
                     {u.id !== currentUser.id && (
@@ -1371,7 +1371,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
 
           {/* Добавить нового */}
           <div style={{background:"#f8f8f7",border:"1px dashed rgba(37,99,235,.15)",borderRadius:12,padding:"20px"}}>
-            <div style={{fontSize:12,fontWeight:700,color:"#2563eb",marginBottom:14,display:"flex",alignItems:"center",gap:6}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#333333",marginBottom:14,display:"flex",alignItems:"center",gap:6}}>
               <span>＋</span> Новый сотрудник
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:12}}>
@@ -1386,7 +1386,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                 </select>
               </div>
             </div>
-            <button onClick={addUser} style={{width:"100%",background:"rgba(37,99,235,.1)",color:"#2563eb",border:"1px solid rgba(37,99,235,.12)",borderRadius:8,padding:"11px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+            <button onClick={addUser} style={{width:"100%",background:"#f2f2f1",color:"#555555",border:"1px solid #e8e7e5",borderRadius:8,padding:"11px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>
               + Добавить сотрудника
             </button>
           </div>
@@ -1405,7 +1405,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
               const cats = [...new Set(allW.map(w=>w.cat))];
               setNewWork({cat:cats[0]||"",catNew:"",sub:"",subNew:"",name:"",unit:"м²",cost:"",margin:40});
               setShowAddWork(true);
-            }} style={{background:"rgba(37,99,235,.12)",color:"#2563eb",border:"1px solid rgba(37,99,235,.15)",borderRadius:8,padding:"9px 16px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+            }} style={{background:"#f2f2f1",color:"#555555",border:"1px solid #e8e7e5",borderRadius:8,padding:"9px 16px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
               ＋ Добавить позицию
             </button>
           </div>
@@ -1418,7 +1418,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
             const inp = {background:"#f8f8f7",border:"1px solid #e8e7e5",color:"#111111",borderRadius:6,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"};
             return (
               <div style={{background:"#f8f8f7",border:"1px solid rgba(37,99,235,.15)",borderRadius:10,padding:"16px",marginBottom:16}}>
-                <div style={{fontSize:13,fontWeight:700,color:"#2563eb",marginBottom:12}}>Новая позиция</div>
+                <div style={{fontSize:13,fontWeight:700,color:"#333333",marginBottom:12}}>Новая позиция</div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:12}}>
                   <div>
                     <div style={{fontSize:10,color:"#666666",marginBottom:4}}>Категория</div>
@@ -1457,7 +1457,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                   </div>
                 </div>
                 <div style={{display:"flex",gap:8}}>
-                  <button onClick={addCustomWork} style={{flex:1,background:"rgba(37,99,235,.12)",color:"#2563eb",border:"1px solid rgba(37,99,235,.15)",borderRadius:8,padding:"10px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>✓ Добавить</button>
+                  <button onClick={addCustomWork} style={{flex:1,background:"#f2f2f1",color:"#555555",border:"1px solid #e8e7e5",borderRadius:8,padding:"10px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>✓ Добавить</button>
                   <button onClick={()=>{setShowAddWork(false);setNewWork({cat:"",sub:"",name:"",unit:"м²"});}} style={{background:"rgba(220,38,38,.1)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:8,padding:"10px 16px",fontFamily:"inherit",fontSize:13,cursor:"pointer"}}>Отмена</button>
                 </div>
               </div>
@@ -1509,13 +1509,13 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                               <>
                                 <input autoFocus value={editingCat.val} onChange={e=>setEditingCat(p=>({...p,val:e.target.value}))}
                                   onKeyDown={e=>{if(e.key==="Enter")renameCat(origCat,editingCat.val);if(e.key==="Escape")setEditingCat(null);}}
-                                  style={{background:"#f8f8f7",border:"1px solid #2563eb",color:"#2563eb",borderRadius:5,padding:"3px 10px",fontFamily:"inherit",fontSize:12,fontWeight:800,outline:"none",width:200}}/>
+                                  style={{background:"#f8f8f7",border:"1px solid #e8e7e5",color:"#111111",borderRadius:5,padding:"3px 10px",fontFamily:"inherit",fontSize:12,fontWeight:800,outline:"none",width:200}}/>
                                 <button onClick={()=>renameCat(origCat,editingCat.val)} style={{...btnS,color:"#16a34a",fontSize:14}}>✓</button>
                                 <button onClick={()=>setEditingCat(null)} style={{...btnS,color:"#666666",fontSize:14}}>✕</button>
                               </>
                             ) : (
                               <>
-                                <span style={{fontSize:11,fontWeight:800,color:"#2563eb",letterSpacing:1,textTransform:"uppercase"}}>{cat}</span>
+                                <span style={{fontSize:11,fontWeight:700,color:"#333333",letterSpacing:.5,textTransform:"uppercase"}}>{cat}</span>
                                 <button onClick={()=>setEditingCat({key:origCat,val:cat})} title="Переименовать" style={{...btnS,color:"#2563eb",opacity:.5,fontSize:11}}>✏️</button>
                                 <button onClick={()=>{if(window.confirm(`Удалить категорию "${cat}"?`))deleteCat(origCat);}} title="Удалить" style={{...btnS,color:"#dc2626",opacity:.5,fontSize:11}}>🗑</button>
                               </>
@@ -1551,7 +1551,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                                     <span style={{display:"contents"}}>
                                       <input autoFocus value={editingSub.val} onChange={e=>setEditingSub(p=>({...p,val:e.target.value}))}
                                         onKeyDown={e=>{if(e.key==="Enter")renameSub(origCat,origSub,editingSub.val);if(e.key==="Escape")setEditingSub(null);}}
-                                        style={{background:"#f8f8f7",border:"1px solid #2563eb",color:"#aaaaaa",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",fontSize:11,outline:"none",width:120}}/>
+                                        style={{background:"#f8f8f7",border:"1px solid #e8e7e5",color:"#aaaaaa",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",fontSize:11,outline:"none",width:120}}/>
                                       <button onClick={()=>renameSub(origCat,origSub,editingSub.val)} style={{...btnS,color:"#16a34a",fontSize:12}}>✓</button>
                                       <button onClick={()=>setEditingSub(null)} style={{...btnS,color:"#666666",fontSize:12}}>✕</button>
                                     </span>
@@ -1614,7 +1614,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                               </div>
                             </td>
                             {/* Цена для клиента */}
-                            <td style={{padding:"6px 12px",textAlign:"right",fontWeight:700,color:"#2563eb",whiteSpace:"nowrap"}}>
+                            <td style={{padding:"6px 12px",textAlign:"right",fontWeight:700,color:"#111111",whiteSpace:"nowrap"}}>
                               {price ? new Intl.NumberFormat("ru-RU").format(price)+" ₸" : "—"}
                             </td>
                             {/* Валовая прибыль */}
@@ -1811,7 +1811,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
               </div>
               <div>
                 <div style={{fontSize:11,color:"#666666",marginBottom:4}}>Итого (авто, ₸)</div>
-                <div className="fi" style={{background:"rgba(37,99,235,.06)",color:"#2563eb",fontWeight:700,display:"flex",alignItems:"center"}}>
+                <div className="fi" style={{background:"#f2f2f1",color:"#333333",fontWeight:600,display:"flex",alignItems:"center"}}>
                   {fmt(Math.round((contract.pricePerSqm||0)*(contract.area||0)))} ₸
                 </div>
               </div>
@@ -1840,7 +1840,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
           <div style={{fontSize:12,fontWeight:700,color:"#aaaaaa"}}>ЗАКАЗЧИК</div>
           {contract.estClient && !contract.clientId && (
-            <div style={{fontSize:11,color:"#2563eb"}}>⚠ Из сметы: {contract.estClient}</div>
+            <div style={{fontSize:11,color:"#d97706"}}>⚠ Из сметы: {contract.estClient}</div>
           )}
         </div>
         <select className="fi" value={contract.clientId||""} onChange={e=>upd({clientId:e.target.value})}>
@@ -1879,17 +1879,17 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
                 style={{background:"#ffffff",border:"1px solid #e8e7e5",color:"#111111",fontSize:11,borderRadius:4,padding:"3px 5px",textAlign:"center",fontFamily:"inherit",width:"100%"}}/>
               <input type="number" value={w.price||""} onChange={e=>{const ws=[...(contract.works||[])];ws[i]={...ws[i],price:parseFloat(e.target.value)||0};upd({works:ws});}}
                 style={{background:"#ffffff",border:"1px solid #e8e7e5",color:"#111111",fontSize:11,borderRadius:4,padding:"3px 5px",textAlign:"right",fontFamily:"inherit",width:"100%"}}/>
-              <div style={{fontSize:12,fontWeight:700,color:"#2563eb",textAlign:"right"}}>{fmt(Number(w.quantity)*Number(w.price)||0)}</div>
+              <div style={{fontSize:12,fontWeight:700,color:"#111111",textAlign:"right"}}>{fmt(Number(w.quantity)*Number(w.price)||0)}</div>
               <button onClick={()=>{const ws=(contract.works||[]).filter((_,j)=>j!==i);upd({works:ws});}}
                 style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:14,padding:0}}>✕</button>
             </div>
           ))}
           <div style={{padding:"8px 12px",borderTop:"1px solid #e8e7e5",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <button onClick={()=>upd({works:[...(contract.works||[]),{name:"",quantity:0,unit:"м²",price:0}]})}
-              style={{background:"rgba(37,99,235,.08)",color:"#2563eb",border:"1px solid rgba(37,99,235,.1)",borderRadius:6,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+              style={{background:"#f2f2f1",color:"#555555",border:"1px solid #e8e7e5",borderRadius:6,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
               + Добавить позицию
             </button>
-            <div style={{fontWeight:800,fontSize:16,color:"#2563eb"}}>{fmt(total)} ₸</div>
+            <div style={{fontWeight:800,fontSize:16,color:"#111111"}}>{fmt(total)} ₸</div>
           </div>
         </div>
       </div>}
@@ -1903,7 +1903,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
           </div>
           <div>
             <div style={{fontSize:11,color:"#666666",marginBottom:4}}>Сумма предоплаты (₸)</div>
-            <div className="fi" style={{background:"rgba(37,99,235,.06)",color:"#2563eb",fontWeight:700,display:"flex",alignItems:"center"}}>
+            <div className="fi" style={{background:"#f2f2f1",color:"#333333",fontWeight:600,display:"flex",alignItems:"center"}}>
               {fmt(Math.round(total*(contract.advancePercent??30)/100))} ₸
             </div>
           </div>
@@ -1918,7 +1918,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       <div style={{display:"flex",gap:8}}>
         <button className="btn btn-g" style={{flex:1}} onClick={onSave}>💾 Сохранить</button>
         <div style={{flex:1,display:"flex",flexDirection:"column",gap:4}}>
-          <button onClick={()=>onPdf(withStamp)} style={{width:"100%",background:"rgba(37,99,235,.08)",color:"#2563eb",border:"1px solid rgba(37,99,235,.15)",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+          <button onClick={()=>onPdf(withStamp)} style={{width:"100%",background:"#f2f2f1",color:"#555555",border:"1px solid #e8e7e5",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
             📄 PDF
           </button>
           <div onClick={()=>setWithStamp(p=>!p)} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",justifyContent:"center"}}>
@@ -1928,7 +1928,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
             <span style={{fontSize:10,color:withStamp?"#2563eb":"#666666"}}>С печатью</span>
           </div>
         </div>
-        <button onClick={onGDoc} style={{flex:1,background:"rgba(37,99,235,.08)",color:"#2563eb",border:"1px solid rgba(66,133,244,.3)",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+        <button onClick={onGDoc} style={{flex:1,background:"#f2f2f1",color:"#555555",border:"1px solid #e8e7e5",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
           📋 Google Doc
         </button>
       </div>
@@ -3359,7 +3359,7 @@ export default function App() {
         html,body{background:#f8f8f7;overflow-x:hidden;width:100%}
         input,select,textarea{outline:none}
         ::-webkit-scrollbar{width:4px}
-        ::-webkit-scrollbar-thumb{background:#2563eb;border-radius:2px}
+        ::-webkit-scrollbar-thumb{background:#d4d4d2;border-radius:2px}
         .fi{background:#f8f8f7;border:1px solid #e8e7e5;color:#111111;border-radius:7px;padding:8px 12px;font-family:inherit;font-size:13px;width:100%;transition:border .15s}
         .fi:focus{border-color:#2563eb}
         .fi::placeholder{color:#333333}
@@ -3427,7 +3427,7 @@ export default function App() {
         }
         .mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:#ffffff;border-top:1px solid #e8e7e5;z-index:50}
         .mob-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;gap:3px;border-top:2px solid transparent;transition:all .15s}
-        .mob-nav-item.active{border-top-color:#2563eb;background:rgba(37,99,235,.06)}
+        .mob-nav-item.active{border-top-color:#111111;background:rgba(0,0,0,.04)}
       `}</style>
 
       {/* ── SIDEBAR (десктоп) ── */}
@@ -3534,10 +3534,10 @@ export default function App() {
                 style={{background:card.bg,border:`1px solid ${card.border}`,borderRadius:14,padding:"22px 20px",cursor:"pointer",transition:"transform .15s,box-shadow .15s"}}
                 onMouseEnter={e=>{e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,.08)";e.currentTarget.style.borderColor="#2563eb";}}
                 onMouseLeave={e=>{e.currentTarget.style.boxShadow="none";e.currentTarget.style.borderColor="#e8e7e5";}}>
-                <div style={{fontSize:22,marginBottom:14,color:"#2563eb",fontWeight:300,lineHeight:1}}>{card.icon}</div>
+                <div style={{fontSize:22,marginBottom:14,color:"#aaaaaa",fontWeight:300,lineHeight:1}}>{card.icon}</div>
                 <div style={{fontWeight:700,fontSize:15,color:"#111111",marginBottom:5}}>{card.title}</div>
                 <div style={{fontSize:12,color:"#666666",marginBottom:14}}>{card.desc}</div>
-                <div style={{display:"inline-block",background:"rgba(37,99,235,.08)",border:"1px solid rgba(37,99,235,.12)",color:"#2563eb",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:600}}>{card.stat}</div>
+                <div style={{display:"inline-block",background:"#f2f2f1",border:"1px solid #e8e7e5",color:"#555555",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:600}}>{card.stat}</div>
               </div>
             ))}
           </div>
@@ -3564,7 +3564,7 @@ export default function App() {
                           <div style={{fontSize:13,color:"#111111",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{est.proj?.name||"Без названия"}</div>
                           <div style={{fontSize:11,color:"#aaaaaa",marginTop:2}}>{est.updatedAt?new Date(est.updatedAt).toLocaleDateString("ru-RU"):""}</div>
                         </div>
-                        {total>0 && <div style={{fontSize:13,fontWeight:700,color:"#2563eb",flexShrink:0}}>{fmt(total)} ₸</div>}
+                        {total>0 && <div style={{fontSize:13,fontWeight:700,color:"#111111",flexShrink:0}}>{fmt(total)} ₸</div>}
                       </div>
                     );
                   })}
@@ -3588,12 +3588,12 @@ export default function App() {
                         style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<arr.length-1?"1px solid #e8e7e5":"none",cursor:"pointer",transition:"background .1s"}}
                         onMouseEnter={e=>e.currentTarget.style.background="#ffffff"}
                         onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                        <div style={{width:7,height:7,borderRadius:"50%",background:"#2563eb",flexShrink:0}}/>
+                        <div style={{width:7,height:7,borderRadius:"50%",background:"#d4d4d2",flexShrink:0}}/>
                         <div style={{flex:1,minWidth:0}}>
                           <div style={{fontSize:13,color:"#111111",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{TYPE_L[c.type||"repair_fiz"]||"Договор"} №{c.number||"—"}</div>
                           <div style={{fontSize:11,color:"#aaaaaa",marginTop:2}}>{cl?.name||c.estClient||"Клиент не выбран"}</div>
                         </div>
-                        {total>0 && <div style={{fontSize:13,fontWeight:700,color:"#2563eb",flexShrink:0}}>{fmt(total)} ₸</div>}
+                        {total>0 && <div style={{fontSize:13,fontWeight:700,color:"#111111",flexShrink:0}}>{fmt(total)} ₸</div>}
                       </div>
                     );
                   })}
@@ -4009,7 +4009,7 @@ export default function App() {
                           <input className="num" style={{width:82,textAlign:"center",fontSize:16,padding:"7px 10px",fontWeight:700}} type="number" min="0" placeholder="0"
                             value={r.qty||""} onChange={e=>setRow(work.name,"qty",e.target.value)}/>
                           {total>0
-                            ? <span style={{fontSize:12,fontWeight:800,color:"#2563eb",whiteSpace:"nowrap"}}>{fmt(total)} ₸</span>
+                            ? <span style={{fontSize:12,fontWeight:800,color:"#111111",whiteSpace:"nowrap"}}>{fmt(total)} ₸</span>
                             : <span style={{fontSize:10,color:"#333333"}}>—</span>}
                         </div>
                       </div>
@@ -4076,7 +4076,7 @@ export default function App() {
                       </div>
                       {proj.area&&Number(proj.area)>0&&(
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6,padding:"5px 8px",background:"rgba(37,99,235,.06)",borderRadius:6}}>
-                          <span style={{fontSize:11,color:"#2563eb"}}>Цена за м²</span>
+                          <span style={{fontSize:11,color:"#d97706"}}>Цена за м²</span>
                           <span style={{fontSize:13,fontWeight:700,color:"#2563eb"}}>≈ {fmt(final/Number(proj.area))} ₸</span>
                         </div>
                       )}
@@ -4274,7 +4274,7 @@ export default function App() {
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(380px,1fr))",gap:16,marginBottom:16}}>
               <div style={{background:"#f8f8f7",border:"1px solid #e8e7e5",borderRadius:12,padding:"18px"}}>
-                <div style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>Сметы</div>
+                <div style={{fontSize:11,color:"#d97706",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>Сметы</div>
                 <div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По статусам</div>
                 <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:14}}>
                   {STATUSES.map(s=>(
@@ -4292,7 +4292,7 @@ export default function App() {
                 {Object.keys(byType).length>0 && <><div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типу объекта</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(<span key={t} style={{fontSize:11,padding:"3px 10px",borderRadius:20,background:"rgba(0,0,0,.04)",color:"#aaaaaa"}}>{t}: <strong style={{color:"#111111"}}>{n}</strong></span>))}</div></>}
               </div>
               <div style={{background:"#f8f8f7",border:"1px solid #e8e7e5",borderRadius:12,padding:"18px"}}>
-                <div style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>Договора</div>
+                <div style={{fontSize:11,color:"#d97706",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>Договора</div>
                 {Object.keys(byConType).length>0 && <><div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типам</div><div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:14}}>{Object.entries(byConType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(<div key={t} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(0,0,0,.02)",borderRadius:6}}><span style={{fontSize:12,color:"#aaaaaa"}}>{t}</span><span style={{fontSize:13,fontWeight:700,color:"#2563eb"}}>{n}</span></div>))}</div></>}
                 {baseCon.length>0 && <><div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>Договора в периоде</div><div style={{display:"flex",flexDirection:"column",gap:3}}>{[...baseCon].sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,6).map(c=>{const cl=contractClients.find(x=>x.id===c.clientId);const sum=(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);return(<div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(0,0,0,.02)",borderRadius:6,cursor:"pointer"}} onClick={()=>{setCurrentContract({...c});setContractTab("editor");setScreen("contracts");}}><div style={{minWidth:0}}><div style={{fontSize:12,color:"#111111",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{TYPE_L2[c.type||"repair_fiz"]} #{c.number||"--"}</div><div style={{fontSize:10,color:"#aaaaaa"}}>{cl?.name||c.estClient||"--"}</div></div><span style={{fontSize:12,fontWeight:700,color:"#2563eb",flexShrink:0,marginLeft:8}}>{fmt(sum)} </span></div>);})}</div></>}
                 {totalCon===0 && <div style={{textAlign:"center",color:"#9b9b9b",fontSize:13,padding:"30px 0"}}>Нет договоров за период</div>}
@@ -4302,7 +4302,7 @@ export default function App() {
               <div style={{background:"#f8f8f7",border:"1px solid #e8e7e5",borderRadius:12,padding:"18px",marginBottom:16}}>
                 <div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>По менеджерам</div>
                 <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                  {managerStats.map(m=>(<div key={m.name} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"rgba(255,255,255,.03)",borderRadius:8,cursor:"pointer"}} onClick={()=>setStatsManager(m.name)}><span style={{fontSize:13,color:"#aaaaaa",flex:1}}>👤 {m.name}</span><span style={{fontSize:11,color:"#666666"}}>{m.count} смет</span><span style={{fontSize:14,fontWeight:700,color:"#2563eb"}}>{fmt(m.sum)} </span>{m.agreed>0&&<span style={{fontSize:10,color:"#16a34a",background:"rgba(22,163,74,.08)",borderRadius:5,padding:"2px 8px"}}>v{m.agreed}</span>}</div>))}
+                  {managerStats.map(m=>(<div key={m.name} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"rgba(255,255,255,.03)",borderRadius:8,cursor:"pointer"}} onClick={()=>setStatsManager(m.name)}><span style={{fontSize:13,color:"#aaaaaa",flex:1}}>👤 {m.name}</span><span style={{fontSize:11,color:"#666666"}}>{m.count} смет</span><span style={{fontSize:14,fontWeight:700,color:"#111111"}}>{fmt(m.sum)} </span>{m.agreed>0&&<span style={{fontSize:10,color:"#16a34a",background:"rgba(22,163,74,.08)",borderRadius:5,padding:"2px 8px"}}>v{m.agreed}</span>}</div>))}
                 </div>
               </div>
             )}
@@ -4375,13 +4375,13 @@ export default function App() {
                           </div>
                         </div>
                         <div style={{textAlign:"right",flexShrink:0}}>
-                          <div style={{fontWeight:800,fontSize:16,color:"#2563eb"}}>{fmt(total)} ₸</div>
+                          <div style={{fontWeight:800,fontSize:16,color:"#111111"}}>{fmt(total)} ₸</div>
                           <div style={{display:"flex",gap:5,marginTop:6}}>
                             <button onClick={e=>{e.stopPropagation();
                               const cl = contractClients.find(x=>x.id===c.clientId);
                               const ca2 = contragents.find(x=>x.id===c.contragentId);
                               generateContractPdf(c, cl, ca2);
-                            }} style={{background:"rgba(37,99,235,.08)",color:"#2563eb",border:"1px solid rgba(37,99,235,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>
+                            }} style={{background:"#f2f2f1",color:"#555555",border:"1px solid #e8e7e5",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>
                             <button onClick={e=>{e.stopPropagation();
                               const cl = contractClients.find(x=>x.id===c.clientId);
                               const ca2 = contragents.find(x=>x.id===c.contragentId);
@@ -4457,7 +4457,7 @@ export default function App() {
                       </div>
                       <div style={{display:"flex",gap:5}}>
                         <button onClick={()=>{ setCurrentContract({...c,_mode:"editClient"}); setContractTab("clientEditor"); }}
-                          style={{background:"rgba(37,99,235,.08)",color:"#2563eb",border:"1px solid rgba(37,99,235,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                          style={{background:"#f2f2f1",color:"#555555",border:"1px solid #e8e7e5",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
                         {currentUser.role==="admin"&&<button onClick={()=>{ if(window.confirm("Удалить клиента?")) saveContractClients(contractClients.filter(x=>x.id!==c.id)); }}
                           style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
                       </div>
@@ -4524,7 +4524,7 @@ export default function App() {
                       </div>
                       <div style={{display:"flex",gap:5}}>
                         <button onClick={()=>{ setCurrentContract({...c,_mode:"editCA"}); setContractTab("caEditor"); }}
-                          style={{background:"rgba(37,99,235,.08)",color:"#2563eb",border:"1px solid rgba(37,99,235,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                          style={{background:"#f2f2f1",color:"#555555",border:"1px solid #e8e7e5",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
                         {currentUser.role==="admin"&&contragents.length>1&&<button onClick={()=>{ if(window.confirm("Удалить?")) saveContragents(contragents.filter(x=>x.id!==c.id)); }}
                           style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
                       </div>
