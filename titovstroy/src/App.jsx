@@ -3702,7 +3702,7 @@ export default function App() {
           <div style={{marginBottom:32,display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
             <div>
               <h1 style={{margin:0,fontSize:26,fontWeight:900,color:"#111827",letterSpacing:-.5}}>
-                TitovStroy <span style={{color:"#2563eb"}}>ERP</span>
+                TitovStroy <span style={{color:"#2563eb"}}>CRM</span>
               </h1>
               <div style={{fontSize:13,color:"#6b7280",marginTop:4}}>
                 {new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
@@ -4414,11 +4414,11 @@ export default function App() {
                 {/* Комментарий для менеджера */}
                 <div className="card" style={{padding:14}}>
                   <div style={{fontSize:10,color:"#9ca3af",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:7}}>Комментарий</div>
-                  <textarea className="fi" rows={2} style={{resize:"none"}} placeholder="Заметка для менеджера..." value={estComment} onChange={e=>setEstComment(e.target.value)}/>
+                  <textarea className="fi" rows={3} style={{resize:"vertical",minHeight:60,overflowY:"auto"}} placeholder="Заметка для менеджера..." value={estComment} onChange={e=>setEstComment(e.target.value)}/>
                 </div>
                 <div className="card" style={{padding:14}}>
                   <div style={{fontSize:10,color:"#9ca3af",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:7}}>Примечание в КП</div>
-                  <textarea className="fi" rows={3} style={{resize:"none"}} placeholder="Доп. условия для клиента..." value={note} onChange={e=>setNote(e.target.value)}/>
+                  <textarea className="fi" rows={3} style={{resize:"vertical",minHeight:60,overflowY:"auto"}} placeholder="Доп. условия для клиента..." value={note} onChange={e=>setNote(e.target.value)}/>
                 </div>
                 <button className="btn btn-g" disabled={kpItems.length===0} onClick={()=>setShowKP(true)}>
                   Сформировать КП
