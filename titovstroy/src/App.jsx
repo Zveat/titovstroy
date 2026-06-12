@@ -2364,7 +2364,9 @@ export default function App() {
         const codes = new Set(existing.map(w=>w.code));
         const merged = [...existing, ...customWorks.filter(w => !codes.has(w.code))];
         const nextCat = { renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], ...cur, custom: merged };
-        await saveCatalog(nextCat);
+        await storage.set(CATALOG_KEY, JSON.stringify(nextCat));
+        setCatalogOverrides(nextCat);            // обновляем _catalogOverrides (для getEffectiveCatalog/getPrice)
+        setCatalogVersion(v => v + 1);           // пересобираем Gdyn, чтобы суммы посчитались
       }
       // 2) Добавляем сметы (без дублей по id)
       const cur = estimatesRef.current;
