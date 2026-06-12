@@ -1274,8 +1274,11 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
     const finalCat = newWork.cat === "__new__" ? (newWork.catNew||"").trim() : newWork.cat.trim();
     const finalSub = newWork.sub === "__new__" ? (newWork.subNew||"").trim() : newWork.sub.trim();
     if (!newWork.name.trim() || !finalCat || !finalSub) return;
-    await saveCatalog({ ...(localCatalog||{}), custom: [...((localCatalog||{}).custom||[]), { code:"CUSTOM-"+Date.now(), cat:finalCat, sub:finalSub, name:newWork.name.trim(), unit:newWork.unit||"м²", tiers:[], fixedPrice:null }] });
-    setNewWork({cat:"", catNew:"", sub:"", subNew:"", name:"", unit:"м²"}); setShowAddWork(false);
+    const cost = Number(newWork.cost) || 0;
+    const marginPct = Math.min(99, Math.max(0, Number(newWork.margin) || 40));
+    const fixedPrice = cost > 0 ? Math.round(cost / (1 - marginPct / 100)) : null;
+    await saveCatalog({ ...(localCatalog||{}), custom: [...((localCatalog||{}).custom||[]), { code:"CUSTOM-"+Date.now(), cat:finalCat, sub:finalSub, name:newWork.name.trim(), unit:newWork.unit||"м²", tiers:[], cost, margin: marginPct/100, fixedPrice }] });
+    setNewWork({cat:"", catNew:"", sub:"", subNew:"", name:"", unit:"м²", cost:"", margin:40}); setShowAddWork(false);
     Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
   const deleteCustomWork = async (code) => { await saveCatalog({ ...(localCatalog||{}), custom: ((localCatalog||{}).custom||[]).filter(w=>w.code!==code) }); Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]); };
