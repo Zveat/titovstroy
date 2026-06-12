@@ -4140,8 +4140,9 @@ export default function App() {
                           totalCost += (w.cost||0)*qty;
                           if(dp!=null) totalRevenue += dp*qty;
                         }
-                        const totalProfit = totalRevenue - totalCost;
-                        const avgMargin = totalRevenue > 0 ? Math.round(totalProfit/totalRevenue*100) : 0;
+                        const revenueAfterDiscount = final; // уже с учётом скидки
+                        const totalProfit = revenueAfterDiscount - totalCost;
+                        const avgMargin = revenueAfterDiscount > 0 ? Math.round(totalProfit/revenueAfterDiscount*100) : 0;
                         return totalCost > 0 ? (
                           <div style={{marginTop:10,padding:"10px 12px",background:"#f0fdf4",borderRadius:8,border:"1px solid #bbf7d0"}}>
                             <div style={{fontSize:10,color:"#059669",fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Финансы (внутренние)</div>
@@ -4151,8 +4152,8 @@ export default function App() {
                                 <span style={{fontWeight:600,color:"#374151"}}>{fmt(Math.round(totalCost))} ₸</span>
                               </div>
                               <div style={{display:"flex",justifyContent:"space-between"}}>
-                                <span style={{color:"#6b7280"}}>Цена клиента</span>
-                                <span style={{fontWeight:600,color:"#374151"}}>{fmt(Math.round(totalRevenue))} ₸</span>
+                                <span style={{color:"#6b7280"}}>Цена клиента{discount>0?` (−${discount}%)`:""}</span>
+                                <span style={{fontWeight:600,color:"#374151"}}>{fmt(Math.round(revenueAfterDiscount))} ₸</span>
                               </div>
                               <div style={{display:"flex",justifyContent:"space-between",borderTop:"1px solid #bbf7d0",paddingTop:5,marginTop:2}}>
                                 <span style={{color:"#059669",fontWeight:700}}>Валовая прибыль</span>
