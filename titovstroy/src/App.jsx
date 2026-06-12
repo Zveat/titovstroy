@@ -2149,6 +2149,7 @@ export default function App() {
   const [editPrices, setEditPrices] = useState(false);
   const [editingPriceRow, setEditingPriceRow] = useState(null);
   const [showFinancial, setShowFinancial] = useState(false);
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const [search, setSearch] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [estStatus, setEstStatus] = useState("new");
@@ -4254,7 +4255,12 @@ export default function App() {
             </div>
             <div className="editor-header-right" style={{display:"flex",alignItems:"center",gap:8}}>
               {saving && <span style={{fontSize:11,color:"#9ca3af"}}>💾</span>}
-              {filledCount > 0 && <span className="badge">{filledCount} позиций</span>}
+              {filledCount > 0 && (
+                <button onClick={()=>setShowSelectedOnly(s=>!s)}
+                  style={{fontSize:11,padding:"6px 12px",background:showSelectedOnly?"#f0fdf4":"",border:`1px solid ${showSelectedOnly?"#059669":"#e5e7eb"}`,borderRadius:6,color:showSelectedOnly?"#059669":"#9ca3af",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                  {showSelectedOnly ? `✓ Выбранные (${filledCount})` : `📋 Выбранные (${filledCount})`}
+                </button>
+              )}
               {currentUser.role !== "viewer" && (
                 <button className="btn btn-o" style={{fontSize:11,padding:"6px 12px",background:showFinancial?"#eff6ff":"",borderColor:showFinancial?"#2563eb":""}} onClick={()=>setShowFinancial(m=>!m)}>
                   {showFinancial ? "💰 Финансы вкл" : "💰 Финансы"}
@@ -4306,8 +4312,76 @@ export default function App() {
             </div>
 
             <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:16,alignItems:"start"}} className="main-grid">
+              {/* ТОЛЬКО ВЫБРАННЫЕ */}
+              {showSelectedOnly && (() => {
+                const selectedWorks = [];
+                for (const cat of cats) for (const sub of Object.keys(Gdyn[cat]||{})) for (const w of Gdyn[cat]?.[sub]||[]) {
+                  const r = rows[w.name]||{};
+                  if (Number(r.qty||0) > 0) selectedWorks.push({...w, cat, sub});
+                }
+                return (
+                  <div className="card up">
+                    <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                      <span style={{fontWeight:700,fontSize:13,color:"#111827"}}>Выбранные позиции ({selectedWorks.length})</span>
+                      <button onClick={()=>setShowSelectedOnly(false)} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:13,fontFamily:"inherit"}}>✕ Закрыть</button>
+                    </div>
+                    <div className="wrow-th" style={{display:"grid",gridTemplateColumns:"1fr 50px 120px 76px 90px",padding:"8px 16px",fontSize:11,color:"#6b7280",fontWeight:600,letterSpacing:".04em",textTransform:"uppercase",borderBottom:"1px solid #e5e7eb",background:"#f9fafb"}}>
+                      <span>Наименование</span>
+                      <span className="wrow-desk" style={{textAlign:"center"}}>Ед.</span>
+                      <span className="wrow-desk" style={{textAlign:"right"}}>Цена за ед., ₸</span>
+                      <span className="wrow-desk" style={{textAlign:"right"}}>Объём</span>
+                      <span className="wrow-desk" style={{textAlign:"right"}}>Итого, ₸</span>
+                    </div>
+                    <div style={{padding:"4px 0"}}>
+                      {selectedWorks.map(work => {
+                        const r = rows[work.name]||{};
+                        const qty = Number(r.qty||0);
+                        const price = rowPrice(work);
+                        const total = rowTotal(work);
+                        const displayName = r.manualName !== undefined ? r.manualName : work.name;
+                        const displayUnit = r.manualUnit !== undefined ? r.manualUnit : (work.unit||"м²");
+                        return (
+                          <div key={work.name} style={{display:"grid",gridTemplateColumns:"1fr 50px 120px 76px 90px",gap:4,padding:"8px 16px",borderBottom:"1px solid #f3f4f6",alignItems:"center"}}>
+                            <div>
+                              <div style={{fontSize:13,color:"#111827",fontWeight:500}}>{displayName}</div>
+                              <div style={{fontSize:10,color:"#9ca3af"}}>{work.cat} · {work.sub}</div>
+                            </div>
+                            <div style={{textAlign:"center"}}>
+                              <input value={displayUnit}
+                                onChange={e=>setRow(work.name,"manualUnit",e.target.value===(work.unit||"м²")?undefined:e.target.value)}
+                                style={{width:"100%",border:"1px solid #e5e7eb",borderRadius:4,padding:"3px 4px",fontSize:11,textAlign:"center",fontFamily:"inherit",background:"#fff"}}/>
+                            </div>
+                            <div style={{textAlign:"right"}}>
+                              <input type="number" min="0"
+                                value={r.manualPrice !== undefined ? r.manualPrice : (price||"")}
+                                onChange={e=>setRow(work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}
+                                style={{width:"100%",border:"1px solid #e5e7eb",borderRadius:4,padding:"3px 6px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
+                            </div>
+                            <div style={{textAlign:"right"}}>
+                              <input type="number" min="0"
+                                value={r.qty||""}
+                                onChange={e=>setRow(work.name,"qty",e.target.value)}
+                                style={{width:"100%",border:"1px solid #e5e7eb",borderRadius:4,padding:"3px 6px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
+                            </div>
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:6}}>
+                              <span style={{fontSize:13,fontWeight:700,color:total>0?"#2563eb":"#9ca3af"}}>{total>0?fmt(total):"—"}</span>
+                              <button onClick={()=>setRow(work.name,"qty","")} title="Убрать из сметы"
+                                style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:14,padding:0,lineHeight:1}}>✕</button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{padding:"12px 16px",borderTop:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span style={{fontSize:12,color:"#9ca3af"}}>Итого по выбранным позициям</span>
+                      <span style={{fontSize:15,fontWeight:800,color:"#2563eb"}}>{fmt(grand)} ₸</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* РАБОТЫ */}
-              <div className="card up">
+              <div className="card up" style={{display:showSelectedOnly?"none":"block"}}>
                 {/* Поиск */}
                 <div style={{padding:"10px 12px",borderBottom:"1px solid #e5e7eb",position:"relative"}}>
                   <input className="fi" placeholder="🔍  Поиск по работам... (например: штукатурка, плитка, розетки)"
