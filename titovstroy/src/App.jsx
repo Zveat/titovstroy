@@ -4874,49 +4874,80 @@ export default function App() {
                     <div style={{fontSize:12}}>Создайте новый или используйте кнопку 📄 на карточке сметы</div>
                   </div>
                 )}
-                {contracts.map(c=>{
-                  const client = contractClients.find(x=>x.id===c.clientId);
-                  const ca = contragents.find(x=>x.id===c.contragentId);
-                  const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
-                  return (
-                    <div key={c.id} style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:6,padding:"14px 18px",cursor:"pointer",transition:"all .15s"}}
-                      onClick={()=>{ setCurrentContract({...c}); setContractTab("editor"); }}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-                        <div>
-                          <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>
-                            {c.number ? `Договор №${c.number}` : "Без номера"}
-                          </div>
-                          <div style={{fontSize:12,color:"#9ca3af",marginTop:3}}>
-                            {client ? `👤 ${client.name}` : c.estClient ? `👤 ${c.estClient} (не добавлен)` : "Клиент не выбран"}
-                            {ca && <span style={{marginLeft:8}}>· {ca.name}</span>}
-                          </div>
-                          <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
-                            {new Date(c.date||Date.now()).toLocaleDateString("ru-RU")} · {(c.works||[]).length} позиций
-                          </div>
-                        </div>
-                        <div style={{textAlign:"right",flexShrink:0}}>
-                          <div style={{fontWeight:800,fontSize:16,color:"#111827"}}>{fmt(total)} ₸</div>
-                          <div style={{display:"flex",gap:5,marginTop:6}}>
-                            <button onClick={e=>{e.stopPropagation();
-                              const cl = contractClients.find(x=>x.id===c.clientId);
-                              const ca2 = contragents.find(x=>x.id===c.contragentId);
-                              generateContractPdf(c, cl, ca2);
-                            }} style={{background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>
-                            <button onClick={e=>{e.stopPropagation();
-                              const cl = contractClients.find(x=>x.id===c.clientId);
-                              const ca2 = contragents.find(x=>x.id===c.contragentId);
-                              generateContractGDoc(c, cl, ca2);
-                            }} style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>
-                            {currentUser.role==="admin" && (
-                              <button onClick={e=>{e.stopPropagation(); if(window.confirm("Удалить договор?")) saveContracts(contracts.filter(x=>x.id!==c.id));}}
-                                style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
-                            )}
+                {(() => {
+                  const TLABEL = {repair_fiz:"Договор",annex:"Приложение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронь"};
+                  const contractTitle = (c) => {
+                    const t = c.type||"repair_fiz";
+                    if(t==="annex") return `Приложение №${c.appendix||2}`+(c.mainNumber?` к №${c.mainNumber}`:"");
+                    const lbl = TLABEL[t]||"Договор";
+                    return c.number ? `${lbl} №${c.number}` : `${lbl} (без номера)`;
+                  };
+                  // дочерние = приложения/доп.соглашения, ссылающиеся на номер существующего договора
+                  const isChildType = (c) => (c.type==="annex"||c.type==="design_add");
+                  const numMap = {}; // number -> contract
+                  contracts.forEach(c=>{ if(c.number && !isChildType(c)) numMap[c.number]=c; });
+                  const childMap = {}; // parentId -> [child]
+                  contracts.forEach(c=>{ if(isChildType(c) && c.mainNumber && numMap[c.mainNumber]){ const pid=numMap[c.mainNumber].id; (childMap[pid]||(childMap[pid]=[])).push(c); } });
+                  const childIds = new Set(Object.values(childMap).flat().map(c=>c.id));
+                  const roots = contracts.filter(c=>!childIds.has(c.id));
+
+                  const renderContractCard = (c, isChild=false) => {
+                    const client = contractClients.find(x=>x.id===c.clientId);
+                    const ca = contragents.find(x=>x.id===c.contragentId);
+                    const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
+                    return (
+                      <div key={c.id}>
+                        {isChild && <div style={{display:"flex",alignItems:"center",gap:6,marginLeft:16,marginBottom:2,marginTop:4}}>
+                          <div style={{width:2,height:14,background:"#e5e7eb",borderRadius:2,flexShrink:0}}/>
+                          <span style={{fontSize:10,color:"#7c3aed",fontWeight:700,background:"rgba(124,58,237,.08)",borderRadius:3,padding:"1px 6px"}}>Приложение №{c.appendix||2}</span>
+                        </div>}
+                        <div style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:6,padding:"14px 18px",cursor:"pointer",transition:"all .15s",marginLeft:isChild?16:0,borderLeft:isChild?"3px solid #ede9fe":"1px solid #e5e7eb"}}
+                          onClick={()=>{ setCurrentContract({...c}); setContractTab("editor"); }}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                            <div>
+                              <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>
+                                {contractTitle(c)}
+                              </div>
+                              <div style={{fontSize:12,color:"#9ca3af",marginTop:3}}>
+                                {client ? `👤 ${client.name}` : c.estClient ? `👤 ${c.estClient} (не добавлен)` : "Клиент не выбран"}
+                                {ca && <span style={{marginLeft:8}}>· {ca.name}</span>}
+                              </div>
+                              <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
+                                {new Date(c.date||Date.now()).toLocaleDateString("ru-RU")} · {(c.works||[]).length} позиций
+                              </div>
+                            </div>
+                            <div style={{textAlign:"right",flexShrink:0}}>
+                              <div style={{fontWeight:800,fontSize:16,color:"#111827"}}>{fmt(total)} ₸</div>
+                              <div style={{display:"flex",gap:5,marginTop:6}}>
+                                <button onClick={e=>{e.stopPropagation();
+                                  const cl = contractClients.find(x=>x.id===c.clientId);
+                                  const ca2 = contragents.find(x=>x.id===c.contragentId);
+                                  generateContractPdf(c, cl, ca2);
+                                }} style={{background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>
+                                <button onClick={e=>{e.stopPropagation();
+                                  const cl = contractClients.find(x=>x.id===c.clientId);
+                                  const ca2 = contragents.find(x=>x.id===c.contragentId);
+                                  generateContractGDoc(c, cl, ca2);
+                                }} style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>
+                                {currentUser.role==="admin" && (
+                                  <button onClick={e=>{e.stopPropagation(); if(window.confirm("Удалить документ?")) saveContracts(contracts.filter(x=>x.id!==c.id));}}
+                                    style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>
+                    );
+                  };
+
+                  return roots.map(c=>(
+                    <div key={c.id}>
+                      {renderContractCard(c,false)}
+                      {(childMap[c.id]||[]).sort((a,b)=>(a.appendix||0)-(b.appendix||0)).map(ch=>renderContractCard(ch,true))}
                     </div>
-                  );
-                })}
+                  ));
+                })()}
               </div>
             )}
 
