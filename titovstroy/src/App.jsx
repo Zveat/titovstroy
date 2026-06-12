@@ -1988,6 +1988,8 @@ export default function App() {
   const [note, setNote] = useState("");
   const [showKP, setShowKP] = useState(false);
   const [editPrices, setEditPrices] = useState(false);
+  const [editingPriceRow, setEditingPriceRow] = useState(null);
+  const [showFinancial, setShowFinancial] = useState(false);
   const [search, setSearch] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [estStatus, setEstStatus] = useState("new");
@@ -3845,8 +3847,8 @@ export default function App() {
               {saving && <span style={{fontSize:11,color:"#9ca3af"}}>💾</span>}
               {filledCount > 0 && <span className="badge">{filledCount} позиций</span>}
               {currentUser.role !== "viewer" && (
-                <button className="btn btn-o" style={{fontSize:11,padding:"6px 12px"}} onClick={()=>setEditPrices(m=>!m)}>
-                  {editPrices ? "✓" : "✏"}
+                <button className="btn btn-o" style={{fontSize:11,padding:"6px 12px",background:showFinancial?"#eff6ff":"",borderColor:showFinancial?"#2563eb":""}} onClick={()=>setShowFinancial(m=>!m)}>
+                  {showFinancial ? "💰 Финансы вкл" : "💰 Финансы"}
                 </button>
               )}
               {currentUser.role === "viewer" && (
@@ -3964,13 +3966,34 @@ export default function App() {
                     const tierHint = (work.tiers||[]).length > 1
                       ? (work.tiers||[]).map(t=>`${t.min}–${t.max}: ${fmt(t.price)} ₸`).join(" · ")
                       : null;
-                    const priceCell = editPrices ? (
-                      <input className="num" style={{width:110}} type="number" min="0" placeholder="Введите цену"
-                        value={r.manualPrice!==undefined ? r.manualPrice : (price||"")}
-                        onChange={e=>setRow(work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}/>
+                    const isEditingThisPrice = editingPriceRow === work.name || editPrices;
+                    const costPerUnit = work.cost || 0;
+                    const marginPct = displayPrice && displayPrice > 0 && costPerUnit > 0
+                      ? Math.round((displayPrice - costPerUnit) / displayPrice * 100)
+                      : null;
+                    const grossProfit = qty > 0 && displayPrice != null && costPerUnit > 0
+                      ? (displayPrice - costPerUnit) * qty : null;
+                    const priceCell = isEditingThisPrice ? (
+                      <div style={{display:"flex",alignItems:"center",gap:4}}>
+                        <input className="num" style={{width:90}} type="number" min="0" placeholder="Цена"
+                          autoFocus={editingPriceRow===work.name}
+                          value={r.manualPrice!==undefined ? r.manualPrice : (price||"")}
+                          onChange={e=>setRow(work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}
+                          onBlur={()=>{ if(!editPrices) setEditingPriceRow(null); }}
+                          onKeyDown={e=>{ if(e.key==="Enter"||e.key==="Escape"){ if(!editPrices) setEditingPriceRow(null); } }}/>
+                        {r.manualPrice!==undefined && <span onClick={()=>setRow(work.name,"manualPrice",undefined)} title="Сбросить" style={{cursor:"pointer",fontSize:10,color:"#ef4444",marginLeft:2}}>✕</span>}
+                      </div>
                     ) : displayPrice != null ? (
-                      <span style={{fontSize:12,color:filled?"#9ca3af":"#9ca3af"}}>{fmt(displayPrice)}</span>
-                    ) : <span style={{fontSize:10,color:"#9ca3af",fontStyle:"italic"}}>нет цены</span>;
+                      <div style={{display:"flex",alignItems:"center",gap:4,justifyContent:"flex-end"}}>
+                        <span style={{fontSize:12,color:r.manualPrice!==undefined?"#2563eb":"#374151",fontWeight:r.manualPrice!==undefined?700:400}}>{fmt(displayPrice)}</span>
+                        {currentUser.role!=="viewer" && <span onClick={()=>setEditingPriceRow(work.name)} title="Изменить цену" style={{cursor:"pointer",fontSize:10,color:"#9ca3af",opacity:.7,lineHeight:1}}>✏</span>}
+                      </div>
+                    ) : (
+                      <div style={{display:"flex",alignItems:"center",gap:4,justifyContent:"flex-end"}}>
+                        <span style={{fontSize:10,color:"#9ca3af",fontStyle:"italic"}}>нет цены</span>
+                        {currentUser.role!=="viewer" && <span onClick={()=>setEditingPriceRow(work.name)} title="Ввести цену" style={{cursor:"pointer",fontSize:10,color:"#9ca3af"}}>✏</span>}
+                      </div>
+                    );
                     const qtyInput = <input className="num" style={{width:70,textAlign:"center",opacity:currentUser.role==="viewer"?.4:1}} type="number" min="0" placeholder="0" disabled={currentUser.role==="viewer"}
                       value={r.qty||""} onChange={e=>setRow(work.name,"qty",e.target.value)}/>;
                     const nameBlock = (
@@ -3983,6 +4006,17 @@ export default function App() {
                             onChange={e=>{setRow(work.name,"complexity",e.target.value);setRow(work.name,"manualPrice",undefined);}}>
                             {COMPLEXITY.map(c=><option key={c.key} value={c.key}>{c.label}</option>)}
                           </select>
+                        )}
+                        {showFinancial && currentUser.role!=="viewer" && qty > 0 && (
+                          <div style={{display:"flex",flexWrap:"wrap",gap:"4px 12px",marginTop:4,fontSize:10,color:"#6b7280"}}>
+                            {costPerUnit > 0 && <span>Себест: <b style={{color:"#374151"}}>{fmt(costPerUnit * qty)} ₸</b></span>}
+                            {marginPct !== null && (
+                              <span>Маржа: <b style={{color: marginPct>=35?"#059669":marginPct>=20?"#d97706":"#ef4444"}}>{marginPct}%</b></span>
+                            )}
+                            {grossProfit !== null && grossProfit > 0 && (
+                              <span>Прибыль: <b style={{color:"#059669"}}>{fmt(Math.round(grossProfit))} ₸</b></span>
+                            )}
+                          </div>
                         )}
                       </div>
                     );
@@ -4015,9 +4049,29 @@ export default function App() {
                 </div>
 
                 {!isSearching && subSum(safeCat,safeActiveSub)>0&&(
-                  <div style={{borderTop:"1px solid #e5e7eb",padding:"10px 14px",display:"flex",justifyContent:"space-between"}}>
+                  <div style={{borderTop:"1px solid #e5e7eb",padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:16,flexWrap:"wrap"}}>
                     <span style={{fontSize:11,color:"#9ca3af"}}>Итого по разделу «{safeActiveSub}»</span>
-                    <span style={{fontSize:15,fontWeight:700,color:"#2563eb"}}>{fmt(subSum(safeCat,safeActiveSub))} ₸</span>
+                    <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+                      {showFinancial && currentUser.role!=="viewer" && (() => {
+                        const subWorks = (Gdyn[safeCat]?.[safeActiveSub]||[]);
+                        let subCost=0, subProfit=0;
+                        for(const w of subWorks){
+                          const qty=Number((rows[w.name]||{}).qty||0);
+                          const p=rowPrice(w); const bp=getBasePrice(w);
+                          const dp=p??bp;
+                          const c=(w.cost||0)*qty;
+                          subCost+=c;
+                          if(qty>0&&dp!=null) subProfit+=(dp-(w.cost||0))*qty;
+                        }
+                        return subCost>0 ? (
+                          <span style={{fontSize:11,color:"#6b7280"}}>
+                            Себест: <b style={{color:"#374151"}}>{fmt(Math.round(subCost))} ₸</b>
+                            {subProfit>0 && <> · Прибыль: <b style={{color:"#059669"}}>{fmt(Math.round(subProfit))} ₸</b></>}
+                          </span>
+                        ) : null;
+                      })()}
+                      <span style={{fontSize:15,fontWeight:700,color:"#2563eb"}}>{fmt(subSum(safeCat,safeActiveSub))} ₸</span>
+                    </div>
                   </div>
                 )}
                 {isSearching && searchResults.length > 0 && (() => {
@@ -4077,6 +4131,41 @@ export default function App() {
                           <span style={{fontSize:13,fontWeight:700,color:"#2563eb"}}>≈ {fmt(final/Number(proj.area))} ₸</span>
                         </div>
                       )}
+                      {showFinancial && currentUser.role!=="viewer" && (() => {
+                        const allFilled = getEffectiveCatalog().filter(w => Number((rows[w.name]||{}).qty||0) > 0);
+                        let totalCost=0, totalRevenue=0;
+                        for(const w of allFilled){
+                          const qty=Number((rows[w.name]||{}).qty||0);
+                          const p=rowPrice(w); const bp=getBasePrice(w); const dp=p??bp;
+                          totalCost += (w.cost||0)*qty;
+                          if(dp!=null) totalRevenue += dp*qty;
+                        }
+                        const totalProfit = totalRevenue - totalCost;
+                        const avgMargin = totalRevenue > 0 ? Math.round(totalProfit/totalRevenue*100) : 0;
+                        return totalCost > 0 ? (
+                          <div style={{marginTop:10,padding:"10px 12px",background:"#f0fdf4",borderRadius:8,border:"1px solid #bbf7d0"}}>
+                            <div style={{fontSize:10,color:"#059669",fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Финансы (внутренние)</div>
+                            <div style={{display:"flex",flexDirection:"column",gap:5,fontSize:12}}>
+                              <div style={{display:"flex",justifyContent:"space-between"}}>
+                                <span style={{color:"#6b7280"}}>Себестоимость</span>
+                                <span style={{fontWeight:600,color:"#374151"}}>{fmt(Math.round(totalCost))} ₸</span>
+                              </div>
+                              <div style={{display:"flex",justifyContent:"space-between"}}>
+                                <span style={{color:"#6b7280"}}>Цена клиента</span>
+                                <span style={{fontWeight:600,color:"#374151"}}>{fmt(Math.round(totalRevenue))} ₸</span>
+                              </div>
+                              <div style={{display:"flex",justifyContent:"space-between",borderTop:"1px solid #bbf7d0",paddingTop:5,marginTop:2}}>
+                                <span style={{color:"#059669",fontWeight:700}}>Валовая прибыль</span>
+                                <span style={{fontWeight:800,color:"#059669"}}>{fmt(Math.round(totalProfit))} ₸</span>
+                              </div>
+                              <div style={{display:"flex",justifyContent:"space-between"}}>
+                                <span style={{color:"#6b7280"}}>Маржа</span>
+                                <span style={{fontWeight:700,color:avgMargin>=35?"#059669":avgMargin>=20?"#d97706":"#ef4444"}}>{avgMargin}%</span>
+                              </div>
+                            </div>
+                          </div>
+                        ) : null;
+                      })()}
                     </>
                   )}
                 </div>
