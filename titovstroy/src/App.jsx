@@ -267,11 +267,12 @@ const STATUSES = [
   { key:"agreed",    label:"Согласовано", color:"#059669", bg:"#eff6ff"  },
   { key:"rejected",  label:"Отказ",       color:"#dc2626", bg:"rgba(220,38,38,.12)"   },
 ];
-const STORAGE_KEY    = "titovstroy-estimates";
-const BACKUPS_KEY    = "titovstroy-estimates-backups"; // снимки архива для восстановления
-const USERS_KEY      = "titovstroy-users";
-const SESSION_KEY    = "titovstroy-session";
-const PRICES_KEY     = "titovstroy-prices";  // переопределённые цены {code: {fixedPrice?, tiers?}}
+const STORAGE_KEY        = "titovstroy-estimates";
+const BACKUPS_KEY        = "titovstroy-estimates-backups"; // снимки архива для восстановления
+const USERS_KEY          = "titovstroy-users";
+const SESSION_KEY        = "titovstroy-session";
+const PRICES_KEY         = "titovstroy-prices";  // переопределённые цены {code: {fixedPrice?, tiers?}}
+const CATALOG_BACKUPS_KEY= "titovstroy-catalog-backups"; // снимки каталога (последние 10)
 const CATALOG_KEY    = "titovstroy-catalog";
 const CONTRACTS_KEY  = "titovstroy-contracts";
 const CLIENTS_KEY    = "titovstroy-clients";
@@ -1212,6 +1213,21 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
   const [newWork, setNewWork] = useState({cat:"", sub:"", name:"", unit:"м²"});
   const [editingCat, setEditingCat] = useState(null);
   const [editingSub, setEditingSub] = useState(null);
+  const [catalogBackupsModal, setCatalogBackupsModal] = useState(null);
+
+  const openCatalogBackups = async () => {
+    const bRaw = await storage.get(CATALOG_BACKUPS_KEY);
+    let bkps = []; try { if (bRaw?.value) bkps = JSON.parse(bRaw.value); } catch {}
+    setCatalogBackupsModal(Array.isArray(bkps) ? bkps : []);
+  };
+  const restoreCatalogBackup = async (snap) => {
+    if (!snap?.data) return;
+    let cat; try { cat = JSON.parse(snap.data); } catch { window.alert("Бэкап повреждён"); return; }
+    if (!window.confirm(`Восстановить каталог на ${new Date(snap.ts).toLocaleString("ru-RU")}?\nТекущий каталог уйдёт в бэкап.`)) return;
+    await saveCatalog(cat);
+    setCatalogBackupsModal(null);
+    window.alert("Каталог восстановлен ✓");
+  };
 
   const _priceAutoSave = useRef(null);
   useEffect(() => {
@@ -1325,6 +1341,19 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
     setPriceSaving(false); setPriceMsg("✓ Прайс сохранён!"); setTimeout(()=>setPriceMsg(""),3000);
   };
   const saveCatalog = async (cat) => {
+    // Авто-бэкап перед каждым сохранением каталога
+    try {
+      const prev = await storage.get(CATALOG_KEY);
+      if (prev && prev.value) {
+        const bRaw = await storage.get(CATALOG_BACKUPS_KEY);
+        let bkps = []; try { if (bRaw?.value) bkps = JSON.parse(bRaw.value); } catch {}
+        if (!Array.isArray(bkps)) bkps = [];
+        if (!bkps[0] || bkps[0].data !== prev.value) {
+          bkps.unshift({ ts: Date.now(), data: prev.value });
+          await storage.set(CATALOG_BACKUPS_KEY, JSON.stringify(bkps.slice(0, 10)));
+        }
+      }
+    } catch(e) { console.warn("catalog backup err", e); }
     await storage.set(CATALOG_KEY, JSON.stringify(cat)); setCatalogOverrides(cat); setLocalCatalog(cat);
     const allWorks = getEffectiveCatalog();
     setLocalPrices(prev => { const lp = {...(prev||{})}; for (const w of allWorks) { if (!lp[w.code]) lp[w.code] = { tiers:(w.tiers||[]).map(t=>({...t})), fixedPrice: w.fixedPrice!=null?String(w.fixedPrice):"" }; } return lp; });
@@ -1495,7 +1524,39 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                 👁 Показать скрытые ({(localCatalog?.hiddenCats||[]).length + (localCatalog?.hiddenSubs||[]).length})
               </button>
             )}
+            <button onClick={openCatalogBackups}
+              style={{background:"rgba(0,0,0,.03)",color:"#6b7280",border:"1px solid #e5e7eb",borderRadius:8,padding:"7px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+              🕘 Бэкапы
+            </button>
           </div>
+
+          {/* Модал бэкапов каталога */}
+          {catalogBackupsModal !== null && (
+            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:320,padding:16}} onClick={()=>setCatalogBackupsModal(null)}>
+              <div style={{background:"#fff",borderRadius:10,padding:"20px 22px",maxWidth:480,width:"100%",maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <div style={{fontWeight:800,fontSize:16,color:"#111827"}}>🕘 Бэкапы каталога</div>
+                  <button onClick={()=>setCatalogBackupsModal(null)} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#9ca3af"}}>✕</button>
+                </div>
+                <div style={{fontSize:12,color:"#9ca3af",marginBottom:14}}>Снимки каталога перед каждым изменением (последние 10). Можно откатиться к любому.</div>
+                {catalogBackupsModal.length===0 && <div style={{textAlign:"center",padding:"30px 0",color:"#9ca3af",fontSize:13}}>Бэкапов каталога пока нет — они появятся после первого изменения прайс-листа</div>}
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {catalogBackupsModal.map((snap,i)=>(
+                    <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"10px 12px",background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:8}}>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:600,color:"#111827"}}>{new Date(snap.ts).toLocaleString("ru-RU")}</div>
+                        <div style={{fontSize:11,color:"#9ca3af"}}>{i===0?"последний":""}</div>
+                      </div>
+                      <button onClick={()=>restoreCatalogBackup(snap)}
+                        style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(37,99,235,.2)",borderRadius:6,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                        Восстановить
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Быстрая навигация по категориям */}
           {!priceSearch && (()=>{
