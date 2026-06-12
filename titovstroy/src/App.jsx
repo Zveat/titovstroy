@@ -1078,7 +1078,7 @@ function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note })
                             <td style={{padding:"6px 8px",fontWeight:600,fontSize:12}}>{item.name}</td>
                             <td style={{padding:"6px 8px",textAlign:"center",color:"#888",fontSize:11}}>{item.unit}</td>
                             <td style={{padding:"6px 8px",textAlign:"center",fontWeight:500}}>{item.qty}</td>
-                            <td style={{padding:"6px 8px",textAlign:"right",color:"#555"}}>{fmt(item.price)} ₸</td>
+                            <td style={{padding:"6px 8px",textAlign:"right",color:"#555"}}>{item.qty > 0 ? (item.total / item.qty).toLocaleString("ru-RU",{minimumFractionDigits:2,maximumFractionDigits:2}) : fmt(item.price)} ₸</td>
                             <td style={{padding:"6px 8px",textAlign:"right",fontWeight:700,fontSize:12}}>{fmt(item.total)} ₸</td>
                           </tr>
                         );
