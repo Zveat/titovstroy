@@ -2148,7 +2148,7 @@ export default function App() {
   const [showKP, setShowKP] = useState(false);
   const [editPrices, setEditPrices] = useState(false);
   const [editingPriceRow, setEditingPriceRow] = useState(null);
-  const [showFinancial, setShowFinancial] = useState(false);
+  const [showFinancial, setShowFinancial] = useState(true);
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const [search, setSearch] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(null);
@@ -4345,6 +4345,19 @@ export default function App() {
                             <div>
                               <div style={{fontSize:13,color:"#111827",fontWeight:500}}>{displayName}</div>
                               <div style={{fontSize:10,color:"#9ca3af"}}>{work.cat} · {work.sub}</div>
+                              {showFinancial && currentUser.role!=="viewer" && qty > 0 && (() => {
+                                const costPerUnit = work.cost || 0;
+                                const dp = price ?? getBasePrice(work);
+                                const marginPct = dp && dp > 0 && costPerUnit > 0 ? Math.round((dp - costPerUnit) / dp * 100) : null;
+                                const grossProfit = dp != null && costPerUnit > 0 ? (dp - costPerUnit) * qty : null;
+                                return (costPerUnit > 0) ? (
+                                  <div style={{display:"flex",flexWrap:"wrap",gap:"4px 12px",marginTop:3,fontSize:10,color:"#6b7280"}}>
+                                    <span>Себест: <b style={{color:"#374151"}}>{fmt(costPerUnit * qty)} ₸</b></span>
+                                    {marginPct !== null && <span>Маржа: <b style={{color: marginPct>=35?"#059669":marginPct>=20?"#d97706":"#ef4444"}}>{marginPct}%</b></span>}
+                                    {grossProfit !== null && grossProfit > 0 && <span>Прибыль: <b style={{color:"#059669"}}>{fmt(Math.round(grossProfit))} ₸</b></span>}
+                                  </div>
+                                ) : null;
+                              })()}
                             </div>
                             <div style={{textAlign:"center"}}>
                               <input value={displayUnit}
