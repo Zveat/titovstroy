@@ -2103,6 +2103,9 @@ export default function App() {
 
   // Список смет { id, proj, rows, discount, note, updatedAt, total }
   const [estimates, setEstimates] = useState([]);
+  // Ref всегда держит актуальный список — для автосохранения (избегаем устаревшего замыкания)
+  const estimatesRef = useRef([]);
+  useEffect(() => { estimatesRef.current = estimates; }, [estimates]);
   const [loadingList, setLoadingList] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -2192,9 +2195,13 @@ export default function App() {
     if (!currentId) return;
     if (_autoSaveRef.current) clearTimeout(_autoSaveRef.current);
     _autoSaveRef.current = setTimeout(() => {
-      const exists = estimates.find(e => e.id === currentId);
-      const updated = { id:currentId, proj, rows, discount, markup, note, status:estStatus, comment:estComment, createdAt:exists?.createdAt||Date.now(), createdBy:exists?.createdBy||currentUser?.name, updatedAt:Date.now(), updatedBy:currentUser?.name, total:final, ...(currentParentId ? {parentId:currentParentId, dsNumber:currentDsNumber} : {}) };
-      const newList = exists ? estimates.map(e=>e.id===currentId?updated:e) : [updated,...estimates];
+      const cur = estimatesRef.current;
+      const exists = cur.find(e => e.id === currentId);
+      // parentId/dsNumber берём из стейта (новая ДС) ИЛИ из сохранённой записи (открытая ДС)
+      const pId = currentParentId || exists?.parentId;
+      const dsN = currentDsNumber || exists?.dsNumber;
+      const updated = { id:currentId, proj, rows, discount, markup, note, status:estStatus, comment:estComment, createdAt:exists?.createdAt||Date.now(), createdBy:exists?.createdBy||currentUser?.name, updatedAt:Date.now(), updatedBy:currentUser?.name, total:final, ...(pId ? {parentId:pId, dsNumber:dsN} : {}) };
+      const newList = exists ? cur.map(e=>e.id===currentId?updated:e) : [updated,...cur];
       setEstimates(newList);
       saveEstimates(newList);
     }, 1500);
@@ -2439,7 +2446,10 @@ export default function App() {
 
   // ── Сохранить текущую и вернуться к списку ──
   const saveAndBack = async () => {
-    const exists = estimates.find(e => e.id === currentId);
+    const cur = estimatesRef.current;
+    const exists = cur.find(e => e.id === currentId);
+    const pId = currentParentId || exists?.parentId;
+    const dsN = currentDsNumber || exists?.dsNumber;
     const updated = {
       id: currentId,
       proj, rows, discount, markup, note,
@@ -2450,10 +2460,11 @@ export default function App() {
       updatedAt: Date.now(),
       updatedBy: currentUser.name,
       total: final,
+      ...(pId ? {parentId:pId, dsNumber:dsN} : {}),
     };
     const newList = exists
-      ? estimates.map(e => e.id === currentId ? updated : e)
-      : [updated, ...estimates];
+      ? cur.map(e => e.id === currentId ? updated : e)
+      : [updated, ...cur];
     setEstimates(newList);
     await saveEstimates(newList);
     setScreen("list");
@@ -2461,7 +2472,8 @@ export default function App() {
 
   // ── Новая доп. смета (ДС) к существующей ──
   const newSupplementaryEstimate = (parentEst) => {
-    const siblings = estimates.filter(e => e.parentId === parentEst.id);
+    const cur = estimatesRef.current;
+    const siblings = cur.filter(e => e.parentId === parentEst.id);
     const dsNumber = siblings.length + 1;
     const id = genId();
     setCurrentId(id);
@@ -2479,7 +2491,8 @@ export default function App() {
     setActiveSub(Object.keys(Gdyn[cats[0]]||{})[0]);
     // Сохраняем parentId до открытия редактора — автосохранение подхватит
     const newEst = {id, parentId: parentEst.id, dsNumber, proj:{...(parentEst.proj||EMPTY_PROJ)}, rows:{}, discount:0, markup:parentEst.markup||0, note:"", status:"new", comment:"", createdAt:Date.now(), createdBy:currentUser.name, updatedAt:Date.now(), updatedBy:currentUser.name, total:0};
-    const newList = [newEst, ...estimates];
+    const newList = [newEst, ...cur];
+    estimatesRef.current = newList;
     setEstimates(newList);
     saveEstimates(newList);
     setScreen("editor");
