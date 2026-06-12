@@ -1,6 +1,13 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, get, set } from "firebase/database";
+
+// Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
+function useDebounce(value, ms) {
+  const [dv, setDv] = useState(value);
+  useEffect(() => { const t = setTimeout(() => setDv(value), ms); return () => clearTimeout(t); }, [value, ms]);
+  return dv;
+}
 
 const firebaseConfig = {
   apiKey:            "AIzaSyCPawCUYGY20SB5cLLszjoNzK5ytew9tCs",
@@ -2021,6 +2028,23 @@ export default function App() {
   const [listFilterManager, setListFilterManager] = useState(""); // "" = все
   const [listFilterStatus, setListFilterStatus] = useState(""); // "" = все статусы
   const [listSort, setListSort] = useState("date"); // "date" | "sum" | "name"
+  const debouncedListSearch = useDebounce(listSearch, 200);
+
+  // Мемоизированный фильтрованный/сортированный список смет
+  const filteredEstimates = useMemo(() => {
+    const q = debouncedListSearch.toLowerCase().trim();
+    return estimates
+      .filter(e => !listFilter || e.proj?.type === listFilter)
+      .filter(e => !listFilterManager || (e.proj?.manager||e.createdBy||"") === listFilterManager)
+      .filter(e => !listFilterStatus || (e.status||"new") === listFilterStatus)
+      .filter(e => !q || [e.proj?.name,e.proj?.address,e.proj?.phone,e.proj?.manager].some(v=>v&&v.toLowerCase().includes(q)))
+      .slice()
+      .sort((a,b) => {
+        if (listSort==="sum") return (b.total||0)-(a.total||0);
+        if (listSort==="name") return (a.proj?.name||"").localeCompare(b.proj?.name||"","ru");
+        return (b.updatedAt||0)-(a.updatedAt||0);
+      });
+  }, [estimates, listFilter, listFilterManager, listFilterStatus, debouncedListSearch, listSort]);
 
   // Когда каталог меняется — синхронизируем activeCat/activeSub
   useEffect(() => {
@@ -2081,8 +2105,8 @@ export default function App() {
   }, []);
 
   // ── Вычисления текущей сметы ──
-  const setRow = (name, field, val) =>
-    setRows(p => ({ ...p, [name]: { ...p[name], [field]: val } }));
+  const setRow = useCallback((name, field, val) =>
+    setRows(p => ({ ...p, [name]: { ...p[name], [field]: val } })), []);
 
   const rowPrice = (work) => {
     const r = rows[work.name] || {};
@@ -2094,13 +2118,35 @@ export default function App() {
     const price = rowPrice(work);
     return qty > 0 && price ? qty * price : 0;
   };
-  const subSum = (cat, sub) => (Gdyn[cat]?.[sub] || []).reduce((s,w) => s + rowTotal(w), 0);
-  const catSum = (cat) => Object.keys(Gdyn[cat]||{}).reduce((s,sub) => s + subSum(cat,sub), 0);
-  const grand = useMemo(() => {
-    let s = 0;
-    for (const cat of cats) for (const sub of Object.keys(Gdyn[cat]||{})) for (const w of Gdyn[cat]?.[sub]||[]) s += rowTotal(w);
-    return s;
-  }, [rows]);
+  // Единый проход по каталогу — вычисляет все суммы за O(n) один раз при изменении rows
+  const allSumMap = useMemo(() => {
+    const subMap = {};
+    const catMap = {};
+    let grandTotal = 0;
+    for (const cat of Object.keys(Gdyn)) {
+      let catTotal = 0;
+      for (const sub of Object.keys(Gdyn[cat]||{})) {
+        let subTotal = 0;
+        for (const w of (Gdyn[cat][sub]||[])) {
+          const r = rows[w.name] || {};
+          const qty = Number(r.qty || 0);
+          if (!qty) continue;
+          const price = (r.manualPrice !== undefined && r.manualPrice !== "")
+            ? Number(r.manualPrice)
+            : getPrice(w, qty, r.complexity || "std");
+          if (price) subTotal += qty * price;
+        }
+        subMap[cat+"||"+sub] = subTotal;
+        catTotal += subTotal;
+      }
+      catMap[cat] = catTotal;
+      grandTotal += catTotal;
+    }
+    return { subMap, catMap, grand: grandTotal };
+  }, [rows, catalogVersion]);
+  const subSum = (cat, sub) => allSumMap.subMap[cat+"||"+sub] || 0;
+  const catSum = (cat) => allSumMap.catMap[cat] || 0;
+  const grand = allSumMap.grand;
   const discAmt = grand * discount / 100;
   const final = grand - discAmt;
   const kpItems = useMemo(() => {
@@ -2112,15 +2158,64 @@ export default function App() {
     }
     return out;
   }, [rows]);
-  const filledCount = Object.values(rows).filter(r => Number(r?.qty) > 0).length;
+  const filledCount = useMemo(() => Object.values(rows).filter(r => Number(r?.qty) > 0).length, [rows]);
+  const nonViewerUsers = useMemo(() => allUsers.filter(u => u.role !== "viewer"), [allUsers]);
+  const debouncedSearch = useDebounce(search, 250);
   const searchResults = useMemo(() => {
-    if (!search.trim()) return [];
-    const q = search.toLowerCase();
+    if (!debouncedSearch.trim()) return [];
+    const q = debouncedSearch.toLowerCase();
     return getEffectiveCatalog().filter(w =>
       w.name.toLowerCase().includes(q) || w.sub.toLowerCase().includes(q) || w.cat.toLowerCase().includes(q)
     );
-  }, [search]);
+  }, [debouncedSearch, catalogVersion]);
   const isSearching = search.trim().length > 0;
+  // Мемоизированные вычисления аналитики — пересчитываются только при изменении данных
+  const analyticsData = useMemo(() => {
+    const now = Date.now();
+    const periodMs = {all:Infinity, month:30*864e5, week:7*864e5, "3month":90*864e5};
+    let fromTs = 0, toTs = now;
+    if(statsPeriod==="custom"){
+      fromTs = statsDateFrom ? new Date(statsDateFrom).getTime() : 0;
+      toTs   = statsDateTo   ? new Date(statsDateTo).getTime()+86399999 : now;
+    } else {
+      const ms = periodMs[statsPeriod]||Infinity;
+      fromTs = ms===Infinity ? 0 : now - ms;
+    }
+    const inRange = ts => (ts||0) >= fromTs && (ts||0) <= toTs;
+    const baseEst = estimates
+      .filter(e => inRange(e.updatedAt||e.createdAt||0))
+      .filter(e => !statsManager || (e.proj?.manager||"")=== statsManager);
+    const baseCon = contracts
+      .filter(c => inRange(new Date(c.date||0).getTime()))
+      .filter(c => (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0)
+      .filter(c => !statsManager || (c.manager||"")=== statsManager);
+    const totalEst = baseEst.length;
+    const withSumEst = baseEst.filter(e=>e.total>0);
+    const totalSumEst = withSumEst.reduce((s,e)=>s+e.total,0);
+    const avgEst = withSumEst.length ? Math.round(totalSumEst/withSumEst.length) : 0;
+    const totalCon = baseCon.length;
+    const totalSumCon = baseCon.reduce((s,c)=>s+(c.works||[]).reduce((ss,w)=>ss+(w.quantity*w.price||0),0),0);
+    const avgCon = totalCon ? Math.round(totalSumCon/totalCon) : 0;
+    const byStatus = {}; for(const s of STATUSES) byStatus[s.key]=baseEst.filter(e=>(e.status||"new")===s.key).length;
+    const byType = {}; for(const e of baseEst){ const t=e.proj?.type||"--"; byType[t]=(byType[t]||0)+1; }
+    const catSums = {};
+    const catalogForStats = getEffectiveCatalog();
+    for(const e of baseEst){
+      const items = e.rows ? Object.entries(e.rows).filter(([,r])=>Number(r?.qty)>0) : [];
+      for(const [code,] of items){ const w=catalogForStats.find(x=>x.code===code); if(w){catSums[w.cat]=(catSums[w.cat]||0)+1;} }
+    }
+    const topCats = Object.entries(catSums).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    const validManagerNames = new Set(nonViewerUsers.map(u=>u.name));
+    const managers = [...new Set(estimates.map(e=>e.proj?.manager||"").filter(m=>m&&validManagerNames.has(m)))];
+    const managerStats = managers.map(m=>{
+      const mes = baseEst.filter(e=>(e.proj?.manager||"")===m);
+      return {name:m, count:mes.length, sum:mes.filter(e=>e.total>0).reduce((s,e)=>s+e.total,0), agreed:mes.filter(e=>e.status==="agreed").length};
+    }).sort((a,b)=>b.sum-a.sum);
+    const TYPE_L2 = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронирование"};
+    const byConType = {}; for(const c of baseCon){ const t=TYPE_L2[c.type||"repair_fiz"]||"--"; byConType[t]=(byConType[t]||0)+1; }
+    return { baseEst, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType };
+  }, [estimates, contracts, statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers, catalogVersion]);
+
   // Защита от краша: если activeCat не в Gdyn — берём первый
   const safeCat = Gdyn[activeCat] ? activeCat : (Object.keys(Gdyn)[0]||"");
   const subs = Object.keys(Gdyn[safeCat] || {});
@@ -2129,7 +2224,7 @@ export default function App() {
   // ── Открыть смету на редактирование ──
   const openEstimate = (est) => {
     setCurrentId(est.id);
-    const validNames = new Set(allUsers.filter(u=>u.role!=="viewer").map(u=>u.name));
+    const validNames = new Set(nonViewerUsers.map(u=>u.name));
     const p = est.proj || {...EMPTY_PROJ};
     setProj({...p, manager: validNames.has(p.manager||"") ? p.manager : ""});
     setRows(est.rows || {});
@@ -3340,13 +3435,13 @@ export default function App() {
   // Показать экран входа если не авторизован
   if (!currentUser) return <LoginScreen onLogin={setCurrentUser} />;
 
-  const NAV_ITEMS = [
+  const NAV_ITEMS = useMemo(() => [
     { id:"dashboard", icon:"⌂",  label:"Главная" },
     { id:"list",      icon:"📋", label:"Сметы" },
     { id:"contracts", icon:"📄", label:"Договора" },
     { id:"analytics", icon:"📊", label:"Аналитика" },
     ...(currentUser.role==="admin" ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
-  ];
+  ], [currentUser.role]);
 
   return (
     <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#f3f4f6",minHeight:"100vh",color:"#111827",display:"flex",flexDirection:"column"}}>
@@ -3678,13 +3773,13 @@ export default function App() {
                       ))}
                     </div>
                     {/* Фильтр по сотруднику */}
-                    {allUsers.filter(u=>u.role!=="viewer").length > 1 && (
+                    {nonViewerUsers.length > 1 && (
                       <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
                         <button onClick={()=>setListFilterManager("")}
                           style={{background:!listFilterManager?"#eff6ff":"rgba(0,0,0,.03)",color:!listFilterManager?"#2563eb":"#9ca3af",border:`1px solid ${!listFilterManager?"rgba(136,136,204,.4)":"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
                           Все сотрудники
                         </button>
-                        {allUsers.filter(u=>u.role!=="viewer").map(u=>(
+                        {nonViewerUsers.map(u=>(
                           <button key={u.id} onClick={()=>setListFilterManager(u.name)}
                             style={{background:listFilterManager===u.name?"#eff6ff":"rgba(0,0,0,.03)",color:listFilterManager===u.name?"#2563eb":"#9ca3af",border:`1px solid ${listFilterManager===u.name?"rgba(136,136,204,.4)":"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
                             👤 {u.name}
@@ -3715,18 +3810,7 @@ export default function App() {
                     )}
                   </div>
                 ) : (() => {
-                  const q = listSearch.toLowerCase().trim();
-                  const filtered = estimates
-                    .filter(e => !listFilter || e.proj?.type === listFilter)
-                    .filter(e => !listFilterManager || (e.proj?.manager||e.createdBy||"")=== listFilterManager)
-                    .filter(e => !listFilterStatus || (e.status||"new") === listFilterStatus)
-                    .filter(e => !q || [e.proj?.name,e.proj?.address,e.proj?.phone,e.proj?.manager].some(v=>v&&v.toLowerCase().includes(q)))
-                    .slice()
-                    .sort((a,b) => {
-                      if (listSort==="sum") return (b.total||0)-(a.total||0);
-                      if (listSort==="name") return (a.proj?.name||"").localeCompare(b.proj?.name||"","ru");
-                      return (b.updatedAt||0)-(a.updatedAt||0);
-                    });
+                  const filtered = filteredEstimates;
                   return (
                     <>
                       <div style={{fontSize:11,color:"#9ca3af",marginBottom:2}}>
@@ -3885,7 +3969,7 @@ export default function App() {
                     ) : ftype==="manager" ? (
                       <select className="fi" value={proj.manager||""} onChange={e=>setProj(p=>({...p,manager:e.target.value}))}>
                         <option value="">— выбрать —</option>
-                        {allUsers.filter(u=>u.role!=="viewer").map(u=>(
+                        {nonViewerUsers.map(u=>(
                           <option key={u.id} value={u.name}>{u.name}</option>
                         ))}
                       </select>
@@ -4274,47 +4358,7 @@ export default function App() {
 
       {/* ЭКРАН: АНАЛИТИКА */}
       {screen === "analytics" && (()=>{
-        const now = Date.now();
-        const periodMs = {all:Infinity, month:30*864e5, week:7*864e5, "3month":90*864e5};
-        let fromTs = 0, toTs = now;
-        if(statsPeriod==="custom"){
-          fromTs = statsDateFrom ? new Date(statsDateFrom).getTime() : 0;
-          toTs   = statsDateTo   ? new Date(statsDateTo).getTime()+86399999 : now;
-        } else {
-          const ms = periodMs[statsPeriod]||Infinity;
-          fromTs = ms===Infinity ? 0 : now - ms;
-        }
-        const inRange = ts => (ts||0) >= fromTs && (ts||0) <= toTs;
-        const baseEst = estimates
-          .filter(e => inRange(e.updatedAt||e.createdAt||0))
-          .filter(e => !statsManager || (e.proj?.manager||"")=== statsManager);
-        const baseCon = contracts
-          .filter(c => inRange(new Date(c.date||0).getTime()))
-          .filter(c => (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0)
-          .filter(c => !statsManager || (c.manager||"")=== statsManager);
-        const totalEst = baseEst.length;
-        const withSumEst = baseEst.filter(e=>e.total>0);
-        const totalSumEst = withSumEst.reduce((s,e)=>s+e.total,0);
-        const avgEst = withSumEst.length ? Math.round(totalSumEst/withSumEst.length) : 0;
-        const totalCon = baseCon.length;
-        const totalSumCon = baseCon.reduce((s,c)=>s+(c.works||[]).reduce((ss,w)=>ss+(w.quantity*w.price||0),0),0);
-        const avgCon = totalCon ? Math.round(totalSumCon/totalCon) : 0;
-        const byStatus = {}; for(const s of STATUSES) byStatus[s.key]=baseEst.filter(e=>(e.status||"new")===s.key).length;
-        const byType = {}; for(const e of baseEst){ const t=e.proj?.type||"--"; byType[t]=(byType[t]||0)+1; }
-        const catSums = {};
-        for(const e of baseEst){
-          const items = e.rows ? Object.entries(e.rows).filter(([,r])=>Number(r?.qty)>0) : [];
-          for(const [code,] of items){ const w=getEffectiveCatalog().find(x=>x.code===code); if(w){catSums[w.cat]=(catSums[w.cat]||0)+1;} }
-        }
-        const topCats = Object.entries(catSums).sort((a,b)=>b[1]-a[1]).slice(0,5);
-        const validManagerNames = new Set(allUsers.filter(u=>u.role!=="viewer").map(u=>u.name));
-        const managers = [...new Set(estimates.map(e=>e.proj?.manager||"").filter(m=>m&&validManagerNames.has(m)))];
-        const managerStats = managers.map(m=>{
-          const mes = baseEst.filter(e=>(e.proj?.manager||"")===m);
-          return {name:m, count:mes.length, sum:mes.filter(e=>e.total>0).reduce((s,e)=>s+e.total,0), agreed:mes.filter(e=>e.status==="agreed").length};
-        }).sort((a,b)=>b.sum-a.sum);
-        const TYPE_L2 = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронирование"};
-        const byConType = {}; for(const c of baseCon){ const t=TYPE_L2[c.type||"repair_fiz"]||"--"; byConType[t]=(byConType[t]||0)+1; }
+        const { baseEst, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType } = analyticsData;
         const PERIOD_BTNS = [["all","Всё время"],["month","Месяц"],["3month","3 месяца"],["week","Неделя"],["custom","Вручную"]];
         return (
           <div style={{maxWidth:960,margin:"0 auto",padding:"40px 40px 80px"}}>
