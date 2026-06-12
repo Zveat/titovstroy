@@ -2183,6 +2183,9 @@ export default function App() {
   const stampBase64 = stampsBase64["stamp.jpg"] || "";
   const [listSearch, setListSearch] = useState("");
   const [backupsModal, setBackupsModal] = useState(null); // null | массив снимков
+  const [importModal, setImportModal] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importBusy, setImportBusy] = useState(false);
   const [listFilter, setListFilter] = useState(""); // "" | "Вторичка" | "Новостройка" | "Коммерция"
   const [listFilterManager, setListFilterManager] = useState(""); // "" = все
   const [listFilterStatus, setListFilterStatus] = useState(""); // "" = все статусы
@@ -2340,6 +2343,48 @@ export default function App() {
     await saveEstimates(list); // текущая версия попадёт в бэкап автоматически
     setBackupsModal(null);
     window.alert("Архив восстановлен ✓");
+  };
+
+  // ── Импорт смет из JSON (восстановление из PDF) ──
+  const runImport = async () => {
+    let payload;
+    try { payload = JSON.parse(importText); }
+    catch { window.alert("Не удалось прочитать JSON. Проверьте, что вставлен корректный текст."); return; }
+    const incoming = Array.isArray(payload) ? payload
+      : Array.isArray(payload?.estimates) ? payload.estimates : null;
+    if (!incoming || incoming.length === 0) { window.alert("В JSON нет смет для импорта."); return; }
+    const customWorks = Array.isArray(payload?.customWorks) ? payload.customWorks : [];
+    if (!window.confirm(`Импортировать ${incoming.length} смет(ы)?${customWorks.length?`\nБудет добавлено пользовательских позиций в каталог: ${customWorks.length}.`:""}\nТекущий архив уйдёт в бэкап — откат доступен.`)) return;
+    setImportBusy(true);
+    try {
+      // 1) Добавляем пользовательские позиции в каталог (без дублей по коду)
+      if (customWorks.length) {
+        const cur = _catalogOverrides;
+        const existing = cur.custom || [];
+        const codes = new Set(existing.map(w=>w.code));
+        const merged = [...existing, ...customWorks.filter(w => !codes.has(w.code))];
+        const nextCat = { renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], ...cur, custom: merged };
+        await saveCatalog(nextCat);
+      }
+      // 2) Добавляем сметы (без дублей по id)
+      const cur = estimatesRef.current;
+      const existIds = new Set(cur.map(e=>e.id));
+      const toAdd = incoming.filter(e => e && e.id && !existIds.has(e.id))
+        .map(e => ({ ...e, createdAt: e.createdAt||Date.now(), updatedAt: e.updatedAt||Date.now() }));
+      if (!toAdd.length) { window.alert("Все сметы из JSON уже есть в архиве (совпадение по id)."); setImportBusy(false); return; }
+      const newList = [...toAdd, ...cur];
+      estimatesRef.current = newList;
+      setEstimates(newList);
+      await saveEstimates(newList);
+      setImportBusy(false);
+      setImportModal(false);
+      setImportText("");
+      window.alert(`Импортировано смет: ${toAdd.length} ✓`);
+    } catch(e) {
+      console.error(e);
+      setImportBusy(false);
+      window.alert("Ошибка импорта: " + (e?.message||e));
+    }
   };
 
   // ── Вычисления текущей сметы ──
@@ -4076,10 +4121,16 @@ export default function App() {
                     <div style={{fontSize:11,color:"#9ca3af",marginTop:1}}>Все расчёты и коммерческие предложения</div>
                   </div>
                   {currentUser.role==="admin" && (
-                    <button onClick={openBackups}
-                      style={{background:"rgba(0,0,0,.03)",color:"#6b7280",border:"1px solid #e5e7eb",borderRadius:8,padding:"7px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                      🕘 Бэкапы
-                    </button>
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={()=>setImportModal(true)}
+                        style={{background:"rgba(0,0,0,.03)",color:"#6b7280",border:"1px solid #e5e7eb",borderRadius:8,padding:"7px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                        ⬆ Импорт
+                      </button>
+                      <button onClick={openBackups}
+                        style={{background:"rgba(0,0,0,.03)",color:"#6b7280",border:"1px solid #e5e7eb",borderRadius:8,padding:"7px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                        🕘 Бэкапы
+                      </button>
+                    </div>
                   )}
                 </div>
                 {/* Поиск и фильтры */}
@@ -4874,6 +4925,32 @@ export default function App() {
                   </button>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {importModal && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:320,padding:16}}
+          onClick={()=>!importBusy && setImportModal(false)}>
+          <div style={{background:"#fff",borderRadius:10,padding:"20px 22px",maxWidth:560,width:"100%",maxHeight:"85vh",overflowY:"auto"}}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={{fontWeight:800,fontSize:16,color:"#111827"}}>⬆ Импорт смет из JSON</div>
+              <button onClick={()=>!importBusy && setImportModal(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#9ca3af"}}>✕</button>
+            </div>
+            <div style={{fontSize:12,color:"#9ca3af",marginBottom:12}}>Вставьте JSON, полученный для восстановления смет. Текущий архив уйдёт в бэкап — откат доступен через «Бэкапы».</div>
+            <textarea
+              value={importText}
+              onChange={e=>setImportText(e.target.value)}
+              placeholder='{"customWorks":[...],"estimates":[...]}'
+              style={{width:"100%",minHeight:200,resize:"vertical",background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 12px",fontFamily:"monospace",fontSize:12,color:"#111827",outline:"none"}}/>
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:14}}>
+              <button onClick={()=>!importBusy && setImportModal(false)}
+                style={{background:"#e5e7eb",color:"#6b7280",border:"none",cursor:"pointer",padding:"9px 16px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:600}}>Отмена</button>
+              <button onClick={runImport} disabled={importBusy||!importText.trim()}
+                style={{background:importBusy||!importText.trim()?"#93c5fd":"#2563eb",color:"#fff",border:"none",cursor:importBusy||!importText.trim()?"default":"pointer",padding:"9px 18px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:700}}>
+                {importBusy?"Импорт…":"Импортировать"}</button>
             </div>
           </div>
         </div>
