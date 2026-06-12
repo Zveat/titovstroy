@@ -1290,7 +1290,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
   const roleColor = r => r==="admin" ? "#2563eb" : r==="viewer" ? "#2563eb" : "#2563eb";
 
   return (
-    <div style={{padding:"28px 24px 80px"}}>
+    <div style={{padding:"32px 28px 80px"}}>
       <div style={{marginBottom:24}}>
         <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#111111"}}>⚙️ Администрирование</h1>
         <div style={{fontSize:12,color:"#aaaaaa",marginTop:4}}>Сотрудники и прайс-лист</div>
@@ -1634,7 +1634,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                       });
                     });
                   });
-                  if(rows.length===0) rows.push(<tr key="empty"><td colSpan={8} style={{textAlign:"center",padding:"40px",color:"#f2f2f1"}}>Ничего не найдено</td></tr>);
+                  if(rows.length===0) rows.push(<tr key="empty"><td colSpan={8} style={{textAlign:"center",padding:"40px",color:"#9b9b9b"}}>Ничего не найдено</td></tr>);
                   return rows;
                 })()}
               </tbody>
@@ -3413,9 +3413,9 @@ export default function App() {
         .est-card:active{transform:scale(.99)}
         .sidebar{width:220px;background:#ffffff;border-right:1px solid #e8e7e5;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:50;transition:width .22s cubic-bezier(.4,0,.2,1)}
         .sidebar.collapsed{width:60px}
-        .nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;margin:2px 6px;transition:all .15s;border-left:2px solid transparent}
-        .nav-item:hover{background:rgba(0,0,0,.03)}
-        .nav-item.active{background:rgba(37,99,235,.08);border-left-color:#2563eb}
+        .nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;margin:1px 8px;transition:all .12s}
+        .nav-item:hover{background:rgba(0,0,0,.04)}
+        .nav-item.active{background:rgba(37,99,235,.09)}
         .nav-label{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;transition:opacity .15s,width .15s}
         .sidebar.collapsed .nav-label{opacity:0;width:0;pointer-events:none}
         .sidebar-content{margin-left:220px;transition:margin-left .22s cubic-bezier(.4,0,.2,1);min-height:100vh}
@@ -3446,7 +3446,7 @@ export default function App() {
             <div key={item.id} className={"nav-item"+(screen===item.id||(!["dashboard","list","contracts"].includes(screen)&&item.id==="list")?"":"")+((screen===item.id||(screen==="editor"&&item.id==="list"))?" active":"")}
               onClick={()=>{ setScreen(item.id); }}>
               <span style={{fontSize:18,flexShrink:0,lineHeight:1}}>{item.icon}</span>
-              <span className="nav-label" style={{color:screen===item.id||(screen==="editor"&&item.id==="list")?"#2563eb":"#aaaaaa"}}>{item.label}</span>
+              <span className="nav-label" style={{color:screen===item.id||(screen==="editor"&&item.id==="list")?"#2563eb":"#555555",fontWeight:screen===item.id||(screen==="editor"&&item.id==="list")?600:400}}>{item.label}</span>
             </div>
           ))}
         </nav>
@@ -3457,7 +3457,7 @@ export default function App() {
             <span className="nav-label" style={{color:"#666666",fontSize:12}}>Выйти</span>
           </div>
           <div className="nav-item" onClick={()=>setSideCollapsed(p=>!p)} style={{justifyContent:"center",marginTop:4}}>
-            <span style={{fontSize:13,color:"#f2f2f1"}}>{sideCollapsed?"▶":"◀"}</span>
+            <span style={{fontSize:13,color:"#9b9b9b"}}>{sideCollapsed?"▶":"◀"}</span>
           </div>
         </div>
       </div>
@@ -3490,7 +3490,7 @@ export default function App() {
         const recentContracts = [...contracts].filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,5);
         const recentEstimates = [...estimates].filter(e=>(e.total||0)>0).sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0)).slice(0,5);
         return (
-        <div style={{maxWidth:960,margin:"0 auto",padding:"28px 24px 80px"}}>
+        <div style={{maxWidth:960,margin:"0 auto",padding:"32px 28px 80px"}}>
           {/* Заголовок */}
           <div style={{marginBottom:32,display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
             <div>
@@ -3499,7 +3499,7 @@ export default function App() {
               </h1>
               <div style={{fontSize:12,color:"#aaaaaa",marginTop:6}}>
                 {new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
-                {" · "}<span style={{color:"#2563eb"}}>{currentUser.role==="admin"?"👑 Администратор":currentUser.role==="viewer"?"👁 Просмотр":"👤 "+currentUser.name}</span>
+                {" · "}<span style={{color:"#2563eb"}}>{currentUser.role==="admin"?"Администратор":currentUser.role==="viewer"?"Просмотр":currentUser.name}</span>
               </div>
             </div>
             {saving && <span style={{fontSize:11,color:"#666666"}}>💾 Сохранение...</span>}
@@ -3515,26 +3515,26 @@ export default function App() {
             ].map((s,i)=>(
               <div key={i} style={{background:"#ffffff",border:"1px solid #e8e7e5",borderRadius:13,padding:"18px 18px 16px",boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
                 
-                <div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:.8,marginBottom:10}}>{s.label}</div>
-                <div style={{fontSize:30,fontWeight:900,color:s.color,lineHeight:1,marginBottom:6}}>{s.value}</div>
-                {s.sub && <div style={{fontSize:11,color:"#aaaaaa"}}>{s.sub}</div>}
+                <div style={{fontSize:11,color:"#666666",fontWeight:500,marginBottom:8}}>{s.label}</div>
+                <div style={{fontSize:28,fontWeight:800,color:"#111111",lineHeight:1,marginBottom:6}}>{s.value}</div>
+                {s.sub && <div style={{fontSize:11,color:"#aaaaaa",marginTop:4}}>{s.sub}</div>}
               </div>
             ))}
           </div>
 
           {/* Разделы */}
-          <div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12,fontWeight:700}}>Разделы</div>
+          <div style={{fontSize:13,color:"#111111",fontWeight:700,marginBottom:14}}>Разделы</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:12,marginBottom:36}}>
             {[
-              {id:"list",      icon:"📋",title:"Сметы",      desc:"Расчёт и архив смет",    stat:estimates.length+" смет",      color:"#2563eb",bg:"#ffffff",border:"#e8e7e5"},
-              {id:"contracts", icon:"📄",title:"Договора",   desc:"Договора и соглашения",  stat:contracts.length+" договоров", color:"#2563eb",bg:"#ffffff",border:"#e8e7e5"},
-              {id:"analytics", icon:"📊",title:"Аналитика",  desc:"Статистика и отчёты",    stat:"За "+new Date().toLocaleDateString("ru-RU",{month:"long"}), color:"#2563eb",bg:"#ffffff",border:"#e8e7e5"},
+              {id:"list",      icon:"≡",title:"Сметы",      desc:"Расчёт и архив смет",    stat:estimates.length+" смет",      color:"#2563eb",bg:"#ffffff",border:"#e8e7e5"},
+              {id:"contracts", icon:"◻",title:"Договора",   desc:"Договора и соглашения",  stat:contracts.length+" договоров", color:"#2563eb",bg:"#ffffff",border:"#e8e7e5"},
+              {id:"analytics", icon:"↗",title:"Аналитика",  desc:"Статистика и отчёты",    stat:"За "+new Date().toLocaleDateString("ru-RU",{month:"long"}), color:"#2563eb",bg:"#ffffff",border:"#e8e7e5"},
             ].map(card=>(
               <div key={card.id} onClick={()=>{ setScreen(card.id); }}
                 style={{background:card.bg,border:`1px solid ${card.border}`,borderRadius:14,padding:"22px 20px",cursor:"pointer",transition:"transform .15s,box-shadow .15s"}}
-                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow=`0 10px 30px ${card.border}`;}}
-                onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
-                <div style={{fontSize:30,marginBottom:12}}>{card.icon}</div>
+                onMouseEnter={e=>{e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,.08)";e.currentTarget.style.borderColor="#2563eb";}}
+                onMouseLeave={e=>{e.currentTarget.style.boxShadow="none";e.currentTarget.style.borderColor="#e8e7e5";}}>
+                <div style={{fontSize:22,marginBottom:14,color:"#2563eb",fontWeight:300,lineHeight:1}}>{card.icon}</div>
                 <div style={{fontWeight:700,fontSize:15,color:"#111111",marginBottom:5}}>{card.title}</div>
                 <div style={{fontSize:12,color:"#666666",marginBottom:14}}>{card.desc}</div>
                 <div style={{display:"inline-block",background:"rgba(37,99,235,.08)",border:"1px solid rgba(37,99,235,.12)",color:"#2563eb",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:600}}>{card.stat}</div>
@@ -3547,7 +3547,7 @@ export default function App() {
             {/* Последние сметы */}
             {recentEstimates.length>0 && (
               <div>
-                <div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12,fontWeight:700,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontSize:13,color:"#111111",fontWeight:700,marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span>Последние сметы</span>
                   <span onClick={()=>setScreen("list")} style={{color:"#2563eb",cursor:"pointer",textTransform:"none",fontSize:11,letterSpacing:0}}>все →</span>
                 </div>
@@ -3559,7 +3559,7 @@ export default function App() {
                         style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<arr.length-1?"1px solid #e8e7e5":"none",cursor:"pointer",transition:"background .1s"}}
                         onMouseEnter={e=>e.currentTarget.style.background="#ffffff"}
                         onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                        <div style={{width:7,height:7,borderRadius:"50%",background:"#2563eb",flexShrink:0}}/>
+                        <div style={{width:3,height:3,borderRadius:"50%",background:"#d4d4d2",flexShrink:0,marginTop:5}}/>
                         <div style={{flex:1,minWidth:0}}>
                           <div style={{fontSize:13,color:"#111111",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{est.proj?.name||"Без названия"}</div>
                           <div style={{fontSize:11,color:"#aaaaaa",marginTop:2}}>{est.updatedAt?new Date(est.updatedAt).toLocaleDateString("ru-RU"):""}</div>
@@ -3574,7 +3574,7 @@ export default function App() {
             {/* Последние договора */}
             {recentContracts.length>0 && (
               <div>
-                <div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12,fontWeight:700,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontSize:13,color:"#111111",fontWeight:700,marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span>Последние договора</span>
                   <span onClick={()=>setScreen("contracts")} style={{color:"#2563eb",cursor:"pointer",textTransform:"none",fontSize:11,letterSpacing:0}}>все →</span>
                 </div>
@@ -3634,7 +3634,7 @@ export default function App() {
 
           <div style={{padding:"20px 20px 0"}}>
             {loadingList ? (
-              <div style={{textAlign:"center",padding:"60px 0",color:"#f2f2f1"}}>
+              <div style={{textAlign:"center",padding:"60px 0",color:"#9b9b9b"}}>
                 <div style={{fontSize:24,marginBottom:10}}>⏳</div>
                 <div style={{fontSize:13}}>Загрузка смет...</div>
               </div>
@@ -3644,7 +3644,7 @@ export default function App() {
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
                   <div>
                     <div style={{fontWeight:800,fontSize:17,color:"#111111"}}>📁 Архив смет</div>
-                    <div style={{fontSize:11,color:"#f2f2f1",marginTop:1}}>Все расчёты и коммерческие предложения</div>
+                    <div style={{fontSize:11,color:"#9b9b9b",marginTop:1}}>Все расчёты и коммерческие предложения</div>
                   </div>
                 </div>
                 {/* Поиск и фильтры */}
@@ -3736,7 +3736,7 @@ export default function App() {
                           : `Всего смет: ${estimates.length}`}
                       </div>
                       {filtered.length === 0 && (
-                        <div style={{textAlign:"center",padding:"40px 0",color:"#f2f2f1",fontSize:13}}>Ничего не найдено</div>
+                        <div style={{textAlign:"center",padding:"40px 0",color:"#9b9b9b",fontSize:13}}>Ничего не найдено</div>
                       )}
                       {filtered.map((est, i) => {
                         const hasItems = est.rows && Object.values(est.rows).some(r => Number(r?.qty) > 0);
@@ -3763,8 +3763,8 @@ export default function App() {
                               {est.proj?.area&&<span style={{fontSize:11,color:"#aaaaaa"}}>{est.proj.area} м²</span>}
                               {est.proj?.address&&<span style={{fontSize:11,color:"#333333",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:160}}>{est.proj.address}</span>}
                               <span style={{flex:1}}/>
-                              <span style={{fontSize:10,color:"#f2f2f1",whiteSpace:"nowrap"}}>{fmtDate(est.updatedAt)}</span>
-                              {author&&<span style={{fontSize:10,color:"#f2f2f1",whiteSpace:"nowrap"}}>· {author}</span>}
+                              <span style={{fontSize:10,color:"#9b9b9b",whiteSpace:"nowrap"}}>{fmtDate(est.updatedAt)}</span>
+                              {author&&<span style={{fontSize:10,color:"#9b9b9b",whiteSpace:"nowrap"}}>· {author}</span>}
                               <button onClick={()=>exportJSON(est)} title="Экспорт JSON"
                                 style={{background:"rgba(74,175,125,.08)",color:"#16a34a",border:"1px solid rgba(74,175,125,.15)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
                                 📥
@@ -3878,7 +3878,7 @@ export default function App() {
                   ["Адрес","address","ул. Бухар-Жырау, 45","text"],
                 ].map(([lbl,f,ph,ftype])=>(
                   <div key={f}>
-                    <div style={{fontSize:10,color:"#f2f2f1",marginBottom:4}}>{lbl}</div>
+                    <div style={{fontSize:10,color:"#9b9b9b",marginBottom:4}}>{lbl}</div>
                     {ftype==="objtype" ? (
                       <select className="fi" value={proj.type} onChange={e=>setProj(p=>({...p,type:e.target.value}))}>
                         {OBJ_TYPES.map(t=><option key={t}>{t}</option>)}
@@ -3932,7 +3932,7 @@ export default function App() {
                 </div>}
 
                 {/* Шапка таблицы */}
-                <div className="wrow-th" style={{display:"grid",gridTemplateColumns:"1fr 50px 120px 76px 90px",padding:"6px 14px 7px",fontSize:10,color:"#f2f2f1",fontWeight:700,letterSpacing:.8,textTransform:"uppercase",borderBottom:"1px solid #e8e7e5"}}>
+                <div className="wrow-th" style={{display:"grid",gridTemplateColumns:"1fr 50px 120px 76px 90px",padding:"6px 14px 7px",fontSize:10,color:"#9b9b9b",fontWeight:700,letterSpacing:.8,textTransform:"uppercase",borderBottom:"1px solid #e8e7e5"}}>
                   <span>Наименование</span>
                   <span className="wrow-desk" style={{textAlign:"center"}}>Ед.</span>
                   <span className="wrow-desk" style={{textAlign:"right"}}>Цена за ед., ₸</span>
@@ -3944,7 +3944,7 @@ export default function App() {
                 {/* Строки работ */}
                 <div style={{padding:"4px 0"}}>
                   {isSearching && searchResults.length === 0 && (
-                    <div style={{textAlign:"center",padding:"32px 0",color:"#f2f2f1"}}>
+                    <div style={{textAlign:"center",padding:"32px 0",color:"#9b9b9b"}}>
                       <div style={{fontSize:22,marginBottom:8}}>🔍</div>
                       <div style={{fontSize:13}}>Ничего не найдено</div>
                     </div>
@@ -3973,7 +3973,7 @@ export default function App() {
                         onChange={e=>setRow(work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}/>
                     ) : displayPrice != null ? (
                       <span style={{fontSize:12,color:filled?"#aaaaaa":"#666666"}}>{fmt(displayPrice)}</span>
-                    ) : <span style={{fontSize:10,color:"#f2f2f1",fontStyle:"italic"}}>нет цены</span>;
+                    ) : <span style={{fontSize:10,color:"#9b9b9b",fontStyle:"italic"}}>нет цены</span>;
                     const qtyInput = <input className="num" style={{width:70,textAlign:"center",opacity:currentUser.role==="viewer"?.4:1}} type="number" min="0" placeholder="0" disabled={currentUser.role==="viewer"}
                       value={r.qty||""} onChange={e=>setRow(work.name,"qty",e.target.value)}/>;
                     const nameBlock = (
@@ -3999,7 +3999,7 @@ export default function App() {
                         <div className="wrow-desk" style={{textAlign:"right"}}>{qtyInput}</div>
                         <div className="wrow-desk" style={{textAlign:"right",paddingTop:3}}>
                           {total>0 ? <span style={{fontSize:13,fontWeight:700,color:"#2563eb"}}>{fmt(total)}</span>
-                                   : <span style={{color:"#f2f2f1",fontSize:12}}>—</span>}
+                                   : <span style={{color:"#9b9b9b",fontSize:12}}>—</span>}
                         </div>
                         {/* Mobile right column: цена/ед · поле · итог */}
                         <div className="wrow-mob-extra" style={{flexDirection:"column",alignItems:"flex-end",gap:3,display:"none",paddingTop:2,minWidth:90}}>
@@ -4057,7 +4057,7 @@ export default function App() {
                       </div>
                     );
                   })}
-                  {grand===0&&<div style={{textAlign:"center",padding:"22px 0",color:"#f2f2f1",fontSize:12}}>Введите объёмы →</div>}
+                  {grand===0&&<div style={{textAlign:"center",padding:"22px 0",color:"#9b9b9b",fontSize:12}}>Введите объёмы →</div>}
                   {grand>0&&(
                     <>
                       <div style={{marginTop:10,paddingTop:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -4085,7 +4085,7 @@ export default function App() {
                 </div>
                 {/* Статус сметы */}
                 <div className="card" style={{padding:14}}>
-                  <div style={{fontSize:10,color:"#f2f2f1",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>Статус</div>
+                  <div style={{fontSize:10,color:"#9b9b9b",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>Статус</div>
                   <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                     {STATUSES.map(s=>(
                       <button key={s.key} onClick={()=>setEstStatus(s.key)}
@@ -4097,11 +4097,11 @@ export default function App() {
                 </div>
                 {/* Комментарий для менеджера */}
                 <div className="card" style={{padding:14}}>
-                  <div style={{fontSize:10,color:"#f2f2f1",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:7}}>Комментарий</div>
+                  <div style={{fontSize:10,color:"#9b9b9b",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:7}}>Комментарий</div>
                   <textarea className="fi" rows={2} style={{resize:"none"}} placeholder="Заметка для менеджера..." value={estComment} onChange={e=>setEstComment(e.target.value)}/>
                 </div>
                 <div className="card" style={{padding:14}}>
-                  <div style={{fontSize:10,color:"#f2f2f1",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:7}}>Примечание в КП</div>
+                  <div style={{fontSize:10,color:"#9b9b9b",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:7}}>Примечание в КП</div>
                   <textarea className="fi" rows={3} style={{resize:"none"}} placeholder="Доп. условия для клиента..." value={note} onChange={e=>setNote(e.target.value)}/>
                 </div>
                 <button className="btn btn-g" disabled={kpItems.length===0} onClick={()=>setShowKP(true)}>
@@ -4230,7 +4230,7 @@ export default function App() {
         const byConType = {}; for(const c of baseCon){ const t=TYPE_L2[c.type||"repair_fiz"]||"--"; byConType[t]=(byConType[t]||0)+1; }
         const PERIOD_BTNS = [["all","Всё время"],["month","Месяц"],["3month","3 месяца"],["week","Неделя"],["custom","Вручную"]];
         return (
-          <div style={{maxWidth:960,margin:"0 auto",padding:"28px 24px 80px"}}>
+          <div style={{maxWidth:960,margin:"0 auto",padding:"32px 28px 80px"}}>
             <div style={{marginBottom:24}}>
               <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#111111"}}>📊 Аналитика</h1>
               <div style={{fontSize:12,color:"#aaaaaa",marginTop:4}}>Статистика по сметам и договорам</div>
@@ -4268,7 +4268,7 @@ export default function App() {
                   <div style={{position:"absolute",top:0,left:0,width:3,height:"100%",background:c,borderRadius:"3px 0 0 3px"}}/>
                   <div style={{fontSize:9,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:.8,marginBottom:6}}>{l}</div>
                   <div style={{fontSize:20,fontWeight:900,color:c,lineHeight:1,marginBottom:4}}>{v}</div>
-                  <div style={{fontSize:10,color:"#f2f2f1"}}>{s}</div>
+                  <div style={{fontSize:10,color:"#9b9b9b"}}>{s}</div>
                 </div>
               ))}
             </div>
@@ -4295,7 +4295,7 @@ export default function App() {
                 <div style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>Договора</div>
                 {Object.keys(byConType).length>0 && <><div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типам</div><div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:14}}>{Object.entries(byConType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(<div key={t} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(0,0,0,.02)",borderRadius:6}}><span style={{fontSize:12,color:"#aaaaaa"}}>{t}</span><span style={{fontSize:13,fontWeight:700,color:"#2563eb"}}>{n}</span></div>))}</div></>}
                 {baseCon.length>0 && <><div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>Договора в периоде</div><div style={{display:"flex",flexDirection:"column",gap:3}}>{[...baseCon].sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,6).map(c=>{const cl=contractClients.find(x=>x.id===c.clientId);const sum=(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);return(<div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(0,0,0,.02)",borderRadius:6,cursor:"pointer"}} onClick={()=>{setCurrentContract({...c});setContractTab("editor");setScreen("contracts");}}><div style={{minWidth:0}}><div style={{fontSize:12,color:"#111111",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{TYPE_L2[c.type||"repair_fiz"]} #{c.number||"--"}</div><div style={{fontSize:10,color:"#aaaaaa"}}>{cl?.name||c.estClient||"--"}</div></div><span style={{fontSize:12,fontWeight:700,color:"#2563eb",flexShrink:0,marginLeft:8}}>{fmt(sum)} </span></div>);})}</div></>}
-                {totalCon===0 && <div style={{textAlign:"center",color:"#f2f2f1",fontSize:13,padding:"30px 0"}}>Нет договоров за период</div>}
+                {totalCon===0 && <div style={{textAlign:"center",color:"#9b9b9b",fontSize:13,padding:"30px 0"}}>Нет договоров за период</div>}
               </div>
             </div>
             {!statsManager && managerStats.length>0 && (
@@ -4314,7 +4314,7 @@ export default function App() {
                 </div>
               </div>
             )}
-            {totalEst===0&&totalCon===0&&<div style={{textAlign:"center",color:"#f2f2f1",fontSize:13,padding:"60px 0"}}><div style={{fontSize:32,marginBottom:12}}>📊</div>Нет данных за выбранный период</div>}
+            {totalEst===0&&totalCon===0&&<div style={{textAlign:"center",color:"#9b9b9b",fontSize:13,padding:"60px 0"}}><div style={{fontSize:32,marginBottom:12}}>📊</div>Нет данных за выбранный период</div>}
           </div>
         );
       })()}
