@@ -2321,12 +2321,13 @@ export default function App() {
       if (qty <= 0) continue;
       const r = rows[w.name]||{};
       const displayName = r.manualName !== undefined ? r.manualName : w.name;
+      const displayUnit = r.manualUnit !== undefined ? r.manualUnit : w.unit;
       const price = rowPrice(w);
       if (price) {
-        out.push({ ...w, name: displayName, qty, price: price * mm, total: qty * price * mm });
+        out.push({ ...w, name: displayName, unit: displayUnit, qty, price: price * mm, total: qty * price * mm });
       } else {
         const pf = rowPriceFrom(w);
-        if (pf) fromOut.push({ ...w, name: displayName, qty, priceFrom: pf });
+        if (pf) fromOut.push({ ...w, name: displayName, unit: displayUnit, qty, priceFrom: pf });
       }
     }
     out._fromItems = fromOut;
