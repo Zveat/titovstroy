@@ -3961,10 +3961,6 @@ export default function App() {
                               <span style={{flex:1}}/>
                               <span style={{fontSize:10,color:"#9ca3af",whiteSpace:"nowrap"}}>{fmtDate(est.updatedAt)}</span>
                               {author&&<span style={{fontSize:10,color:"#9ca3af",whiteSpace:"nowrap"}}>· {author}</span>}
-                              <button onClick={()=>exportJSON(est)} title="Экспорт JSON"
-                                style={{background:"rgba(74,175,125,.08)",color:"#059669",border:"1px solid rgba(74,175,125,.15)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
-                                📥
-                              </button>
                               <button onClick={()=>{
                                 const catalog = getEffectiveCatalog();
                                 const works = Object.entries(est.rows||{}).filter(([,r])=>Number(r?.qty)>0).map(([key,r])=>{
@@ -4479,21 +4475,30 @@ export default function App() {
               <KPContent proj={proj} kpItems={kpItems} fromItems={kpItems._fromItems||[]} discount={discount} discAmt={discAmt} final={final} note={note}/>
               <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:20}}>
                 <button style={{background:"#e5e7eb",color:"#9ca3af",border:"none",cursor:"pointer",padding:"10px 18px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:600}} onClick={()=>setShowKP(false)}>Закрыть</button>
-                <button style={{background:"#2563eb",color:"#f3f4f6",border:"none",cursor:"pointer",padding:"10px 20px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:700}} onClick={()=>{
+                <button style={{background:"#2563eb",color:"#f3f4f6",border:"none",cursor:"pointer",padding:"10px 20px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:700}} onClick={async ()=>{
                 const el = document.getElementById("kp-print-portal");
+                // Конвертируем /stamp.jpg в base64 чтобы работало в blob-окне
+                let stampB64 = "";
+                try {
+                  const resp = await fetch("/stamp.jpg");
+                  const buf = await resp.arrayBuffer();
+                  stampB64 = "data:image/jpeg;base64," + btoa(String.fromCharCode(...new Uint8Array(buf)));
+                } catch(e) {}
                 const css = [
                   "@import url('https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;900&display=swap');",
                   "*{box-sizing:border-box;margin:0;padding:0}",
-                  "body{font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color:#ffffff;padding:24px;-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact}",
+                  "body{font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color:#111827;padding:24px;-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact}",
                   "table{width:100%;border-collapse:collapse}",
                   "@page{margin:8mm;size:A4 portrait}",
                   "@media print{.no-print{display:none!important}body{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}}"
                 ].join(" ");
-                const html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>КП TitovStroy</title><style>" + css + "</style></head><body>" + el.innerHTML + "<div class=\"no-print\" style=\"margin-top:24px;text-align:center\"><button onclick=\"window.print()\" style=\"padding:12px 32px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:inherit\">🖨 Сохранить PDF</button></div></body></html>";
+                let innerHTML = el.innerHTML;
+                if (stampB64) innerHTML = innerHTML.replace(/src="\/stamp\.jpg"/g, `src="${stampB64}"`);
+                const html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>КП TitovStroy</title><style>" + css + "</style></head><body>" + innerHTML + "<div class=\"no-print\" style=\"margin-top:24px;text-align:center\"><button onclick=\"window.print()\" style=\"padding:12px 32px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:inherit\">🖨 Сохранить PDF</button></div></body></html>";
                 const blob = new Blob([html], {type:"text/html"});
                 const url = URL.createObjectURL(blob);
                 window.open(url, "_blank");
-                setTimeout(()=>URL.revokeObjectURL(url), 10000);
+                setTimeout(()=>URL.revokeObjectURL(url), 30000);
               }}>Печать / PDF</button>
               </div>
             </div>
