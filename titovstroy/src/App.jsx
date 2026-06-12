@@ -2004,6 +2004,8 @@ export default function App() {
   const [showStats, setShowStats] = useState(false);
   const [statsPeriod, setStatsPeriod] = useState("all"); // all | month | week | 3month
   const [statsManager, setStatsManager] = useState(""); // "" = все
+  const [statsDateFrom, setStatsDateFrom] = useState("");
+  const [statsDateTo, setStatsDateTo] = useState("");
   // ── Договоры ──
   const [contracts, setContracts] = useState([]);
   const [contractClients, setContractClients] = useState([]);
