@@ -1046,7 +1046,7 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
                       {items.map((item,i) => {
                         rowNum++;
                         return (
-                          <tr key={i} style={{background:i%2===0?"#111111":"#f2f2f1",borderBottom:"1px solid #f2f2f1"}}>
+                          <tr key={i} style={{background:i%2===0?"#ffffff":"#f8f8f7",borderBottom:"1px solid #f2f2f1"}}>
                             <td style={{padding:"6px 8px",textAlign:"center",color:"#aaaaaa",fontSize:11}}>{rowNum}</td>
                             <td style={{padding:"6px 8px",color:"#2563eb",fontSize:11,fontWeight:500}}>{item.sub}</td>
                             <td style={{padding:"6px 8px",fontWeight:600,fontSize:12}}>{item.name}</td>
@@ -3513,22 +3513,22 @@ export default function App() {
               {label:"Объём за месяц",   value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма смет за месяц",                          color:"#16a34a"},
               {label:"Клиентов за месяц",value:clientsThisMonth.length,    sub:"из "+contractClients.length+" всего", color:"#2563eb"},
             ].map((s,i)=>(
-              <div key={i} style={{background:"#f8f8f7",border:"1px solid #e8e7e5",borderRadius:13,padding:"18px 18px 16px",position:"relative",overflow:"hidden"}}>
-                <div style={{position:"absolute",top:0,left:0,width:3,height:"100%",background:s.color,borderRadius:"3px 0 0 3px"}}/>
+              <div key={i} style={{background:"#ffffff",border:"1px solid #e8e7e5",borderRadius:13,padding:"18px 18px 16px",boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
+                
                 <div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:.8,marginBottom:10}}>{s.label}</div>
                 <div style={{fontSize:30,fontWeight:900,color:s.color,lineHeight:1,marginBottom:6}}>{s.value}</div>
-                {s.sub && <div style={{fontSize:11,color:"#f2f2f1"}}>{s.sub}</div>}
+                {s.sub && <div style={{fontSize:11,color:"#aaaaaa"}}>{s.sub}</div>}
               </div>
             ))}
           </div>
 
           {/* Разделы */}
-          <div style={{fontSize:10,color:"#f2f2f1",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12,fontWeight:700}}>Разделы</div>
+          <div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12,fontWeight:700}}>Разделы</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:12,marginBottom:36}}>
             {[
-              {id:"list",      icon:"📋",title:"Сметы",      desc:"Расчёт и архив смет",    stat:estimates.length+" смет",      color:"#2563eb",bg:"rgba(136,136,204,.07)",border:"rgba(37,99,235,.1)"},
-              {id:"contracts", icon:"📄",title:"Договора",   desc:"Договора и соглашения",  stat:contracts.length+" договоров", color:"#2563eb",bg:"rgba(37,99,235,.06)",  border:"rgba(37,99,235,.1)"},
-              {id:"analytics", icon:"📊",title:"Аналитика",  desc:"Статистика и отчёты",    stat:"За "+new Date().toLocaleDateString("ru-RU",{month:"long"}), color:"#2563eb",bg:"rgba(66,133,244,.07)",   border:"rgba(66,133,244,.2)"},
+              {id:"list",      icon:"📋",title:"Сметы",      desc:"Расчёт и архив смет",    stat:estimates.length+" смет",      color:"#2563eb",bg:"#ffffff",border:"#e8e7e5"},
+              {id:"contracts", icon:"📄",title:"Договора",   desc:"Договора и соглашения",  stat:contracts.length+" договоров", color:"#2563eb",bg:"#ffffff",border:"#e8e7e5"},
+              {id:"analytics", icon:"📊",title:"Аналитика",  desc:"Статистика и отчёты",    stat:"За "+new Date().toLocaleDateString("ru-RU",{month:"long"}), color:"#2563eb",bg:"#ffffff",border:"#e8e7e5"},
             ].map(card=>(
               <div key={card.id} onClick={()=>{ setScreen(card.id); }}
                 style={{background:card.bg,border:`1px solid ${card.border}`,borderRadius:14,padding:"22px 20px",cursor:"pointer",transition:"transform .15s,box-shadow .15s"}}
@@ -3537,7 +3537,7 @@ export default function App() {
                 <div style={{fontSize:30,marginBottom:12}}>{card.icon}</div>
                 <div style={{fontWeight:700,fontSize:15,color:"#111111",marginBottom:5}}>{card.title}</div>
                 <div style={{fontSize:12,color:"#666666",marginBottom:14}}>{card.desc}</div>
-                <div style={{display:"inline-block",background:card.bg,border:`1px solid ${card.border}`,color:card.color,borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:600}}>{card.stat}</div>
+                <div style={{display:"inline-block",background:"rgba(37,99,235,.08)",border:"1px solid rgba(37,99,235,.12)",color:"#2563eb",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:600}}>{card.stat}</div>
               </div>
             ))}
           </div>
@@ -3547,11 +3547,11 @@ export default function App() {
             {/* Последние сметы */}
             {recentEstimates.length>0 && (
               <div>
-                <div style={{fontSize:10,color:"#f2f2f1",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12,fontWeight:700,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12,fontWeight:700,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span>Последние сметы</span>
                   <span onClick={()=>setScreen("list")} style={{color:"#2563eb",cursor:"pointer",textTransform:"none",fontSize:11,letterSpacing:0}}>все →</span>
                 </div>
-                <div style={{background:"#f8f8f7",border:"1px solid #e8e7e5",borderRadius:12,overflow:"hidden"}}>
+                <div style={{background:"#ffffff",border:"1px solid #e8e7e5",borderRadius:12,overflow:"hidden"}}>
                   {recentEstimates.map((est,i,arr)=>{
                     const total = est.total || 0;
                     return (
@@ -3574,11 +3574,11 @@ export default function App() {
             {/* Последние договора */}
             {recentContracts.length>0 && (
               <div>
-                <div style={{fontSize:10,color:"#f2f2f1",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12,fontWeight:700,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12,fontWeight:700,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span>Последние договора</span>
                   <span onClick={()=>setScreen("contracts")} style={{color:"#2563eb",cursor:"pointer",textTransform:"none",fontSize:11,letterSpacing:0}}>все →</span>
                 </div>
-                <div style={{background:"#f8f8f7",border:"1px solid #e8e7e5",borderRadius:12,overflow:"hidden"}}>
+                <div style={{background:"#ffffff",border:"1px solid #e8e7e5",borderRadius:12,overflow:"hidden"}}>
                   {recentContracts.map((c,i,arr)=>{
                     const cl = contractClients.find(x=>x.id===c.clientId);
                     const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
@@ -4275,7 +4275,7 @@ export default function App() {
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(380px,1fr))",gap:16,marginBottom:16}}>
               <div style={{background:"#f8f8f7",border:"1px solid #e8e7e5",borderRadius:12,padding:"18px"}}>
                 <div style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>Сметы</div>
-                <div style={{fontSize:10,color:"#f2f2f1",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По статусам</div>
+                <div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По статусам</div>
                 <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:14}}>
                   {STATUSES.map(s=>(
                     <div key={s.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(0,0,0,.02)",borderRadius:6}}>
@@ -4289,12 +4289,12 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-                {Object.keys(byType).length>0 && <><div style={{fontSize:10,color:"#f2f2f1",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типу объекта</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(<span key={t} style={{fontSize:11,padding:"3px 10px",borderRadius:20,background:"rgba(0,0,0,.04)",color:"#aaaaaa"}}>{t}: <strong style={{color:"#111111"}}>{n}</strong></span>))}</div></>}
+                {Object.keys(byType).length>0 && <><div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типу объекта</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(<span key={t} style={{fontSize:11,padding:"3px 10px",borderRadius:20,background:"rgba(0,0,0,.04)",color:"#aaaaaa"}}>{t}: <strong style={{color:"#111111"}}>{n}</strong></span>))}</div></>}
               </div>
               <div style={{background:"#f8f8f7",border:"1px solid #e8e7e5",borderRadius:12,padding:"18px"}}>
                 <div style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>Договора</div>
-                {Object.keys(byConType).length>0 && <><div style={{fontSize:10,color:"#f2f2f1",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типам</div><div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:14}}>{Object.entries(byConType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(<div key={t} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(0,0,0,.02)",borderRadius:6}}><span style={{fontSize:12,color:"#aaaaaa"}}>{t}</span><span style={{fontSize:13,fontWeight:700,color:"#2563eb"}}>{n}</span></div>))}</div></>}
-                {baseCon.length>0 && <><div style={{fontSize:10,color:"#f2f2f1",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>Договора в периоде</div><div style={{display:"flex",flexDirection:"column",gap:3}}>{[...baseCon].sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,6).map(c=>{const cl=contractClients.find(x=>x.id===c.clientId);const sum=(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);return(<div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(0,0,0,.02)",borderRadius:6,cursor:"pointer"}} onClick={()=>{setCurrentContract({...c});setContractTab("editor");setScreen("contracts");}}><div style={{minWidth:0}}><div style={{fontSize:12,color:"#111111",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{TYPE_L2[c.type||"repair_fiz"]} #{c.number||"--"}</div><div style={{fontSize:10,color:"#aaaaaa"}}>{cl?.name||c.estClient||"--"}</div></div><span style={{fontSize:12,fontWeight:700,color:"#2563eb",flexShrink:0,marginLeft:8}}>{fmt(sum)} </span></div>);})}</div></>}
+                {Object.keys(byConType).length>0 && <><div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типам</div><div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:14}}>{Object.entries(byConType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(<div key={t} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(0,0,0,.02)",borderRadius:6}}><span style={{fontSize:12,color:"#aaaaaa"}}>{t}</span><span style={{fontSize:13,fontWeight:700,color:"#2563eb"}}>{n}</span></div>))}</div></>}
+                {baseCon.length>0 && <><div style={{fontSize:10,color:"#aaaaaa",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>Договора в периоде</div><div style={{display:"flex",flexDirection:"column",gap:3}}>{[...baseCon].sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,6).map(c=>{const cl=contractClients.find(x=>x.id===c.clientId);const sum=(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);return(<div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(0,0,0,.02)",borderRadius:6,cursor:"pointer"}} onClick={()=>{setCurrentContract({...c});setContractTab("editor");setScreen("contracts");}}><div style={{minWidth:0}}><div style={{fontSize:12,color:"#111111",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{TYPE_L2[c.type||"repair_fiz"]} #{c.number||"--"}</div><div style={{fontSize:10,color:"#aaaaaa"}}>{cl?.name||c.estClient||"--"}</div></div><span style={{fontSize:12,fontWeight:700,color:"#2563eb",flexShrink:0,marginLeft:8}}>{fmt(sum)} </span></div>);})}</div></>}
                 {totalCon===0 && <div style={{textAlign:"center",color:"#f2f2f1",fontSize:13,padding:"30px 0"}}>Нет договоров за период</div>}
               </div>
             </div>
