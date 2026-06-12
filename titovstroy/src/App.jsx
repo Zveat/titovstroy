@@ -1777,12 +1777,13 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
 // Типы документов
 const DOC_TYPES = [
   { value:"repair_fiz",  label:"Договор ремонта" },
+  { value:"repair_add",  label:"Доп. соглашение к договору ремонта" },
   { value:"annex",       label:"Приложение (доп. работы) №2/3..." },
   { value:"design",      label:"Соглашение о дизайн-проекте" },
   { value:"design_add",  label:"Доп. соглашение к дизайн-проекту" },
   { value:"reservation", label:"Соглашение о резервировании" },
 ];
-const TYPE_LABELS = { repair_fiz:"Договор ремонта", annex:"Приложение", design:"Дизайн-проект", design_add:"Доп. соглашение дизайн", reservation:"Бронь" };
+const TYPE_LABELS = { repair_fiz:"Договор ремонта", repair_add:"Доп. соглашение", annex:"Приложение", design:"Дизайн-проект", design_add:"Доп. соглашение дизайн", reservation:"Бронь" };
 
 function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onGDoc, onAddClientFromEstimate, currentUserRole, fmt }) {
   const [withStamp, setWithStamp] = useState(true);
@@ -1790,13 +1791,14 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
   const total = (contract.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
   const upd = (patch) => onUpdate(prev=>({...prev,...patch}));
 
-  const isRepair = type==="repair_fiz";
-  const isAnnex  = type==="annex";
-  const isDesign = type==="design";
-  const isDesAdd = type==="design_add";
-  const isRes    = type==="reservation";
-  const hasWorks = isRepair || isAnnex;
-  const hasMainRef = isAnnex || isDesAdd; // ссылка на основной договор
+  const isRepair    = type==="repair_fiz";
+  const isRepairAdd = type==="repair_add";
+  const isAnnex     = type==="annex";
+  const isDesign    = type==="design";
+  const isDesAdd    = type==="design_add";
+  const isRes       = type==="reservation";
+  const hasWorks    = isRepair || isAnnex || isRepairAdd;
+  const hasMainRef  = isAnnex || isDesAdd || isRepairAdd;
 
   const fi = {background:"#f3f4f6",border:"1px solid #e5e7eb",borderRadius:6,color:"#111827",fontSize:13,padding:"8px 10px",fontFamily:"inherit",width:"100%"};
 
@@ -1829,7 +1831,13 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
 
       {/* Ссылка на основной договор (для Приложений и Доп.соглашений) */}
       {hasMainRef && (
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div style={{display:"grid",gridTemplateColumns:isRepairAdd?"1fr 1fr 1fr":"1fr 1fr",gap:10}}>
+          {isRepairAdd && (
+            <div>
+              <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Доп. соглашение №</div>
+              <input className="fi" type="number" min="1" value={contract.dsNumber||1} onChange={e=>upd({dsNumber:parseInt(e.target.value)||1})} placeholder="1"/>
+            </div>
+          )}
           <div>
             <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>{isDesAdd?"Номер соглашения о дизайне":"Номер основного договора"}</div>
             <input className="fi" value={contract.mainNumber||""} onChange={e=>upd({mainNumber:e.target.value})} placeholder="0819#128"/>
@@ -2191,7 +2199,7 @@ export default function App() {
     if (_autoSaveRef.current) clearTimeout(_autoSaveRef.current);
     _autoSaveRef.current = setTimeout(() => {
       const exists = estimates.find(e => e.id === currentId);
-      const updated = { id:currentId, proj, rows, discount, markup, note, status:estStatus, comment:estComment, createdAt:exists?.createdAt||Date.now(), createdBy:exists?.createdBy||currentUser?.name, updatedAt:Date.now(), updatedBy:currentUser?.name, total:final };
+      const updated = { id:currentId, proj, rows, discount, markup, note, status:estStatus, comment:estComment, createdAt:exists?.createdAt||Date.now(), createdBy:exists?.createdBy||currentUser?.name, updatedAt:Date.now(), updatedBy:currentUser?.name, total:final, ...(exists?.parentId ? {parentId:exists.parentId, dsNumber:exists.dsNumber} : {}) };
       const newList = exists ? estimates.map(e=>e.id===currentId?updated:e) : [updated,...estimates];
       setEstimates(newList);
       saveEstimates(newList);
@@ -2451,6 +2459,30 @@ export default function App() {
     setEstimates(newList);
     await saveEstimates(newList);
     setScreen("list");
+  };
+
+  // ── Новая доп. смета (ДС) к существующей ──
+  const newSupplementaryEstimate = (parentEst) => {
+    const siblings = estimates.filter(e => e.parentId === parentEst.id || e.id === parentEst.id);
+    const dsNumber = siblings.filter(e => e.parentId === parentEst.id).length + 1;
+    const id = genId();
+    setCurrentId(id);
+    setProj({...(parentEst.proj||EMPTY_PROJ), manager: currentUser.name});
+    setRows({});
+    setDiscount(0);
+    setMarkup(parentEst.markup||0);
+    setNote("");
+    setEstStatus("new");
+    setEstComment("");
+    setSearch("");
+    setActiveCat(cats[0]);
+    setActiveSub(Object.keys(Gdyn[cats[0]]||{})[0]);
+    // Сохраняем parentId до открытия редактора — автосохранение подхватит
+    const newEst = {id, parentId: parentEst.id, dsNumber, proj:{...(parentEst.proj||EMPTY_PROJ)}, rows:{}, discount:0, markup:parentEst.markup||0, note:"", status:"new", comment:"", createdAt:Date.now(), createdBy:currentUser.name, updatedAt:Date.now(), updatedBy:currentUser.name, total:0};
+    const newList = [newEst, ...estimates];
+    setEstimates(newList);
+    saveEstimates(newList);
+    setScreen("editor");
   };
 
   // ── Удалить смету ──
@@ -2798,7 +2830,38 @@ export default function App() {
   <p class="s">14. РЕКВИЗИТЫ И ПОДПИСИ СТОРОН</p><br>
   ${sigBlock("Подрядчик:", "Заказчик:")}
   ${annex1}`;
-    // ─────── 3. ПРИЛОЖЕНИЕ №2/3 (ДОП. РАБОТЫ) ───────
+    // ─────── 3. ДОПОЛНИТЕЛЬНОЕ СОГЛАШЕНИЕ К ДОГОВОРУ РЕМОНТА ───────
+    } else if(type==="repair_add"){
+      const dsN = c.dsNumber||1;
+      const disc = c.discount||0;
+      const discAmt = disc>0 ? Math.round(total*disc/100) : 0;
+      const finalTotal = total - discAmt;
+      const adv = Math.round(finalTotal*(c.advancePercent??30)/100);
+      body = `
+  <p class="t">ДОПОЛНИТЕЛЬНОЕ СОГЛАШЕНИЕ №${dsN}</p>
+  <p class="c">к Договору ремонтно-отделочных работ</p>
+  <p class="c">№${c.mainNumber||"___"} от «${dtM.d}» ${dtM.m} ${dtM.y} г.</p>
+  <br><p class="city-line">г. Караганда «${dt.d}» ${dt.m} ${dt.y} г.</p><br>
+  ${preambula("Подрядчик")}
+  <p class="s">1. Предмет дополнительного соглашения</p>
+  <p>1.1. Стороны пришли к соглашению о выполнении дополнительных работ на Объекте, расположенном по адресу: ${clAddr}.</p>
+  <p>1.2. Перечень дополнительных работ, их объём и стоимость определяются настоящим Дополнительным соглашением №${dsN}.</p>
+  <p>1.3. Настоящее Дополнительное соглашение №${dsN} является неотъемлемой частью Договора ремонтно-отделочных работ №${c.mainNumber||"___"} от «${dtM.d}» ${dtM.m} ${dtM.y} г.</p>
+  <p class="s">2. Стоимость и порядок оплаты</p>
+  <p>2.1. Стоимость дополнительных работ по настоящему Соглашению составляет <b>${fmtN(finalTotal)} тенге</b>${disc>0?` (включая скидку ${disc}%, ${fmtN(discAmt)} тенге)`:``}.</p>
+  <p>2.2. Заказчик вносит предоплату в размере ${c.advancePercent??30}% от стоимости работ — <b>${fmtN(adv)} тенге</b>.</p>
+  <p>2.3. Оставшаяся сумма в размере <b>${fmtN(finalTotal-adv)} тенге</b> вносится по завершении работ.</p>
+  <p>2.4. Оплата производится наличными или безналичным переводом.</p>
+  <p class="s">3. Сроки выполнения</p>
+  <p>3.1. Сроки выполнения работ согласовываются Сторонами дополнительно.</p>
+  <p>3.2. Начало работ — после внесения предоплаты.</p>
+  <p class="s">4. Прочие условия</p>
+  <p>4.1. Во всём остальном, что не предусмотрено настоящим Соглашением, Стороны руководствуются условиями Договора №${c.mainNumber||"___"}.</p>
+  <p>4.2. Настоящее Дополнительное соглашение вступает в силу с момента подписания обеими Сторонами.</p>
+  <p>4.3. Соглашение составлено в двух экземплярах, имеющих равную юридическую силу.</p><br>
+  ${worksTable()}<br>
+  ${sigBlock("Подрядчик:", "Заказчик:")}`;
+    // ─────── 4. ПРИЛОЖЕНИЕ №2/3 (ДОП. РАБОТЫ) ───────
     } else if(type==="annex"){
       const an = c.appendix||2;
       const prevList = Array.from({length:an-1},(_,i)=>`№${i+1}`).join(" и ");
@@ -2979,7 +3042,7 @@ export default function App() {
     const num = c.number || c.id?.slice(-4) || "б-н";
     const dateStr = c.date ? c.date.split("-").reverse().join(".") : "";
     const isAnnexD = (c.type||"repair_fiz") === "annex";
-    const docLabel = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Соглашение о дизайн-проекте",design_add:"Доп соглашение к дизайн-проекту",reservation:"Соглашение о резервировании"}[c.type||"repair_fiz"] || "Договор";
+    const docLabel = {repair_fiz:"Договор ремонта",repair_add:"Доп соглашение",annex:"Приложение",design:"Соглашение о дизайн-проекте",design_add:"Доп соглашение к дизайн-проекту",reservation:"Соглашение о резервировании"}[c.type||"repair_fiz"] || "Договор";
     const filename = isAnnexD
       ? ("Приложение №"+(c.appendix||2)+" Перечень доп работ к Договору №"+(c.mainNumber||num)+(dateStr?" от "+dateStr:"")+".docx").replace(/[<>:"/\\|?*]/g,"_")
       : (docLabel+" №"+num+" "+clientName+(dateStr?" от "+dateStr:"")+".docx").replace(/[<>:"/\\|?*]/g,"_");
@@ -3247,6 +3310,43 @@ export default function App() {
         ...annex1,
       ];
 
+    } else if(type==="repair_add"){
+      const dsN = c.dsNumber||1;
+      const disc = c.discount||0;
+      const discAmt = disc>0 ? Math.round(total*disc/100) : 0;
+      const finalTotal = total - discAmt;
+      const adv = Math.round(finalTotal*(c.advancePercent??30)/100);
+      children = [
+        PC([T("ДОПОЛНИТЕЛЬНОЕ СОГЛАШЕНИЕ №"+dsN,{sz:13,b:true})]),
+        PC([T("к Договору ремонтно-отделочных работ")]),
+        PC([T("№"+(c.mainNumber||"___")+" от «"+dtM.d+"» "+dtM.m+" "+dtM.y+" г.")]),
+        P([]),
+        PC([T("г. Караганда «"+dt.d+"» "+dt.m+" "+dt.y+" г.")]),
+        P([]),
+        ...preamParas("Подрядчик"),
+        s("1. Предмет дополнительного соглашения"),
+        n("1.1. Стороны пришли к соглашению о выполнении дополнительных работ на Объекте, расположенном по адресу: "+clAddr+"."),
+        n("1.2. Перечень дополнительных работ, их объём и стоимость определяются настоящим Дополнительным соглашением №"+dsN+"."),
+        n("1.3. Настоящее Дополнительное соглашение является неотъемлемой частью Договора №"+(c.mainNumber||"___")+" от «"+dtM.d+"» "+dtM.m+" "+dtM.y+" г."),
+        s("2. Стоимость и порядок оплаты"),
+        n("2.1. Стоимость дополнительных работ составляет "+fmtN2(finalTotal)+" тенге"+(disc>0?" (включая скидку "+disc+"%, "+fmtN2(discAmt)+" тенге)":"")+"."),
+        n("2.2. Заказчик вносит предоплату "+(c.advancePercent??30)+"% — "+fmtN2(adv)+" тенге."),
+        n("2.3. Оставшаяся сумма "+fmtN2(finalTotal-adv)+" тенге вносится по завершении работ."),
+        n("2.4. Оплата производится наличными или безналичным переводом."),
+        s("3. Сроки выполнения"),
+        n("3.1. Сроки выполнения работ согласовываются Сторонами дополнительно."),
+        n("3.2. Начало работ — после внесения предоплаты."),
+        s("4. Прочие условия"),
+        n("4.1. Во всём остальном Стороны руководствуются условиями Договора №"+(c.mainNumber||"___")+"."),
+        n("4.2. Соглашение вступает в силу с момента подписания обеими Сторонами."),
+        n("4.3. Составлено в двух экземплярах, имеющих равную юридическую силу."),
+        P([]),
+        makeWorksTable(),
+        P([]),
+        b("Подписи сторон"),
+        P([]),
+        sigTable(),
+      ];
     } else if(type==="annex"){
       const an = c.appendix||2;
       const prevList = Array.from({length:an-1},(_,i)=>"№"+(i+1)).join(" и ");
@@ -3437,7 +3537,7 @@ export default function App() {
     const num = c.number || c.id?.slice(-4) || "б-н";
     const dateStrG = c.date ? c.date.split("-").reverse().join(".") : "";
     const isAnnexG = (c.type||"repair_fiz") === "annex";
-    const docLabelG = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Соглашение о дизайн-проекте",design_add:"Доп соглашение к дизайн-проекту",reservation:"Соглашение о резервировании"}[c.type||"repair_fiz"] || "Договор";
+    const docLabelG = {repair_fiz:"Договор ремонта",repair_add:"Доп соглашение",annex:"Приложение",design:"Соглашение о дизайн-проекте",design_add:"Доп соглашение к дизайн-проекту",reservation:"Соглашение о резервировании"}[c.type||"repair_fiz"] || "Договор";
     const title = isAnnexG
       ? ("Приложение №"+(c.appendix||2)+" Перечень доп работ к Договору №"+(c.mainNumber||num)+(dateStrG?" от "+dateStrG:"")).replace(/[<>:"/\\|?*]/g,"_")
       : (docLabelG+" №"+num+" "+clientName+(dateStrG?" от "+dateStrG:"")).replace(/[<>:"/\\|?*]/g,"_");
@@ -4018,12 +4118,21 @@ export default function App() {
                       {filtered.length === 0 && (
                         <div style={{textAlign:"center",padding:"40px 0",color:"#374151",fontSize:13}}>Ничего не найдено</div>
                       )}
-                      {filtered.map((est, i) => {
+                      {(() => {
+                        // Группировка: основные + их ДС
+                        const roots = filtered.filter(e => !e.parentId);
+                        const children = filtered.filter(e => e.parentId);
+                        const getChildren = (id) => children.filter(e => e.parentId === id).sort((a,b) => (a.dsNumber||0)-(b.dsNumber||0));
+                        const renderCard = (est, i, isChild=false) => {
                         const hasItems = est.rows && Object.values(est.rows).some(r => Number(r?.qty) > 0);
-                        const status = !hasItems ? "draft" : est.total > 0 ? "done" : "draft";
                         const author = est.updatedBy&&est.updatedBy!==est.createdBy ? est.updatedBy : est.createdBy;
                         return (
-                          <div key={est.id} className="est-card up" style={{animationDelay:`${i*0.04}s`,padding:"10px 14px"}}
+                          <div key={est.id}>
+                          {isChild && <div style={{display:"flex",alignItems:"center",gap:6,marginLeft:16,marginBottom:2,marginTop:4}}>
+                            <div style={{width:2,height:14,background:"#e5e7eb",borderRadius:2,flexShrink:0}}/>
+                            <span style={{fontSize:10,color:"#9ca3af",fontWeight:700}}>ДС-{est.dsNumber||"?"}</span>
+                          </div>}
+                          <div className="est-card up" style={{animationDelay:`${i*0.04}s`,padding:"10px 14px",marginLeft:isChild?16:0,borderLeft:isChild?"3px solid #e5e7eb":"none"}}
                             onClick={() => { if(currentUser.role==="viewer") return; openEstimate(est); }}
                             >
                             {/* Строка 1: имя + сумма */}
@@ -4063,7 +4172,8 @@ export default function App() {
                                   const displayUnit = r.manualUnit !== undefined ? r.manualUnit : (w.unit||"м²");
                                   return {name:displayName,category:w.cat||"",subcategory:w.sub||"",quantity:qty,unit:displayUnit,price:price?Math.round(price):0,priceFrom:pf||undefined};
                                 }).filter(Boolean);
-                                const newContract = {id:Date.now().toString(),number:"",date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works,discount:est.discount||0,appendix:1,estId:est.id,estClient:est.proj?.name||"",estPhone:est.proj?.phone||"",estAddress:est.proj?.address||"",note:""};
+                                const isDs = !!est.parentId;
+                                const newContract = {id:Date.now().toString(),number:"",date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works,discount:est.discount||0,appendix:1,estId:est.id,estClient:est.proj?.name||"",estPhone:est.proj?.phone||"",estAddress:est.proj?.address||"",note:"",type:isDs?"repair_add":"repair_fiz",...(isDs?{dsNumber:est.dsNumber||1}:{})};
                                 setCurrentContract(newContract);
                                 setContractTab("editor");
                                 setScreen("contracts");
@@ -4071,6 +4181,13 @@ export default function App() {
                                 style={{background:"rgba(184,144,74,.08)",color:"#2563eb",border:"1px solid #eff6ff",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
                                 📄
                               </button>
+                              {currentUser.role !== "viewer" && !isChild && (
+                                <button onClick={()=>newSupplementaryEstimate(est)}
+                                  title="Создать доп. смету (ДС)"
+                                  style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0,fontWeight:700}}>
+                                  +ДС
+                                </button>
+                              )}
                               {currentUser.role !== "viewer" && (
                                 <button onClick={()=>duplicateEstimate(est)}
                                   style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(100,100,200,.15)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
@@ -4085,8 +4202,16 @@ export default function App() {
                               )}
                             </div>
                           </div>
+                          </div>
                         );
-                      })}
+                        };
+                        return roots.map((est, i) => (
+                          <div key={est.id}>
+                            {renderCard(est, i, false)}
+                            {getChildren(est.id).map((child, j) => renderCard(child, j, true))}
+                          </div>
+                        ));
+                      })()}
                     </>
                   );
                 })()}
