@@ -3569,7 +3569,7 @@ export default function App() {
         ::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:2px}
         .fi{background:#ffffff;border:1px solid #e5e7eb;color:#111827;border-radius:6px;padding:8px 12px;font-family:inherit;font-size:14px;width:100%;transition:border .1s;outline:none}
         .fi:focus{border-color:#9ca3af}
-        .fi::placeholder{color:#374151}
+        .fi::placeholder{color:#b0b7c3}
         .tab-btn{background:none;border:none;cursor:pointer;padding:7px 16px;border-radius:6px;font-family:inherit;font-size:13px;font-weight:500;color:#6b7280;transition:all .1s;white-space:nowrap}
         .tab-btn:hover{color:#374151;background:#f3f4f6}
         .tab-btn.active{background:#eff6ff;color:#2563eb;font-weight:600}
