@@ -679,8 +679,8 @@ function AdminPanel({ currentUser, onClose }) {
             <button key={t} onClick={()=>setTab(t)} style={{
               flex:1,padding:"8px",borderRadius:6,border:"none",cursor:"pointer",
               fontFamily:"inherit",fontSize:12,fontWeight:700,
-              background: tab===t ? "#ffffff" : "transparent",
-              color: tab===t ? "#ffffff" : "#9ca3af",transition:"all .15s"
+              background: tab===t ? "#f3f4f6" : "transparent",
+              color: tab===t ? "#111827" : "#6b7280",transition:"all .1s"
             }}>{label}</button>
           ))}
         </div>
@@ -1302,8 +1302,8 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
           <button key={t} onClick={()=>setTab(t)} style={{
             flex:1,padding:"11px",borderRadius:8,border:"none",cursor:"pointer",
             fontFamily:"inherit",fontSize:13,fontWeight:700,
-            background: tab===t ? "#ffffff" : "transparent",
-            color: tab===t ? "#ffffff" : "#9ca3af",transition:"all .15s"
+            background: tab===t ? "#f3f4f6" : "transparent",
+            color: tab===t ? "#111827" : "#6b7280",transition:"all .1s"
           }}>{label}</button>
         ))}
       </div>
@@ -3360,7 +3360,7 @@ export default function App() {
         input,select,textarea{outline:none}
         ::-webkit-scrollbar{width:4px}
         ::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:2px}
-        .fi{background:#f3f4f6;border:1px solid #e5e7eb;color:#ffffff;border-radius:7px;padding:8px 12px;font-family:inherit;font-size:13px;width:100%;transition:border .15s}
+        .fi{background:#ffffff;border:1px solid #e5e7eb;color:#111827;border-radius:6px;padding:8px 12px;font-family:inherit;font-size:14px;width:100%;transition:border .1s;outline:none}
         .fi:focus{border-color:#9ca3af}
         .fi::placeholder{color:#374151}
         .tab-btn{background:none;border:none;cursor:pointer;padding:7px 16px;border-radius:6px;font-family:inherit;font-size:13px;font-weight:500;color:#6b7280;transition:all .1s;white-space:nowrap}
@@ -3371,7 +3371,7 @@ export default function App() {
         .sub-btn.active{background:#e5e7eb;color:#111827;font-weight:600}
         .wrow{display:grid;align-items:start;padding:9px 14px;border-radius:7px;gap:8px;transition:background .12s;min-width:0}
         .wrow:hover{background:#f9fafb}
-        .wrow.on{background:#f0f9ff}
+        .wrow.on{background:#eff6ff}
         .num{background:#ffffff;border:1px solid #e5e7eb;color:#111827;border-radius:6px;padding:6px 8px;text-align:right;font-family:inherit;font-size:13px;transition:border .1s;outline:none}
         .num:focus{border-color:#9ca3af}
         .num::placeholder{color:#9ca3af}
