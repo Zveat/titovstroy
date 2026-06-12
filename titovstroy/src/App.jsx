@@ -373,22 +373,22 @@ function LoginScreen({ onLogin }) {
   };
 
   return (
-    <div style={{minHeight:"100vh",background:"#0c0e1a",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'Golos Text','Segoe UI',sans-serif"}}>
+    <div style={{minHeight:"100vh",background:"#f0f2f8",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'Golos Text','Segoe UI',sans-serif"}}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;600;700;900&display=swap');*{box-sizing:border-box;margin:0;padding:0}`}</style>
       <div style={{width:"100%",maxWidth:380}}>
         {/* Лого */}
         <div style={{textAlign:"center",marginBottom:32}}>
-          <div style={{width:56,height:56,borderRadius:14,background:"linear-gradient(135deg,#b8904a,#d4a85a)",display:"inline-flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:26,color:"#0c0e1a",marginBottom:12}}>T</div>
-          <div style={{fontWeight:900,fontSize:22,color:"#e2ddd4",letterSpacing:.3}}>TitovStroy</div>
-          <div style={{fontSize:12,color:"#454560",marginTop:4}}>Система расчёта смет · Вход</div>
+          <div style={{width:56,height:56,borderRadius:14,background:"linear-gradient(135deg,#5b4ef5,#7c6ff7)",display:"inline-flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:26,color:"#f0f2f8",marginBottom:12}}>T</div>
+          <div style={{fontWeight:900,fontSize:22,color:"#111827",letterSpacing:.3}}>TitovStroy</div>
+          <div style={{fontSize:12,color:"#9ca3af",marginTop:4}}>Система расчёта смет · Вход</div>
         </div>
 
         {/* Форма */}
-        <div style={{background:"#111425",border:"1px solid #1c2035",borderRadius:14,padding:"28px 28px"}}>
+        <div style={{background:"#ffffff",boxShadow:"0 1px 3px rgba(0,0,0,.08),0 4px 12px rgba(0,0,0,.04)",border:"1px solid #e5e7eb",borderRadius:14,padding:"28px 28px"}}>
           <div style={{marginBottom:16}}>
-            <div style={{fontSize:11,color:"#454560",marginBottom:6,fontWeight:600,letterSpacing:.5,textTransform:"uppercase"}}>Логин</div>
+            <div style={{fontSize:11,color:"#9ca3af",marginBottom:6,fontWeight:600,letterSpacing:.5,textTransform:"uppercase"}}>Логин</div>
             <input
-              style={{background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:8,padding:"11px 14px",fontFamily:"inherit",fontSize:14,width:"100%",outline:"none",transition:"border .15s"}}
+              style={{background:"#f8f9fc",border:"1px solid #e5e7eb",color:"#111827",borderRadius:8,padding:"11px 14px",fontFamily:"inherit",fontSize:14,width:"100%",outline:"none",transition:"border .15s"}}
               placeholder="Введите логин"
               value={login}
               onChange={e=>{setLogin(e.target.value);setError("");}}
@@ -397,10 +397,10 @@ function LoginScreen({ onLogin }) {
             />
           </div>
           <div style={{marginBottom:20}}>
-            <div style={{fontSize:11,color:"#454560",marginBottom:6,fontWeight:600,letterSpacing:.5,textTransform:"uppercase"}}>Пароль</div>
+            <div style={{fontSize:11,color:"#9ca3af",marginBottom:6,fontWeight:600,letterSpacing:.5,textTransform:"uppercase"}}>Пароль</div>
             <div style={{position:"relative"}}>
               <input
-                style={{background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:8,padding:"11px 40px 11px 14px",fontFamily:"inherit",fontSize:14,width:"100%",outline:"none",transition:"border .15s"}}
+                style={{background:"#f8f9fc",border:"1px solid #e5e7eb",color:"#111827",borderRadius:8,padding:"11px 40px 11px 14px",fontFamily:"inherit",fontSize:14,width:"100%",outline:"none",transition:"border .15s"}}
                 placeholder="Введите пароль"
                 type={showPass?"text":"password"}
                 value={password}
@@ -408,7 +408,7 @@ function LoginScreen({ onLogin }) {
                 onKeyDown={e=>e.key==="Enter"&&handleLogin()}
                 autoComplete="current-password"
               />
-              <button onClick={()=>setShowPass(p=>!p)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#555575",fontSize:16}}>
+              <button onClick={()=>setShowPass(p=>!p)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#6b7280",fontSize:16}}>
                 {showPass?"🙈":"👁"}
               </button>
             </div>
@@ -423,11 +423,11 @@ function LoginScreen({ onLogin }) {
           <button
             onClick={handleLogin}
             disabled={loading}
-            style={{width:"100%",background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",cursor:loading?"not-allowed":"pointer",padding:"13px",borderRadius:8,fontFamily:"inherit",fontSize:14,fontWeight:700,opacity:loading?.6:1,transition:"all .2s"}}>
+            style={{width:"100%",background:"linear-gradient(135deg,#5b4ef5,#7c6ff7)",color:"#f0f2f8",border:"none",cursor:loading?"not-allowed":"pointer",padding:"13px",borderRadius:8,fontFamily:"inherit",fontSize:14,fontWeight:700,opacity:loading?.6:1,transition:"all .2s"}}>
             {loading ? "Проверка..." : "Войти"}
           </button>
         </div>
-        <div style={{textAlign:"center",marginTop:16,fontSize:11,color:"#2a2a40"}}>TitovStroy · Только для сотрудников</div>
+        <div style={{textAlign:"center",marginTop:16,fontSize:11,color:"#d1d5db"}}>TitovStroy · Только для сотрудников</div>
       </div>
     </div>
   );
@@ -665,39 +665,39 @@ function AdminPanel({ currentUser, onClose }) {
   const roleLabel = r => r==="admin" ? "👑 Админ" : r==="viewer" ? "👁 Наблюдатель" : "👤 Замерщик";
 
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:16,fontFamily:"'Golos Text','Segoe UI',sans-serif"}}>
-      <div style={{background:"#111425",border:"1px solid #1c2035",borderRadius:14,padding:"24px 28px",maxWidth:520,width:"100%",height:"88vh",display:"flex",flexDirection:"column",position:"relative"}}>
+    <div style={{position:"fixed",inset:0,background:"rgba(15,15,30,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:16,fontFamily:"'Golos Text','Segoe UI',sans-serif"}}>
+      <div style={{background:"#ffffff",boxShadow:"0 1px 3px rgba(0,0,0,.08),0 4px 12px rgba(0,0,0,.04)",border:"1px solid #e5e7eb",borderRadius:14,padding:"24px 28px",maxWidth:520,width:"100%",height:"88vh",display:"flex",flexDirection:"column",position:"relative"}}>
 
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-          <div style={{fontWeight:800,fontSize:16,color:"#e2ddd4"}}>⚙️ Администрирование</div>
-          <button onClick={onClose} style={{background:"none",border:"none",color:"#555575",cursor:"pointer",fontSize:20}}>×</button>
+          <div style={{fontWeight:800,fontSize:16,color:"#111827"}}>⚙️ Администрирование</div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",fontSize:20}}>×</button>
         </div>
 
         {/* Вкладки */}
-        <div style={{display:"flex",gap:4,marginBottom:16,background:"#0c0e1a",borderRadius:8,padding:4}}>
+        <div style={{display:"flex",gap:4,marginBottom:16,background:"#f0f2f8",borderRadius:8,padding:4}}>
           {[["users","👥 Сотрудники"],["prices","💰 Прайс-лист"]].map(([t,label])=>(
             <button key={t} onClick={()=>setTab(t)} style={{
               flex:1,padding:"8px",borderRadius:6,border:"none",cursor:"pointer",
               fontFamily:"inherit",fontSize:12,fontWeight:700,
-              background: tab===t ? "linear-gradient(135deg,#b8904a,#d4a85a)" : "transparent",
-              color: tab===t ? "#0c0e1a" : "#555575",transition:"all .15s"
+              background: tab===t ? "linear-gradient(135deg,#5b4ef5,#7c6ff7)" : "transparent",
+              color: tab===t ? "#f0f2f8" : "#6b7280",transition:"all .15s"
             }}>{label}</button>
           ))}
         </div>
 
-        {loading ? <div style={{textAlign:"center",padding:"30px 0",color:"#454560"}}>Загрузка...</div> : tab === "users" ? (
+        {loading ? <div style={{textAlign:"center",padding:"30px 0",color:"#9ca3af"}}>Загрузка...</div> : tab === "users" ? (
           <div style={{flex:1,overflowY:"auto"}}>
           <>
             {/* Список */}
             <div style={{marginBottom:20}}>
               {users.map(u => (
-                <div key={u.id} style={{background:"#14172a",border:"1px solid #1e2238",borderRadius:9,padding:"12px 14px",marginBottom:8}}>
+                <div key={u.id} style={{background:"#f8f9fc",border:"1px solid #e5e7eb",borderRadius:9,padding:"12px 14px",marginBottom:8}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
                     <div style={{flex:1}}>
-                      <div style={{fontWeight:700,fontSize:13,color:"#ddd8ce"}}>{u.name}</div>
-                      <div style={{fontSize:11,color:"#555575",marginTop:2}}>
+                      <div style={{fontWeight:700,fontSize:13,color:"#111827"}}>{u.name}</div>
+                      <div style={{fontSize:11,color:"#6b7280",marginTop:2}}>
                         @{u.login} · {roleLabel(u.role)}
-                        {u.id === currentUser.id && <span style={{color:"#b8904a",marginLeft:6}}>(вы)</span>}
+                        {u.id === currentUser.id && <span style={{color:"#5b4ef5",marginLeft:6}}>(вы)</span>}
                       </div>
                     </div>
                     <div style={{display:"flex",gap:6,alignItems:"center"}}>
@@ -708,7 +708,7 @@ function AdminPanel({ currentUser, onClose }) {
                       </button>
                       <button
                         onClick={()=>{setEditingPass(editingPass?.id===u.id?null:{id:u.id,val:""});setEditingUser(null);}}
-                        style={{background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.2)",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+                        style={{background:"rgba(184,144,74,.1)",color:"#5b4ef5",border:"1px solid rgba(184,144,74,.2)",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
                         🔑
                       </button>
                       {u.id !== currentUser.id && (
@@ -721,18 +721,18 @@ function AdminPanel({ currentUser, onClose }) {
                     <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:8}}>
                       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                         <div>
-                          <div style={{fontSize:10,color:"#555575",marginBottom:3}}>Имя</div>
-                          <input style={{width:"100%",background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:6,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"}}
+                          <div style={{fontSize:10,color:"#6b7280",marginBottom:3}}>Имя</div>
+                          <input style={{width:"100%",background:"#f0f2f8",border:"1px solid #e5e7eb",color:"#111827",borderRadius:6,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"}}
                             value={editingUser.name} onChange={e=>setEditingUser(p=>({...p,name:e.target.value}))}/>
                         </div>
                         <div>
-                          <div style={{fontSize:10,color:"#555575",marginBottom:3}}>Логин</div>
-                          <input style={{width:"100%",background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:6,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"}}
+                          <div style={{fontSize:10,color:"#6b7280",marginBottom:3}}>Логин</div>
+                          <input style={{width:"100%",background:"#f0f2f8",border:"1px solid #e5e7eb",color:"#111827",borderRadius:6,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"}}
                             value={editingUser.login} onChange={e=>setEditingUser(p=>({...p,login:e.target.value}))}/>
                         </div>
                       </div>
                       <button onClick={saveUser}
-                        style={{background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:6,padding:"8px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                        style={{background:"linear-gradient(135deg,#5b4ef5,#7c6ff7)",color:"#f0f2f8",border:"none",borderRadius:6,padding:"8px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
                         Сохранить изменения
                       </button>
                     </div>
@@ -740,13 +740,13 @@ function AdminPanel({ currentUser, onClose }) {
                   {editingPass?.id === u.id && (
                     <div style={{marginTop:10,display:"flex",gap:8}}>
                       <input
-                        style={{flex:1,background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:6,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"}}
+                        style={{flex:1,background:"#f0f2f8",border:"1px solid #e5e7eb",color:"#111827",borderRadius:6,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"}}
                         placeholder="Новый пароль"
                         value={editingPass.val}
                         onChange={e=>setEditingPass(p=>({...p,val:e.target.value}))}
                       />
                       <button onClick={()=>savePass(u.id)}
-                        style={{background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:6,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                        style={{background:"linear-gradient(135deg,#5b4ef5,#7c6ff7)",color:"#f0f2f8",border:"none",borderRadius:6,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
                         Сохранить
                       </button>
                     </div>
@@ -756,47 +756,47 @@ function AdminPanel({ currentUser, onClose }) {
             </div>
 
             {/* Добавить */}
-            <div style={{background:"#0e1122",border:"1px solid #1a1e30",borderRadius:9,padding:"14px 16px"}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#b8904a",letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>+ Новый пользователь</div>
+            <div style={{background:"#f0f2f8",border:"1px solid #e5e7eb",borderRadius:9,padding:"14px 16px"}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#5b4ef5",letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>+ Новый пользователь</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-                <input style={{background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none"}} placeholder="Имя" value={newName} onChange={e=>setNewName(e.target.value)}/>
-                <input style={{background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none"}} placeholder="Логин" value={newLogin} onChange={e=>setNewLogin(e.target.value)}/>
-                <input style={{background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none"}} placeholder="Пароль" value={newPass} onChange={e=>setNewPass(e.target.value)}/>
-                <select style={{background:"#14172a",border:"1px solid #20243a",color:"#9090b0",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none",cursor:"pointer"}} value={newRole} onChange={e=>setNewRole(e.target.value)}>
+                <input style={{background:"#f8f9fc",border:"1px solid #e5e7eb",color:"#111827",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none"}} placeholder="Имя" value={newName} onChange={e=>setNewName(e.target.value)}/>
+                <input style={{background:"#f8f9fc",border:"1px solid #e5e7eb",color:"#111827",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none"}} placeholder="Логин" value={newLogin} onChange={e=>setNewLogin(e.target.value)}/>
+                <input style={{background:"#f8f9fc",border:"1px solid #e5e7eb",color:"#111827",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none"}} placeholder="Пароль" value={newPass} onChange={e=>setNewPass(e.target.value)}/>
+                <select style={{background:"#f8f9fc",border:"1px solid #e5e7eb",color:"#9090b0",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none",cursor:"pointer"}} value={newRole} onChange={e=>setNewRole(e.target.value)}>
                   <option value="user">👤 Замерщик</option>
                   <option value="admin">👑 Администратор</option>
                   <option value="viewer">👁 Наблюдатель</option>
                 </select>
               </div>
               <button onClick={addUser}
-                style={{width:"100%",background:"rgba(184,144,74,.12)",color:"#b8904a",border:"1px solid rgba(184,144,74,.25)",borderRadius:7,padding:"9px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                style={{width:"100%",background:"rgba(184,144,74,.12)",color:"#5b4ef5",border:"1px solid rgba(184,144,74,.25)",borderRadius:7,padding:"9px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>
                 + Добавить
               </button>
             </div>
 
             {msg && <div style={{marginTop:12,textAlign:"center",fontSize:12,color: msg.startsWith("✓") ? "#4caf7d" : "#e07070"}}>{msg}</div>}
-            {saving && <div style={{textAlign:"center",fontSize:11,color:"#454560",marginTop:8}}>💾 Сохранение...</div>}
+            {saving && <div style={{textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:8}}>💾 Сохранение...</div>}
           </>
           </div>
         ) : (
           /* ═══ ВКЛАДКА ПРАЙС-ЛИСТ ═══ */
           <div style={{display:"flex",flexDirection:"column",height:"calc(88vh - 160px)"}}>
-            {!localPrices ? <div style={{textAlign:"center",padding:30,color:"#454560"}}>Загрузка...</div> : null}
+            {!localPrices ? <div style={{textAlign:"center",padding:30,color:"#9ca3af"}}>Загрузка...</div> : null}
             {localPrices && <>
               {/* Поиск — фиксированный */}
               <input
-                style={{width:"100%",boxSizing:"border-box",background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:7,padding:"8px 12px",fontFamily:"inherit",fontSize:12,outline:"none",marginBottom:8}}
+                style={{width:"100%",boxSizing:"border-box",background:"#f8f9fc",border:"1px solid #e5e7eb",color:"#111827",borderRadius:7,padding:"8px 12px",fontFamily:"inherit",fontSize:12,outline:"none",marginBottom:8}}
                 placeholder="🔍 Поиск по названию..."
                 value={priceSearch}
                 onChange={e=>setPriceSearch(e.target.value)}
               />
               {/* Список — скроллится */}
-              <div className="price-scroll" style={{flex:1,overflowY:"scroll",paddingRight:4,scrollbarWidth:"auto",scrollbarColor:"#b8904a #1a1e30"}}>
+              <div className="price-scroll" style={{flex:1,overflowY:"scroll",paddingRight:4,scrollbarWidth:"auto",scrollbarColor:"#5b4ef5 #e5e7eb"}}>
                 <style>{`
                   .price-scroll::-webkit-scrollbar{width:10px}
-                  .price-scroll::-webkit-scrollbar-track{background:#1a1e30;border-radius:5px}
-                  .price-scroll::-webkit-scrollbar-thumb{background:#b8904a;border-radius:5px;min-height:40px}
-                  .price-scroll::-webkit-scrollbar-thumb:hover{background:#d4a85a}
+                  .price-scroll::-webkit-scrollbar-track{background:#e5e7eb;border-radius:5px}
+                  .price-scroll::-webkit-scrollbar-thumb{background:#5b4ef5;border-radius:5px;min-height:40px}
+                  .price-scroll::-webkit-scrollbar-thumb:hover{background:#7c6ff7}
                 `}</style>
                 {(() => {
                   const allWorks = getEffectiveCatalog();
@@ -829,14 +829,14 @@ function AdminPanel({ currentUser, onClose }) {
                           <input autoFocus value={editingCat.val}
                             onChange={e=>setEditingCat(p=>({...p,val:e.target.value}))}
                             onKeyDown={e=>{if(e.key==="Enter")renameCat(origCat,editingCat.val);if(e.key==="Escape")setEditingCat(null);}}
-                            style={{flex:1,background:"#0c0e1a",border:"1px solid #b8904a",color:"#b8904a",borderRadius:5,padding:"3px 8px",fontFamily:"inherit",fontSize:11,fontWeight:700,outline:"none"}}/>
+                            style={{flex:1,background:"#f0f2f8",border:"1px solid #5b4ef5",color:"#5b4ef5",borderRadius:5,padding:"3px 8px",fontFamily:"inherit",fontSize:11,fontWeight:700,outline:"none"}}/>
                           <button onClick={()=>renameCat(origCat,editingCat.val)} style={{...btnS,color:"#4caf7d"}}>✓</button>
-                          <button onClick={()=>setEditingCat(null)} style={{...btnS,color:"#555575"}}>✕</button>
+                          <button onClick={()=>setEditingCat(null)} style={{...btnS,color:"#6b7280"}}>✕</button>
                         </div>
                       ) : (
-                        <div style={{display:"flex",alignItems:"center",gap:4,padding:"4px 0",borderBottom:"1px solid #1c2035",marginBottom:6}}>
-                          <span style={{fontSize:10,fontWeight:700,color:"#b8904a",letterSpacing:1,textTransform:"uppercase",flex:1}}>{cat}</span>
-                          <button onClick={()=>setEditingCat({key:origCat,val:cat})} title="Переименовать категорию" style={{...btnS,color:"#555575"}}>✏️</button>
+                        <div style={{display:"flex",alignItems:"center",gap:4,padding:"4px 0",borderBottom:"1px solid #e5e7eb",marginBottom:6}}>
+                          <span style={{fontSize:10,fontWeight:700,color:"#5b4ef5",letterSpacing:1,textTransform:"uppercase",flex:1}}>{cat}</span>
+                          <button onClick={()=>setEditingCat({key:origCat,val:cat})} title="Переименовать категорию" style={{...btnS,color:"#6b7280"}}>✏️</button>
                           <button onClick={()=>{ if(window.confirm(`Удалить всю категорию "${cat}"?`)) deleteCat(origCat); }} title="Удалить категорию" style={{...btnS,color:"#c84848"}}>🗑</button>
                         </div>
                       )}
@@ -850,13 +850,13 @@ function AdminPanel({ currentUser, onClose }) {
                               <input autoFocus value={editingSub.val}
                                 onChange={e=>setEditingSub(p=>({...p,val:e.target.value}))}
                                 onKeyDown={e=>{if(e.key==="Enter")renameSub(origCat,origSub,editingSub.val);if(e.key==="Escape")setEditingSub(null);}}
-                                style={{flex:1,background:"#0c0e1a",border:"1px solid #6060a0",color:"#9090c0",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",fontSize:10,outline:"none"}}/>
+                                style={{flex:1,background:"#f0f2f8",border:"1px solid #6060a0",color:"#9090c0",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",fontSize:10,outline:"none"}}/>
                               <button onClick={()=>renameSub(origCat,origSub,editingSub.val)} style={{...btnS,color:"#4caf7d"}}>✓</button>
-                              <button onClick={()=>setEditingSub(null)} style={{...btnS,color:"#555575"}}>✕</button>
+                              <button onClick={()=>setEditingSub(null)} style={{...btnS,color:"#6b7280"}}>✕</button>
                             </div>
                           ) : (
                             <div style={{display:"flex",alignItems:"center",gap:3,paddingLeft:8,marginBottom:4}}>
-                              <span style={{fontSize:9,fontWeight:700,color:"#555575",letterSpacing:.8,textTransform:"uppercase",flex:1}}>{sub}</span>
+                              <span style={{fontSize:9,fontWeight:700,color:"#6b7280",letterSpacing:.8,textTransform:"uppercase",flex:1}}>{sub}</span>
                               <button onClick={()=>setEditingSub({cat:origCat,key:origSub,val:sub})} title="Переименовать подкатегорию" style={{...btnS,color:"#404058",fontSize:10}}>✏️</button>
                               <button onClick={()=>{ if(window.confirm(`Удалить подкатегорию "${sub}"?`)) deleteSub(origCat,origSub); }} title="Удалить подкатегорию" style={{...btnS,color:"#7a3030",fontSize:10}}>🗑</button>
                             </div>
@@ -886,22 +886,22 @@ function AdminPanel({ currentUser, onClose }) {
                 <div style={{marginTop:8,border:"1px dashed rgba(184,144,74,.3)",borderRadius:8,padding:"10px 12px",marginBottom:8}}>
                   {!showAddWork ? (
                     <button onClick={()=>setShowAddWork(true)}
-                      style={{width:"100%",background:"transparent",color:"#b8904a",border:"none",padding:"6px",fontFamily:"inherit",fontSize:12,cursor:"pointer",fontWeight:700}}>
+                      style={{width:"100%",background:"transparent",color:"#5b4ef5",border:"none",padding:"6px",fontFamily:"inherit",fontSize:12,cursor:"pointer",fontWeight:700}}>
                       ＋ Добавить позицию в каталог
                     </button>
                   ) : (() => {
                     const allW = getEffectiveCatalog();
                     const cats = [...new Set(allW.map(w=>w.cat))];
                     const subs = newWork.cat ? [...new Set(allW.filter(w=>w.cat===newWork.cat).map(w=>w.sub))] : [];
-                    const inpStyle = {background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:6,padding:"6px 9px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%",boxSizing:"border-box"};
+                    const inpStyle = {background:"#f0f2f8",border:"1px solid #e5e7eb",color:"#111827",borderRadius:6,padding:"6px 9px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%",boxSizing:"border-box"};
                     const selStyle = {...inpStyle, cursor:"pointer"};
                     return (
                       <div>
-                        <div style={{fontSize:11,fontWeight:700,color:"#b8904a",marginBottom:10}}>Новая позиция</div>
+                        <div style={{fontSize:11,fontWeight:700,color:"#5b4ef5",marginBottom:10}}>Новая позиция</div>
 
                         {/* Категория */}
                         <div style={{marginBottom:6}}>
-                          <div style={{fontSize:10,color:"#555575",marginBottom:3}}>Категория</div>
+                          <div style={{fontSize:10,color:"#6b7280",marginBottom:3}}>Категория</div>
                           <select value={newWork.cat} onChange={e=>setNewWork(p=>({...p,cat:e.target.value,sub:""}))} style={selStyle}>
                             <option value="">— выбрать существующую —</option>
                             {cats.map(c=><option key={c} value={c}>{c}</option>)}
@@ -916,7 +916,7 @@ function AdminPanel({ currentUser, onClose }) {
 
                         {/* Подкатегория */}
                         <div style={{marginBottom:6}}>
-                          <div style={{fontSize:10,color:"#555575",marginBottom:3}}>Подкатегория</div>
+                          <div style={{fontSize:10,color:"#6b7280",marginBottom:3}}>Подкатегория</div>
                           <select value={newWork.sub} onChange={e=>setNewWork(p=>({...p,sub:e.target.value}))} style={selStyle}
                             disabled={!newWork.cat||newWork.cat==="__new__"&&!newWork.catNew}>
                             <option value="">— выбрать существующую —</option>
@@ -933,13 +933,13 @@ function AdminPanel({ currentUser, onClose }) {
                         {/* Название и единица */}
                         <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:6,marginBottom:10}}>
                           <div>
-                            <div style={{fontSize:10,color:"#555575",marginBottom:3}}>Название работы</div>
+                            <div style={{fontSize:10,color:"#6b7280",marginBottom:3}}>Название работы</div>
                             <input placeholder="напр. Укладка паркета" value={newWork.name}
                               onChange={e=>setNewWork(p=>({...p,name:e.target.value}))}
                               style={inpStyle}/>
                           </div>
                           <div>
-                            <div style={{fontSize:10,color:"#555575",marginBottom:3}}>Единица</div>
+                            <div style={{fontSize:10,color:"#6b7280",marginBottom:3}}>Единица</div>
                             <select value={newWork.unit} onChange={e=>setNewWork(p=>({...p,unit:e.target.value}))} style={{...selStyle,width:80}}>
                               {["м²","м.п.","шт","усл.","кг","л"].map(u=><option key={u} value={u}>{u}</option>)}
                             </select>
@@ -948,7 +948,7 @@ function AdminPanel({ currentUser, onClose }) {
 
                         <div style={{display:"flex",gap:6}}>
                           <button onClick={addCustomWork}
-                            style={{flex:1,background:"rgba(184,144,74,.15)",color:"#b8904a",border:"1px solid rgba(184,144,74,.3)",borderRadius:6,padding:"7px",fontFamily:"inherit",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                            style={{flex:1,background:"rgba(184,144,74,.15)",color:"#5b4ef5",border:"1px solid rgba(184,144,74,.3)",borderRadius:6,padding:"7px",fontFamily:"inherit",fontSize:12,fontWeight:700,cursor:"pointer"}}>
                             ✓ Добавить
                           </button>
                           <button onClick={()=>{setShowAddWork(false);setNewWork({cat:"",sub:"",name:"",unit:"м²"});}}
@@ -962,10 +962,10 @@ function AdminPanel({ currentUser, onClose }) {
                 </div>
               </div>
               {/* Кнопка сохранить — фиксирована снизу */}
-              <div style={{paddingTop:10,borderTop:"1px solid #1c2035",marginTop:6}}>
+              <div style={{paddingTop:10,borderTop:"1px solid #e5e7eb",marginTop:6}}>
                 {priceMsg && <div style={{textAlign:"center",fontSize:12,color:"#4caf7d",fontWeight:700,marginBottom:6}}>{priceMsg}</div>}
                 <button onClick={savePrices} disabled={priceSaving}
-                  style={{width:"100%",background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:8,padding:"11px",fontFamily:"inherit",fontSize:13,fontWeight:800,cursor:"pointer"}}>
+                  style={{width:"100%",background:"linear-gradient(135deg,#5b4ef5,#7c6ff7)",color:"#f0f2f8",border:"none",borderRadius:8,padding:"11px",fontFamily:"inherit",fontSize:13,fontWeight:800,cursor:"pointer"}}>
                   {priceSaving ? "💾 Сохранение..." : "💾 Сохранить прайс"}
                 </button>
               </div>
@@ -998,9 +998,9 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
           <div style={{fontSize:12,color:"#888",marginTop:3}}>на услуги ремонта и отделки недвижимости</div>
         </div>
         <div style={{textAlign:"right"}}>
-          <div style={{fontWeight:900,fontSize:16,color:"#b8904a"}}>TitovStroy</div>
+          <div style={{fontWeight:900,fontSize:16,color:"#5b4ef5"}}>TitovStroy</div>
           <div style={{fontSize:11,color:"#555",marginTop:2}}>БИН 231040002769</div>
-          <div style={{fontSize:11,color:"#555"}}>WA: <span style={{color:"#b8904a"}}>+7 707 982 4915</span></div>
+          <div style={{fontSize:11,color:"#555"}}>WA: <span style={{color:"#5b4ef5"}}>+7 707 982 4915</span></div>
         </div>
       </div>
 
@@ -1031,7 +1031,7 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
                   {/* Заголовок категории */}
                   <div style={{background:"#1a1a28",color:"#f5f2ec",padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center",borderRadius:"6px 6px 0 0"}}>
                     <span style={{fontWeight:700,fontSize:13,letterSpacing:.5,textTransform:"uppercase"}}>{cat}</span>
-                    <span style={{fontWeight:700,fontSize:13,color:"#b8904a"}}>{fmt(catTotal)} ₸</span>
+                    <span style={{fontWeight:700,fontSize:13,color:"#5b4ef5"}}>{fmt(catTotal)} ₸</span>
                   </div>
                   {/* Строки работ */}
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
@@ -1062,7 +1062,7 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
                     <tfoot>
                       <tr style={{background:"#e8e4da",borderTop:"2px solid #ccc"}}>
                         <td colSpan={7} style={{padding:"7px 8px",fontSize:12,fontWeight:700,color:"#444",textAlign:"right"}}>Итого по разделу «{cat}»:</td>
-                        <td style={{padding:"7px 8px",textAlign:"right",fontWeight:800,fontSize:13,color:"#b8904a"}}>{fmt(catTotal)} ₸</td>
+                        <td style={{padding:"7px 8px",textAlign:"right",fontWeight:800,fontSize:13,color:"#5b4ef5"}}>{fmt(catTotal)} ₸</td>
                       </tr>
                     </tfoot>
                   </table>
@@ -1086,12 +1086,12 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
               {discount>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#e07070",marginBottom:6}}><span>Скидка {discount}%</span><span>− {fmt(discAmt)} ₸</span></div>}
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <span style={{fontSize:14,fontWeight:600,letterSpacing:.5}}>ИТОГО:</span>
-                <span style={{fontSize:28,fontWeight:900,color:"#b8904a",letterSpacing:-.5}}>{fmt(final)} ₸</span>
+                <span style={{fontSize:28,fontWeight:900,color:"#5b4ef5",letterSpacing:-.5}}>{fmt(final)} ₸</span>
               </div>
               {proj.area&&Number(proj.area)>0&&(
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,paddingTop:8,borderTop:"1px solid rgba(255,255,255,.08)"}}>
                   <span style={{fontSize:12,color:"#888"}}>Цена за м² ({proj.area} м²)</span>
-                  <span style={{fontSize:14,fontWeight:700,color:"#d4a85a"}}>≈ {fmt(final/Number(proj.area))} ₸/м²</span>
+                  <span style={{fontSize:14,fontWeight:700,color:"#7c6ff7"}}>≈ {fmt(final/Number(proj.area))} ₸/м²</span>
                 </div>
               )}
             </div>
@@ -1107,16 +1107,16 @@ function KPContent({ proj, kpItems, discount, discAmt, final, note }) {
         <div style={{fontWeight:700,color:"#1a1a28",marginBottom:10,fontSize:13}}>Условия:</div>
         {CONDITIONS.map((text, i) => (
           <div key={i} style={{display:"flex",gap:10,marginBottom:5}}>
-            <span style={{color:"#b8904a",fontWeight:700,minWidth:18,flexShrink:0}}>{i+1}.</span>
+            <span style={{color:"#5b4ef5",fontWeight:700,minWidth:18,flexShrink:0}}>{i+1}.</span>
             <span>{text}</span>
           </div>
         ))}
         <div style={{display:"flex",gap:10,marginTop:5}}>
-          <span style={{color:"#b8904a",fontWeight:700,minWidth:18,flexShrink:0}}>7.</span>
+          <span style={{color:"#5b4ef5",fontWeight:700,minWidth:18,flexShrink:0}}>7.</span>
           <span>Ссылка для ознакомления с договором (шаблон):{" "}
             <a href="https://drive.google.com/file/d/1qmhQhn6LE3F3lnU_BBEDXqCiyj-LDjSC/view?usp=sharing"
               target="_blank" rel="noreferrer"
-              style={{color:"#b8904a",textDecoration:"underline",wordBreak:"break-all"}}>
+              style={{color:"#5b4ef5",textDecoration:"underline",wordBreak:"break-all"}}>
               https://drive.google.com/file/d/1qmhQhn6LE3F3lnU_BBEDXqCiyj-LDjSC/view
             </a>
           </span>
@@ -1287,13 +1287,13 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
     await saveCatalog({ ...(localCatalog||{}), hiddenSubs:hs, custom:((localCatalog||{}).custom||[]).filter(w => !(w.cat===curCat && w.sub===curSub)) }); Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
   const roleLabel = r => r==="admin" ? "👑 Администратор" : r==="viewer" ? "👁 Наблюдатель" : "👤 Замерщик";
-  const roleColor = r => r==="admin" ? "#b8904a" : r==="viewer" ? "#4285f4" : "#8888cc";
+  const roleColor = r => r==="admin" ? "#5b4ef5" : r==="viewer" ? "#4285f4" : "#8888cc";
 
   return (
     <div style={{padding:"28px 24px 80px"}}>
       <div style={{marginBottom:24}}>
-        <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#e2ddd4"}}>⚙️ Администрирование</h1>
-        <div style={{fontSize:12,color:"#454560",marginTop:4}}>Сотрудники и прайс-лист</div>
+        <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#111827"}}>⚙️ Администрирование</h1>
+        <div style={{fontSize:12,color:"#9ca3af",marginTop:4}}>Сотрудники и прайс-лист</div>
       </div>
 
       {/* Табы */}
@@ -1302,14 +1302,14 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
           <button key={t} onClick={()=>setTab(t)} style={{
             flex:1,padding:"11px",borderRadius:8,border:"none",cursor:"pointer",
             fontFamily:"inherit",fontSize:13,fontWeight:700,
-            background: tab===t ? "linear-gradient(135deg,#b8904a,#d4a85a)" : "transparent",
-            color: tab===t ? "#0c0e1a" : "#555575",transition:"all .15s"
+            background: tab===t ? "linear-gradient(135deg,#5b4ef5,#7c6ff7)" : "transparent",
+            color: tab===t ? "#f0f2f8" : "#6b7280",transition:"all .15s"
           }}>{label}</button>
         ))}
       </div>
 
       {loading ? (
-        <div style={{textAlign:"center",padding:"60px 0",color:"#454560"}}>
+        <div style={{textAlign:"center",padding:"60px 0",color:"#9ca3af"}}>
           <div style={{fontSize:24,marginBottom:8}}>⏳</div>Загрузка...
         </div>
       ) : tab === "users" ? (
@@ -1325,11 +1325,11 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                   </div>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
-                      <span style={{fontWeight:700,fontSize:14,color:"#e2ddd4"}}>{u.name}</span>
+                      <span style={{fontWeight:700,fontSize:14,color:"#111827"}}>{u.name}</span>
                       <span style={{fontSize:10,fontWeight:700,color:roleColor(u.role),background:"rgba(255,255,255,.05)",borderRadius:4,padding:"2px 7px"}}>{roleLabel(u.role)}</span>
-                      {u.id === currentUser.id && <span style={{fontSize:10,color:"#b8904a",background:"rgba(184,144,74,.1)",borderRadius:4,padding:"2px 7px"}}>вы</span>}
+                      {u.id === currentUser.id && <span style={{fontSize:10,color:"#5b4ef5",background:"rgba(184,144,74,.1)",borderRadius:4,padding:"2px 7px"}}>вы</span>}
                     </div>
-                    <div style={{fontSize:11,color:"#454560",marginTop:2}}>@{u.login}</div>
+                    <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>@{u.login}</div>
                   </div>
                   <div style={{display:"flex",gap:6}}>
                     <button onClick={()=>{setEditingUser(editingUser?.id===u.id?null:{id:u.id,name:u.name,login:u.login});setEditingPass(null);}}
@@ -1337,7 +1337,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                       ✏ Изменить
                     </button>
                     <button onClick={()=>{setEditingPass(editingPass?.id===u.id?null:{id:u.id,val:""});setEditingUser(null);}}
-                      style={{background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.2)",borderRadius:7,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+                      style={{background:"rgba(184,144,74,.1)",color:"#5b4ef5",border:"1px solid rgba(184,144,74,.2)",borderRadius:7,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
                       🔑
                     </button>
                     {u.id !== currentUser.id && (
@@ -1349,10 +1349,10 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                 {editingUser?.id === u.id && (
                   <div style={{marginTop:14,paddingTop:14,borderTop:"1px solid #161929",display:"flex",flexDirection:"column",gap:10}}>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                      <div><div style={{fontSize:10,color:"#555575",marginBottom:4}}>Имя</div><input className="fi" value={editingUser.name} onChange={e=>setEditingUser(p=>({...p,name:e.target.value}))}/></div>
-                      <div><div style={{fontSize:10,color:"#555575",marginBottom:4}}>Логин</div><input className="fi" value={editingUser.login} onChange={e=>setEditingUser(p=>({...p,login:e.target.value}))}/></div>
+                      <div><div style={{fontSize:10,color:"#6b7280",marginBottom:4}}>Имя</div><input className="fi" value={editingUser.name} onChange={e=>setEditingUser(p=>({...p,name:e.target.value}))}/></div>
+                      <div><div style={{fontSize:10,color:"#6b7280",marginBottom:4}}>Логин</div><input className="fi" value={editingUser.login} onChange={e=>setEditingUser(p=>({...p,login:e.target.value}))}/></div>
                     </div>
-                    <button onClick={saveUser} style={{background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                    <button onClick={saveUser} style={{background:"linear-gradient(135deg,#5b4ef5,#7c6ff7)",color:"#f0f2f8",border:"none",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
                       💾 Сохранить изменения
                     </button>
                   </div>
@@ -1360,7 +1360,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                 {editingPass?.id === u.id && (
                   <div style={{marginTop:14,paddingTop:14,borderTop:"1px solid #161929",display:"flex",gap:8}}>
                     <input className="fi" placeholder="Новый пароль" value={editingPass.val} onChange={e=>setEditingPass(p=>({...p,val:e.target.value}))}/>
-                    <button onClick={()=>savePass(u.id)} style={{background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                    <button onClick={()=>savePass(u.id)} style={{background:"linear-gradient(135deg,#5b4ef5,#7c6ff7)",color:"#f0f2f8",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
                       Сохранить
                     </button>
                   </div>
@@ -1371,14 +1371,14 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
 
           {/* Добавить нового */}
           <div style={{background:"#0f1120",border:"1px dashed rgba(184,144,74,.3)",borderRadius:12,padding:"20px"}}>
-            <div style={{fontSize:12,fontWeight:700,color:"#b8904a",marginBottom:14,display:"flex",alignItems:"center",gap:6}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#5b4ef5",marginBottom:14,display:"flex",alignItems:"center",gap:6}}>
               <span>＋</span> Новый сотрудник
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:12}}>
-              <div><div style={{fontSize:10,color:"#555575",marginBottom:4}}>Имя</div><input className="fi" placeholder="Иван Иванов" value={newName} onChange={e=>setNewName(e.target.value)}/></div>
-              <div><div style={{fontSize:10,color:"#555575",marginBottom:4}}>Логин</div><input className="fi" placeholder="ivanov" value={newLogin} onChange={e=>setNewLogin(e.target.value)}/></div>
-              <div><div style={{fontSize:10,color:"#555575",marginBottom:4}}>Пароль</div><input className="fi" placeholder="••••••" value={newPass} onChange={e=>setNewPass(e.target.value)}/></div>
-              <div><div style={{fontSize:10,color:"#555575",marginBottom:4}}>Роль</div>
+              <div><div style={{fontSize:10,color:"#6b7280",marginBottom:4}}>Имя</div><input className="fi" placeholder="Иван Иванов" value={newName} onChange={e=>setNewName(e.target.value)}/></div>
+              <div><div style={{fontSize:10,color:"#6b7280",marginBottom:4}}>Логин</div><input className="fi" placeholder="ivanov" value={newLogin} onChange={e=>setNewLogin(e.target.value)}/></div>
+              <div><div style={{fontSize:10,color:"#6b7280",marginBottom:4}}>Пароль</div><input className="fi" placeholder="••••••" value={newPass} onChange={e=>setNewPass(e.target.value)}/></div>
+              <div><div style={{fontSize:10,color:"#6b7280",marginBottom:4}}>Роль</div>
                 <select className="fi" value={newRole} onChange={e=>setNewRole(e.target.value)}>
                   <option value="user">👤 Замерщик</option>
                   <option value="admin">👑 Администратор</option>
@@ -1386,13 +1386,13 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                 </select>
               </div>
             </div>
-            <button onClick={addUser} style={{width:"100%",background:"rgba(184,144,74,.12)",color:"#b8904a",border:"1px solid rgba(184,144,74,.25)",borderRadius:8,padding:"11px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+            <button onClick={addUser} style={{width:"100%",background:"rgba(184,144,74,.12)",color:"#5b4ef5",border:"1px solid rgba(184,144,74,.25)",borderRadius:8,padding:"11px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>
               + Добавить сотрудника
             </button>
           </div>
 
           {msg && <div style={{marginTop:14,textAlign:"center",fontSize:13,fontWeight:600,color: msg.startsWith("✓") ? "#4caf7d" : "#e07070",padding:"10px",background:msg.startsWith("✓")?"rgba(76,175,125,.08)":"rgba(200,60,60,.08)",borderRadius:8}}>{msg}</div>}
-          {saving && <div style={{textAlign:"center",fontSize:11,color:"#454560",marginTop:8}}>💾 Сохранение...</div>}
+          {saving && <div style={{textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:8}}>💾 Сохранение...</div>}
         </div>
       ) : (
         /* ПРАЙС-ЛИСТ */
@@ -1405,7 +1405,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
               const cats = [...new Set(allW.map(w=>w.cat))];
               setNewWork({cat:cats[0]||"",catNew:"",sub:"",subNew:"",name:"",unit:"м²",cost:"",margin:40});
               setShowAddWork(true);
-            }} style={{background:"rgba(184,144,74,.15)",color:"#b8904a",border:"1px solid rgba(184,144,74,.3)",borderRadius:8,padding:"9px 16px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+            }} style={{background:"rgba(184,144,74,.15)",color:"#5b4ef5",border:"1px solid rgba(184,144,74,.3)",borderRadius:8,padding:"9px 16px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
               ＋ Добавить позицию
             </button>
           </div>
@@ -1415,13 +1415,13 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
             const allW = getEffectiveCatalog();
             const cats = [...new Set(allW.map(w=>w.cat))];
             const subs = newWork.cat ? [...new Set(allW.filter(w=>w.cat===newWork.cat).map(w=>w.sub))] : [];
-            const inp = {background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:6,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"};
+            const inp = {background:"#f0f2f8",border:"1px solid #e5e7eb",color:"#111827",borderRadius:6,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"};
             return (
               <div style={{background:"#0f1120",border:"1px solid rgba(184,144,74,.3)",borderRadius:10,padding:"16px",marginBottom:16}}>
-                <div style={{fontSize:13,fontWeight:700,color:"#b8904a",marginBottom:12}}>Новая позиция</div>
+                <div style={{fontSize:13,fontWeight:700,color:"#5b4ef5",marginBottom:12}}>Новая позиция</div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:12}}>
                   <div>
-                    <div style={{fontSize:10,color:"#555575",marginBottom:4}}>Категория</div>
+                    <div style={{fontSize:10,color:"#6b7280",marginBottom:4}}>Категория</div>
                     <select value={newWork.cat} onChange={e=>setNewWork(p=>({...p,cat:e.target.value,sub:""}))} style={{...inp,width:"100%",cursor:"pointer"}}>
                       {cats.map(c=><option key={c} value={c}>{c}</option>)}
                       <option value="__new__">＋ Новая категория...</option>
@@ -1429,7 +1429,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                     {newWork.cat==="__new__"&&<input autoFocus placeholder="Название" value={newWork.catNew||""} onChange={e=>setNewWork(p=>({...p,catNew:e.target.value}))} style={{...inp,width:"100%",marginTop:6}}/>}
                   </div>
                   <div>
-                    <div style={{fontSize:10,color:"#555575",marginBottom:4}}>Подкатегория</div>
+                    <div style={{fontSize:10,color:"#6b7280",marginBottom:4}}>Подкатегория</div>
                     <select value={newWork.sub} onChange={e=>setNewWork(p=>({...p,sub:e.target.value}))} style={{...inp,width:"100%",cursor:"pointer"}} disabled={!newWork.cat}>
                       <option value="">— выбрать —</option>
                       {subs.map(s=><option key={s} value={s}>{s}</option>)}
@@ -1438,26 +1438,26 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                     {newWork.sub==="__new__"&&<input autoFocus placeholder="Название" value={newWork.subNew||""} onChange={e=>setNewWork(p=>({...p,subNew:e.target.value}))} style={{...inp,width:"100%",marginTop:6}}/>}
                   </div>
                   <div>
-                    <div style={{fontSize:10,color:"#555575",marginBottom:4}}>Название работы</div>
+                    <div style={{fontSize:10,color:"#6b7280",marginBottom:4}}>Название работы</div>
                     <input placeholder="напр. Укладка паркета" value={newWork.name} onChange={e=>setNewWork(p=>({...p,name:e.target.value}))} style={{...inp,width:"100%"}}/>
                   </div>
                   <div>
-                    <div style={{fontSize:10,color:"#555575",marginBottom:4}}>Ед. измерения</div>
+                    <div style={{fontSize:10,color:"#6b7280",marginBottom:4}}>Ед. измерения</div>
                     <select value={newWork.unit} onChange={e=>setNewWork(p=>({...p,unit:e.target.value}))} style={{...inp,width:"100%",cursor:"pointer"}}>
                       {["м²","м.п.","шт","усл.","кг","л"].map(u=><option key={u} value={u}>{u}</option>)}
                     </select>
                   </div>
                   <div>
-                    <div style={{fontSize:10,color:"#555575",marginBottom:4}}>Себестоимость ₸</div>
+                    <div style={{fontSize:10,color:"#6b7280",marginBottom:4}}>Себестоимость ₸</div>
                     <input type="number" min="0" placeholder="0" value={newWork.cost||""} onChange={e=>setNewWork(p=>({...p,cost:e.target.value}))} style={{...inp,width:"100%"}}/>
                   </div>
                   <div>
-                    <div style={{fontSize:10,color:"#555575",marginBottom:4}}>Маржа %</div>
+                    <div style={{fontSize:10,color:"#6b7280",marginBottom:4}}>Маржа %</div>
                     <input type="number" min="0" max="100" placeholder="40" value={newWork.margin||""} onChange={e=>setNewWork(p=>({...p,margin:e.target.value}))} style={{...inp,width:"100%"}}/>
                   </div>
                 </div>
                 <div style={{display:"flex",gap:8}}>
-                  <button onClick={addCustomWork} style={{flex:1,background:"rgba(184,144,74,.15)",color:"#b8904a",border:"1px solid rgba(184,144,74,.3)",borderRadius:8,padding:"10px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>✓ Добавить</button>
+                  <button onClick={addCustomWork} style={{flex:1,background:"rgba(184,144,74,.15)",color:"#5b4ef5",border:"1px solid rgba(184,144,74,.3)",borderRadius:8,padding:"10px",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>✓ Добавить</button>
                   <button onClick={()=>{setShowAddWork(false);setNewWork({cat:"",sub:"",name:"",unit:"м²"});}} style={{background:"rgba(200,60,60,.1)",color:"#e07070",border:"1px solid rgba(200,60,60,.2)",borderRadius:8,padding:"10px 16px",fontFamily:"inherit",fontSize:13,cursor:"pointer"}}>Отмена</button>
                 </div>
               </div>
@@ -1480,7 +1480,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
               <thead>
                 <tr style={{background:"#0a0c18",position:"sticky",top:0,zIndex:5}}>
                   {["Подкатегория","Название работы","Ед.","Себестоимость ₸","Маржа %","Цена для клиента ₸","Валовая прибыль ₸",""].map((h,i)=>(
-                    <th key={i} style={{padding:"10px 12px",textAlign:i>=3&&i<=6?"right":"left",fontSize:10,fontWeight:700,color:"#555575",textTransform:"uppercase",letterSpacing:.5,borderBottom:"2px solid #161929",whiteSpace:"nowrap"}}>
+                    <th key={i} style={{padding:"10px 12px",textAlign:i>=3&&i<=6?"right":"left",fontSize:10,fontWeight:700,color:"#6b7280",textTransform:"uppercase",letterSpacing:.5,borderBottom:"2px solid #161929",whiteSpace:"nowrap"}}>
                       {h}
                     </th>
                   ))}
@@ -1509,14 +1509,14 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                               <>
                                 <input autoFocus value={editingCat.val} onChange={e=>setEditingCat(p=>({...p,val:e.target.value}))}
                                   onKeyDown={e=>{if(e.key==="Enter")renameCat(origCat,editingCat.val);if(e.key==="Escape")setEditingCat(null);}}
-                                  style={{background:"#0c0e1a",border:"1px solid #b8904a",color:"#b8904a",borderRadius:5,padding:"3px 10px",fontFamily:"inherit",fontSize:12,fontWeight:800,outline:"none",width:200}}/>
+                                  style={{background:"#f0f2f8",border:"1px solid #5b4ef5",color:"#5b4ef5",borderRadius:5,padding:"3px 10px",fontFamily:"inherit",fontSize:12,fontWeight:800,outline:"none",width:200}}/>
                                 <button onClick={()=>renameCat(origCat,editingCat.val)} style={{...btnS,color:"#4caf7d",fontSize:14}}>✓</button>
-                                <button onClick={()=>setEditingCat(null)} style={{...btnS,color:"#555575",fontSize:14}}>✕</button>
+                                <button onClick={()=>setEditingCat(null)} style={{...btnS,color:"#6b7280",fontSize:14}}>✕</button>
                               </>
                             ) : (
                               <>
-                                <span style={{fontSize:11,fontWeight:800,color:"#b8904a",letterSpacing:1,textTransform:"uppercase"}}>{cat}</span>
-                                <button onClick={()=>setEditingCat({key:origCat,val:cat})} title="Переименовать" style={{...btnS,color:"#b8904a",opacity:.5,fontSize:11}}>✏️</button>
+                                <span style={{fontSize:11,fontWeight:800,color:"#5b4ef5",letterSpacing:1,textTransform:"uppercase"}}>{cat}</span>
+                                <button onClick={()=>setEditingCat({key:origCat,val:cat})} title="Переименовать" style={{...btnS,color:"#5b4ef5",opacity:.5,fontSize:11}}>✏️</button>
                                 <button onClick={()=>{if(window.confirm(`Удалить категорию "${cat}"?`))deleteCat(origCat);}} title="Удалить" style={{...btnS,color:"#e07070",opacity:.5,fontSize:11}}>🗑</button>
                               </>
                             )}
@@ -1551,14 +1551,14 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                                     <span style={{display:"contents"}}>
                                       <input autoFocus value={editingSub.val} onChange={e=>setEditingSub(p=>({...p,val:e.target.value}))}
                                         onKeyDown={e=>{if(e.key==="Enter")renameSub(origCat,origSub,editingSub.val);if(e.key==="Escape")setEditingSub(null);}}
-                                        style={{background:"#0c0e1a",border:"1px solid #6060a0",color:"#9090c0",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",fontSize:11,outline:"none",width:120}}/>
+                                        style={{background:"#f0f2f8",border:"1px solid #6060a0",color:"#9090c0",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",fontSize:11,outline:"none",width:120}}/>
                                       <button onClick={()=>renameSub(origCat,origSub,editingSub.val)} style={{...btnS,color:"#4caf7d",fontSize:12}}>✓</button>
-                                      <button onClick={()=>setEditingSub(null)} style={{...btnS,color:"#555575",fontSize:12}}>✕</button>
+                                      <button onClick={()=>setEditingSub(null)} style={{...btnS,color:"#6b7280",fontSize:12}}>✕</button>
                                     </span>
                                   ) : (
                                     <span style={{display:"contents"}}>
                                       <span style={{color:"#888",fontSize:11}}>{sub}</span>
-                                      <button onClick={()=>setEditingSub({cat:origCat,key:origSub,val:sub})} style={{...btnS,color:"#555575",fontSize:10,opacity:.6}}>✏️</button>
+                                      <button onClick={()=>setEditingSub({cat:origCat,key:origSub,val:sub})} style={{...btnS,color:"#6b7280",fontSize:10,opacity:.6}}>✏️</button>
                                       <button onClick={()=>{if(window.confirm("Удалить подкатегорию?"))deleteSub(origCat,origSub);}} style={{...btnS,color:"#c84848",fontSize:10,opacity:.6}}>🗑</button>
                                     </span>
                                   )}
@@ -1571,19 +1571,19 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                                 <div style={{display:"flex",gap:4}}>
                                   <input autoFocus value={editingUser.name} onChange={e=>setEditingUser(p=>({...p,name:e.target.value}))}
                                     onKeyDown={e=>{if(e.key==="Enter"){renameWork(w.code,editingUser.name);setEditingUser(null);}if(e.key==="Escape")setEditingUser(null);}}
-                                    style={{flex:1,background:"#0c0e1a",border:"1px solid #b8904a",color:"#ddd8ce",borderRadius:5,padding:"3px 8px",fontFamily:"inherit",fontSize:12,outline:"none"}}/>
+                                    style={{flex:1,background:"#f0f2f8",border:"1px solid #5b4ef5",color:"#111827",borderRadius:5,padding:"3px 8px",fontFamily:"inherit",fontSize:12,outline:"none"}}/>
                                   <button onClick={()=>{renameWork(w.code,editingUser.name);setEditingUser(null);}} style={{...btnS,color:"#4caf7d",fontSize:13}}>✓</button>
-                                  <button onClick={()=>setEditingUser(null)} style={{...btnS,color:"#555575",fontSize:13}}>✕</button>
+                                  <button onClick={()=>setEditingUser(null)} style={{...btnS,color:"#6b7280",fontSize:13}}>✕</button>
                                 </div>
                               ) : (
                                 <div style={{display:"flex",alignItems:"center",gap:4}}>
-                                  <span style={{color:"#ddd8ce",flex:1}}>{w.name}</span>
-                                  <button onClick={()=>setEditingUser({id:w.code,name:w.name})} style={{...btnS,color:"#555575",fontSize:10,opacity:.5,flexShrink:0}}>✏️</button>
+                                  <span style={{color:"#111827",flex:1}}>{w.name}</span>
+                                  <button onClick={()=>setEditingUser({id:w.code,name:w.name})} style={{...btnS,color:"#6b7280",fontSize:10,opacity:.5,flexShrink:0}}>✏️</button>
                                 </div>
                               )}
                             </td>
                             {/* Ед. */}
-                            <td style={{padding:"6px 8px",color:"#454560",textAlign:"center",fontSize:11}}>{w.unit}</td>
+                            <td style={{padding:"6px 8px",color:"#9ca3af",textAlign:"center",fontSize:11}}>{w.unit}</td>
                             {/* Себестоимость */}
                             <td style={{padding:"6px 8px",textAlign:"right"}}>
                               <input type="number" min="0"
@@ -1594,7 +1594,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                                   setLocalPrices(prev=>({...prev,[w.code]:{...(prev?.[w.code]||{}),cost:val}}));
                                   priceCardCache[w.code] = {...(priceCardCache[w.code]||{}), cost:val, margin:ovMargin};
                                 }}
-                                style={{width:"100%",background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:5,padding:"4px 8px",textAlign:"right",fontFamily:"inherit",fontSize:12,outline:"none"}}
+                                style={{width:"100%",background:"#f0f2f8",border:"1px solid #e5e7eb",color:"#111827",borderRadius:5,padding:"4px 8px",textAlign:"right",fontFamily:"inherit",fontSize:12,outline:"none"}}
                               />
                             </td>
                             {/* Маржа */}
@@ -1608,13 +1608,13 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                                     setLocalPrices(prev=>({...prev,[w.code]:{...(prev?.[w.code]||{}),margin:val}}));
                                     priceCardCache[w.code] = {...(priceCardCache[w.code]||{}), margin:val, cost:ovCost};
                                   }}
-                                  style={{width:50,background:"#0c0e1a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:5,padding:"4px 6px",textAlign:"right",fontFamily:"inherit",fontSize:12,outline:"none"}}
+                                  style={{width:50,background:"#f0f2f8",border:"1px solid #e5e7eb",color:"#111827",borderRadius:5,padding:"4px 6px",textAlign:"right",fontFamily:"inherit",fontSize:12,outline:"none"}}
                                 />
-                                <span style={{color:"#454560",fontSize:10}}>%</span>
+                                <span style={{color:"#9ca3af",fontSize:10}}>%</span>
                               </div>
                             </td>
                             {/* Цена для клиента */}
-                            <td style={{padding:"6px 12px",textAlign:"right",fontWeight:700,color:"#b8904a",whiteSpace:"nowrap"}}>
+                            <td style={{padding:"6px 12px",textAlign:"right",fontWeight:700,color:"#5b4ef5",whiteSpace:"nowrap"}}>
                               {price ? new Intl.NumberFormat("ru-RU").format(price)+" ₸" : "—"}
                             </td>
                             {/* Валовая прибыль */}
@@ -1642,10 +1642,10 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
           </div>
 
           {/* Кнопка сохранить */}
-          <div style={{position:"fixed",bottom:0,left:"220px",right:0,background:"#0c0e1a",borderTop:"1px solid #161929",padding:"12px 24px",zIndex:20}}>
+          <div style={{position:"fixed",bottom:0,left:"220px",right:0,background:"#f0f2f8",borderTop:"1px solid #161929",padding:"12px 24px",zIndex:20}}>
             {priceMsg && <div style={{textAlign:"center",fontSize:13,color:"#4caf7d",fontWeight:700,marginBottom:8}}>{priceMsg}</div>}
             <button onClick={savePrices} disabled={priceSaving}
-              style={{width:"100%",display:"block",background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",borderRadius:9,padding:"13px",fontFamily:"inherit",fontSize:14,fontWeight:800,cursor:"pointer"}}>
+              style={{width:"100%",display:"block",background:"linear-gradient(135deg,#5b4ef5,#7c6ff7)",color:"#f0f2f8",border:"none",borderRadius:9,padding:"13px",fontFamily:"inherit",fontSize:14,fontWeight:800,cursor:"pointer"}}>
               {priceSaving ? "💾 Сохранение..." : "💾 Сохранить прайс"}
             </button>
           </div>
@@ -1682,18 +1682,18 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
   const hasWorks = isRepair || isAnnex;
   const hasMainRef = isAnnex || isDesAdd; // ссылка на основной договор
 
-  const fi = {background:"#11152a",border:"1px solid #20243a",borderRadius:6,color:"#ddd8ce",fontSize:13,padding:"8px 10px",fontFamily:"inherit",width:"100%"};
+  const fi = {background:"#11152a",border:"1px solid #e5e7eb",borderRadius:6,color:"#111827",fontSize:13,padding:"8px 10px",fontFamily:"inherit",width:"100%"};
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
-        <button onClick={onBack} style={{background:"none",border:"none",color:"#555575",cursor:"pointer",fontSize:18}}>←</button>
-        <span style={{fontWeight:700,fontSize:15,color:"#e2ddd4"}}>{contract.number ? `${TYPE_LABELS[type]||""} №${contract.number}` : "Новый документ"}</span>
+        <button onClick={onBack} style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",fontSize:18}}>←</button>
+        <span style={{fontWeight:700,fontSize:15,color:"#111827"}}>{contract.number ? `${TYPE_LABELS[type]||""} №${contract.number}` : "Новый документ"}</span>
       </div>
 
       {/* Тип документа */}
       <div>
-        <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Тип документа</div>
+        <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Тип документа</div>
         <select style={fi} value={type} onChange={e=>upd({type:e.target.value})}>
           {DOC_TYPES.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
         </select>
@@ -1702,11 +1702,11 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       {/* Основные поля — номер и дата */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         <div>
-          <div style={{fontSize:11,color:"#555575",marginBottom:4}}>{isDesAdd?"Номер доп. соглашения":"Номер договора/соглашения"}</div>
+          <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>{isDesAdd?"Номер доп. соглашения":"Номер договора/соглашения"}</div>
           <input className="fi" value={contract.number||""} onChange={e=>upd({number:e.target.value})} placeholder="0001#2026"/>
         </div>
         <div>
-          <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Дата</div>
+          <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Дата</div>
           <input className="fi" type="date" value={contract.date||""} onChange={e=>upd({date:e.target.value})}/>
         </div>
       </div>
@@ -1715,11 +1715,11 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       {hasMainRef && (
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <div>
-            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>{isDesAdd?"Номер соглашения о дизайне":"Номер основного договора"}</div>
+            <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>{isDesAdd?"Номер соглашения о дизайне":"Номер основного договора"}</div>
             <input className="fi" value={contract.mainNumber||""} onChange={e=>upd({mainNumber:e.target.value})} placeholder="0819#128"/>
           </div>
           <div>
-            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>{isDesAdd?"Дата соглашения о дизайне":"Дата основного договора"}</div>
+            <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>{isDesAdd?"Дата соглашения о дизайне":"Дата основного договора"}</div>
             <input className="fi" type="date" value={contract.mainDate||""} onChange={e=>upd({mainDate:e.target.value})}/>
           </div>
         </div>
@@ -1729,11 +1729,11 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       {isAnnex && (
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <div>
-            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Приложение №</div>
+            <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Приложение №</div>
             <input className="fi" type="number" min="2" value={contract.appendix||2} onChange={e=>upd({appendix:parseInt(e.target.value)||2})}/>
           </div>
           <div>
-            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Дата приложения</div>
+            <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Дата приложения</div>
             <input className="fi" type="date" value={contract.annexDate||contract.date||""} onChange={e=>upd({annexDate:e.target.value})}/>
           </div>
         </div>
@@ -1743,11 +1743,11 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       {isRes && (
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <div>
-            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Сумма резервирования (₸)</div>
+            <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Сумма резервирования (₸)</div>
             <input className="fi" type="number" value={contract.reserveAmount||50000} onChange={e=>upd({reserveAmount:parseFloat(e.target.value)||0})}/>
           </div>
           <div>
-            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Дата начала работ (п.2.1)</div>
+            <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Дата начала работ (п.2.1)</div>
             <input className="fi" type="date" value={contract.reserveStartDate||""} onChange={e=>upd({reserveStartDate:e.target.value})}/>
           </div>
         </div>
@@ -1756,7 +1756,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       {/* Доп поля: дизайн */}
       {isDesign && (
         <div>
-          <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Предоплата (₸)</div>
+          <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Предоплата (₸)</div>
           <input className="fi" type="number" value={contract.designAdvance||25000} onChange={e=>upd({designAdvance:parseFloat(e.target.value)||0})}/>
         </div>
       )}
@@ -1765,29 +1765,29 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       {isDesAdd && (<>\
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <div>
-            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Площадь объекта (м²)</div>
+            <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Площадь объекта (м²)</div>
             <input className="fi" type="number" value={contract.area||""} onChange={e=>upd({area:e.target.value})} placeholder="85"/>
           </div>
           <div>
-            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Срок выполнения (раб. дней)</div>
+            <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Срок выполнения (раб. дней)</div>
             <input className="fi" type="number" value={contract.deadline||""} onChange={e=>upd({deadline:e.target.value})} placeholder="30"/>
           </div>
           <div>
-            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Вариантов планировки</div>
+            <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Вариантов планировки</div>
             <input className="fi" type="number" min="1" value={contract.variantsLayout||""} onChange={e=>upd({variantsLayout:e.target.value})} placeholder="2"/>
           </div>
           <div>
-            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Раундов корр. планировки</div>
+            <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Раундов корр. планировки</div>
             <input className="fi" type="number" min="0" value={contract.corrLayout||""} onChange={e=>upd({corrLayout:e.target.value})} placeholder="2"/>
           </div>
           <div>
-            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Раундов корр. визуализаций</div>
+            <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Раундов корр. визуализаций</div>
             <input className="fi" type="number" min="0" value={contract.corrVis||""} onChange={e=>upd({corrVis:e.target.value})} placeholder="2"/>
           </div>
         </div>
         {/* Тип стоимости */}
         <div>
-          <div style={{fontSize:11,color:"#555575",marginBottom:6}}>Способ расчёта стоимости</div>
+          <div style={{fontSize:11,color:"#6b7280",marginBottom:6}}>Способ расчёта стоимости</div>
           <div style={{display:"flex",gap:16,marginBottom:8}}>
             <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#aaa",cursor:"pointer"}}>
               <input type="radio" name="priceType" checked={!contract.priceType||contract.priceType==="fixed"}
@@ -1800,18 +1800,18 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
           </div>
           {(!contract.priceType||contract.priceType==="fixed") ? (
             <div>
-              <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Итоговая стоимость (₸)</div>
+              <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Итоговая стоимость (₸)</div>
               <input className="fi" type="number" value={contract.totalCost||""} onChange={e=>upd({totalCost:parseFloat(e.target.value)||0})} placeholder="170000"/>
             </div>
           ) : (
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <div>
-                <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Цена за м² (₸)</div>
+                <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Цена за м² (₸)</div>
                 <input className="fi" type="number" value={contract.pricePerSqm||""} onChange={e=>upd({pricePerSqm:parseFloat(e.target.value)||0})} placeholder="2000"/>
               </div>
               <div>
-                <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Итого (авто, ₸)</div>
-                <div className="fi" style={{background:"rgba(184,144,74,.07)",color:"#b8904a",fontWeight:700,display:"flex",alignItems:"center"}}>
+                <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Итого (авто, ₸)</div>
+                <div className="fi" style={{background:"rgba(184,144,74,.07)",color:"#5b4ef5",fontWeight:700,display:"flex",alignItems:"center"}}>
                   {fmt(Math.round((contract.pricePerSqm||0)*(contract.area||0)))} ₸
                 </div>
               </div>
@@ -1819,11 +1819,11 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
           )}
         </div>
         <div>
-          <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Предоплата уже внесена (₸)</div>
+          <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Предоплата уже внесена (₸)</div>
           <input className="fi" type="number" value={contract.designAdvance||25000} onChange={e=>upd({designAdvance:parseFloat(e.target.value)||0})}/>
         </div>
         <div>
-          <div style={{fontSize:11,color:"#555575",marginBottom:6}}>Состав дизайн-проекта</div>
+          <div style={{fontSize:11,color:"#6b7280",marginBottom:6}}>Состав дизайн-проекта</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
             {[["plan","Обмерочный план"],["layout","Планировочное решение"],["concept","Концепция интерьера"],["vis3d","3D визуализация"],["drawings","Рабочие чертежи"],["materials","Ведомость материалов"]].map(([k,l])=>(
               <label key={k} style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#aaa",cursor:"pointer"}}>
@@ -1840,7 +1840,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
           <div style={{fontSize:12,fontWeight:700,color:"#888"}}>ЗАКАЗЧИК</div>
           {contract.estClient && !contract.clientId && (
-            <div style={{fontSize:11,color:"#b8904a"}}>⚠ Из сметы: {contract.estClient}</div>
+            <div style={{fontSize:11,color:"#5b4ef5"}}>⚠ Из сметы: {contract.estClient}</div>
           )}
         </div>
         <select className="fi" value={contract.clientId||""} onChange={e=>upd({clientId:e.target.value})}>
@@ -1865,21 +1865,21 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       {/* Работы — только для ремонта и приложений */}
       {hasWorks && <div>
         <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:8}}>РАБОТЫ ({(contract.works||[]).length})</div>
-        <div style={{background:"#0d1020",borderRadius:8,overflow:"hidden",border:"1px solid #1c2035"}}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 70px 55px 80px 80px 30px",padding:"8px 12px",background:"#161929",fontSize:10,color:"#454560",fontWeight:700}}>
+        <div style={{background:"#0d1020",borderRadius:8,overflow:"hidden",border:"1px solid #e5e7eb"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 70px 55px 80px 80px 30px",padding:"8px 12px",background:"#161929",fontSize:10,color:"#9ca3af",fontWeight:700}}>
             <span>НАИМЕНОВАНИЕ</span><span style={{textAlign:"center"}}>КОЛ-ВО</span><span style={{textAlign:"center"}}>ЕД.</span><span style={{textAlign:"right"}}>ЦЕНА</span><span style={{textAlign:"right"}}>СУММА</span><span/>
           </div>
           {(contract.works||[]).map((w,i)=>(
             <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 70px 55px 80px 80px 30px",gap:4,padding:"6px 12px",borderTop:"1px solid #181c2e",alignItems:"center"}}>
               <input value={w.name||""} onChange={e=>{const ws=[...(contract.works||[])];ws[i]={...ws[i],name:e.target.value};upd({works:ws});}}
-                style={{background:"transparent",border:"none",color:"#ddd8ce",fontSize:12,fontFamily:"inherit",padding:0,outline:"none",width:"100%"}}/>
+                style={{background:"transparent",border:"none",color:"#111827",fontSize:12,fontFamily:"inherit",padding:0,outline:"none",width:"100%"}}/>
               <input type="number" value={w.quantity||""} onChange={e=>{const ws=[...(contract.works||[])];ws[i]={...ws[i],quantity:parseFloat(e.target.value)||0};upd({works:ws});}}
-                style={{background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",fontSize:11,borderRadius:4,padding:"3px 5px",textAlign:"center",fontFamily:"inherit",width:"100%"}}/>
+                style={{background:"#f8f9fc",border:"1px solid #e5e7eb",color:"#111827",fontSize:11,borderRadius:4,padding:"3px 5px",textAlign:"center",fontFamily:"inherit",width:"100%"}}/>
               <input value={w.unit||"м²"} onChange={e=>{const ws=[...(contract.works||[])];ws[i]={...ws[i],unit:e.target.value};upd({works:ws});}}
-                style={{background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",fontSize:11,borderRadius:4,padding:"3px 5px",textAlign:"center",fontFamily:"inherit",width:"100%"}}/>
+                style={{background:"#f8f9fc",border:"1px solid #e5e7eb",color:"#111827",fontSize:11,borderRadius:4,padding:"3px 5px",textAlign:"center",fontFamily:"inherit",width:"100%"}}/>
               <input type="number" value={w.price||""} onChange={e=>{const ws=[...(contract.works||[])];ws[i]={...ws[i],price:parseFloat(e.target.value)||0};upd({works:ws});}}
-                style={{background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",fontSize:11,borderRadius:4,padding:"3px 5px",textAlign:"right",fontFamily:"inherit",width:"100%"}}/>
-              <div style={{fontSize:12,fontWeight:700,color:"#b8904a",textAlign:"right"}}>{fmt(Number(w.quantity)*Number(w.price)||0)}</div>
+                style={{background:"#f8f9fc",border:"1px solid #e5e7eb",color:"#111827",fontSize:11,borderRadius:4,padding:"3px 5px",textAlign:"right",fontFamily:"inherit",width:"100%"}}/>
+              <div style={{fontSize:12,fontWeight:700,color:"#5b4ef5",textAlign:"right"}}>{fmt(Number(w.quantity)*Number(w.price)||0)}</div>
               <button onClick={()=>{const ws=(contract.works||[]).filter((_,j)=>j!==i);upd({works:ws});}}
                 style={{background:"none",border:"none",color:"#c06060",cursor:"pointer",fontSize:14,padding:0}}>✕</button>
             </div>
@@ -1889,7 +1889,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
               style={{background:"rgba(136,136,204,.1)",color:"#8888cc",border:"1px solid rgba(136,136,204,.2)",borderRadius:6,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
               + Добавить позицию
             </button>
-            <div style={{fontWeight:800,fontSize:16,color:"#b8904a"}}>{fmt(total)} ₸</div>
+            <div style={{fontWeight:800,fontSize:16,color:"#5b4ef5"}}>{fmt(total)} ₸</div>
           </div>
         </div>
       </div>}
@@ -1897,13 +1897,13 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       {isRepair && (
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <div>
-            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Предоплата (%)</div>
+            <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Предоплата (%)</div>
             <input className="fi" type="number" min="0" max="100" value={contract.advancePercent??30}
               onChange={e=>upd({advancePercent:parseFloat(e.target.value)||0})} placeholder="30"/>
           </div>
           <div>
-            <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Сумма предоплаты (₸)</div>
-            <div className="fi" style={{background:"rgba(184,144,74,.07)",color:"#b8904a",fontWeight:700,display:"flex",alignItems:"center"}}>
+            <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Сумма предоплаты (₸)</div>
+            <div className="fi" style={{background:"rgba(184,144,74,.07)",color:"#5b4ef5",fontWeight:700,display:"flex",alignItems:"center"}}>
               {fmt(Math.round(total*(contract.advancePercent??30)/100))} ₸
             </div>
           </div>
@@ -1911,21 +1911,21 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       )}
       {/* Примечание */}
       <div>
-        <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Примечание</div>
+        <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Примечание</div>
         <textarea className="fi" rows={2} value={contract.note||""} onChange={e=>upd({note:e.target.value})} placeholder="Дополнительные условия..."/>
       </div>
       {/* Кнопки */}
       <div style={{display:"flex",gap:8}}>
         <button className="btn btn-g" style={{flex:1}} onClick={onSave}>💾 Сохранить</button>
         <div style={{flex:1,display:"flex",flexDirection:"column",gap:4}}>
-          <button onClick={()=>onPdf(withStamp)} style={{width:"100%",background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.3)",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+          <button onClick={()=>onPdf(withStamp)} style={{width:"100%",background:"rgba(184,144,74,.1)",color:"#5b4ef5",border:"1px solid rgba(184,144,74,.3)",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
             📄 PDF
           </button>
           <div onClick={()=>setWithStamp(p=>!p)} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",justifyContent:"center"}}>
-            <div style={{width:28,height:16,borderRadius:8,background:withStamp?"#b8904a":"#2a2a3a",position:"relative",transition:"background .2s",flexShrink:0}}>
+            <div style={{width:28,height:16,borderRadius:8,background:withStamp?"#5b4ef5":"#2a2a3a",position:"relative",transition:"background .2s",flexShrink:0}}>
               <div style={{position:"absolute",top:2,left:withStamp?12:2,width:12,height:12,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
             </div>
-            <span style={{fontSize:10,color:withStamp?"#b8904a":"#555575"}}>С печатью</span>
+            <span style={{fontSize:10,color:withStamp?"#5b4ef5":"#6b7280"}}>С печатью</span>
           </div>
         </div>
         <button onClick={onGDoc} style={{flex:1,background:"rgba(66,133,244,.1)",color:"#4285f4",border:"1px solid rgba(66,133,244,.3)",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
@@ -2673,7 +2673,7 @@ export default function App() {
   <p class="b">Подписи сторон</p><br>
   ${sigBlock("Исполнитель:", "Заказчик:")}`;
     }
-    const printBtn = forDocx ? "" : `\n<div class="np" style="margin-top:24px;text-align:center;padding:16px">\n  <button onclick="window.print()" style="padding:12px 36px;background:#b8904a;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;font-weight:700;font-family:Verdana,sans-serif">🖨 Распечатать / Сохранить PDF</button>\n</div>`;
+    const printBtn = forDocx ? "" : `\n<div class="np" style="margin-top:24px;text-align:center;padding:16px">\n  <button onclick="window.print()" style="padding:12px 36px;background:#5b4ef5;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;font-weight:700;font-family:Verdana,sans-serif">🖨 Распечатать / Сохранить PDF</button>\n</div>`;
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Договор №${c.number||""}</title><style>${CSS}</style></head>
   <body>${body}${printBtn}
   </body></html>`;
@@ -3350,43 +3350,43 @@ export default function App() {
   ];
 
   return (
-    <div style={{fontFamily:"'Golos Text','Segoe UI',sans-serif",background:"#0c0e1a",minHeight:"100vh",color:"#ddd8ce",display:"flex",flexDirection:"column"}}>
+    <div style={{fontFamily:"'Golos Text','Segoe UI',sans-serif",background:"#f0f2f8",minHeight:"100vh",color:"#111827",display:"flex",flexDirection:"column"}}>
       {/* Панель администратора */}
 
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;900&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
-        html,body{background:#0c0e1a;overflow-x:hidden;width:100%}
+        html,body{background:#f0f2f8;overflow-x:hidden;width:100%}
         input,select,textarea{outline:none}
         ::-webkit-scrollbar{width:4px}
-        ::-webkit-scrollbar-thumb{background:#b8904a;border-radius:2px}
-        .fi{background:#14172a;border:1px solid #20243a;color:#ddd8ce;border-radius:7px;padding:8px 12px;font-family:inherit;font-size:13px;width:100%;transition:border .15s}
-        .fi:focus{border-color:#b8904a}
+        ::-webkit-scrollbar-thumb{background:#5b4ef5;border-radius:2px}
+        .fi{background:#f8f9fc;border:1px solid #e5e7eb;color:#111827;border-radius:7px;padding:8px 12px;font-family:inherit;font-size:13px;width:100%;transition:border .15s}
+        .fi:focus{border-color:#5b4ef5}
         .fi::placeholder{color:#33364d}
         .tab-btn{background:none;border:none;cursor:pointer;padding:7px 14px;border-radius:6px;font-family:inherit;font-size:13px;font-weight:600;color:#555570;transition:all .15s;white-space:nowrap}
         .tab-btn:hover{color:#b8b0a0;background:rgba(184,144,74,.08)}
-        .tab-btn.active{background:rgba(184,144,74,.18);color:#b8904a}
+        .tab-btn.active{background:rgba(184,144,74,.18);color:#5b4ef5}
         .sub-btn{background:none;border:none;cursor:pointer;padding:5px 10px;border-radius:5px;font-family:inherit;font-size:11.5px;color:#45455e;transition:all .15s;white-space:nowrap}
         .sub-btn:hover{color:#9090b0;background:rgba(255,255,255,.04)}
         .sub-btn.active{background:rgba(255,255,255,.07);color:#b0b0c8;font-weight:600}
         .wrow{display:grid;align-items:start;padding:9px 14px;border-radius:7px;gap:8px;transition:background .12s;min-width:0}
         .wrow:hover{background:rgba(255,255,255,.02)}
         .wrow.on{background:rgba(184,144,74,.06)}
-        .num{background:#14172a;border:1px solid #20243a;color:#ddd8ce;border-radius:6px;padding:6px 8px;text-align:right;font-family:inherit;font-size:13px;transition:border .15s}
-        .num:focus{border-color:#b8904a}
+        .num{background:#f8f9fc;border:1px solid #e5e7eb;color:#111827;border-radius:6px;padding:6px 8px;text-align:right;font-family:inherit;font-size:13px;transition:border .15s}
+        .num:focus{border-color:#5b4ef5}
         .num::placeholder{color:#33364d}
-        .cpx-sel{background:#14172a;border:1px solid #20243a;color:#7070a0;border-radius:6px;padding:4px 6px;font-family:inherit;font-size:11px;margin-top:4px;cursor:pointer;width:auto;max-width:130px}
-        .cpx-sel:focus{border-color:#b8904a}
-        .card{background:#111425;border:1px solid #1c2035;border-radius:12px;overflow:hidden}
+        .cpx-sel{background:#f8f9fc;border:1px solid #e5e7eb;color:#7070a0;border-radius:6px;padding:4px 6px;font-family:inherit;font-size:11px;margin-top:4px;cursor:pointer;width:auto;max-width:130px}
+        .cpx-sel:focus{border-color:#5b4ef5}
+        .card{background:#ffffff;box-shadow:0 1px 3px rgba(0,0,0,.08),0 4px 12px rgba(0,0,0,.04);border:1px solid #e5e7eb;border-radius:12px;overflow:hidden}
         .btn{border:none;cursor:pointer;padding:11px 22px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:700;transition:all .2s;letter-spacing:.2px}
-        .btn-g{background:linear-gradient(135deg,#b8904a,#d4a85a);color:#0c0e1a}
+        .btn-g{background:linear-gradient(135deg,#5b4ef5,#7c6ff7);color:#f0f2f8}
         .btn-g:hover{transform:translateY(-1px);box-shadow:0 5px 20px rgba(184,144,74,.4)}
         .btn-g:disabled{opacity:.35;cursor:not-allowed;transform:none;box-shadow:none}
-        .btn-o{background:rgba(255,255,255,.05);color:#707090;border:1px solid #1c2035}
+        .btn-o{background:rgba(255,255,255,.05);color:#707090;border:1px solid #e5e7eb}
         .btn-o:hover{background:rgba(255,255,255,.08);color:#b0b0c8}
         .btn-red{background:rgba(200,60,60,.12);color:#e07070;border:1px solid rgba(200,60,60,.2)}
         .btn-red:hover{background:rgba(200,60,60,.22);color:#f09090}
-        .badge{background:rgba(184,144,74,.15);color:#b8904a;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700}
+        .badge{background:rgba(184,144,74,.15);color:#5b4ef5;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700}
         @keyframes up{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
         .up{animation:up .22s ease forwards}
         @media(min-width:900px){.main-grid{grid-template-columns:minmax(0,1fr) 295px!important}}
@@ -3408,14 +3408,14 @@ export default function App() {
           .kp-no-print{display:none!important}
           @page{margin:10mm;size:A4 portrait}
         }
-        .est-card{background:#111425;border:1px solid #1c2035;border-radius:11px;padding:16px 18px;cursor:pointer;transition:all .15s;position:relative}
-        .est-card:hover{border-color:#b8904a;background:#14172e}
+        .est-card{background:#ffffff;box-shadow:0 1px 3px rgba(0,0,0,.08),0 4px 12px rgba(0,0,0,.04);border:1px solid #e5e7eb;border-radius:11px;padding:16px 18px;cursor:pointer;transition:all .15s;position:relative}
+        .est-card:hover{border-color:#5b4ef5;background:#14172e}
         .est-card:active{transform:scale(.99)}
         .sidebar{width:220px;background:#0a0c18;border-right:1px solid #161929;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:50;transition:width .22s cubic-bezier(.4,0,.2,1)}
         .sidebar.collapsed{width:60px}
         .nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;margin:2px 6px;transition:all .15s;border-left:2px solid transparent}
         .nav-item:hover{background:rgba(255,255,255,.04)}
-        .nav-item.active{background:rgba(184,144,74,.1);border-left-color:#b8904a}
+        .nav-item.active{background:rgba(184,144,74,.1);border-left-color:#5b4ef5}
         .nav-label{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;transition:opacity .15s,width .15s}
         .sidebar.collapsed .nav-label{opacity:0;width:0;pointer-events:none}
         .sidebar-content{margin-left:220px;transition:margin-left .22s cubic-bezier(.4,0,.2,1);min-height:100vh}
@@ -3427,17 +3427,17 @@ export default function App() {
         }
         .mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:#0a0c18;border-top:1px solid #161929;z-index:50}
         .mob-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;gap:3px;border-top:2px solid transparent;transition:all .15s}
-        .mob-nav-item.active{border-top-color:#b8904a;background:rgba(184,144,74,.07)}
+        .mob-nav-item.active{border-top-color:#5b4ef5;background:rgba(184,144,74,.07)}
       `}</style>
 
       {/* ── SIDEBAR (десктоп) ── */}
       <div className={"sidebar"+(sideCollapsed?" collapsed":"")}>
         {/* Лого */}
         <div style={{padding:"20px 14px 16px",display:"flex",alignItems:"center",gap:10,borderBottom:"1px solid #161929",minHeight:64}}>
-          <div style={{width:34,height:34,borderRadius:9,background:"linear-gradient(135deg,#b8904a,#d4a85a)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:16,color:"#0c0e1a",flexShrink:0}}>T</div>
+          <div style={{width:34,height:34,borderRadius:9,background:"linear-gradient(135deg,#5b4ef5,#7c6ff7)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:16,color:"#f0f2f8",flexShrink:0}}>T</div>
           <div className="nav-label" style={{lineHeight:1.2}}>
-            <div style={{fontWeight:800,fontSize:13,color:"#e2ddd4"}}>TitovStroy</div>
-            <div style={{fontSize:10,color:"#454560"}}>{currentUser.name}</div>
+            <div style={{fontWeight:800,fontSize:13,color:"#111827"}}>TitovStroy</div>
+            <div style={{fontSize:10,color:"#9ca3af"}}>{currentUser.name}</div>
           </div>
         </div>
         {/* Nav */}
@@ -3446,7 +3446,7 @@ export default function App() {
             <div key={item.id} className={"nav-item"+(screen===item.id||(!["dashboard","list","contracts"].includes(screen)&&item.id==="list")?"":"")+((screen===item.id||(screen==="editor"&&item.id==="list"))?" active":"")}
               onClick={()=>{ setScreen(item.id); }}>
               <span style={{fontSize:18,flexShrink:0,lineHeight:1}}>{item.icon}</span>
-              <span className="nav-label" style={{color:screen===item.id||(screen==="editor"&&item.id==="list")?"#b8904a":"#888"}}>{item.label}</span>
+              <span className="nav-label" style={{color:screen===item.id||(screen==="editor"&&item.id==="list")?"#5b4ef5":"#888"}}>{item.label}</span>
             </div>
           ))}
         </nav>
@@ -3454,7 +3454,7 @@ export default function App() {
         <div style={{borderTop:"1px solid #161929",padding:"10px 0"}}>
           <div className="nav-item" onClick={()=>{ try{localStorage.removeItem(SESSION_KEY);}catch(e){} setCurrentUser(null); }}>
             <span style={{fontSize:16,flexShrink:0}}>🚪</span>
-            <span className="nav-label" style={{color:"#555575",fontSize:12}}>Выйти</span>
+            <span className="nav-label" style={{color:"#6b7280",fontSize:12}}>Выйти</span>
           </div>
           <div className="nav-item" onClick={()=>setSideCollapsed(p=>!p)} style={{justifyContent:"center",marginTop:4}}>
             <span style={{fontSize:13,color:"#333350"}}>{sideCollapsed?"▶":"◀"}</span>
@@ -3468,7 +3468,7 @@ export default function App() {
           <div key={item.id} className={"mob-nav-item"+(screen===item.id||(screen==="editor"&&item.id==="list")?" active":"")}
             onClick={()=>{ setScreen(item.id); }}>
             <span style={{fontSize:20}}>{item.icon}</span>
-            <span style={{fontSize:9,color:screen===item.id||(screen==="editor"&&item.id==="list")?"#b8904a":"#454560",fontWeight:600}}>{item.label}</span>
+            <span style={{fontSize:9,color:screen===item.id||(screen==="editor"&&item.id==="list")?"#5b4ef5":"#9ca3af",fontWeight:600}}>{item.label}</span>
           </div>
         ))}
       </div>
@@ -3494,28 +3494,28 @@ export default function App() {
           {/* Заголовок */}
           <div style={{marginBottom:32,display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
             <div>
-              <h1 style={{margin:0,fontSize:26,fontWeight:900,color:"#e2ddd4",letterSpacing:-.5}}>
-                TitovStroy <span style={{color:"#b8904a"}}>CRM</span>
+              <h1 style={{margin:0,fontSize:26,fontWeight:900,color:"#111827",letterSpacing:-.5}}>
+                TitovStroy <span style={{color:"#5b4ef5"}}>CRM</span>
               </h1>
-              <div style={{fontSize:12,color:"#454560",marginTop:6}}>
+              <div style={{fontSize:12,color:"#9ca3af",marginTop:6}}>
                 {new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
-                {" · "}<span style={{color:"#b8904a"}}>{currentUser.role==="admin"?"👑 Администратор":currentUser.role==="viewer"?"👁 Просмотр":"👤 "+currentUser.name}</span>
+                {" · "}<span style={{color:"#5b4ef5"}}>{currentUser.role==="admin"?"👑 Администратор":currentUser.role==="viewer"?"👁 Просмотр":"👤 "+currentUser.name}</span>
               </div>
             </div>
-            {saving && <span style={{fontSize:11,color:"#555575"}}>💾 Сохранение...</span>}
+            {saving && <span style={{fontSize:11,color:"#6b7280"}}>💾 Сохранение...</span>}
           </div>
 
           {/* Статы */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:32}}>
             {[
               {label:"Смет за месяц",    value:estimatesThisMonth.filter(e=>(e.total||0)>0).length,  sub:"из "+estimates.filter(e=>(e.total||0)>0).length+" с суммой всего", color:"#8888cc"},
-              {label:"Договоров за месяц",value:contractsThisMonth.filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).length, sub:"из "+contracts.filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).length+" с суммой всего", color:"#b8904a"},
+              {label:"Договоров за месяц",value:contractsThisMonth.filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).length, sub:"из "+contracts.filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).length+" с суммой всего", color:"#5b4ef5"},
               {label:"Объём за месяц",   value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма смет за месяц",                          color:"#4caf7d"},
               {label:"Клиентов за месяц",value:clientsThisMonth.length,    sub:"из "+contractClients.length+" всего", color:"#4285f4"},
             ].map((s,i)=>(
               <div key={i} style={{background:"#0f1120",border:"1px solid #161929",borderRadius:13,padding:"18px 18px 16px",position:"relative",overflow:"hidden"}}>
                 <div style={{position:"absolute",top:0,left:0,width:3,height:"100%",background:s.color,borderRadius:"3px 0 0 3px"}}/>
-                <div style={{fontSize:10,color:"#454560",textTransform:"uppercase",letterSpacing:.8,marginBottom:10}}>{s.label}</div>
+                <div style={{fontSize:10,color:"#9ca3af",textTransform:"uppercase",letterSpacing:.8,marginBottom:10}}>{s.label}</div>
                 <div style={{fontSize:30,fontWeight:900,color:s.color,lineHeight:1,marginBottom:6}}>{s.value}</div>
                 {s.sub && <div style={{fontSize:11,color:"#333350"}}>{s.sub}</div>}
               </div>
@@ -3527,7 +3527,7 @@ export default function App() {
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:12,marginBottom:36}}>
             {[
               {id:"list",      icon:"📋",title:"Сметы",      desc:"Расчёт и архив смет",    stat:estimates.length+" смет",      color:"#8888cc",bg:"rgba(136,136,204,.07)",border:"rgba(136,136,204,.2)"},
-              {id:"contracts", icon:"📄",title:"Договора",   desc:"Договора и соглашения",  stat:contracts.length+" договоров", color:"#b8904a",bg:"rgba(184,144,74,.07)",  border:"rgba(184,144,74,.2)"},
+              {id:"contracts", icon:"📄",title:"Договора",   desc:"Договора и соглашения",  stat:contracts.length+" договоров", color:"#5b4ef5",bg:"rgba(184,144,74,.07)",  border:"rgba(184,144,74,.2)"},
               {id:"analytics", icon:"📊",title:"Аналитика",  desc:"Статистика и отчёты",    stat:"За "+new Date().toLocaleDateString("ru-RU",{month:"long"}), color:"#4285f4",bg:"rgba(66,133,244,.07)",   border:"rgba(66,133,244,.2)"},
             ].map(card=>(
               <div key={card.id} onClick={()=>{ setScreen(card.id); }}
@@ -3535,8 +3535,8 @@ export default function App() {
                 onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow=`0 10px 30px ${card.border}`;}}
                 onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
                 <div style={{fontSize:30,marginBottom:12}}>{card.icon}</div>
-                <div style={{fontWeight:700,fontSize:15,color:"#e2ddd4",marginBottom:5}}>{card.title}</div>
-                <div style={{fontSize:12,color:"#555575",marginBottom:14}}>{card.desc}</div>
+                <div style={{fontWeight:700,fontSize:15,color:"#111827",marginBottom:5}}>{card.title}</div>
+                <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>{card.desc}</div>
                 <div style={{display:"inline-block",background:card.bg,border:`1px solid ${card.border}`,color:card.color,borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:600}}>{card.stat}</div>
               </div>
             ))}
@@ -3557,14 +3557,14 @@ export default function App() {
                     return (
                       <div key={est.id} onClick={()=>openEstimate(est)}
                         style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<arr.length-1?"1px solid #161929":"none",cursor:"pointer",transition:"background .1s"}}
-                        onMouseEnter={e=>e.currentTarget.style.background="#14172a"}
+                        onMouseEnter={e=>e.currentTarget.style.background="#f8f9fc"}
                         onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                         <div style={{width:7,height:7,borderRadius:"50%",background:"#8888cc",flexShrink:0}}/>
                         <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:13,color:"#e2ddd4",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{est.proj?.name||"Без названия"}</div>
-                          <div style={{fontSize:11,color:"#454560",marginTop:2}}>{est.updatedAt?new Date(est.updatedAt).toLocaleDateString("ru-RU"):""}</div>
+                          <div style={{fontSize:13,color:"#111827",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{est.proj?.name||"Без названия"}</div>
+                          <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>{est.updatedAt?new Date(est.updatedAt).toLocaleDateString("ru-RU"):""}</div>
                         </div>
-                        {total>0 && <div style={{fontSize:13,fontWeight:700,color:"#b8904a",flexShrink:0}}>{fmt(total)} ₸</div>}
+                        {total>0 && <div style={{fontSize:13,fontWeight:700,color:"#5b4ef5",flexShrink:0}}>{fmt(total)} ₸</div>}
                       </div>
                     );
                   })}
@@ -3576,7 +3576,7 @@ export default function App() {
               <div>
                 <div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12,fontWeight:700,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span>Последние договора</span>
-                  <span onClick={()=>setScreen("contracts")} style={{color:"#b8904a",cursor:"pointer",textTransform:"none",fontSize:11,letterSpacing:0}}>все →</span>
+                  <span onClick={()=>setScreen("contracts")} style={{color:"#5b4ef5",cursor:"pointer",textTransform:"none",fontSize:11,letterSpacing:0}}>все →</span>
                 </div>
                 <div style={{background:"#0f1120",border:"1px solid #161929",borderRadius:12,overflow:"hidden"}}>
                   {recentContracts.map((c,i,arr)=>{
@@ -3586,14 +3586,14 @@ export default function App() {
                     return (
                       <div key={c.id} onClick={()=>{ setCurrentContract({...c}); setContractTab("editor"); setScreen("contracts"); }}
                         style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<arr.length-1?"1px solid #161929":"none",cursor:"pointer",transition:"background .1s"}}
-                        onMouseEnter={e=>e.currentTarget.style.background="#14172a"}
+                        onMouseEnter={e=>e.currentTarget.style.background="#f8f9fc"}
                         onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                        <div style={{width:7,height:7,borderRadius:"50%",background:"#b8904a",flexShrink:0}}/>
+                        <div style={{width:7,height:7,borderRadius:"50%",background:"#5b4ef5",flexShrink:0}}/>
                         <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:13,color:"#e2ddd4",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{TYPE_L[c.type||"repair_fiz"]||"Договор"} №{c.number||"—"}</div>
-                          <div style={{fontSize:11,color:"#454560",marginTop:2}}>{cl?.name||c.estClient||"Клиент не выбран"}</div>
+                          <div style={{fontSize:13,color:"#111827",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{TYPE_L[c.type||"repair_fiz"]||"Договор"} №{c.number||"—"}</div>
+                          <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>{cl?.name||c.estClient||"Клиент не выбран"}</div>
                         </div>
-                        {total>0 && <div style={{fontSize:13,fontWeight:700,color:"#b8904a",flexShrink:0}}>{fmt(total)} ₸</div>}
+                        {total>0 && <div style={{fontSize:13,fontWeight:700,color:"#5b4ef5",flexShrink:0}}>{fmt(total)} ₸</div>}
                       </div>
                     );
                   })}
@@ -3613,18 +3613,18 @@ export default function App() {
       {screen === "list" && (
         <div style={{maxWidth:720,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
           {/* Шапка */}
-          <div className="list-header" style={{background:"#0e1122",borderBottom:"1px solid #181c2e",padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
+          <div className="list-header" style={{background:"#f0f2f8",borderBottom:"1px solid #181c2e",padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
             <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
-              <div style={{width:30,height:30,borderRadius:7,background:"linear-gradient(135deg,#b8904a,#d4a85a)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:14,color:"#0c0e1a",flexShrink:0}}>T</div>
+              <div style={{width:30,height:30,borderRadius:7,background:"linear-gradient(135deg,#5b4ef5,#7c6ff7)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:14,color:"#f0f2f8",flexShrink:0}}>T</div>
               <div style={{minWidth:0}}>
-                <div style={{fontWeight:800,fontSize:13,whiteSpace:"nowrap",color:"#e2ddd4"}}>TitovStroy</div>
-                <div style={{fontSize:10,color:"#454560",whiteSpace:"nowrap"}}>
-                  <span style={{color:"#b8904a"}}>{currentUser.role==="admin"?"👑":currentUser.role==="viewer"?"👁":"👤"}</span>{" "}{currentUser.name}
+                <div style={{fontWeight:800,fontSize:13,whiteSpace:"nowrap",color:"#111827"}}>TitovStroy</div>
+                <div style={{fontSize:10,color:"#9ca3af",whiteSpace:"nowrap"}}>
+                  <span style={{color:"#5b4ef5"}}>{currentUser.role==="admin"?"👑":currentUser.role==="viewer"?"👁":"👤"}</span>{" "}{currentUser.name}
                 </div>
               </div>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-              {saving && <span style={{fontSize:11,color:"#555575"}}>💾</span>}
+              {saving && <span style={{fontSize:11,color:"#6b7280"}}>💾</span>}
               <button className="btn btn-o" style={{padding:"6px 9px",fontSize:14}} onClick={()=>setScreen("analytics")} title="Статистика">📊</button>
               {currentUser.role !== "viewer" && (
                 <button className="btn btn-g" style={{padding:"7px 14px",fontSize:12,whiteSpace:"nowrap"}} onClick={newEstimate}>+ Новая</button>
@@ -3643,7 +3643,7 @@ export default function App() {
                 {/* Заголовок */}
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
                   <div>
-                    <div style={{fontWeight:800,fontSize:17,color:"#e2ddd4"}}>📁 Архив смет</div>
+                    <div style={{fontWeight:800,fontSize:17,color:"#111827"}}>📁 Архив смет</div>
                     <div style={{fontSize:11,color:"#353550",marginTop:1}}>Все расчёты и коммерческие предложения</div>
                   </div>
                 </div>
@@ -3651,7 +3651,7 @@ export default function App() {
                 {estimates.length > 0 && (
                   <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:2}}>
                     <input
-                      style={{background:"#14172a",border:"1px solid #20243a",color:"#ddd8ce",borderRadius:8,padding:"9px 14px",fontFamily:"inherit",fontSize:13,outline:"none",width:"100%"}}
+                      style={{background:"#f8f9fc",border:"1px solid #e5e7eb",color:"#111827",borderRadius:8,padding:"9px 14px",fontFamily:"inherit",fontSize:13,outline:"none",width:"100%"}}
                       placeholder="🔍 Поиск по клиенту, адресу, телефону..."
                       value={listSearch}
                       onChange={e=>setListSearch(e.target.value)}
@@ -3660,7 +3660,7 @@ export default function App() {
                       {/* Фильтр по типу */}
                       {["","Вторичка","Новостройка","Коммерция"].map(t=>(
                         <button key={t} onClick={()=>setListFilter(t)}
-                          style={{background:listFilter===t?"rgba(184,144,74,.2)":"rgba(255,255,255,.04)",color:listFilter===t?"#b8904a":"#555575",border:`1px solid ${listFilter===t?"rgba(184,144,74,.4)":"#1c2035"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                          style={{background:listFilter===t?"rgba(184,144,74,.2)":"rgba(255,255,255,.04)",color:listFilter===t?"#5b4ef5":"#6b7280",border:`1px solid ${listFilter===t?"rgba(184,144,74,.4)":"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
                           {t||"Все типы"}
                         </button>
                       ))}
@@ -3668,12 +3668,12 @@ export default function App() {
                     {/* Фильтр по статусу */}
                     <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                       <button onClick={()=>setListFilterStatus("")}
-                        style={{background:!listFilterStatus?"rgba(255,255,255,.08)":"rgba(255,255,255,.04)",color:!listFilterStatus?"#e2ddd4":"#555575",border:`1px solid ${!listFilterStatus?"rgba(255,255,255,.15)":"#1c2035"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                        style={{background:!listFilterStatus?"rgba(255,255,255,.08)":"rgba(255,255,255,.04)",color:!listFilterStatus?"#111827":"#6b7280",border:`1px solid ${!listFilterStatus?"rgba(255,255,255,.15)":"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
                         Все статусы
                       </button>
                       {STATUSES.map(s=>(
                         <button key={s.key} onClick={()=>setListFilterStatus(s.key)}
-                          style={{background:listFilterStatus===s.key?s.bg:"rgba(255,255,255,.04)",color:listFilterStatus===s.key?s.color:"#555575",border:`1px solid ${listFilterStatus===s.key?s.color:"#1c2035"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                          style={{background:listFilterStatus===s.key?s.bg:"rgba(255,255,255,.04)",color:listFilterStatus===s.key?s.color:"#6b7280",border:`1px solid ${listFilterStatus===s.key?s.color:"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
                           {s.label}
                         </button>
                       ))}
@@ -3682,12 +3682,12 @@ export default function App() {
                     {allUsers.filter(u=>u.role!=="viewer").length > 1 && (
                       <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
                         <button onClick={()=>setListFilterManager("")}
-                          style={{background:!listFilterManager?"rgba(136,136,204,.2)":"rgba(255,255,255,.04)",color:!listFilterManager?"#8888cc":"#555575",border:`1px solid ${!listFilterManager?"rgba(136,136,204,.4)":"#1c2035"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                          style={{background:!listFilterManager?"rgba(136,136,204,.2)":"rgba(255,255,255,.04)",color:!listFilterManager?"#8888cc":"#6b7280",border:`1px solid ${!listFilterManager?"rgba(136,136,204,.4)":"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
                           Все сотрудники
                         </button>
                         {allUsers.filter(u=>u.role!=="viewer").map(u=>(
                           <button key={u.id} onClick={()=>setListFilterManager(u.name)}
-                            style={{background:listFilterManager===u.name?"rgba(136,136,204,.2)":"rgba(255,255,255,.04)",color:listFilterManager===u.name?"#8888cc":"#555575",border:`1px solid ${listFilterManager===u.name?"rgba(136,136,204,.4)":"#1c2035"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                            style={{background:listFilterManager===u.name?"rgba(136,136,204,.2)":"rgba(255,255,255,.04)",color:listFilterManager===u.name?"#8888cc":"#6b7280",border:`1px solid ${listFilterManager===u.name?"rgba(136,136,204,.4)":"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
                             👤 {u.name}
                           </button>
                         ))}
@@ -3697,7 +3697,7 @@ export default function App() {
                       <div style={{flex:1}}/>
                       {/* Сортировка */}
                       <select value={listSort} onChange={e=>setListSort(e.target.value)}
-                        style={{background:"#14172a",border:"1px solid #20243a",color:"#555575",borderRadius:6,padding:"4px 8px",fontSize:11,fontFamily:"inherit",cursor:"pointer",outline:"none"}}>
+                        style={{background:"#f8f9fc",border:"1px solid #e5e7eb",color:"#6b7280",borderRadius:6,padding:"4px 8px",fontSize:11,fontFamily:"inherit",cursor:"pointer",outline:"none"}}>
                         <option value="date">По дате</option>
                         <option value="sum">По сумме</option>
                         <option value="name">По имени</option>
@@ -3710,7 +3710,7 @@ export default function App() {
                   <div style={{textAlign:"center",padding:"80px 0"}}>
                     <div style={{fontSize:40,marginBottom:16}}>📋</div>
                     <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>Смет пока нет</div>
-                    <div style={{fontSize:13,color:"#454560",marginBottom:24}}>Нажмите «+ Новая смета» чтобы начать</div>
+                    <div style={{fontSize:13,color:"#9ca3af",marginBottom:24}}>Нажмите «+ Новая смета» чтобы начать</div>
                     {currentUser.role !== "viewer" && (
                       <button className="btn btn-g" onClick={newEstimate}>+ Создать первую смету</button>
                     )}
@@ -3730,7 +3730,7 @@ export default function App() {
                     });
                   return (
                     <>
-                      <div style={{fontSize:11,color:"#454560",marginBottom:2}}>
+                      <div style={{fontSize:11,color:"#9ca3af",marginBottom:2}}>
                         {filtered.length !== estimates.length
                           ? `Найдено: ${filtered.length} из ${estimates.length}`
                           : `Всего смет: ${estimates.length}`}
@@ -3749,18 +3749,18 @@ export default function App() {
                             {/* Строка 1: имя + сумма */}
                             <div style={{display:"flex",alignItems:"center",gap:8}}>
                               {(() => { const s=STATUSES.find(x=>x.key===(est.status||"new"))||STATUSES[0]; return <span style={{fontSize:10,fontWeight:700,color:s.color,background:s.bg,borderRadius:4,padding:"1px 7px",flexShrink:0,whiteSpace:"nowrap"}}>{s.label}</span>; })()}
-                              <span style={{fontWeight:700,fontSize:14,color:"#e2ddd4",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                                {est.proj?.name || <span style={{color:"#454560",fontStyle:"italic"}}>Без названия</span>}
+                              <span style={{fontWeight:700,fontSize:14,color:"#111827",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                                {est.proj?.name || <span style={{color:"#9ca3af",fontStyle:"italic"}}>Без названия</span>}
                               </span>
                               {est.total>0
-                                ? <span style={{fontSize:14,fontWeight:800,color:"#b8904a",flexShrink:0}}>{fmt(est.total)} ₸</span>
-                                : <span style={{fontSize:11,color:"#454560",fontStyle:"italic",flexShrink:0}}>черновик</span>}
+                                ? <span style={{fontSize:14,fontWeight:800,color:"#5b4ef5",flexShrink:0}}>{fmt(est.total)} ₸</span>
+                                : <span style={{fontSize:11,color:"#9ca3af",fontStyle:"italic",flexShrink:0}}>черновик</span>}
                             </div>
-                            {est.comment&&<div style={{fontSize:11,color:"#555575",marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>💬 {est.comment}</div>}
+                            {est.comment&&<div style={{fontSize:11,color:"#6b7280",marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>💬 {est.comment}</div>}
                             {/* Строка 2: мета + дата + кнопки */}
                             <div style={{display:"flex",alignItems:"center",gap:6,marginTop:5}} onClick={e=>e.stopPropagation()}>
-                              <span style={{fontSize:11,color:"#555575",background:"rgba(255,255,255,.04)",borderRadius:4,padding:"1px 6px"}}>{est.proj?.type||"—"}</span>
-                              {est.proj?.area&&<span style={{fontSize:11,color:"#454560"}}>{est.proj.area} м²</span>}
+                              <span style={{fontSize:11,color:"#6b7280",background:"rgba(255,255,255,.04)",borderRadius:4,padding:"1px 6px"}}>{est.proj?.type||"—"}</span>
+                              {est.proj?.area&&<span style={{fontSize:11,color:"#9ca3af"}}>{est.proj.area} м²</span>}
                               {est.proj?.address&&<span style={{fontSize:11,color:"#404058",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:160}}>{est.proj.address}</span>}
                               <span style={{flex:1}}/>
                               <span style={{fontSize:10,color:"#353550",whiteSpace:"nowrap"}}>{fmtDate(est.updatedAt)}</span>
@@ -3783,7 +3783,7 @@ export default function App() {
                                 setContractTab("editor");
                                 setScreen("contracts");
                               }} title="Создать договор"
-                                style={{background:"rgba(184,144,74,.08)",color:"#b8904a",border:"1px solid rgba(184,144,74,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
+                                style={{background:"rgba(184,144,74,.08)",color:"#5b4ef5",border:"1px solid rgba(184,144,74,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
                                 📄
                               </button>
                               {currentUser.role !== "viewer" && (
@@ -3820,7 +3820,7 @@ export default function App() {
             onClick={e=>e.stopPropagation()}>
             <div style={{fontSize:32,marginBottom:12}}>🗑️</div>
             <div style={{fontWeight:700,fontSize:15,marginBottom:8}}>Удалить смету?</div>
-            <div style={{fontSize:12,color:"#555575",marginBottom:20}}>Это действие нельзя отменить</div>
+            <div style={{fontSize:12,color:"#6b7280",marginBottom:20}}>Это действие нельзя отменить</div>
             <div style={{display:"flex",gap:10,justifyContent:"center"}}>
               <button className="btn btn-o" style={{padding:"9px 20px"}} onClick={() => setDeleteConfirm(null)}>Отмена</button>
               <button className="btn btn-red" style={{padding:"9px 20px"}} onClick={() => deleteEstimate(deleteConfirm)}>Удалить</button>
@@ -3835,7 +3835,7 @@ export default function App() {
       {screen === "editor" && (
         <div>
           {/* HEADER */}
-          <div className="editor-header" style={{background:"#0e1122",borderBottom:"1px solid #181c2e",padding:"11px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10,gap:8}}>
+          <div className="editor-header" style={{background:"#f0f2f8",borderBottom:"1px solid #181c2e",padding:"11px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10,gap:8}}>
             <div className="editor-header-left" style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
               <button className="btn btn-o" style={{padding:"7px 11px",fontSize:12,flexShrink:0}} onClick={saveAndBack}>
                 ← Сметы
@@ -3845,7 +3845,7 @@ export default function App() {
               </div>
             </div>
             <div className="editor-header-right" style={{display:"flex",alignItems:"center",gap:8}}>
-              {saving && <span style={{fontSize:11,color:"#555575"}}>💾</span>}
+              {saving && <span style={{fontSize:11,color:"#6b7280"}}>💾</span>}
               {filledCount > 0 && <span className="badge">{filledCount} позиций</span>}
               {currentUser.role !== "viewer" && (
                 <button className="btn btn-o" style={{fontSize:11,padding:"6px 12px"}} onClick={()=>setEditPrices(m=>!m)}>
@@ -3853,9 +3853,9 @@ export default function App() {
                 </button>
               )}
               {currentUser.role === "viewer" && (
-                <span style={{fontSize:11,color:"#555575",background:"rgba(255,255,255,.05)",borderRadius:5,padding:"4px 10px"}}>👁 Только просмотр</span>
+                <span style={{fontSize:11,color:"#6b7280",background:"rgba(255,255,255,.05)",borderRadius:5,padding:"4px 10px"}}>👁 Только просмотр</span>
               )}
-              <span className="proj-name" style={{fontSize:11,color:"#454560"}}>
+              <span className="proj-name" style={{fontSize:11,color:"#9ca3af"}}>
                 {currentUser.role==="admin"?"👑":currentUser.role==="viewer"?"👁":"👤"} {currentUser.name}
               </span>
               {currentUser.role !== "viewer"
@@ -3868,7 +3868,7 @@ export default function App() {
           <div style={{maxWidth:1160,margin:"0 auto",padding:"18px 18px"}}>
             {/* ОБЪЕКТ */}
             <div className="card up" style={{padding:"16px 20px",marginBottom:16}}>
-              <div style={{fontSize:10,fontWeight:700,color:"#b8904a",letterSpacing:1.5,textTransform:"uppercase",marginBottom:11}}>Информация об объекте</div>
+              <div style={{fontSize:10,fontWeight:700,color:"#5b4ef5",letterSpacing:1.5,textTransform:"uppercase",marginBottom:11}}>Информация об объекте</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:10}}>
                 {[["Клиент / Объект","name","Иванов — Бухар-Жырау 45","text"],
                   ["Тип","type","","objtype"],
@@ -3908,7 +3908,7 @@ export default function App() {
                     value={search} onChange={e=>setSearch(e.target.value)}
                     style={{paddingLeft:14,paddingRight:search?32:14}}/>
                   {search && (
-                    <button onClick={()=>setSearch("")} style={{position:"absolute",right:20,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#555575",fontSize:16,lineHeight:1}}>×</button>
+                    <button onClick={()=>setSearch("")} style={{position:"absolute",right:20,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#6b7280",fontSize:16,lineHeight:1}}>×</button>
                   )}
                 </div>
 
@@ -3917,7 +3917,7 @@ export default function App() {
                   {cats.map(cat=>(
                     <button key={cat} className={`tab-btn ${activeCat===cat?"active":""}`}
                       onClick={()=>{ const s=Object.keys(Gdyn[cat]||{}); setActiveCat(cat); setActiveSub(s[0]||""); }}>
-                      {cat}{catSum(cat)>0&&<span style={{marginLeft:4,fontSize:9,color:"#b8904a"}}>●</span>}
+                      {cat}{catSum(cat)>0&&<span style={{marginLeft:4,fontSize:9,color:"#5b4ef5"}}>●</span>}
                     </button>
                   ))}
                 </div>}
@@ -3926,7 +3926,7 @@ export default function App() {
                 {!isSearching && <div style={{display:"flex",flexWrap:"wrap",gap:3,padding:"8px 10px",borderBottom:"1px solid #181c2e",background:"rgba(0,0,0,.12)"}}>
                   {subs.map(sub=>(
                     <button key={sub} className={`sub-btn ${safeActiveSub===sub?"active":""}`} onClick={()=>setActiveSub(sub)}>
-                      {sub}{subSum(safeCat,sub)>0&&<span style={{marginLeft:3,color:"#b8904a",fontSize:8}}>●</span>}
+                      {sub}{subSum(safeCat,sub)>0&&<span style={{marginLeft:3,color:"#5b4ef5",fontSize:8}}>●</span>}
                     </button>
                   ))}
                 </div>}
@@ -3950,7 +3950,7 @@ export default function App() {
                     </div>
                   )}
                   {isSearching && searchResults.length > 0 && (
-                    <div style={{padding:"4px 8px 2px",fontSize:10,color:"#555575",borderBottom:"1px solid #181c2e",marginBottom:2}}>
+                    <div style={{padding:"4px 8px 2px",fontSize:10,color:"#6b7280",borderBottom:"1px solid #181c2e",marginBottom:2}}>
                       Найдено: {searchResults.length} работ
                     </div>
                   )}
@@ -3972,14 +3972,14 @@ export default function App() {
                         value={r.manualPrice!==undefined ? r.manualPrice : (price||"")}
                         onChange={e=>setRow(work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}/>
                     ) : displayPrice != null ? (
-                      <span style={{fontSize:12,color:filled?"#b8a880":"#555575"}}>{fmt(displayPrice)}</span>
+                      <span style={{fontSize:12,color:filled?"#b8a880":"#6b7280"}}>{fmt(displayPrice)}</span>
                     ) : <span style={{fontSize:10,color:"#353550",fontStyle:"italic"}}>нет цены</span>;
                     const qtyInput = <input className="num" style={{width:70,textAlign:"center",opacity:currentUser.role==="viewer"?.4:1}} type="number" min="0" placeholder="0" disabled={currentUser.role==="viewer"}
                       value={r.qty||""} onChange={e=>setRow(work.name,"qty",e.target.value)}/>;
                     const nameBlock = (
                       <div style={{minWidth:0}}>
                         {showBreadcrumb && <div style={{fontSize:10,color:"#454568",marginBottom:2}}>{work.cat} › {work.sub}</div>}
-                        <div style={{fontSize:13,color:filled?"#ddd8ce":"#707090",lineHeight:1.3}}>{work.name}</div>
+                        <div style={{fontSize:13,color:filled?"#111827":"#707090",lineHeight:1.3}}>{work.name}</div>
                         {tierHint && <div style={{fontSize:10,color:"#444460",marginTop:1}}>{tierHint}</div>}
                         {qty > 0 && (
                           <select className="cpx-sel" value={cpx}
@@ -3994,22 +3994,22 @@ export default function App() {
                         {/* Desktop: 5 cols via CSS class; Mobile: overridden to 2 cols */}
                         <style>{`@media(min-width:701px){.wrow{grid-template-columns:1fr 50px 120px 76px 90px}}.wrow-mob-extra{display:none}@media(max-width:700px){.wrow{grid-template-columns:1fr auto!important}.wrow-mob-extra{display:flex!important}}`}</style>
                         {nameBlock}
-                        <div className="wrow-desk" style={{textAlign:"center",fontSize:12,color:"#454560",paddingTop:3}}>{work.unit}</div>
+                        <div className="wrow-desk" style={{textAlign:"center",fontSize:12,color:"#9ca3af",paddingTop:3}}>{work.unit}</div>
                         <div className="wrow-desk" style={{textAlign:"right",paddingTop:2}}>{priceCell}</div>
                         <div className="wrow-desk" style={{textAlign:"right"}}>{qtyInput}</div>
                         <div className="wrow-desk" style={{textAlign:"right",paddingTop:3}}>
-                          {total>0 ? <span style={{fontSize:13,fontWeight:700,color:"#b8904a"}}>{fmt(total)}</span>
+                          {total>0 ? <span style={{fontSize:13,fontWeight:700,color:"#5b4ef5"}}>{fmt(total)}</span>
                                    : <span style={{color:"#252535",fontSize:12}}>—</span>}
                         </div>
                         {/* Mobile right column: цена/ед · поле · итог */}
                         <div className="wrow-mob-extra" style={{flexDirection:"column",alignItems:"flex-end",gap:3,display:"none",paddingTop:2,minWidth:90}}>
-                          <span style={{fontSize:11,color:"#555575",whiteSpace:"nowrap"}}>
+                          <span style={{fontSize:11,color:"#6b7280",whiteSpace:"nowrap"}}>
                             {displayPrice!=null ? fmt(displayPrice)+" ₸/ед" : <span style={{fontStyle:"italic",fontSize:10}}>нет цены</span>}
                           </span>
                           <input className="num" style={{width:82,textAlign:"center",fontSize:16,padding:"7px 10px",fontWeight:700}} type="number" min="0" placeholder="0"
                             value={r.qty||""} onChange={e=>setRow(work.name,"qty",e.target.value)}/>
                           {total>0
-                            ? <span style={{fontSize:12,fontWeight:800,color:"#b8904a",whiteSpace:"nowrap"}}>{fmt(total)} ₸</span>
+                            ? <span style={{fontSize:12,fontWeight:800,color:"#5b4ef5",whiteSpace:"nowrap"}}>{fmt(total)} ₸</span>
                             : <span style={{fontSize:10,color:"#333345"}}>—</span>}
                         </div>
                       </div>
@@ -4019,16 +4019,16 @@ export default function App() {
 
                 {!isSearching && subSum(safeCat,safeActiveSub)>0&&(
                   <div style={{borderTop:"1px solid #181c2e",padding:"10px 14px",display:"flex",justifyContent:"space-between"}}>
-                    <span style={{fontSize:11,color:"#454560"}}>Итого по разделу «{safeActiveSub}»</span>
-                    <span style={{fontSize:15,fontWeight:700,color:"#b8904a"}}>{fmt(subSum(safeCat,safeActiveSub))} ₸</span>
+                    <span style={{fontSize:11,color:"#9ca3af"}}>Итого по разделу «{safeActiveSub}»</span>
+                    <span style={{fontSize:15,fontWeight:700,color:"#5b4ef5"}}>{fmt(subSum(safeCat,safeActiveSub))} ₸</span>
                   </div>
                 )}
                 {isSearching && searchResults.length > 0 && (() => {
                   const searchTotal = searchResults.reduce((s,w) => s + rowTotal(w), 0);
                   return searchTotal > 0 ? (
                     <div style={{borderTop:"1px solid #181c2e",padding:"10px 14px",display:"flex",justifyContent:"space-between"}}>
-                      <span style={{fontSize:11,color:"#454560"}}>Итого по найденным работам</span>
-                      <span style={{fontSize:15,fontWeight:700,color:"#b8904a"}}>{fmt(searchTotal)} ₸</span>
+                      <span style={{fontSize:11,color:"#9ca3af"}}>Итого по найденным работам</span>
+                      <span style={{fontSize:15,fontWeight:700,color:"#5b4ef5"}}>{fmt(searchTotal)} ₸</span>
                     </div>
                   ) : null;
                 })()}
@@ -4036,14 +4036,14 @@ export default function App() {
 
               {/* ПРАВАЯ ПАНЕЛЬ */}
               <div id="summary-panel" style={{display:"flex",flexDirection:"column",gap:14}}>
-                <div style={{background:"linear-gradient(145deg,#13162a,#111424)",border:"1px solid #1c2035",borderRadius:12,padding:18}} className="up">
-                  <div style={{fontSize:10,fontWeight:700,color:"#b8904a",letterSpacing:1.5,textTransform:"uppercase",marginBottom:14}}>Смета</div>
+                <div style={{background:"linear-gradient(145deg,#13162a,#111424)",border:"1px solid #e5e7eb",borderRadius:12,padding:18}} className="up">
+                  <div style={{fontSize:10,fontWeight:700,color:"#5b4ef5",letterSpacing:1.5,textTransform:"uppercase",marginBottom:14}}>Смета</div>
                   {cats.map(cat=>{
                     const cs = catSum(cat);
                     if(!cs) return null;
                     return (
                       <div key={cat} style={{marginBottom:8}}>
-                        <div style={{fontSize:10,color:"#454560",fontWeight:700,textTransform:"uppercase",letterSpacing:.7,padding:"5px 0 3px",borderBottom:"1px solid #181c2e"}}>{cat}</div>
+                        <div style={{fontSize:10,color:"#9ca3af",fontWeight:700,textTransform:"uppercase",letterSpacing:.7,padding:"5px 0 3px",borderBottom:"1px solid #181c2e"}}>{cat}</div>
                         {Object.keys(Gdyn[cat]||{}).map(sub=>{
                           const ss = subSum(cat,sub);
                           if(!ss) return null;
@@ -4061,7 +4061,7 @@ export default function App() {
                   {grand>0&&(
                     <>
                       <div style={{marginTop:10,paddingTop:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                        <span style={{fontSize:12,color:"#454560"}}>Скидка %</span>
+                        <span style={{fontSize:12,color:"#9ca3af"}}>Скидка %</span>
                         <input className="num" style={{width:54}} type="number" min="0" max="100"
                           value={discount} onChange={e=>setDiscount(Math.min(100,Math.max(0,Number(e.target.value))))}/>
                       </div>
@@ -4070,14 +4070,14 @@ export default function App() {
                           <span>Скидка {discount}%</span><span>− {fmt(discAmt)} ₸</span>
                         </div>
                       )}
-                      <div style={{borderTop:"1px solid #1c2035",marginTop:12,paddingTop:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div style={{borderTop:"1px solid #e5e7eb",marginTop:12,paddingTop:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                         <span style={{fontSize:12,color:"#6060a0"}}>Итого</span>
-                        <span style={{fontSize:22,fontWeight:900,color:"#b8904a"}}>{fmt(final)} ₸</span>
+                        <span style={{fontSize:22,fontWeight:900,color:"#5b4ef5"}}>{fmt(final)} ₸</span>
                       </div>
                       {proj.area&&Number(proj.area)>0&&(
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6,padding:"5px 8px",background:"rgba(184,144,74,.07)",borderRadius:6}}>
                           <span style={{fontSize:11,color:"#6060a0"}}>Цена за м²</span>
-                          <span style={{fontSize:13,fontWeight:700,color:"#b8904a"}}>≈ {fmt(final/Number(proj.area))} ₸</span>
+                          <span style={{fontSize:13,fontWeight:700,color:"#5b4ef5"}}>≈ {fmt(final/Number(proj.area))} ₸</span>
                         </div>
                       )}
                     </>
@@ -4089,7 +4089,7 @@ export default function App() {
                   <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                     {STATUSES.map(s=>(
                       <button key={s.key} onClick={()=>setEstStatus(s.key)}
-                        style={{fontSize:11,fontWeight:700,padding:"4px 12px",borderRadius:6,cursor:"pointer",fontFamily:"inherit",border:`1px solid ${estStatus===s.key?s.color:"rgba(255,255,255,.08)"}`,background:estStatus===s.key?s.bg:"transparent",color:estStatus===s.key?s.color:"#454560",transition:"all .15s"}}>
+                        style={{fontSize:11,fontWeight:700,padding:"4px 12px",borderRadius:6,cursor:"pointer",fontFamily:"inherit",border:`1px solid ${estStatus===s.key?s.color:"rgba(255,255,255,.08)"}`,background:estStatus===s.key?s.bg:"transparent",color:estStatus===s.key?s.color:"#9ca3af",transition:"all .15s"}}>
                         {s.label}
                       </button>
                     ))}
@@ -4131,8 +4131,8 @@ export default function App() {
                   }
                 }}
                 style={{
-                  background:"linear-gradient(135deg,#b8904a,#d4a85a)",
-                  color:"#0c0e1a",border:"none",borderRadius:30,
+                  background:"linear-gradient(135deg,#5b4ef5,#7c6ff7)",
+                  color:"#f0f2f8",border:"none",borderRadius:30,
                   padding:"11px 18px",fontFamily:"inherit",fontWeight:800,
                   fontSize:14,cursor:"pointer",
                   boxShadow:"0 4px 24px rgba(184,144,74,.55)",
@@ -4159,7 +4159,7 @@ export default function App() {
               <KPContent proj={proj} kpItems={kpItems} discount={discount} discAmt={discAmt} final={final} note={note}/>
               <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:20}}>
                 <button style={{background:"#ddd",color:"#555",border:"none",cursor:"pointer",padding:"10px 18px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:600}} onClick={()=>setShowKP(false)}>Закрыть</button>
-                <button style={{background:"linear-gradient(135deg,#b8904a,#d4a85a)",color:"#0c0e1a",border:"none",cursor:"pointer",padding:"10px 20px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:700}} onClick={()=>{
+                <button style={{background:"linear-gradient(135deg,#5b4ef5,#7c6ff7)",color:"#f0f2f8",border:"none",cursor:"pointer",padding:"10px 20px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:700}} onClick={()=>{
                 const el = document.getElementById("kp-print-portal");
                 const css = [
                   "@import url('https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;900&display=swap');",
@@ -4169,7 +4169,7 @@ export default function App() {
                   "@page{margin:8mm;size:A4 portrait}",
                   "@media print{.no-print{display:none!important}body{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}}"
                 ].join(" ");
-                const html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>КП TitovStroy</title><style>" + css + "</style></head><body>" + el.innerHTML + "<div class=\"no-print\" style=\"margin-top:24px;text-align:center\"><button onclick=\"window.print()\" style=\"padding:12px 32px;background:#b8904a;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:inherit\">🖨 Сохранить PDF</button></div></body></html>";
+                const html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>КП TitovStroy</title><style>" + css + "</style></head><body>" + el.innerHTML + "<div class=\"no-print\" style=\"margin-top:24px;text-align:center\"><button onclick=\"window.print()\" style=\"padding:12px 32px;background:#5b4ef5;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:inherit\">🖨 Сохранить PDF</button></div></body></html>";
                 const blob = new Blob([html], {type:"text/html"});
                 const url = URL.createObjectURL(blob);
                 window.open(url, "_blank");
@@ -4232,41 +4232,41 @@ export default function App() {
         return (
           <div style={{maxWidth:960,margin:"0 auto",padding:"28px 24px 80px"}}>
             <div style={{marginBottom:24}}>
-              <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#e2ddd4"}}>📊 Аналитика</h1>
-              <div style={{fontSize:12,color:"#454560",marginTop:4}}>Статистика по сметам и договорам</div>
+              <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#111827"}}>📊 Аналитика</h1>
+              <div style={{fontSize:12,color:"#9ca3af",marginTop:4}}>Статистика по сметам и договорам</div>
             </div>
             <div style={{background:"#0f1120",border:"1px solid #161929",borderRadius:12,padding:"16px 18px",marginBottom:20,display:"flex",flexWrap:"wrap",gap:16}}>
               <div style={{flex:"1 1 300px"}}>
-                <div style={{fontSize:10,color:"#454560",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>Период</div>
+                <div style={{fontSize:10,color:"#9ca3af",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>Период</div>
                 <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                   {PERIOD_BTNS.map(([k,l])=>(
                     <button key={k} onClick={()=>setStatsPeriod(k)}
                       style={{fontSize:11,fontWeight:600,padding:"5px 12px",borderRadius:7,cursor:"pointer",fontFamily:"inherit",
-                        border:"1px solid "+(statsPeriod===k?"#b8904a":"rgba(255,255,255,.08)"),
+                        border:"1px solid "+(statsPeriod===k?"#5b4ef5":"rgba(255,255,255,.08)"),
                         background:statsPeriod===k?"rgba(184,144,74,.15)":"transparent",
-                        color:statsPeriod===k?"#b8904a":"#555575"}}>{l}</button>
+                        color:statsPeriod===k?"#5b4ef5":"#6b7280"}}>{l}</button>
                   ))}
                 </div>
                 {statsPeriod==="custom" && (
                   <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
-                    <div><div style={{fontSize:10,color:"#555575",marginBottom:4}}>С</div><input type="date" className="fi" style={{width:"auto"}} value={statsDateFrom} onChange={e=>setStatsDateFrom(e.target.value)}/></div>
-                    <div><div style={{fontSize:10,color:"#555575",marginBottom:4}}>По</div><input type="date" className="fi" style={{width:"auto"}} value={statsDateTo} onChange={e=>setStatsDateTo(e.target.value)}/></div>
+                    <div><div style={{fontSize:10,color:"#6b7280",marginBottom:4}}>С</div><input type="date" className="fi" style={{width:"auto"}} value={statsDateFrom} onChange={e=>setStatsDateFrom(e.target.value)}/></div>
+                    <div><div style={{fontSize:10,color:"#6b7280",marginBottom:4}}>По</div><input type="date" className="fi" style={{width:"auto"}} value={statsDateTo} onChange={e=>setStatsDateTo(e.target.value)}/></div>
                   </div>
                 )}
               </div>
               <div style={{flex:"1 1 200px"}}>
-                <div style={{fontSize:10,color:"#454560",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>Менеджер</div>
+                <div style={{fontSize:10,color:"#9ca3af",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>Менеджер</div>
                 <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                  <button onClick={()=>setStatsManager("")} style={{fontSize:11,fontWeight:600,padding:"5px 12px",borderRadius:7,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(!statsManager?"#8888cc":"rgba(255,255,255,.08)"),background:!statsManager?"rgba(136,136,204,.15)":"transparent",color:!statsManager?"#8888cc":"#555575"}}>🏢 Все</button>
-                  {managers.map(m=>(<button key={m} onClick={()=>setStatsManager(m)} style={{fontSize:11,fontWeight:600,padding:"5px 12px",borderRadius:7,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(statsManager===m?"#8888cc":"rgba(255,255,255,.08)"),background:statsManager===m?"rgba(136,136,204,.15)":"transparent",color:statsManager===m?"#8888cc":"#555575"}}>👤 {m}</button>))}
+                  <button onClick={()=>setStatsManager("")} style={{fontSize:11,fontWeight:600,padding:"5px 12px",borderRadius:7,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(!statsManager?"#8888cc":"rgba(255,255,255,.08)"),background:!statsManager?"rgba(136,136,204,.15)":"transparent",color:!statsManager?"#8888cc":"#6b7280"}}>🏢 Все</button>
+                  {managers.map(m=>(<button key={m} onClick={()=>setStatsManager(m)} style={{fontSize:11,fontWeight:600,padding:"5px 12px",borderRadius:7,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(statsManager===m?"#8888cc":"rgba(255,255,255,.08)"),background:statsManager===m?"rgba(136,136,204,.15)":"transparent",color:statsManager===m?"#8888cc":"#6b7280"}}>👤 {m}</button>))}
                 </div>
               </div>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:20}}>
-              {[["Смет",totalEst,"в периоде","#8888cc"],["Объём смет",fmt(totalSumEst)+" ₸","сумма","#b8904a"],["Ср. чек",fmt(avgEst)+" ₸","по сметам","#4caf7d"],["Договоров",totalCon,"в периоде","#b8904a"],["Объём дог.",fmt(totalSumCon)+" ₸","сумма","#4285f4"],["Ср. дог.",fmt(avgCon)+" ₸","по договорам","#4caf7d"]].map(([l,v,s,c],i)=>(
+              {[["Смет",totalEst,"в периоде","#8888cc"],["Объём смет",fmt(totalSumEst)+" ₸","сумма","#5b4ef5"],["Ср. чек",fmt(avgEst)+" ₸","по сметам","#4caf7d"],["Договоров",totalCon,"в периоде","#5b4ef5"],["Объём дог.",fmt(totalSumCon)+" ₸","сумма","#4285f4"],["Ср. дог.",fmt(avgCon)+" ₸","по договорам","#4caf7d"]].map(([l,v,s,c],i)=>(
                 <div key={i} style={{background:"#0f1120",border:"1px solid #161929",borderRadius:10,padding:"14px 14px 12px",position:"relative",overflow:"hidden"}}>
                   <div style={{position:"absolute",top:0,left:0,width:3,height:"100%",background:c,borderRadius:"3px 0 0 3px"}}/>
-                  <div style={{fontSize:9,color:"#454560",textTransform:"uppercase",letterSpacing:.8,marginBottom:6}}>{l}</div>
+                  <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase",letterSpacing:.8,marginBottom:6}}>{l}</div>
                   <div style={{fontSize:20,fontWeight:900,color:c,lineHeight:1,marginBottom:4}}>{v}</div>
                   <div style={{fontSize:10,color:"#333350"}}>{s}</div>
                 </div>
@@ -4284,33 +4284,33 @@ export default function App() {
                         <div style={{width:80,height:4,background:"rgba(255,255,255,.06)",borderRadius:2,overflow:"hidden"}}>
                           <div style={{width:totalEst?(byStatus[s.key]/totalEst*100)+"%":"0%",height:"100%",background:s.color,borderRadius:2}}/>
                         </div>
-                        <span style={{fontSize:13,fontWeight:700,color:"#e2ddd4",minWidth:20,textAlign:"right"}}>{byStatus[s.key]}</span>
+                        <span style={{fontSize:13,fontWeight:700,color:"#111827",minWidth:20,textAlign:"right"}}>{byStatus[s.key]}</span>
                       </div>
                     </div>
                   ))}
                 </div>
-                {Object.keys(byType).length>0 && <><div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типу объекта</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(<span key={t} style={{fontSize:11,padding:"3px 10px",borderRadius:20,background:"rgba(255,255,255,.05)",color:"#8888aa"}}>{t}: <strong style={{color:"#e2ddd4"}}>{n}</strong></span>))}</div></>}
+                {Object.keys(byType).length>0 && <><div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типу объекта</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(<span key={t} style={{fontSize:11,padding:"3px 10px",borderRadius:20,background:"rgba(255,255,255,.05)",color:"#8888aa"}}>{t}: <strong style={{color:"#111827"}}>{n}</strong></span>))}</div></>}
               </div>
               <div style={{background:"#0f1120",border:"1px solid #161929",borderRadius:12,padding:"18px"}}>
-                <div style={{fontSize:11,color:"#b8904a",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>Договора</div>
-                {Object.keys(byConType).length>0 && <><div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типам</div><div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:14}}>{Object.entries(byConType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(<div key={t} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(255,255,255,.02)",borderRadius:6}}><span style={{fontSize:12,color:"#aaa"}}>{t}</span><span style={{fontSize:13,fontWeight:700,color:"#b8904a"}}>{n}</span></div>))}</div></>}
-                {baseCon.length>0 && <><div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>Договора в периоде</div><div style={{display:"flex",flexDirection:"column",gap:3}}>{[...baseCon].sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,6).map(c=>{const cl=contractClients.find(x=>x.id===c.clientId);const sum=(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);return(<div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(255,255,255,.02)",borderRadius:6,cursor:"pointer"}} onClick={()=>{setCurrentContract({...c});setContractTab("editor");setScreen("contracts");}}><div style={{minWidth:0}}><div style={{fontSize:12,color:"#e2ddd4",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{TYPE_L2[c.type||"repair_fiz"]} #{c.number||"--"}</div><div style={{fontSize:10,color:"#454560"}}>{cl?.name||c.estClient||"--"}</div></div><span style={{fontSize:12,fontWeight:700,color:"#b8904a",flexShrink:0,marginLeft:8}}>{fmt(sum)} </span></div>);})}</div></>}
+                <div style={{fontSize:11,color:"#5b4ef5",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>Договора</div>
+                {Object.keys(byConType).length>0 && <><div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типам</div><div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:14}}>{Object.entries(byConType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(<div key={t} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(255,255,255,.02)",borderRadius:6}}><span style={{fontSize:12,color:"#aaa"}}>{t}</span><span style={{fontSize:13,fontWeight:700,color:"#5b4ef5"}}>{n}</span></div>))}</div></>}
+                {baseCon.length>0 && <><div style={{fontSize:10,color:"#333350",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>Договора в периоде</div><div style={{display:"flex",flexDirection:"column",gap:3}}>{[...baseCon].sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,6).map(c=>{const cl=contractClients.find(x=>x.id===c.clientId);const sum=(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);return(<div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(255,255,255,.02)",borderRadius:6,cursor:"pointer"}} onClick={()=>{setCurrentContract({...c});setContractTab("editor");setScreen("contracts");}}><div style={{minWidth:0}}><div style={{fontSize:12,color:"#111827",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{TYPE_L2[c.type||"repair_fiz"]} #{c.number||"--"}</div><div style={{fontSize:10,color:"#9ca3af"}}>{cl?.name||c.estClient||"--"}</div></div><span style={{fontSize:12,fontWeight:700,color:"#5b4ef5",flexShrink:0,marginLeft:8}}>{fmt(sum)} </span></div>);})}</div></>}
                 {totalCon===0 && <div style={{textAlign:"center",color:"#353550",fontSize:13,padding:"30px 0"}}>Нет договоров за период</div>}
               </div>
             </div>
             {!statsManager && managerStats.length>0 && (
               <div style={{background:"#0f1120",border:"1px solid #161929",borderRadius:12,padding:"18px",marginBottom:16}}>
-                <div style={{fontSize:10,color:"#454560",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>По менеджерам</div>
+                <div style={{fontSize:10,color:"#9ca3af",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>По менеджерам</div>
                 <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                  {managerStats.map(m=>(<div key={m.name} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"rgba(255,255,255,.03)",borderRadius:8,cursor:"pointer"}} onClick={()=>setStatsManager(m.name)}><span style={{fontSize:13,color:"#aaa",flex:1}}>👤 {m.name}</span><span style={{fontSize:11,color:"#555575"}}>{m.count} смет</span><span style={{fontSize:14,fontWeight:700,color:"#b8904a"}}>{fmt(m.sum)} </span>{m.agreed>0&&<span style={{fontSize:10,color:"#4caf7d",background:"rgba(76,175,125,.1)",borderRadius:5,padding:"2px 8px"}}>v{m.agreed}</span>}</div>))}
+                  {managerStats.map(m=>(<div key={m.name} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"rgba(255,255,255,.03)",borderRadius:8,cursor:"pointer"}} onClick={()=>setStatsManager(m.name)}><span style={{fontSize:13,color:"#aaa",flex:1}}>👤 {m.name}</span><span style={{fontSize:11,color:"#6b7280"}}>{m.count} смет</span><span style={{fontSize:14,fontWeight:700,color:"#5b4ef5"}}>{fmt(m.sum)} </span>{m.agreed>0&&<span style={{fontSize:10,color:"#4caf7d",background:"rgba(76,175,125,.1)",borderRadius:5,padding:"2px 8px"}}>v{m.agreed}</span>}</div>))}
                 </div>
               </div>
             )}
             {topCats.length>0 && (
               <div style={{background:"#0f1120",border:"1px solid #161929",borderRadius:12,padding:"18px"}}>
-                <div style={{fontSize:10,color:"#454560",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>Топ категорий работ</div>
+                <div style={{fontSize:10,color:"#9ca3af",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>Топ категорий работ</div>
                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                  {topCats.map(([cat,n],i)=>(<div key={cat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"7px 12px",background:"rgba(255,255,255,.03)",borderRadius:6}}><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:10,color:"#454560",minWidth:16}}>{i+1}.</span><span style={{color:"#aaa"}}>{cat}</span></div><span style={{fontWeight:700,color:"#b8904a"}}>{n} смет</span></div>))}
+                  {topCats.map(([cat,n],i)=>(<div key={cat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"7px 12px",background:"rgba(255,255,255,.03)",borderRadius:6}}><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:10,color:"#9ca3af",minWidth:16}}>{i+1}.</span><span style={{color:"#aaa"}}>{cat}</span></div><span style={{fontWeight:700,color:"#5b4ef5"}}>{n} смет</span></div>))}
                 </div>
               </div>
             )}
@@ -4322,10 +4322,10 @@ export default function App() {
       {screen === "contracts" && (
         <div style={{maxWidth:860,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
           {/* Шапка */}
-          <div style={{background:"#0e1122",borderBottom:"1px solid #181c2e",padding:"12px 20px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
-            <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"none",color:"#555575",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
-            <div style={{width:28,height:28,borderRadius:6,background:"linear-gradient(135deg,#b8904a,#d4a85a)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#0c0e1a"}}>T</div>
-            <div style={{fontWeight:800,fontSize:14,color:"#e2ddd4"}}>Договоры</div>
+          <div style={{background:"#f0f2f8",borderBottom:"1px solid #181c2e",padding:"12px 20px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
+            <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
+            <div style={{width:28,height:28,borderRadius:6,background:"linear-gradient(135deg,#5b4ef5,#7c6ff7)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#f0f2f8"}}>T</div>
+            <div style={{fontWeight:800,fontSize:14,color:"#111827"}}>Договоры</div>
             <div style={{flex:1}}/>
             {contractTab === "list" && currentUser.role !== "viewer" && (
               <button className="btn btn-g" style={{fontSize:12,padding:"7px 14px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:"",date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:""}); setContractTab("editor"); }}>+ Новый</button>
@@ -4333,10 +4333,10 @@ export default function App() {
           </div>
 
           {/* Табы */}
-          <div style={{display:"flex",gap:4,padding:"12px 20px 0",borderBottom:"1px solid #181c2e",background:"#0e1122"}}>
+          <div style={{display:"flex",gap:4,padding:"12px 20px 0",borderBottom:"1px solid #181c2e",background:"#f0f2f8"}}>
             {[["list","📋 Список"],["clients","👥 Клиенты"],["contragents","🏢 ТОО"]].map(([k,l])=>(
               <button key={k} onClick={()=>setContractTab(k)}
-                style={{background:"none",border:"none",borderBottom:`2px solid ${contractTab===k?"#b8904a":"transparent"}`,color:contractTab===k?"#b8904a":"#555575",cursor:"pointer",padding:"8px 14px",fontSize:13,fontWeight:600,fontFamily:"inherit",transition:"all .15s"}}>
+                style={{background:"none",border:"none",borderBottom:`2px solid ${contractTab===k?"#5b4ef5":"transparent"}`,color:contractTab===k?"#5b4ef5":"#6b7280",cursor:"pointer",padding:"8px 14px",fontSize:13,fontWeight:600,fontFamily:"inherit",transition:"all .15s"}}>
                 {l}
               </button>
             ))}
@@ -4348,7 +4348,7 @@ export default function App() {
             {contractTab === "list" && (
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
                 {contracts.length === 0 && (
-                  <div style={{textAlign:"center",padding:"60px 0",color:"#454560"}}>
+                  <div style={{textAlign:"center",padding:"60px 0",color:"#9ca3af"}}>
                     <div style={{fontSize:40,marginBottom:12}}>📋</div>
                     <div style={{fontWeight:700,marginBottom:6}}>Договоров пока нет</div>
                     <div style={{fontSize:12}}>Создайте новый или используйте кнопку 📄 на карточке сметы</div>
@@ -4359,29 +4359,29 @@ export default function App() {
                   const ca = contragents.find(x=>x.id===c.contragentId);
                   const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
                   return (
-                    <div key={c.id} style={{background:"#111425",border:"1px solid #1c2035",borderRadius:11,padding:"14px 18px",cursor:"pointer",transition:"all .15s"}}
+                    <div key={c.id} style={{background:"#ffffff",boxShadow:"0 1px 3px rgba(0,0,0,.08),0 4px 12px rgba(0,0,0,.04)",border:"1px solid #e5e7eb",borderRadius:11,padding:"14px 18px",cursor:"pointer",transition:"all .15s"}}
                       onClick={()=>{ setCurrentContract({...c}); setContractTab("editor"); }}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                         <div>
-                          <div style={{fontWeight:700,fontSize:14,color:"#e2ddd4"}}>
+                          <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>
                             {c.number ? `Договор №${c.number}` : "Без номера"}
                           </div>
-                          <div style={{fontSize:12,color:"#555575",marginTop:3}}>
+                          <div style={{fontSize:12,color:"#6b7280",marginTop:3}}>
                             {client ? `👤 ${client.name}` : c.estClient ? `👤 ${c.estClient} (не добавлен)` : "Клиент не выбран"}
                             {ca && <span style={{marginLeft:8}}>· {ca.name}</span>}
                           </div>
-                          <div style={{fontSize:11,color:"#454560",marginTop:3}}>
+                          <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
                             {new Date(c.date||Date.now()).toLocaleDateString("ru-RU")} · {(c.works||[]).length} позиций
                           </div>
                         </div>
                         <div style={{textAlign:"right",flexShrink:0}}>
-                          <div style={{fontWeight:800,fontSize:16,color:"#b8904a"}}>{fmt(total)} ₸</div>
+                          <div style={{fontWeight:800,fontSize:16,color:"#5b4ef5"}}>{fmt(total)} ₸</div>
                           <div style={{display:"flex",gap:5,marginTop:6}}>
                             <button onClick={e=>{e.stopPropagation();
                               const cl = contractClients.find(x=>x.id===c.clientId);
                               const ca2 = contragents.find(x=>x.id===c.contragentId);
                               generateContractPdf(c, cl, ca2);
-                            }} style={{background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>
+                            }} style={{background:"rgba(184,144,74,.1)",color:"#5b4ef5",border:"1px solid rgba(184,144,74,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>
                             <button onClick={e=>{e.stopPropagation();
                               const cl = contractClients.find(x=>x.id===c.clientId);
                               const ca2 = contragents.find(x=>x.id===c.contragentId);
@@ -4442,22 +4442,22 @@ export default function App() {
                   <button onClick={()=>{ setCurrentContract({id:Date.now().toString(),name:"",phone:"",address:"",iin:"",doc:"",type:"физ",createdAt:Date.now(),_mode:"newClient"}); setContractTab("clientEditor"); }}
                     className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
                 </div>
-                {contractClients.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#454560",fontSize:13}}>Клиентов пока нет</div>}
+                {contractClients.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#9ca3af",fontSize:13}}>Клиентов пока нет</div>}
                 {contractClients.map(c=>(
-                  <div key={c.id} style={{background:"#111425",border:"1px solid #1c2035",borderRadius:10,padding:"14px 16px"}}>
+                  <div key={c.id} style={{background:"#ffffff",boxShadow:"0 1px 3px rgba(0,0,0,.08),0 4px 12px rgba(0,0,0,.04)",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px 16px"}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                       <div>
-                        <div style={{fontWeight:700,fontSize:14,color:"#e2ddd4"}}>{c.name||"Без имени"}</div>
-                        <div style={{fontSize:11,color:"#555575",marginTop:3}}>
+                        <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>{c.name||"Без имени"}</div>
+                        <div style={{fontSize:11,color:"#6b7280",marginTop:3}}>
                           {c.type==="физ"?"👤 Физ. лицо":"🏢 Юр. лицо"}
                           {c.iin&&<span style={{marginLeft:8}}>ИИН: {c.iin}</span>}
                         </div>
-                        {c.phone&&<div style={{fontSize:11,color:"#454560",marginTop:2}}>📞 {c.phone}</div>}
-                        {c.address&&<div style={{fontSize:11,color:"#454560",marginTop:2}}>📍 {c.address}</div>}
+                        {c.phone&&<div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>📞 {c.phone}</div>}
+                        {c.address&&<div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>📍 {c.address}</div>}
                       </div>
                       <div style={{display:"flex",gap:5}}>
                         <button onClick={()=>{ setCurrentContract({...c,_mode:"editClient"}); setContractTab("clientEditor"); }}
-                          style={{background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                          style={{background:"rgba(184,144,74,.1)",color:"#5b4ef5",border:"1px solid rgba(184,144,74,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
                         {currentUser.role==="admin"&&<button onClick={()=>{ if(window.confirm("Удалить клиента?")) saveContractClients(contractClients.filter(x=>x.id!==c.id)); }}
                           style={{background:"rgba(200,60,60,.08)",color:"#c06060",border:"1px solid rgba(200,60,60,.15)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
                       </div>
@@ -4471,12 +4471,12 @@ export default function App() {
             {contractTab === "clientEditor" && currentContract?._mode?.includes("Client") && (
               <div style={{display:"flex",flexDirection:"column",gap:12}}>
                 <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                  <button onClick={()=>setContractTab("clients")} style={{background:"none",border:"none",color:"#555575",cursor:"pointer",fontSize:18}}>←</button>
-                  <span style={{fontWeight:700,fontSize:15,color:"#e2ddd4"}}>{currentContract._mode==="newClient"?"Новый клиент":"Редактировать клиента"}</span>
+                  <button onClick={()=>setContractTab("clients")} style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",fontSize:18}}>←</button>
+                  <span style={{fontWeight:700,fontSize:15,color:"#111827"}}>{currentContract._mode==="newClient"?"Новый клиент":"Редактировать клиента"}</span>
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                   <div>
-                    <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Тип</div>
+                    <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Тип</div>
                     <select className="fi" value={currentContract.type||"физ"} onChange={e=>setCurrentContract(p=>({...p,type:e.target.value}))}>
                       <option value="физ">Физ. лицо</option>
                       <option value="юр">Юр. лицо</option>
@@ -4492,7 +4492,7 @@ export default function App() {
                     )
                   ].map(([label,field])=>(
                     <div key={field}>
-                      <div style={{fontSize:11,color:"#555575",marginBottom:4}}>{label}</div>
+                      <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>{label}</div>
                       <input className="fi" value={currentContract[field]||""} onChange={e=>setCurrentContract(p=>({...p,[field]:e.target.value}))} placeholder={label}/>
                     </div>
                   ))}
@@ -4515,16 +4515,16 @@ export default function App() {
                     className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
                 </div>
                 {contragents.map(c=>(
-                  <div key={c.id} style={{background:"#111425",border:"1px solid #1c2035",borderRadius:10,padding:"14px 16px"}}>
+                  <div key={c.id} style={{background:"#ffffff",boxShadow:"0 1px 3px rgba(0,0,0,.08),0 4px 12px rgba(0,0,0,.04)",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px 16px"}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                       <div>
-                        <div style={{fontWeight:700,fontSize:14,color:"#e2ddd4"}}>{c.name}</div>
-                        <div style={{fontSize:11,color:"#555575",marginTop:2}}>БИН: {c.bin} · {c.bank}</div>
-                        <div style={{fontSize:11,color:"#454560",marginTop:2}}>Директор: {c.director} · {c.phone}</div>
+                        <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>{c.name}</div>
+                        <div style={{fontSize:11,color:"#6b7280",marginTop:2}}>БИН: {c.bin} · {c.bank}</div>
+                        <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>Директор: {c.director} · {c.phone}</div>
                       </div>
                       <div style={{display:"flex",gap:5}}>
                         <button onClick={()=>{ setCurrentContract({...c,_mode:"editCA"}); setContractTab("caEditor"); }}
-                          style={{background:"rgba(184,144,74,.1)",color:"#b8904a",border:"1px solid rgba(184,144,74,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                          style={{background:"rgba(184,144,74,.1)",color:"#5b4ef5",border:"1px solid rgba(184,144,74,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
                         {currentUser.role==="admin"&&contragents.length>1&&<button onClick={()=>{ if(window.confirm("Удалить?")) saveContragents(contragents.filter(x=>x.id!==c.id)); }}
                           style={{background:"rgba(200,60,60,.08)",color:"#c06060",border:"1px solid rgba(200,60,60,.15)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
                       </div>
@@ -4538,12 +4538,12 @@ export default function App() {
             {contractTab === "caEditor" && currentContract?._mode?.includes("CA") && (
               <div style={{display:"flex",flexDirection:"column",gap:12}}>
                 <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                  <button onClick={()=>setContractTab("contragents")} style={{background:"none",border:"none",color:"#555575",cursor:"pointer",fontSize:18}}>←</button>
-                  <span style={{fontWeight:700,fontSize:15,color:"#e2ddd4"}}>{currentContract._mode==="newCA"?"Новое ТОО":"Редактировать ТОО"}</span>
+                  <button onClick={()=>setContractTab("contragents")} style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",fontSize:18}}>←</button>
+                  <span style={{fontWeight:700,fontSize:15,color:"#111827"}}>{currentContract._mode==="newCA"?"Новое ТОО":"Редактировать ТОО"}</span>
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                   <div style={{gridColumn:"1/-1"}}>
-                    <div style={{fontSize:11,color:"#555575",marginBottom:4}}>Файл печати</div>
+                    <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Файл печати</div>
                     <select className="fi" value={currentContract.stampFile||"stamp.jpg"} onChange={e=>setCurrentContract(p=>({...p,stampFile:e.target.value}))}>
                       <option value="stamp.jpg">stamp.jpg</option>
                       <option value="stamp2.jpg">stamp2.jpg</option>
@@ -4551,7 +4551,7 @@ export default function App() {
                   </div>
                   {[["Название","name"],["БИН","bin"],["Банк","bank"],["БИК","bik"],["Расчётный счёт","account"],["Директор","director"],["Телефон","phone"],["Email","email"],["Адрес","address"]].map(([label,field])=>(
                     <div key={field}>
-                      <div style={{fontSize:11,color:"#555575",marginBottom:4}}>{label}</div>
+                      <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>{label}</div>
                       <input className="fi" value={currentContract[field]||""} onChange={e=>setCurrentContract(p=>({...p,[field]:e.target.value}))} placeholder={label}/>
                     </div>
                   ))}
