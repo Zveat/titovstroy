@@ -274,18 +274,12 @@ const CONTRACT_STATUSES = [
   { key:"signed",  label:"Заключён",     color:"#059669", bg:"rgba(5,150,105,.1)"   },
   { key:"archive", label:"Архив",        color:"#6b7280", bg:"rgba(107,114,128,.12)"},
 ];
-// Объекты — воронка статусов
+// Объекты — статусы жизненного цикла
 const DEAL_STATUSES = [
-  { key:"lead",     label:"Лид",         color:"#6b7280", bg:"#f3f4f6"              },
-  { key:"measure",  label:"Замер",       color:"#0891b2", bg:"rgba(8,145,178,.1)"   },
-  { key:"estimate", label:"Смета",       color:"#2563eb", bg:"#eff6ff"              },
-  { key:"sent",     label:"Отправлена",  color:"#7c3aed", bg:"rgba(124,58,237,.1)"  },
-  { key:"agreed",   label:"Согласована", color:"#d97706", bg:"rgba(217,119,6,.12)"  },
-  { key:"contract", label:"Договор",     color:"#db2777", bg:"rgba(219,39,119,.1)"  },
-  { key:"signed",   label:"Подписан",    color:"#059669", bg:"rgba(5,150,105,.1)"   },
-  { key:"inwork",   label:"В работе",    color:"#16a34a", bg:"rgba(22,163,74,.1)"   },
-  { key:"done",     label:"Завершён",    color:"#374151", bg:"rgba(55,65,81,.08)"   },
-  { key:"rejected", label:"Отказ",       color:"#dc2626", bg:"rgba(220,38,38,.12)"  },
+  { key:"new",      label:"Черновик", color:"#6b7280", bg:"#f3f4f6"              },
+  { key:"inwork",   label:"В работе", color:"#16a34a", bg:"rgba(22,163,74,.1)"   },
+  { key:"done",     label:"Сдан",     color:"#059669", bg:"rgba(5,150,105,.1)"   },
+  { key:"rejected", label:"Отменён",  color:"#dc2626", bg:"rgba(220,38,38,.12)"  },
 ];
 const OBJECTS_KEY         = "titovstroy-objects";
 const OBJECTS_BACKUPS_KEY = "titovstroy-objects-backups";
@@ -2528,6 +2522,7 @@ export default function App() {
   const [objInfoCollapsed, setObjInfoCollapsed] = useState(false); // свёрнут ли блок инфо клиента/объекта
   const [currentObject, setCurrentObject] = useState(null);
   const [objectFilterStatus, setObjectFilterStatus] = useState("");
+  const [objectSearch, setObjectSearch] = useState("");
   const [objectReturnId, setObjectReturnId] = useState(null); // id объекта, куда вернуться из редактора сметы/договора
   // legacy deals ref (не используется, но нужен для saveDeals ниже)
   const [deals, setDeals] = useState([]);
@@ -6402,12 +6397,15 @@ export default function App() {
           {/* Список объектов */}
           {objectTab==="list" && (
             <div className="contracts-pad" style={{padding:"20px 24px",display:"flex",flexDirection:"column",gap:10}}>
-              {/* Воронка-фильтр */}
+              {/* Поиск */}
+              <input value={objectSearch} onChange={e=>setObjectSearch(e.target.value)} placeholder="🔍 Поиск по клиенту, адресу..."
+                style={{border:"1px solid #e5e7eb",borderRadius:7,padding:"7px 12px",fontSize:13,width:"100%",boxSizing:"border-box",outline:"none",fontFamily:"inherit"}}/>
+              {/* Фильтр по статусу */}
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 <button onClick={()=>setObjectFilterStatus("")}
                   style={{background:!objectFilterStatus?"#2563eb":"rgba(0,0,0,.03)",color:!objectFilterStatus?"#fff":"#9ca3af",border:`1px solid ${!objectFilterStatus?"#2563eb":"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Все ({objects.length})</button>
                 {DEAL_STATUSES.map(s=>{
-                  const cnt = objects.filter(o=>(o.status||"lead")===s.key).length;
+                  const cnt = objects.filter(o=>(o.status||"new")===s.key).length;
                   if(!cnt && objectFilterStatus!==s.key) return null;
                   return (
                     <button key={s.key} onClick={()=>setObjectFilterStatus(v=>v===s.key?"":s.key)}
@@ -6427,10 +6425,17 @@ export default function App() {
               )}
 
               {[...objects]
-                .filter(o=>!objectFilterStatus||(o.status||"lead")===objectFilterStatus)
+                .filter(o=>{
+                  if(objectFilterStatus && (o.status||"new")!==objectFilterStatus) return false;
+                  if(objectSearch){
+                    const q=objectSearch.toLowerCase();
+                    if(!((o.clientName||"").toLowerCase().includes(q)||(o.address||"").toLowerCase().includes(q)||(o.phone||"").toLowerCase().includes(q))) return false;
+                  }
+                  return true;
+                })
                 .sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0))
                 .map(obj=>{
-                const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"lead"))||DEAL_STATUSES[0];
+                const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"new"))||DEAL_STATUSES[0];
                 const objEsts = estimates.filter(e=>e.objectId===obj.id);
                 const objCons = contracts.filter(c=>c.objectId===obj.id);
                 const bestEst = [...objEsts].sort((a,b)=>(b.total||0)-(a.total||0))[0];
@@ -6471,7 +6476,7 @@ export default function App() {
           {/* Workspace объекта */}
           {objectTab==="workspace" && currentObject && (()=>{
             const obj = currentObject;
-            const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"lead"))||DEAL_STATUSES[0];
+            const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"new"))||DEAL_STATUSES[0];
             const _allEsts = estimates.filter(e=>e.objectId===obj.id);
             const _allCons = contracts.filter(c=>c.objectId===obj.id);
             // Дерево смет: основная смета → под ней доп. сметы (ДС). parentId===id (битая ссылка) трактуем как основную.
@@ -6647,6 +6652,7 @@ export default function App() {
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
                     {objEsts.map((est,estIdx)=>{
                       const isChild = !_estIsMain(est);
+                      const estNum = isChild ? (est.dsNumber||1)+1 : 1;
                       const posCount = Object.values(est.rows||{}).filter(r=>Number(r?.qty)>0).length;
                       const stEst = STATUSES.find(s=>s.key===(est.status||"new"))||STATUSES[0];
                       return (
@@ -6655,7 +6661,7 @@ export default function App() {
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                                {isChild && <span style={{fontSize:10,fontWeight:700,color:"#059669",background:"rgba(5,150,105,.08)",borderRadius:3,padding:"1px 6px"}}>Доп. смета №{est.dsNumber||1}</span>}
+                                <span style={{fontSize:10,fontWeight:700,color:isChild?"#059669":"#2563eb",background:isChild?"rgba(5,150,105,.08)":"#eff6ff",borderRadius:3,padding:"1px 6px"}}>Смета {estNum}</span>
                                 <span style={{fontWeight:600,fontSize:13,color:"#111827"}}>{est.proj?.name||obj.clientName||obj.address||"Новая смета"}</span>
                                 <span style={{fontSize:10,fontWeight:700,color:stEst.color,background:stEst.bg,borderRadius:4,padding:"1px 6px"}}>{stEst.label}</span>
                               </div>
