@@ -1431,7 +1431,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
   const roleColor = r => r==="admin" ? "#ffffff" : r==="viewer" ? "#9ca3af" : "#9ca3af";
 
   return (
-    <div style={{padding:"40px 40px 80px"}}>
+    <div className="page">
       <div style={{marginBottom:24}}>
         <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#111827"}}>⚙️ Администрирование</h1>
         <div style={{fontSize:12,color:"#9ca3af",marginTop:4}}>Сотрудники и прайс-лист</div>
@@ -4298,6 +4298,7 @@ export default function App() {
         .badge{background:#eff6ff;color:#2563eb;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600}
         @keyframes up{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
         .up{animation:up .22s ease forwards}
+        .page{max-width:960px;margin:0 auto;padding:40px 40px 80px}
         @media(min-width:900px){.main-grid{grid-template-columns:minmax(0,1fr) 295px!important}}
         @media(max-width:700px){
           .editor-header{gap:6px!important;padding:8px 12px!important}
@@ -4333,6 +4334,17 @@ export default function App() {
           .sidebar{display:none!important}
           .sidebar-content{margin-left:0!important;padding-bottom:68px!important}
           .mob-nav{display:flex!important}
+          .page{padding:18px 14px 84px!important}
+          .list-header,.contracts-header{padding:10px 14px!important}
+          .list-pad{padding:16px 14px 0!important}
+          .contracts-pad{padding:16px 14px!important}
+          .an-filters{padding:14px!important}
+          .an-row-fixed{flex-wrap:wrap!important}
+          .btn{padding:10px 16px!important}
+          /* фикс-ширины в аналитике → тянутся по экрану, цифры не режем */
+          .an-bar-label{width:104px!important;font-size:11px!important}
+          .an-bar-right{width:88px!important;font-size:10px!important}
+          .an-mtable-num{width:auto!important;min-width:48px!important}
         }
         .mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:#ffffff;border-top:1px solid #e5e7eb;z-index:50}
         .mob-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;gap:3px;border-top:2px solid transparent;transition:all .15s}
@@ -4407,7 +4419,7 @@ export default function App() {
         const profitMonth = revMonth - agreedMonth.reduce((s,e)=>s+_dashCost(e),0);
         const marginMonth = revMonth>0 ? Math.round(profitMonth/revMonth*100) : 0;
         return (
-        <div style={{maxWidth:960,margin:"0 auto",padding:"40px 40px 80px"}}>
+        <div className="page">
           {/* Заголовок */}
           <div style={{marginBottom:32,display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
             <div>
@@ -4490,12 +4502,12 @@ export default function App() {
                     const w = Math.round((d.count/maxCount)*100);
                     return (
                       <div key={s.key} style={{display:"flex",alignItems:"center",gap:12}}>
-                        <span style={{fontSize:12,fontWeight:600,color:s.color,width:140,flexShrink:0}}>{s.label}</span>
-                        <div style={{flex:1,background:"rgba(0,0,0,.04)",borderRadius:6,height:24,position:"relative",overflow:"hidden"}}>
+                        <span className="an-bar-label" style={{fontSize:12,fontWeight:600,color:s.color,width:140,flexShrink:0}}>{s.label}</span>
+                        <div style={{flex:1,minWidth:60,background:"rgba(0,0,0,.04)",borderRadius:6,height:24,position:"relative",overflow:"hidden"}}>
                           <div style={{width:`${w}%`,minWidth:d.count>0?28:0,height:"100%",background:s.bg,borderLeft:`3px solid ${s.color}`,transition:"width .3s"}}/>
                           <span style={{position:"absolute",left:8,top:0,height:"100%",display:"flex",alignItems:"center",fontSize:12,fontWeight:700,color:s.color}}>{d.count}</span>
                         </div>
-                        <span style={{fontSize:12,color:"#6b7280",width:130,textAlign:"right",flexShrink:0}}>{d.sum>0?fmt(Math.round(d.sum))+" ₸":"—"}</span>
+                        <span className="an-bar-right" style={{fontSize:12,color:"#6b7280",width:130,textAlign:"right",flexShrink:0}}>{d.sum>0?fmt(Math.round(d.sum))+" ₸":"—"}</span>
                       </div>
                     );
                   })}
@@ -4594,7 +4606,7 @@ export default function App() {
             </div>
           </div>
 
-          <div style={{padding:"20px 24px 0"}}>
+          <div className="list-pad" style={{padding:"20px 24px 0"}}>
             {loadingList ? (
               <div style={{textAlign:"center",padding:"60px 0",color:"#9ca3af"}}>
                 <div style={{fontSize:24,marginBottom:10}}>⏳</div>
@@ -5559,12 +5571,12 @@ export default function App() {
           wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin, funnel, winRateOverall, winRateSent, agreedB, sentB, catProfit, monthly, staleSent } = analyticsData;
         const PERIOD_BTNS = [["all","Всё время"],["month","Месяц"],["3month","3 месяца"],["week","Неделя"],["custom","Вручную"]];
         return (
-          <div style={{maxWidth:960,margin:"0 auto",padding:"40px 40px 80px"}}>
+          <div className="page">
             <div style={{marginBottom:24}}>
               <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#111827"}}>📊 Аналитика</h1>
               <div style={{fontSize:12,color:"#9ca3af",marginTop:4}}>Статистика по сметам и договорам</div>
             </div>
-            <div style={{background:"#f3f4f6",border:"1px solid #e5e7eb",borderRadius:6,padding:"16px 18px",marginBottom:20,display:"flex",flexWrap:"wrap",gap:16}}>
+            <div className="an-filters" style={{background:"#f3f4f6",border:"1px solid #e5e7eb",borderRadius:6,padding:"16px 18px",marginBottom:20,display:"flex",flexWrap:"wrap",gap:16}}>
               <div style={{flex:"1 1 300px"}}>
                 <div style={{fontSize:10,color:"#9ca3af",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>Период</div>
                 <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
@@ -5638,12 +5650,12 @@ export default function App() {
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
                     {funnel.map(f=>(
                       <div key={f.key} style={{display:"flex",alignItems:"center",gap:12}}>
-                        <span style={{fontSize:12,fontWeight:600,color:f.color,width:140,flexShrink:0}}>{f.label}</span>
-                        <div style={{flex:1,background:"rgba(0,0,0,.04)",borderRadius:6,height:26,position:"relative",overflow:"hidden"}}>
+                        <span className="an-bar-label" style={{fontSize:12,fontWeight:600,color:f.color,width:140,flexShrink:0}}>{f.label}</span>
+                        <div style={{flex:1,minWidth:60,background:"rgba(0,0,0,.04)",borderRadius:6,height:26,position:"relative",overflow:"hidden"}}>
                           <div style={{width:`${Math.round(f.sum/maxSum*100)}%`,minWidth:f.count>0?2:0,height:"100%",background:f.bg,borderLeft:`3px solid ${f.color}`}}/>
                           <span style={{position:"absolute",left:10,top:0,height:"100%",display:"flex",alignItems:"center",gap:8,fontSize:11,fontWeight:700,color:f.color}}>{f.count} шт · {fmt(Math.round(f.sum))} ₸</span>
                         </div>
-                        <span style={{fontSize:11,color:"#059669",width:130,textAlign:"right",flexShrink:0}}>{f.profit>0?"приб. "+fmt(Math.round(f.profit))+" ₸":"—"}</span>
+                        <span className="an-bar-right" style={{fontSize:11,color:"#059669",width:130,textAlign:"right",flexShrink:0}}>{f.profit>0?"приб. "+fmt(Math.round(f.profit))+" ₸":"—"}</span>
                       </div>
                     ))}
                   </div>
@@ -5773,7 +5785,7 @@ export default function App() {
       {screen === "contracts" && (
         <div style={{maxWidth:960,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
           {/* Шапка */}
-          <div style={{background:"#f3f4f6",borderBottom:"1px solid #e5e7eb",padding:"12px 24px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
+          <div className="contracts-header" style={{background:"#f3f4f6",borderBottom:"1px solid #e5e7eb",padding:"12px 24px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
             <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
             <div style={{width:28,height:28,borderRadius:6,background:"#2563eb",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#f3f4f6"}}>T</div>
             <div style={{fontWeight:800,fontSize:14,color:"#111827"}}>Договоры</div>
@@ -5799,7 +5811,7 @@ export default function App() {
             ))}
           </div>
 
-          <div style={{padding:"20px 24px"}}>
+          <div className="contracts-pad" style={{padding:"20px 24px"}}>
 
             {/* ── СПИСОК ДОГОВОРОВ ── */}
             {contractTab === "list" && (
