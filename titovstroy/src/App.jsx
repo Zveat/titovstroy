@@ -2625,7 +2625,7 @@ export default function App() {
       // parentId/dsNumber берём из стейта (новая ДС) ИЛИ из сохранённой записи (открытая ДС)
       const pId = currentParentId || exists?.parentId;
       const dsN = currentDsNumber || exists?.dsNumber;
-      const updated = { id:currentId, proj, rows, discount, markup, note, status:estStatus, sentAt: estStatus==="sent" ? (estSentAt||exists?.sentAt||new Date().toISOString().slice(0,10)) : (exists?.sentAt||null), comment:estComment, createdAt:exists?.createdAt||Date.now(), createdBy:exists?.createdBy||currentUser?.name, updatedAt:Date.now(), updatedBy:currentUser?.name, total:final, ...(pId ? {parentId:pId, dsNumber:dsN} : {}) };
+      const updated = { id:currentId, proj, rows, discount, markup, note, status:estStatus, sentAt: estStatus==="sent" ? (estSentAt||exists?.sentAt||new Date().toISOString().slice(0,10)) : (exists?.sentAt||null), comment:estComment, createdAt:exists?.createdAt||Date.now(), createdBy:exists?.createdBy||currentUser?.name, updatedAt:Date.now(), updatedBy:currentUser?.name, total:final, ...(exists?.objectId ? {objectId:exists.objectId} : {}), ...(pId ? {parentId:pId, dsNumber:dsN} : {}) };
       updated.history = _appendHistory(exists, updated);
       const newList = exists ? cur.map(e=>e.id===currentId?updated:e) : [updated,...cur];
       setEstimates(newList);
@@ -3289,6 +3289,7 @@ export default function App() {
       updatedAt: Date.now(),
       updatedBy: currentUser.name,
       total: final,
+      ...(exists?.objectId ? {objectId:exists.objectId} : {}),
       ...(pId ? {parentId:pId, dsNumber:dsN} : {}),
     };
     updated.history = _appendHistory(exists, updated);
@@ -5303,7 +5304,8 @@ export default function App() {
           </div>
 
           <div style={{maxWidth:1160,margin:"0 auto",padding:"18px 18px"}}>
-            {/* ОБЪЕКТ */}
+            {/* ОБЪЕКТ — скрываем, если смета открыта из карточки объекта (поля ведутся в объекте) */}
+            {!objectReturnId && (
             <div className="card up" style={{padding:"16px 20px",marginBottom:16}}>
               <div style={{fontSize:10,fontWeight:700,color:"#2563eb",letterSpacing:1.5,textTransform:"uppercase",marginBottom:11}}>Информация об объекте</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:10}}>
@@ -5335,6 +5337,7 @@ export default function App() {
                 ))}
               </div>
             </div>
+            )}
 
             <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:16,alignItems:"start"}} className="main-grid">
               {/* ТОЛЬКО ВЫБРАННЫЕ */}
@@ -6195,15 +6198,40 @@ export default function App() {
 
       {/* ── ТЕСТ: СДЕЛКИ (смета+договор в одной карточке) ── */}
       {effScreen === "objects" && (()=>{
+        // Данные клиента берём прямо из объекта (inline-поля)
+        const objProj = (obj) => ({
+          ...EMPTY_PROJ,
+          name: obj.clientName || "",
+          phone: obj.clientPhone || "",
+          address: obj.address || "",
+          type: obj.objType || "Вторичка",
+          area: obj.area || "",
+          manager: obj.manager || currentUser.name,
+        });
+        // Авто-синхронизация скрытой записи клиента (нужна договорам/PDF). Возвращает clientId.
+        const ensureObjClient = async (obj) => {
+          const cdata = { name: obj.clientName||"", phone: obj.clientPhone||"", address: obj.address||"", iin: obj.clientIin||"", doc: obj.clientDoc||"", type: obj.clientType||"физ" };
+          let clientId = obj.clientId;
+          const list = clientsRef.current;
+          if (clientId && list.find(c=>c.id===clientId)) {
+            await saveContractClients(list.map(c=>c.id===clientId?{...c,...cdata}:c));
+          } else {
+            clientId = Date.now().toString();
+            await saveContractClients([...list, { id:clientId, ...cdata, createdAt:Date.now(), createdById:currentUser.id, _fromObject:obj.id }]);
+            const updObj = {...obj, clientId, updatedAt:Date.now()};
+            await saveObjects(objectsRef.current.map(x=>x.id===obj.id?updObj:x));
+            setCurrentObject(updObj);
+          }
+          return clientId;
+        };
         // ── Вспомогательные функции для workspace ──
         const openObjectEstimate = (obj) => {
           const id = genId();
-          const cl = contractClients.find(x=>x.id===obj.clientId);
           const cats2 = Object.keys(Gdyn);
           const newEst = {
             id,
             objectId: obj.id,
-            proj: {...EMPTY_PROJ, name: cl?.name||"", address: obj.address||"", type: obj.objType||"Вторичка", manager: currentUser.name},
+            proj: objProj(obj),
             rows: {}, discount: 0, markup: 0, note: "", status: "new", comment: "",
             createdAt: Date.now(), createdBy: currentUser.name, updatedAt: Date.now(), updatedBy: currentUser.name, total: 0,
           };
@@ -6230,7 +6258,8 @@ export default function App() {
         const openObjectEstimateEdit = (est, obj) => {
           setObjectReturnId(obj.id);
           setCurrentId(est.id);
-          setProj(est.proj||EMPTY_PROJ);
+          // proj синхронизируем из объекта (клиент/адрес ведутся в объекте)
+          setProj({...(est.proj||EMPTY_PROJ), ...objProj(obj)});
           setRows(est.rows||{});
           setDiscount(est.discount||0);
           setMarkup(est.markup||0);
@@ -6245,15 +6274,17 @@ export default function App() {
           setScreen("editor");
         };
 
-        const openObjectContract = (obj) => {
-          const cl = contractClients.find(x=>x.id===obj.clientId);
+        const openObjectContract = async (obj) => {
+          const clientId = await ensureObjClient(obj);
           const newC = {
             id: Date.now().toString(),
             objectId: obj.id,
             number: nextContractNumber(),
             date: new Date().toISOString().split("T")[0],
-            clientId: obj.clientId||"",
-            estClient: cl?.name||"",
+            clientId,
+            estClient: obj.clientName||"",
+            estPhone: obj.clientPhone||"",
+            estAddress: obj.address||"",
             contragentId: contragents[0]?.id||"",
             works: [],
             appendix: 1,
@@ -6282,11 +6313,11 @@ export default function App() {
               <button onClick={()=>{ setObjectTab("list"); setCurrentObject(null); }} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
             )}
             <div style={{width:28,height:28,borderRadius:6,background:"#2563eb",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#fff"}}>📦</div>
-            <div style={{fontWeight:800,fontSize:14,color:"#111827"}}>{objectTab==="workspace" && currentObject ? (contractClients.find(x=>x.id===currentObject.clientId)?.name||"Объект") : "Объекты"}</div>
+            <div style={{fontWeight:800,fontSize:14,color:"#111827"}}>{objectTab==="workspace" && currentObject ? (currentObject.clientName||"Новый объект") : "Объекты"}</div>
             <div style={{flex:1}}/>
             {objectTab==="list" && currentUser.role!=="viewer" && (
               <button className="btn btn-g" style={{fontSize:12,padding:"7px 14px"}} onClick={async ()=>{
-                const newObj = {id:genId(),clientId:"",address:"",objType:"Вторичка",area:"",status:"lead",note:"",manager:currentUser.name,createdBy:currentUser.name,createdById:currentUser.id,createdAt:Date.now(),updatedAt:Date.now()};
+                const newObj = {id:genId(),clientId:"",clientName:"",clientPhone:"",clientType:"физ",clientIin:"",clientDoc:"",address:"",objType:"Вторичка",area:"",status:"lead",note:"",manager:currentUser.name,createdBy:currentUser.name,createdById:currentUser.id,createdAt:Date.now(),updatedAt:Date.now()};
                 await saveObjects([newObj, ...objectsRef.current]);
                 setCurrentObject(newObj);
                 setObjectTab("workspace");
@@ -6325,7 +6356,6 @@ export default function App() {
                 .filter(o=>!objectFilterStatus||(o.status||"lead")===objectFilterStatus)
                 .sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0))
                 .map(obj=>{
-                const client = contractClients.find(x=>x.id===obj.clientId);
                 const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"lead"))||DEAL_STATUSES[0];
                 const objEsts = estimates.filter(e=>e.objectId===obj.id);
                 const objCons = contracts.filter(c=>c.objectId===obj.id);
@@ -6337,7 +6367,7 @@ export default function App() {
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                       <div style={{minWidth:0,flex:1}}>
                         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                          <span style={{fontWeight:700,fontSize:14,color:"#111827"}}>{client?.name||<span style={{color:"#9ca3af",fontStyle:"italic",fontWeight:400}}>Клиент не выбран</span>}</span>
+                          <span style={{fontWeight:700,fontSize:14,color:"#111827"}}>{obj.clientName||<span style={{color:"#9ca3af",fontStyle:"italic",fontWeight:400}}>Без клиента</span>}</span>
                           <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:4,padding:"1px 7px",whiteSpace:"nowrap"}}>{st.label}</span>
                         </div>
                         <div style={{fontSize:12,color:"#9ca3af",marginTop:3}}>
@@ -6367,11 +6397,21 @@ export default function App() {
           {/* Workspace объекта */}
           {objectTab==="workspace" && currentObject && (()=>{
             const obj = currentObject;
-            const client = contractClients.find(x=>x.id===obj.clientId);
             const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"lead"))||DEAL_STATUSES[0];
             const objEsts = estimates.filter(e=>e.objectId===obj.id).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
             const objCons = contracts.filter(c=>c.objectId===obj.id).sort((a,b)=>(b.id||0)-(a.id||0));
             const canEdit = currentUser.role==="admin"||(currentUser.role==="user"&&obj.createdById===currentUser.id);
+            // Текст печатаем локально (отзывчиво), сохраняем на blur. Синхронизируем скрытую запись клиента.
+            const setObjLocal = (patch) => setCurrentObject(p=>({...p,...patch}));
+            const persistObj = () => setCurrentObject(p=>{
+              const upd = {...p, updatedAt: Date.now()};
+              saveObjects(objectsRef.current.map(x=>x.id===p.id?upd:x));
+              if (p.clientId) {
+                const cl = clientsRef.current.find(c=>c.id===p.clientId);
+                if (cl) saveContractClients(clientsRef.current.map(c=>c.id===p.clientId?{...c,name:p.clientName||"",phone:p.clientPhone||"",address:p.address||"",iin:p.clientIin||"",doc:p.clientDoc||"",type:p.clientType||"физ"}:c));
+              }
+              return upd;
+            });
 
             return (
               <div style={{padding:"0 24px 40px"}}>
@@ -6390,41 +6430,73 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Клиент */}
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-                    <div>
-                      <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Клиент</div>
-                      <select className="fi" value={obj.clientId||""} disabled={!canEdit}
-                        onChange={e=>saveObjField(obj,{clientId:e.target.value})}>
-                        <option value="">— Выберите клиента —</option>
-                        {contractClients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Менеджер / Замерщик</div>
-                      <input className="fi" value={obj.manager||""} readOnly={!canEdit}
-                        onChange={e=>saveObjField(obj,{manager:e.target.value})}
-                        placeholder="Кто ведёт объект" />
-                    </div>
-                    <div>
-                      <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Адрес</div>
-                      <input className="fi" value={obj.address||""} readOnly={!canEdit}
-                        onChange={e=>saveObjField(obj,{address:e.target.value})}
-                        placeholder="ул. Примерная, д. 1" />
-                    </div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                  {/* Клиент — поля ведутся прямо здесь */}
+                  <div>
+                    <div style={{fontSize:11,color:"#2563eb",fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>👤 Клиент</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
                       <div>
-                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Тип</div>
+                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>ФИО / Название</div>
+                        <input className="fi" value={obj.clientName||""} readOnly={!canEdit}
+                          onChange={e=>setObjLocal({clientName:e.target.value})} onBlur={persistObj}
+                          placeholder="Иванов Иван Иванович" />
+                      </div>
+                      <div>
+                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Тип лица</div>
+                        <select className="fi" value={obj.clientType||"физ"} disabled={!canEdit}
+                          onChange={e=>{ setObjLocal({clientType:e.target.value}); setTimeout(persistObj,0); }}>
+                          <option value="физ">Физ. лицо</option>
+                          <option value="юр">Юр. лицо</option>
+                        </select>
+                      </div>
+                      <div>
+                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Телефон</div>
+                        <input className="fi" value={obj.clientPhone||""} readOnly={!canEdit}
+                          onChange={e=>setObjLocal({clientPhone:e.target.value})} onBlur={persistObj}
+                          placeholder="+7 707 ..." />
+                      </div>
+                      <div>
+                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>{obj.clientType==="юр"?"БИН":"ИИН"}</div>
+                        <input className="fi" value={obj.clientIin||""} readOnly={!canEdit}
+                          onChange={e=>setObjLocal({clientIin:e.target.value})} onBlur={persistObj}
+                          placeholder="12 цифр" />
+                      </div>
+                      <div style={{gridColumn:"1 / -1"}}>
+                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Документ (основание)</div>
+                        <input className="fi" value={obj.clientDoc||""} readOnly={!canEdit}
+                          onChange={e=>setObjLocal({clientDoc:e.target.value})} onBlur={persistObj}
+                          placeholder={obj.clientType==="юр"?"Устав / доверенность":"уд. личности №..."} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Объект */}
+                  <div>
+                    <div style={{fontSize:11,color:"#2563eb",fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>📍 Объект</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                      <div style={{gridColumn:"1 / -1"}}>
+                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Адрес</div>
+                        <input className="fi" value={obj.address||""} readOnly={!canEdit}
+                          onChange={e=>setObjLocal({address:e.target.value})} onBlur={persistObj}
+                          placeholder="ул. Примерная, д. 1" />
+                      </div>
+                      <div>
+                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Тип объекта</div>
                         <select className="fi" value={obj.objType||"Вторичка"} disabled={!canEdit}
-                          onChange={e=>saveObjField(obj,{objType:e.target.value})}>
+                          onChange={e=>{ setObjLocal({objType:e.target.value}); setTimeout(persistObj,0); }}>
                           {["Вторичка","Новостройка","Коммерция","Частный дом","Другое"].map(t=><option key={t} value={t}>{t}</option>)}
                         </select>
                       </div>
                       <div>
-                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Площадь</div>
+                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Площадь, м²</div>
                         <input className="fi" value={obj.area||""} readOnly={!canEdit} type="number"
-                          onChange={e=>saveObjField(obj,{area:e.target.value})}
-                          placeholder="м²" />
+                          onChange={e=>setObjLocal({area:e.target.value})} onBlur={persistObj}
+                          placeholder="75" />
+                      </div>
+                      <div style={{gridColumn:"1 / -1"}}>
+                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Менеджер / Замерщик</div>
+                        <input className="fi" value={obj.manager||""} readOnly={!canEdit}
+                          onChange={e=>setObjLocal({manager:e.target.value})} onBlur={persistObj}
+                          placeholder="Кто ведёт объект" />
                       </div>
                     </div>
                   </div>
@@ -6433,7 +6505,7 @@ export default function App() {
                   <div>
                     <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Заметка</div>
                     <textarea className="fi" rows={2} value={obj.note||""} readOnly={!canEdit}
-                      onChange={e=>saveObjField(obj,{note:e.target.value})}
+                      onChange={e=>setObjLocal({note:e.target.value})} onBlur={persistObj}
                       placeholder="Любая информация по объекту..." style={{resize:"vertical",minHeight:52}} />
                   </div>
                 </div>
