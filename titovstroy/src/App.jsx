@@ -1459,20 +1459,20 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
           <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
             {users.map(u => (
               <div key={u.id} style={{background:"#f3f4f6",border:"1px solid #e5e7eb",borderRadius:6,padding:"16px 18px"}}>
-                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                <div className="user-row" style={{display:"flex",alignItems:"center",gap:12}}>
                   {/* Аватар */}
                   <div style={{width:42,height:42,borderRadius:10,background:"#eff6ff",border:"1px solid #eff6ff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:18}}>
                     {u.role==="admin"?"👑":u.role==="viewer"?"👁":"👤"}
                   </div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{flex:1,minWidth:120}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                       <span style={{fontWeight:700,fontSize:14,color:"#111827"}}>{u.name}</span>
-                      <span style={{fontSize:10,fontWeight:700,color:roleColor(u.role),background:"rgba(0,0,0,.04)",borderRadius:4,padding:"2px 7px"}}>{roleLabel(u.role)}</span>
+                      <span style={{fontSize:10,fontWeight:700,color:roleColor(u.role),background:"rgba(0,0,0,.04)",borderRadius:4,padding:"2px 7px",whiteSpace:"nowrap"}}>{roleLabel(u.role)}</span>
                       {u.id === currentUser.id && <span style={{fontSize:10,color:"#9ca3af",background:"#e5e7eb",borderRadius:4,padding:"2px 7px"}}>вы</span>}
                     </div>
                     <div style={{fontSize:12,color:"#9ca3af",marginTop:1}}>@{u.login}</div>
                   </div>
-                  <div style={{display:"flex",gap:6}}>
+                  <div className="user-row-btns" style={{display:"flex",gap:6,flexShrink:0}}>
                     <button onClick={()=>{setEditingUser(editingUser?.id===u.id?null:{id:u.id,name:u.name,login:u.login});setEditingPass(null);}}
                       style={{background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:7,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
                       ✏ Изменить
@@ -1666,8 +1666,8 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
           })()}
 
           {/* Таблица */}
-          <div style={{overflowX:"auto"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,tableLayout:"fixed"}}>
+          <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+            <table style={{width:"100%",minWidth:760,borderCollapse:"collapse",fontSize:12,tableLayout:"fixed"}}>
               <colgroup>
                 <col style={{width:"13%"}}/>
                 <col style={{width:"24%"}}/>
@@ -4345,6 +4345,8 @@ export default function App() {
           .an-bar-label{width:104px!important;font-size:11px!important}
           .an-bar-right{width:88px!important;font-size:10px!important}
           .an-mtable-num{width:auto!important;min-width:48px!important}
+          .user-row{flex-wrap:wrap!important}
+          .user-row-btns{width:100%!important;justify-content:flex-end!important;margin-top:8px!important}
         }
         .mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:#ffffff;border-top:1px solid #e5e7eb;z-index:50}
         .mob-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;gap:3px;border-top:2px solid transparent;transition:all .15s}
