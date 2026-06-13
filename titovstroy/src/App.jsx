@@ -322,28 +322,45 @@ const simpleHash = (s) => btoa(encodeURIComponent(s)).split("").reverse().join("
 
 // ─── ХРАНИЛИЩЕ: Firebase (общая) + localStorage (резерв) ───────────────────
 const _mem = {};
-const _race = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(null), ms))]);
+const _TIMEOUT = Symbol("timeout");
+const _race = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(_TIMEOUT), ms))]);
 const _fbKey = (k) => k.replace(/[^a-zA-Z0-9_]/g, "_"); // Firebase: только буквы/цифры/_
 const _TS_SUFFIX = "__wts"; // timestamp последней локальной записи
 const storage = {
-  async get(key) {
-    // Если localStorage была записана менее 30с назад — использовать её (свежая локальная запись)
+  // Расширенное чтение: { value, status: 'found'|'empty'|'unavailable' }
+  // 'found' — данные есть; 'empty' — источник точно ответил, данных нет;
+  // 'unavailable' — Firebase не ответил/ошибка И локальной копии нет (НЕЛЬЗЯ затирать!)
+  async getResult(key) {
+    // Свежая локальная запись (<30с) — самый надёжный источник
     try {
       const ts = parseInt(localStorage.getItem(key + _TS_SUFFIX) || "0");
       if (Date.now() - ts < 30000) {
         const v = localStorage.getItem(key);
-        if (v) return { value: v };
+        if (v) return { value: v, status: "found" };
       }
     } catch(e) {}
-    // Иначе пробуем Firebase (для синхронизации между устройствами)
+    // Firebase (синхронизация между устройствами)
+    let fbResponded = !_fbDb; // если FB не сконфигурирован — авторитетен localStorage
     try {
       if (_fbDb) {
-        const snap = await _race(get(ref(_fbDb, _fbKey(key))), 5000);
-        if (snap && snap.exists()) return { value: JSON.stringify(snap.val()) };
+        const snap = await _race(get(ref(_fbDb, _fbKey(key))), 8000);
+        if (snap === _TIMEOUT) {
+          fbResponded = false; // таймаут — НЕ знаем что в базе
+        } else {
+          fbResponded = true;
+          if (snap && snap.exists()) return { value: JSON.stringify(snap.val()), status: "found" };
+        }
       }
-    } catch(e) { console.warn("FB get error:", e); }
-    try { const v = localStorage.getItem(key); if (v) return { value: v }; } catch(e) {}
-    return _mem[key] ? { value: _mem[key] } : null;
+    } catch(e) { console.warn("FB get error:", e); fbResponded = false; }
+    // Резерв: localStorage любой давности
+    try { const v = localStorage.getItem(key); if (v) return { value: v, status: "found" }; } catch(e) {}
+    if (_mem[key]) return { value: _mem[key], status: "found" };
+    // Ничего не нашли: различаем «точно пусто» и «недоступно»
+    return { value: null, status: fbResponded ? "empty" : "unavailable" };
+  },
+  async get(key) {
+    const r = await this.getResult(key);
+    return r.status === "found" ? { value: r.value } : null;
   },
   async set(key, value) {
     const parsed = (() => { try { return JSON.parse(value); } catch { return value; } })();
@@ -2189,6 +2206,7 @@ export default function App() {
     } catch(e) { return null; }
   });
   const [showAdmin, setShowAdmin] = useState(false);
+  const [loadError, setLoadError] = useState(false); // не удалось загрузить из Firebase — сохранение заблокировано
 
   // Экраны: "list" | "editor" | "contracts"
   const [screen, setScreen] = useState("dashboard");
@@ -2340,22 +2358,43 @@ export default function App() {
     return () => clearTimeout(_contractAutoSave.current);
   }, [currentContract]);
 
+  const _estimatesLoaded = useRef(false); // защита: не сохранять пока не загрузились из Firebase
+
   const loadEstimates = useCallback(async () => {
     setLoadingList(true);
+    let ok = false;
     try {
       const [result, u, pr, cat] = await Promise.all([
-        storage.get(STORAGE_KEY),
+        storage.getResult(STORAGE_KEY),
         storage.get(USERS_KEY),
         storage.get(PRICES_KEY),
         storage.get(CATALOG_KEY),
       ]);
-      try { if (result) setEstimates(JSON.parse(result.value)); else setEstimates([]); } catch { setEstimates([]); }
+      if (result.status === "found" && result.value) {
+        try {
+          const parsed = JSON.parse(result.value);
+          if (Array.isArray(parsed)) { setEstimates(parsed); estimatesRef.current = parsed; ok = true; }
+          else console.error("loadEstimates: данные не массив — не трогаем");
+        } catch(e) {
+          console.error("loadEstimates parse error — данные не тронуты", e);
+        }
+      } else if (result.status === "empty") {
+        // Источник точно ответил и данных нет — корректно показываем пустой список
+        setEstimates([]); estimatesRef.current = []; ok = true;
+      } else {
+        // 'unavailable' — Firebase не ответил, локальной копии нет.
+        // НЕ затираем стейт и НЕ разрешаем сохранение (иначе пустой список перетрёт базу).
+        console.error("loadEstimates: данные недоступны (Firebase не ответил) — сохранение заблокировано до перезагрузки");
+        setLoadError(true);
+      }
       try { if (u) setAllUsers(JSON.parse(u.value)); } catch {}
       try { if (pr) setPriceOverrides(JSON.parse(pr.value)); } catch {}
       try { if (cat) setCatalogOverrides(JSON.parse(cat.value)); } catch {}
     } catch(e) {
-      setEstimates([]);
+      console.error("loadEstimates error — данные не тронуты", e);
     }
+    // Разрешаем запись ТОЛЬКО если успешно подтвердили состояние базы
+    _estimatesLoaded.current = ok;
     setLoadingList(false);
   }, []);
 
@@ -2363,6 +2402,24 @@ export default function App() {
 
   // ── Сохранение всего списка ──
   const saveEstimates = useCallback(async (list) => {
+    // Не писать пока начальная загрузка не подтверждена — иначе пустой стейт перетрёт данные
+    if (!_estimatesLoaded.current) { console.warn("saveEstimates заблокирован: данные ещё не загружены/недоступны"); return; }
+    if (!Array.isArray(list)) { console.error("saveEstimates: список не массив — отмена"); return; }
+    // ФИНАЛЬНЫЙ ПРЕДОХРАНИТЕЛЬ: не затирать непустую базу пустым списком без явного разрешения
+    try {
+      const prevCheck = await storage.getResult(STORAGE_KEY);
+      if (prevCheck.status === "found" && prevCheck.value) {
+        let prevArr = []; try { prevArr = JSON.parse(prevCheck.value); } catch {}
+        if (Array.isArray(prevArr) && prevArr.length > 0 && list.length === 0 && !_allowEmptySave.current) {
+          console.error("saveEstimates ЗАБЛОКИРОВАН: попытка записать пустой список поверх", prevArr.length, "смет");
+          return;
+        }
+      } else if (prevCheck.status === "unavailable" && list.length === 0) {
+        // База недоступна и мы собираемся писать пусто — слишком рискованно
+        console.error("saveEstimates ЗАБЛОКИРОВАН: база недоступна, пустая запись отменена");
+        return;
+      }
+    } catch(e) { console.warn("guard check err", e); }
     setSaving(true);
     try {
       // Авто-бэкап: перед перезаписью сохраняем снимок предыдущего архива (последние 20)
@@ -2704,9 +2761,13 @@ export default function App() {
 
   // ── Удалить смету ──
   const deleteEstimate = async (id) => {
-    const newList = estimates.filter(e => e.id !== id);
+    const newList = estimatesRef.current.filter(e => e.id !== id);
+    estimatesRef.current = newList;
     setEstimates(newList);
+    // явное удаление — разрешаем сохранить даже если список стал пустым
+    _allowEmptySave.current = true;
     await saveEstimates(newList);
+    setTimeout(() => { _allowEmptySave.current = false; }, 1000);
     setDeleteConfirm(null);
   };
 
@@ -3896,6 +3957,13 @@ export default function App() {
 
   return (
     <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#f3f4f6",minHeight:"100vh",color:"#111827",display:"flex",flexDirection:"column"}}>
+      {/* Баннер: данные не загрузились — редактирование опасно */}
+      {loadError && (
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:500,background:"#dc2626",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
+          ⚠️ Не удалось загрузить данные из базы. НЕ редактируйте сметы — сохранение отключено для защиты данных.
+          <button onClick={()=>window.location.reload()} style={{background:"#fff",color:"#dc2626",border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Обновить</button>
+        </div>
+      )}
       {/* Панель администратора */}
 
       <style>{`
