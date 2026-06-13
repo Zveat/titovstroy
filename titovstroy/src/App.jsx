@@ -4315,12 +4315,16 @@ export default function App() {
   // ─────────────────────────────────────────────────────────────────────────
   // Показать экран входа если не авторизован
   if (!currentUser) return <LoginScreen onLogin={setCurrentUser} />;
+  // Наблюдатель не имеет доступа к дашборду/аналитике — редиректим на сметы
+  if (currentUser.role === "viewer" && (screen === "dashboard" || screen === "analytics" || screen === "admin")) {
+    setScreen("list"); return null;
+  }
 
   const NAV_ITEMS = useMemo(() => [
-    { id:"dashboard", icon:"⌂",  label:"Главная" },
+    ...(currentUser.role !== "viewer" ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
     { id:"list",      icon:"📋", label:"Сметы" },
     { id:"contracts", icon:"📄", label:"Договора" },
-    { id:"analytics", icon:"📊", label:"Аналитика" },
+    ...(currentUser.role !== "viewer" ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
     ...(currentUser.role==="admin" ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
   ], [currentUser.role]);
 
@@ -4876,7 +4880,7 @@ export default function App() {
                                 ⧉
                               </button>
                             )}
-                            {currentUser.role==="admin" && (
+                            {(currentUser.role==="admin" || (currentUser.role==="user" && est.createdBy===currentUser.name)) && (
                               <button onClick={()=>setDeleteConfirm(est.id)}
                                 style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
                                 🗑
@@ -5878,7 +5882,7 @@ export default function App() {
               </button>
             )}
             {contractTab === "list" && currentUser.role !== "viewer" && (
-              <button className="btn btn-g" style={{fontSize:12,padding:"7px 14px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:""}); setContractTab("editor"); }}>+ Новый</button>
+              <button className="btn btn-g" style={{fontSize:12,padding:"7px 14px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:"",createdBy:currentUser.name,createdById:currentUser.id}); setContractTab("editor"); }}>+ Новый</button>
             )}
           </div>
 
@@ -5971,7 +5975,7 @@ export default function App() {
                                   const ca2 = contragents.find(x=>x.id===c.contragentId);
                                   generateContractGDoc(c, cl, ca2);
                                 }} style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>
-                                {currentUser.role==="admin" && (
+                                {(currentUser.role==="admin" || (currentUser.role==="user" && c.createdBy===currentUser.name)) && (
                                   <button onClick={e=>{e.stopPropagation(); if(window.confirm("Удалить документ?")) saveContracts(contractsRef.current.filter(x=>x.id!==c.id), {removedIds:[c.id], allowEmpty:true});}}
                                     style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                                 )}
@@ -6035,8 +6039,10 @@ export default function App() {
               <div style={{display:"flex",flexDirection:"column",gap:12}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div style={{fontWeight:700,color:"#9ca3af",fontSize:12}}>КЛИЕНТЫ ({contractClients.length})</div>
-                  <button onClick={()=>{ setCurrentContract({id:Date.now().toString(),name:"",phone:"",address:"",iin:"",doc:"",type:"физ",createdAt:Date.now(),_mode:"newClient"}); setContractTab("clientEditor"); }}
-                    className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
+                  {currentUser.role !== "viewer" && (
+                    <button onClick={()=>{ setCurrentContract({id:Date.now().toString(),name:"",phone:"",address:"",iin:"",doc:"",type:"физ",createdAt:Date.now(),createdById:currentUser.id,_mode:"newClient"}); setContractTab("clientEditor"); }}
+                      className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
+                  )}
                 </div>
                 {contractClients.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#374151",fontSize:13}}>Клиентов пока нет</div>}
                 {contractClients.map(c=>(
@@ -6052,10 +6058,14 @@ export default function App() {
                         {c.address&&<div style={{fontSize:12,color:"#9ca3af",marginTop:1}}>📍 {c.address}</div>}
                       </div>
                       <div style={{display:"flex",gap:5}}>
-                        <button onClick={()=>{ setCurrentContract({...c,_mode:"editClient"}); setContractTab("clientEditor"); }}
-                          style={{background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
-                        {currentUser.role==="admin"&&<button onClick={()=>{ if(window.confirm("Удалить клиента?")) saveContractClients(clientsRef.current.filter(x=>x.id!==c.id), {removedIds:[c.id], allowEmpty:true}); }}
-                          style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
+                        {(currentUser.role==="admin" || (currentUser.role==="user" && c.createdById===currentUser.id)) && (
+                          <button onClick={()=>{ setCurrentContract({...c,_mode:"editClient"}); setContractTab("clientEditor"); }}
+                            style={{background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                        )}
+                        {(currentUser.role==="admin" || (currentUser.role==="user" && c.createdById===currentUser.id)) && (
+                          <button onClick={()=>{ if(window.confirm("Удалить клиента?")) saveContractClients(clientsRef.current.filter(x=>x.id!==c.id), {removedIds:[c.id], allowEmpty:true}); }}
+                            style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -6107,8 +6117,10 @@ export default function App() {
               <div style={{display:"flex",flexDirection:"column",gap:12}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div style={{fontWeight:700,color:"#9ca3af",fontSize:12}}>ТОО / ПОДРЯДЧИКИ ({contragents.length})</div>
-                  <button onClick={()=>{ setCurrentContract({id:Date.now().toString(),name:"",bin:"",bank:"",bik:"",account:"",director:"",phone:"",email:"",address:"",_mode:"newCA"}); setContractTab("caEditor"); }}
-                    className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
+                  {currentUser.role==="admin" && (
+                    <button onClick={()=>{ setCurrentContract({id:Date.now().toString(),name:"",bin:"",bank:"",bik:"",account:"",director:"",phone:"",email:"",address:"",_mode:"newCA"}); setContractTab("caEditor"); }}
+                      className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
+                  )}
                 </div>
                 {contragents.map(c=>(
                   <div key={c.id} style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px 16px"}}>
@@ -6118,12 +6130,14 @@ export default function App() {
                         <div style={{fontSize:12,color:"#9ca3af",marginTop:1}}>БИН: {c.bin} · {c.bank}</div>
                         <div style={{fontSize:12,color:"#9ca3af",marginTop:1}}>Директор: {c.director} · {c.phone}</div>
                       </div>
-                      <div style={{display:"flex",gap:5}}>
-                        <button onClick={()=>{ setCurrentContract({...c,_mode:"editCA"}); setContractTab("caEditor"); }}
-                          style={{background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
-                        {currentUser.role==="admin"&&contragents.length>1&&<button onClick={()=>{ if(window.confirm("Удалить?")) saveContragents(contragentsRef.current.filter(x=>x.id!==c.id), {removedIds:[c.id], allowEmpty:true}); }}
-                          style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
-                      </div>
+                      {currentUser.role==="admin" && (
+                        <div style={{display:"flex",gap:5}}>
+                          <button onClick={()=>{ setCurrentContract({...c,_mode:"editCA"}); setContractTab("caEditor"); }}
+                            style={{background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                          {contragents.length>1&&<button onClick={()=>{ if(window.confirm("Удалить?")) saveContragents(contragentsRef.current.filter(x=>x.id!==c.id), {removedIds:[c.id], allowEmpty:true}); }}
+                            style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
