@@ -2525,6 +2525,7 @@ export default function App() {
   const objectsRef = useRef([]);
   useEffect(() => { objectsRef.current = objects; }, [objects]);
   const [objectTab, setObjectTab] = useState("list"); // list | workspace
+  const [objInfoCollapsed, setObjInfoCollapsed] = useState(false); // свёрнут ли блок инфо клиента/объекта
   const [currentObject, setCurrentObject] = useState(null);
   const [objectFilterStatus, setObjectFilterStatus] = useState("");
   const [objectReturnId, setObjectReturnId] = useState(null); // id объекта, куда вернуться из редактора сметы/договора
@@ -3308,26 +3309,29 @@ export default function App() {
     if (_autoSaveRef.current) clearTimeout(_autoSaveRef.current);
     estimatesRef.current = newList;
     setEstimates(newList);
-    await saveEstimates(newList);
-    // если редактировали смету объекта — обновляем updatedAt объекта
-    if (objectReturnId) {
-      const obj = objectsRef.current.find(x=>x.id===objectReturnId);
+    // Навигируем сразу (не ждём облако), сохраняем в фоне — иначе кнопка «не нажимается» при медленном сохранении
+    const retObj = objectReturnId;
+    const retDeal = dealReturnId;
+    _backFromEditor();
+    saveEstimates(newList);
+    // если редактировали смету объекта — обновляем updatedAt объекта (фон)
+    if (retObj) {
+      const obj = objectsRef.current.find(x=>x.id===retObj);
       if (obj) {
         const updObj = {...obj, updatedAt: Date.now()};
         const rest = objectsRef.current.filter(x=>x.id!==obj.id);
-        await saveObjects([...rest, updObj]);
+        saveObjects([...rest, updObj]);
       }
     }
-    // если редактировали смету сделки — синхронизируем итог обратно в сделку
-    if (dealReturnId) {
-      const dl = dealsRef.current.find(x=>x.id===dealReturnId);
+    // если редактировали смету сделки — синхронизируем итог обратно в сделку (фон)
+    if (retDeal) {
+      const dl = dealsRef.current.find(x=>x.id===retDeal);
       if (dl) {
         const updDeal = {...dl, estId: currentId, total: final, updatedAt: Date.now()};
         const rest = dealsRef.current.filter(x=>x.id!==dl.id);
-        await saveDeals([...rest, updDeal]);
+        saveDeals([...rest, updDeal]);
       }
     }
-    _backFromEditor();
   };
 
   // ── Новая доп. смета (ДС) к существующей ──
@@ -6440,8 +6444,25 @@ export default function App() {
           {objectTab==="workspace" && currentObject && (()=>{
             const obj = currentObject;
             const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"lead"))||DEAL_STATUSES[0];
-            const objEsts = estimates.filter(e=>e.objectId===obj.id).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
-            const objCons = contracts.filter(c=>c.objectId===obj.id).sort((a,b)=>(b.id||0)-(a.id||0));
+            const _allEsts = estimates.filter(e=>e.objectId===obj.id);
+            const _allCons = contracts.filter(c=>c.objectId===obj.id);
+            // Дерево смет: основная смета → под ней доп. сметы (ДС)
+            const _estMains = _allEsts.filter(e=>!e.parentId).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+            const objEsts = [];
+            _estMains.forEach(m=>{
+              objEsts.push(m);
+              _allEsts.filter(e=>e.parentId===m.id).sort((a,b)=>(a.dsNumber||0)-(b.dsNumber||0)).forEach(ch=>objEsts.push(ch));
+            });
+            // осиротевшие ДС (родитель удалён) — показываем в конце
+            _allEsts.filter(e=>e.parentId && !_estMains.some(m=>m.id===e.parentId)).forEach(ch=>objEsts.push(ch));
+            // Дерево договоров: основной договор → под ним доп. соглашения (приложения)
+            const _conMains = _allCons.filter(c=>(c.type||"repair_fiz")!=="annex").sort((a,b)=>(b.id||0)-(a.id||0));
+            const objCons = [];
+            _conMains.forEach(m=>{
+              objCons.push(m);
+              _allCons.filter(c=>c.type==="annex" && c.mainNumber && c.mainNumber===m.number).sort((a,b)=>(a.appendix||0)-(b.appendix||0)).forEach(ch=>objCons.push(ch));
+            });
+            _allCons.filter(c=>c.type==="annex" && !(c.mainNumber && _conMains.some(m=>m.number===c.mainNumber))).forEach(ch=>objCons.push(ch));
             const canEdit = currentUser.role==="admin"||(currentUser.role==="user"&&obj.createdById===currentUser.id);
             // Текст печатаем локально (отзывчиво), сохраняем на blur. Синхронизируем скрытую запись клиента.
             const setObjLocal = (patch) => setCurrentObject(p=>({...p,...patch}));
@@ -6478,7 +6499,19 @@ export default function App() {
                     ))}
                   </div>
 
+                  {/* Сводка клиента/объекта + сворачивание */}
+                  <div onClick={()=>setObjInfoCollapsed(v=>!v)} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",padding:"2px 0",userSelect:"none"}}>
+                    <span style={{fontSize:11,color:"#2563eb",fontWeight:700,letterSpacing:.5,textTransform:"uppercase"}}>👤 Клиент и объект</span>
+                    {objInfoCollapsed && (
+                      <span style={{fontSize:12,color:"#6b7280",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
+                        {[obj.clientName, obj.clientPhone, obj.address].filter(Boolean).join(" · ")||"не заполнено"}
+                      </span>
+                    )}
+                    <span style={{marginLeft:objInfoCollapsed?0:"auto",fontSize:12,color:"#9ca3af",fontWeight:600}}>{objInfoCollapsed?"▼ развернуть":"▲ свернуть"}</span>
+                  </div>
+
                   {/* Клиент + Объект — одна сетка */}
+                  {!objInfoCollapsed && (
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
                     {/* Выбор клиента — на всю ширину если есть список */}
                     {contractClients.length>0 && canEdit && (
@@ -6584,6 +6617,7 @@ export default function App() {
                         placeholder="Заметка..." />
                     </div>
                   </div>
+                  )}
                 </div>
 
                 {/* Сметы объекта */}
@@ -6610,7 +6644,7 @@ export default function App() {
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                                {isChild && <span style={{fontSize:10,fontWeight:700,color:"#059669",background:"rgba(5,150,105,.08)",borderRadius:3,padding:"1px 6px"}}>ДС №{est.dsNumber||1}</span>}
+                                {isChild && <span style={{fontSize:10,fontWeight:700,color:"#059669",background:"rgba(5,150,105,.08)",borderRadius:3,padding:"1px 6px"}}>Доп. смета №{est.dsNumber||1}</span>}
                                 <span style={{fontWeight:600,fontSize:13,color:"#111827"}}>{est.proj?.name||obj.clientName||obj.address||"Новая смета"}</span>
                                 <span style={{fontSize:10,fontWeight:700,color:stEst.color,background:stEst.bg,borderRadius:4,padding:"1px 6px"}}>{stEst.label}</span>
                               </div>
@@ -6622,11 +6656,11 @@ export default function App() {
                             <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
                               <div style={{fontWeight:800,fontSize:15,color:"#111827"}}>{fmt(est.total||0)} ₸</div>
                               <div style={{display:"flex",gap:4}} onClick={e=>e.stopPropagation()}>
-                                <button title={isChild?"Создать доп. соглашение из этой ДС":"Создать договор из сметы"} onClick={()=>openObjectContract(obj,est)}
-                                  style={{background:"rgba(184,144,74,.08)",color:"#2563eb",border:"1px solid #eff6ff",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄 {isChild?"Доп.согл":"Договор"}</button>
+                                <button title={isChild?"Создать доп. соглашение из этой доп. сметы":"Создать договор из сметы"} onClick={()=>openObjectContract(obj,est)}
+                                  style={{background:"rgba(184,144,74,.08)",color:"#2563eb",border:"1px solid #eff6ff",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄 {isChild?"Доп. соглашение":"Договор"}</button>
                                 {currentUser.role!=="viewer" && !isChild && (
-                                  <button title="Доп. смета (ДС)" onClick={()=>{ setObjectReturnId(obj.id); newSupplementaryEstimate(est); }}
-                                    style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>+ДС</button>
+                                  <button title="Создать доп. смету к этой смете" onClick={()=>{ setObjectReturnId(obj.id); newSupplementaryEstimate(est); }}
+                                    style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>+ Доп. смета</button>
                                 )}
                                 {currentUser.role!=="viewer" && (
                                   <button title="Дублировать" onClick={()=>duplicateEstimate(est)}
@@ -6662,14 +6696,16 @@ export default function App() {
                       const ca2 = contragents.find(x=>x.id===c.contragentId);
                       const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
                       const stC = CONTRACT_STATUSES.find(x=>x.key===(c.contractStatus||"draft"))||CONTRACT_STATUSES[0];
-                      const TLABEL = {repair_fiz:"Договор",annex:"Приложение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронь"};
-                      const conTitle = c.type==="annex" ? `Приложение №${c.appendix||2}`+(c.mainNumber?` к №${c.mainNumber}`:"") : `${TLABEL[c.type||"repair_fiz"]||"Договор"} №${c.number||"б/н"}`;
+                      const TLABEL = {repair_fiz:"Договор",annex:"Доп. соглашение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронь"};
+                      const isAnnex = c.type==="annex";
+                      const conTitle = isAnnex ? `Доп. соглашение №${c.appendix||2}`+(c.mainNumber?` к договору №${c.mainNumber}`:"") : `${TLABEL[c.type||"repair_fiz"]||"Договор"} №${c.number||"б/н"}`;
                       return (
-                        <div key={c.id} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"12px 16px",cursor:"pointer",transition:"all .12s"}}
+                        <div key={c.id} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"12px 16px",cursor:"pointer",transition:"all .12s",marginLeft:isAnnex?16:0,borderLeft:isAnnex?"3px solid #ede9fe":"1px solid #e5e7eb"}}
                           onClick={()=>{ setCurrentContract({...c}); setObjectReturnId(obj.id); setContractTab("editor"); setScreen("contracts"); }}>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                                {isAnnex && <span style={{fontSize:10,fontWeight:700,color:"#7c3aed",background:"rgba(124,58,237,.08)",borderRadius:3,padding:"1px 6px"}}>Доп. согл.</span>}
                                 <span style={{fontWeight:600,fontSize:13,color:"#111827"}}>{conTitle}</span>
                                 <span style={{fontSize:10,fontWeight:700,color:stC.color,background:stC.bg,borderRadius:4,padding:"1px 6px"}}>{stC.label}</span>
                               </div>
@@ -6705,7 +6741,8 @@ export default function App() {
 
       {effScreen === "contracts" && (
         <div style={{maxWidth:960,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
-          {/* Шапка */}
+          {/* Шапка + табы — скрываем в режиме редактора договора (у него своя шапка) */}
+          {contractTab !== "editor" && (<>
           <div className="contracts-header" style={{background:"#f3f4f6",borderBottom:"1px solid #e5e7eb",padding:"12px 24px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
             <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
             <div style={{width:28,height:28,borderRadius:6,background:"#2563eb",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#f3f4f6"}}>T</div>
@@ -6731,6 +6768,7 @@ export default function App() {
               </button>
             ))}
           </div>
+          </>)}
 
           <div className="contracts-pad" style={{padding:"20px 24px"}}>
 
