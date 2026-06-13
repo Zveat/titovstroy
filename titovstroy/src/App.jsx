@@ -2263,6 +2263,7 @@ export default function App() {
   const [estSentAt, setEstSentAt] = useState("");
   const [estComment, setEstComment] = useState("");
   const [showStats, setShowStats] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [statsPeriod, setStatsPeriod] = useState("all"); // all | month | week | 3month
   const [statsManager, setStatsManager] = useState(""); // "" = все
   const [statsDateFrom, setStatsDateFrom] = useState("");
@@ -2334,6 +2335,26 @@ export default function App() {
     }
   }, [catalogVersion]);
 
+  // ── Мини-журнал изменений сметы ──
+  // Логируем: создание, смену статуса (всегда), и «редактировал» (коалесцируем 1 запись на 10 мин).
+  const _appendHistory = useCallback((exists, updated) => {
+    const hist = Array.isArray(exists?.history) ? exists.history.map(h => ({ ...h })) : [];
+    const now = Date.now();
+    const by = currentUser?.name || "";
+    const total = Math.round(updated.total || 0);
+    const push = (action) => hist.push({ ts: now, by, action, total });
+    if (!exists) { push("создал смету"); return hist.slice(-60); }
+    if ((exists.status || "new") !== (updated.status || "new")) {
+      const lbl = (STATUSES.find(s => s.key === (updated.status || "new")) || {}).label || updated.status;
+      push(`статус → «${lbl}»`);
+    }
+    const last = hist[hist.length - 1];
+    const recentEdit = last && last.by === by && last.action === "редактировал" && (now - last.ts) < 10 * 60 * 1000;
+    if (!recentEdit) push("редактировал");
+    else { last.ts = now; last.total = total; }
+    return hist.slice(-60);
+  }, [currentUser]);
+
   // Автосохранение сметы
   const _autoSaveRef = useRef(null);
   useEffect(() => {
@@ -2349,7 +2370,8 @@ export default function App() {
       // parentId/dsNumber берём из стейта (новая ДС) ИЛИ из сохранённой записи (открытая ДС)
       const pId = currentParentId || exists?.parentId;
       const dsN = currentDsNumber || exists?.dsNumber;
-      const updated = { id:currentId, proj, rows, discount, markup, note, status:estStatus, comment:estComment, createdAt:exists?.createdAt||Date.now(), createdBy:exists?.createdBy||currentUser?.name, updatedAt:Date.now(), updatedBy:currentUser?.name, total:final, ...(pId ? {parentId:pId, dsNumber:dsN} : {}) };
+      const updated = { id:currentId, proj, rows, discount, markup, note, status:estStatus, sentAt: estStatus==="sent" ? (estSentAt||exists?.sentAt||new Date().toISOString().slice(0,10)) : (exists?.sentAt||null), comment:estComment, createdAt:exists?.createdAt||Date.now(), createdBy:exists?.createdBy||currentUser?.name, updatedAt:Date.now(), updatedBy:currentUser?.name, total:final, ...(pId ? {parentId:pId, dsNumber:dsN} : {}) };
+      updated.history = _appendHistory(exists, updated);
       const newList = exists ? cur.map(e=>e.id===currentId?updated:e) : [updated,...cur];
       setEstimates(newList);
       saveEstimates(newList);
@@ -2890,6 +2912,7 @@ export default function App() {
       total: final,
       ...(pId ? {parentId:pId, dsNumber:dsN} : {}),
     };
+    updated.history = _appendHistory(exists, updated);
     const newList = exists
       ? cur.map(e => e.id === currentId ? updated : e)
       : [updated, ...cur];
@@ -4344,6 +4367,47 @@ export default function App() {
             ))}
           </div>
 
+          {/* Воронка по статусам */}
+          {(() => {
+            const real = estimates.filter(e => (e.total||0) > 0 || (e.status&&e.status!=="new"));
+            const byKey = {};
+            for (const s of STATUSES) byKey[s.key] = { count:0, sum:0 };
+            for (const e of real) { const k=(e.status||"new"); if(!byKey[k]) byKey[k]={count:0,sum:0}; byKey[k].count++; byKey[k].sum+=(e.total||0); }
+            const totalCount = real.length;
+            if (totalCount === 0) return null;
+            const maxCount = Math.max(1, ...STATUSES.map(s=>byKey[s.key]?.count||0));
+            const sentN = byKey.sent?.count||0, agreedN = byKey.agreed?.count||0;
+            const convOverall = totalCount>0 ? Math.round(agreedN/totalCount*100) : 0;
+            const convSent = (sentN+agreedN)>0 ? Math.round(agreedN/(sentN+agreedN)*100) : 0;
+            return (
+              <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"20px 22px",marginBottom:36,boxShadow:"0 1px 2px rgba(0,0,0,.04)"}}>
+                <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:16}}>
+                  <span style={{fontWeight:700,fontSize:15,color:"#111827"}}>Воронка по статусам</span>
+                  <span style={{fontSize:12,color:"#6b7280"}}>
+                    Конверсия в согласование: <b style={{color:"#059669"}}>{convOverall}%</b>
+                    {(sentN+agreedN)>0 && <span style={{color:"#9ca3af"}}> · из отправленных <b style={{color:"#7c3aed"}}>{convSent}%</b></span>}
+                  </span>
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  {STATUSES.map(s=>{
+                    const d = byKey[s.key]||{count:0,sum:0};
+                    const w = Math.round((d.count/maxCount)*100);
+                    return (
+                      <div key={s.key} style={{display:"flex",alignItems:"center",gap:12}}>
+                        <span style={{fontSize:12,fontWeight:600,color:s.color,width:140,flexShrink:0}}>{s.label}</span>
+                        <div style={{flex:1,background:"rgba(0,0,0,.04)",borderRadius:6,height:24,position:"relative",overflow:"hidden"}}>
+                          <div style={{width:`${w}%`,minWidth:d.count>0?28:0,height:"100%",background:s.bg,borderLeft:`3px solid ${s.color}`,transition:"width .3s"}}/>
+                          <span style={{position:"absolute",left:8,top:0,height:"100%",display:"flex",alignItems:"center",fontSize:12,fontWeight:700,color:s.color}}>{d.count}</span>
+                        </div>
+                        <span style={{fontSize:12,color:"#6b7280",width:130,textAlign:"right",flexShrink:0}}>{d.sum>0?fmt(Math.round(d.sum))+" ₸":"—"}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Лента активности */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:16}}>
             {/* Последние сметы */}
@@ -5177,6 +5241,30 @@ export default function App() {
                     </div>
                   )}
                 </div>
+                {/* История изменений */}
+                {(() => {
+                  const rec = estimates.find(e => e.id === currentId);
+                  const hist = Array.isArray(rec?.history) ? rec.history : [];
+                  if (hist.length === 0) return null;
+                  return (
+                    <div className="card" style={{padding:14}}>
+                      <div onClick={()=>setShowHistory(v=>!v)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer"}}>
+                        <span style={{fontSize:10,color:"#9ca3af",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase"}}>История изменений ({hist.length})</span>
+                        <span style={{fontSize:12,color:"#9ca3af"}}>{showHistory?"▲":"▼"}</span>
+                      </div>
+                      {showHistory && (
+                        <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:0,maxHeight:240,overflowY:"auto"}}>
+                          {[...hist].reverse().map((h,i)=>(
+                            <div key={i} style={{display:"flex",gap:8,padding:"6px 0",borderTop:i>0?"1px solid rgba(0,0,0,.05)":"none",fontSize:12}}>
+                              <span style={{color:"#9ca3af",whiteSpace:"nowrap",flexShrink:0,fontSize:11}}>{fmtDate(h.ts)}</span>
+                              <span style={{flex:1,color:"#374151"}}><b style={{color:"#111827"}}>{h.by||"?"}</b> · {h.action}{h.total>0?<span style={{color:"#9ca3af"}}> · {fmt(h.total)} ₸</span>:null}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 {/* Комментарий для менеджера */}
                 <div className="card" style={{padding:14}}>
                   <div style={{fontSize:10,color:"#9ca3af",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:7}}>Комментарий</div>
