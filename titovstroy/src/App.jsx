@@ -274,6 +274,21 @@ const CONTRACT_STATUSES = [
   { key:"signed",  label:"Заключён",     color:"#059669", bg:"rgba(5,150,105,.1)"   },
   { key:"archive", label:"Архив",        color:"#6b7280", bg:"rgba(107,114,128,.12)"},
 ];
+// ТЕСТ: единая воронка «Сделки» (смета+договор в одной карточке)
+const DEAL_STATUSES = [
+  { key:"lead",     label:"Лид",         color:"#6b7280", bg:"#f3f4f6"              },
+  { key:"measure",  label:"Замер",       color:"#0891b2", bg:"rgba(8,145,178,.1)"   },
+  { key:"estimate", label:"Смета",       color:"#2563eb", bg:"#eff6ff"              },
+  { key:"sent",     label:"Отправлена",  color:"#7c3aed", bg:"rgba(124,58,237,.1)"  },
+  { key:"agreed",   label:"Согласована", color:"#d97706", bg:"rgba(217,119,6,.12)"  },
+  { key:"contract", label:"Договор",     color:"#db2777", bg:"rgba(219,39,119,.1)"  },
+  { key:"signed",   label:"Подписан",    color:"#059669", bg:"rgba(5,150,105,.1)"   },
+  { key:"inwork",   label:"В работе",    color:"#16a34a", bg:"rgba(22,163,74,.1)"   },
+  { key:"done",     label:"Завершён",    color:"#374151", bg:"rgba(55,65,81,.08)"   },
+  { key:"rejected", label:"Отказ",       color:"#dc2626", bg:"rgba(220,38,38,.12)"  },
+];
+const DEALS_KEY          = "titovstroy-deals";
+const DEALS_BACKUPS_KEY  = "titovstroy-deals-backups";
 const STORAGE_KEY        = "titovstroy-estimates";
 const BACKUPS_KEY        = "titovstroy-estimates-backups"; // снимки архива для восстановления
 const USERS_KEY          = "titovstroy-users";
@@ -2236,6 +2251,169 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
   );
 }
 
+// ── ТЕСТ: Редактор сделки (смета + договор в одной карточке) ──
+function DealEditor({ deal, clients, contragents, onUpdate, onBack, onEstimatePdf, onContractPdf, onAddClient, onUpdateClient, role, fmt }) {
+  const [withStamp, setWithStamp] = useState(true);
+  const [showClientForm, setShowClientForm] = useState(false);
+  const upd = (patch) => onUpdate(prev=>({...prev,...patch}));
+  const works = deal.works||[];
+  const total = works.reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
+  const disc = Math.round(total*(deal.discount||0)/100);
+  const fin = total - disc;
+  const readonly = role==="viewer";
+  const client = clients.find(c=>c.id===deal.clientId);
+  const stIdx = DEAL_STATUSES.findIndex(s=>s.key===(deal.status||"lead"));
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:18}}>←</button>
+        <span style={{fontWeight:700,fontSize:15,color:"#111827"}}>{client?.name || "Новая сделка"}</span>
+      </div>
+
+      {/* ВОРОНКА СТАТУСОВ */}
+      <div>
+        <div style={{fontSize:11,color:"#9ca3af",marginBottom:6}}>Этап сделки</div>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+          {DEAL_STATUSES.map((s,i)=>{
+            const active = (deal.status||"lead")===s.key;
+            const passed = i<stIdx;
+            return (
+              <button key={s.key} disabled={readonly} onClick={()=>upd({status:s.key})}
+                style={{background:active?s.bg:passed?"rgba(5,150,105,.05)":"rgba(0,0,0,.03)",color:active?s.color:passed?"#059669":"#9ca3af",border:`1px solid ${active?s.color:passed?"rgba(5,150,105,.2)":"#e5e7eb"}`,borderRadius:6,padding:"5px 10px",fontSize:11,fontWeight:active?700:600,cursor:readonly?"default":"pointer",fontFamily:"inherit"}}>
+                {passed?"✓ ":""}{s.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* КЛИЕНТ */}
+      <div>
+        <div style={{fontSize:12,fontWeight:700,color:"#9ca3af",marginBottom:8}}>КЛИЕНТ</div>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          <select className="fi" style={{flex:1}} disabled={readonly} value={deal.clientId||""} onChange={e=>upd({clientId:e.target.value})}>
+            <option value="">— Выбрать клиента —</option>
+            {clients.map(c=>(<option key={c.id} value={c.id}>{c.name}{c.type==="юр"?" (ЮР)":""}</option>))}
+          </select>
+          {!readonly && <button onClick={()=>{const n=window.prompt("Имя нового клиента:"); if(n!==null) onAddClient(n);}}
+            style={{background:"#eff6ff",color:"#059669",border:"1px solid #e5e7eb",borderRadius:6,padding:"8px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ Новый</button>}
+          {deal.clientId && <button onClick={()=>setShowClientForm(s=>!s)}
+            style={{background:showClientForm?"#eff6ff":"#f3f4f6",color:"#2563eb",border:"1px solid #e5e7eb",borderRadius:6,padding:"8px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>✎ Данные</button>}
+        </div>
+        {deal.clientId && showClientForm && client && (() => {
+          const updCl=(patch)=>onUpdateClient({...client,...patch});
+          const isYur=client.type==="юр";
+          const fields = isYur
+            ? [["ФИО / Название","name"],["Телефон","phone"],["Адрес","address"],["БИН","iin"],["Директор (полностью)","director"],["Директор (кратко)","directorShort"],["Банк","bank"],["БИК","bik"],["ИИК (счёт)","account"],["Почта","email"]]
+            : [["ФИО","name"],["Телефон","phone"],["Адрес","address"],["ИИН","iin"],["Документ","doc"]];
+          return (
+            <div style={{marginTop:8,padding:"12px 14px",background:"#f3f4f6",border:"1px solid #e5e7eb",borderRadius:8,display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div><div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Тип</div>
+                <select className="fi" value={client.type||"физ"} onChange={e=>updCl({type:e.target.value})}><option value="физ">Физ. лицо</option><option value="юр">Юр. лицо</option></select></div>
+              {fields.map(([label,field])=>(
+                <div key={field}><div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>{label}</div>
+                  <input className="fi" value={client[field]||""} onChange={e=>updCl({[field]:e.target.value})} placeholder={label}/></div>
+              ))}
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* ОБЪЕКТ */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+        <div><div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Тип объекта</div>
+          <select className="fi" disabled={readonly} value={deal.objType||"Вторичка"} onChange={e=>upd({objType:e.target.value})}>
+            <option>Вторичка</option><option>Новостройка</option><option>Коммерция</option>
+          </select></div>
+        <div><div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Адрес объекта</div>
+          <input className="fi" disabled={readonly} value={deal.address||""} onChange={e=>upd({address:e.target.value})} placeholder="ул., дом, кв."/></div>
+        <div><div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Площадь, м²</div>
+          <input className="fi" type="number" disabled={readonly} value={deal.area||""} onChange={e=>upd({area:e.target.value})} placeholder="0"/></div>
+      </div>
+
+      {/* РАБОТЫ (общие для сметы и договора) */}
+      <div>
+        <div style={{fontSize:12,fontWeight:700,color:"#9ca3af",marginBottom:8}}>РАБОТЫ ({works.filter(w=>w.name).length}) <span style={{fontWeight:500,color:"#cbd5e1"}}>— одни для сметы и договора</span></div>
+        <div style={{background:"#f3f4f6",borderRadius:8,overflow:"hidden",border:"1px solid #e5e7eb"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 70px 55px 80px 80px 30px",padding:"8px 12px",fontSize:10,color:"#9ca3af",fontWeight:700}}>
+            <span>НАИМЕНОВАНИЕ</span><span style={{textAlign:"center"}}>КОЛ-ВО</span><span style={{textAlign:"center"}}>ЕД.</span><span style={{textAlign:"right"}}>ЦЕНА</span><span style={{textAlign:"right"}}>СУММА</span><span/>
+          </div>
+          {works.map((w,i)=>(
+            <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 70px 55px 80px 80px 30px",gap:4,padding:"6px 12px",borderTop:"1px solid #e5e7eb",alignItems:"center"}}>
+              <input value={w.name||""} disabled={readonly} onChange={e=>{const ws=[...works];ws[i]={...ws[i],name:e.target.value};upd({works:ws});}}
+                style={{background:"transparent",border:"none",color:"#111827",fontSize:12,fontFamily:"inherit",padding:0,outline:"none",width:"100%"}} placeholder="Работа..."/>
+              <input type="number" value={w.quantity||""} disabled={readonly} onChange={e=>{const ws=[...works];ws[i]={...ws[i],quantity:parseFloat(e.target.value)||0};upd({works:ws});}}
+                style={{background:"#fff",border:"1px solid #e5e7eb",color:"#111827",fontSize:11,borderRadius:4,padding:"3px 5px",textAlign:"center",fontFamily:"inherit",width:"100%"}}/>
+              <input value={w.unit||"м²"} disabled={readonly} onChange={e=>{const ws=[...works];ws[i]={...ws[i],unit:e.target.value};upd({works:ws});}}
+                style={{background:"#fff",border:"1px solid #e5e7eb",color:"#111827",fontSize:11,borderRadius:4,padding:"3px 5px",textAlign:"center",fontFamily:"inherit",width:"100%"}}/>
+              <input type="number" value={w.price||""} disabled={readonly} onChange={e=>{const ws=[...works];ws[i]={...ws[i],price:parseFloat(e.target.value)||0};upd({works:ws});}}
+                style={{background:"#fff",border:"1px solid #e5e7eb",color:"#111827",fontSize:11,borderRadius:4,padding:"3px 5px",textAlign:"right",fontFamily:"inherit",width:"100%"}}/>
+              <div style={{fontSize:12,fontWeight:700,color:"#111827",textAlign:"right"}}>{fmt(Number(w.quantity)*Number(w.price)||0)}</div>
+              {!readonly && <button onClick={()=>upd({works:works.filter((_,j)=>j!==i)})} style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:14,padding:0}}>✕</button>}
+            </div>
+          ))}
+          <div style={{padding:"8px 12px",borderTop:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            {!readonly ? <button onClick={()=>upd({works:[...works,{name:"",quantity:0,unit:"м²",price:0}]})} className="btn btn-g" style={{fontSize:11,padding:"5px 12px"}}>+ Добавить позицию</button> : <span/>}
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              <div style={{display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#9ca3af"}}>
+                <span>Скидка</span>
+                <input type="number" min="0" max="100" disabled={readonly} value={deal.discount||0} onChange={e=>upd({discount:Math.min(100,Math.max(0,Number(e.target.value)||0))})}
+                  style={{width:46,background:"#f3f4f6",border:"1px solid #e5e7eb",color:"#111827",borderRadius:4,padding:"3px 6px",fontSize:11,textAlign:"right",fontFamily:"inherit",outline:"none"}}/>
+                <span>%</span>
+              </div>
+              {disc>0 ? (
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:11,color:"#dc2626"}}>− {fmt(disc)} ₸</div>
+                  <div style={{fontWeight:800,fontSize:16,color:"#111827"}}>{fmt(fin)} ₸</div>
+                </div>
+              ) : <div style={{fontWeight:800,fontSize:16,color:"#111827"}}>{fmt(total)} ₸</div>}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ЮР. ЧАСТЬ (для договора) */}
+      <div style={{border:"1px solid #fbcfe8",borderRadius:8,padding:"14px 16px",background:"rgba(219,39,119,.03)"}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#db2777",marginBottom:10}}>📄 ДАННЫЕ ДЛЯ ДОГОВОРА</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div><div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Номер договора</div>
+            <input className="fi" disabled={readonly} value={deal.contractNumber||""} onChange={e=>upd({contractNumber:e.target.value})}/></div>
+          <div><div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Дата договора</div>
+            <input className="fi" type="date" disabled={readonly} value={deal.contractDate||""} onChange={e=>upd({contractDate:e.target.value})}/></div>
+          <div><div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Подрядчик (ТОО)</div>
+            <select className="fi" disabled={readonly} value={deal.contragentId||""} onChange={e=>upd({contragentId:e.target.value})}>
+              <option value="">— Выбрать ТОО —</option>
+              {contragents.map(c=>(<option key={c.id} value={c.id}>{c.name}</option>))}
+            </select></div>
+          <div><div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Предоплата (%)</div>
+            <input className="fi" type="number" min="0" max="100" disabled={readonly} value={deal.advancePercent??30} onChange={e=>upd({advancePercent:parseFloat(e.target.value)||0})}/></div>
+        </div>
+      </div>
+
+      {/* Примечание */}
+      <div><div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Примечание</div>
+        <textarea className="fi" rows={2} disabled={readonly} value={deal.note||""} onChange={e=>upd({note:e.target.value})} placeholder="Доп. условия..."/></div>
+
+      {/* Действия: две печати из одних данных */}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <button className="btn btn-o" style={{flex:"1 1 120px"}} onClick={onBack}>← Назад</button>
+        <button onClick={onEstimatePdf} className="btn btn-o" style={{flex:"1 1 120px"}}>📄 PDF сметы</button>
+        <div style={{flex:"1 1 120px",display:"flex",flexDirection:"column",gap:4}}>
+          <button onClick={()=>onContractPdf(withStamp)} className="btn btn-o" style={{width:"100%"}}>📄 PDF договора</button>
+          <div onClick={()=>setWithStamp(p=>!p)} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",justifyContent:"center"}}>
+            <div style={{width:28,height:16,borderRadius:8,background:withStamp?"#db2777":"#e5e7eb",position:"relative",transition:"background .2s",flexShrink:0}}>
+              <div style={{position:"absolute",top:2,left:withStamp?12:2,width:12,height:12,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
+            </div>
+            <span style={{fontSize:10,color:withStamp?"#db2777":"#9ca3af"}}>С печатью</span>
+          </div>
+        </div>
+      </div>
+      <div style={{fontSize:10,color:"#9ca3af",textAlign:"center"}}>✓ Сохраняется автоматически</div>
+    </div>
+  );
+}
+
 // ── Генерация договора: HTML / PDF / DOCX / WhatsApp ──
 
 export default function App() {
@@ -2359,6 +2537,14 @@ export default function App() {
   const _contractsLoaded = useRef(false);
   const [contractTab, setContractTab] = useState("list"); // list | editor | clients | contragents
   const [currentContract, setCurrentContract] = useState(null);
+
+  // ТЕСТ: Сделки (единая карточка смета+договор)
+  const [deals, setDeals] = useState([]);
+  const dealsRef = useRef([]);
+  useEffect(() => { dealsRef.current = deals; }, [deals]);
+  const [dealTab, setDealTab] = useState("list"); // list | editor
+  const [currentDeal, setCurrentDeal] = useState(null);
+  const [dealFilterStatus, setDealFilterStatus] = useState("");
   const [contractClientsTab, setContractClientsTab] = useState("list");
   const [sideCollapsed, setSideCollapsed] = useState(false);
   const [stampsBase64, setStampsBase64] = useState({});
@@ -2462,11 +2648,14 @@ export default function App() {
   const loadContracts = useCallback(async () => {
     let ok = true;
     try {
-      const [cr, cl, ca] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY)]);
+      const [cr, cl, ca, dl] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY), storage.getResult(DEALS_KEY)]);
       // Договоры
       if (cr.status === "found" && cr.value) { try { const p = JSON.parse(cr.value); if (Array.isArray(p)) { setContracts(p); contractsRef.current = p; } } catch {} }
       else if (cr.status === "empty") { setContracts([]); contractsRef.current = []; }
       else { ok = false; } // unavailable — не трогаем
+      // Сделки (тест)
+      if (dl.status === "found" && dl.value) { try { const p = JSON.parse(dl.value); if (Array.isArray(p)) { setDeals(p); dealsRef.current = p; } } catch {} }
+      else if (dl.status === "empty") { setDeals([]); dealsRef.current = []; }
       // Клиенты
       if (cl.status === "found" && cl.value) { try { const p = JSON.parse(cl.value); if (Array.isArray(p)) { const cls = p.map(c=>({...c, createdAt:c.createdAt||Date.now()})); setContractClients(cls); clientsRef.current = cls; } } catch {} }
       else if (cl.status === "empty") { setContractClients([]); clientsRef.current = []; }
@@ -2489,6 +2678,10 @@ export default function App() {
   };
   const saveContragents = async (list, opts = {}) => {
     const r = await saveListProtected(CONTRAGENTS_KEY, CONTRAGENTS_BACKUPS_KEY, list, (fl)=>{ contragentsRef.current = fl; setContragents(fl); }, { loadedRef: _contractsLoaded, ...opts });
+    return r;
+  };
+  const saveDeals = async (list, opts = {}) => {
+    const r = await saveListProtected(DEALS_KEY, DEALS_BACKUPS_KEY, list, (fl)=>{ dealsRef.current = fl; setDeals(fl); }, { loadedRef: _contractsLoaded, ...opts });
     return r;
   };
 
@@ -2529,6 +2722,19 @@ export default function App() {
     }, 1500);
     return () => clearTimeout(_contractAutoSave.current);
   }, [currentContract]);
+
+  // Автосохранение сделки (тест)
+  const _dealAutoSave = useRef(null);
+  useEffect(() => {
+    if (!currentDeal) return;
+    if (_dealAutoSave.current) clearTimeout(_dealAutoSave.current);
+    _dealAutoSave.current = setTimeout(async () => {
+      const list = dealsRef.current.filter(x=>x.id!==currentDeal.id);
+      const total = (currentDeal.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
+      await saveDeals([...list, {...currentDeal, total, updatedAt: Date.now()}]);
+    }, 1500);
+    return () => clearTimeout(_dealAutoSave.current);
+  }, [currentDeal]);
 
   const _estimatesLoaded = useRef(false); // защита: не сохранять пока не загрузились из Firebase
 
@@ -3642,6 +3848,46 @@ export default function App() {
     setTimeout(()=>URL.revokeObjectURL(url),20000);
   };
 
+  // ТЕСТ: из сделки печатаем смету (простая таблица) или договор (переиспользуем генератор договора)
+  const dealToContract = (deal) => ({
+    type:"repair_fiz", number:deal.contractNumber||"", date:deal.contractDate||deal.createdAtDate||new Date().toISOString().slice(0,10),
+    clientId:deal.clientId, contragentId:deal.contragentId, works:deal.works||[], discount:deal.discount||0,
+    advancePercent:deal.advancePercent??30, note:deal.note||"",
+  });
+  const generateDealContractPdf = (deal, withStamp=true) => {
+    const client = contractClients.find(x=>x.id===deal.clientId);
+    const ca = contragents.find(x=>x.id===deal.contragentId);
+    generateContractPdf(dealToContract(deal), client, ca, withStamp);
+  };
+  const generateDealEstimatePdf = (deal) => {
+    const client = contractClients.find(x=>x.id===deal.clientId);
+    const works = (deal.works||[]).filter(w=>w.name);
+    const total = works.reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
+    const disc = Math.round(total*(deal.discount||0)/100);
+    const final = total - disc;
+    const esc = s => String(s||"").replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));
+    const rows = works.map((w,i)=>`<tr><td style="padding:6px 8px;border-bottom:1px solid #eee">${i+1}</td><td style="padding:6px 8px;border-bottom:1px solid #eee">${esc(w.name)}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">${w.quantity||0}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">${esc(w.unit||"м²")}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${fmt(w.price||0)}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${fmt((Number(w.quantity)*Number(w.price))||0)}</td></tr>`).join("");
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Смета ${esc(client?.name||deal.address||"")}</title>
+    <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Inter',sans-serif;color:#111827;padding:28px}@page{margin:10mm;size:A4 portrait}h1{font-size:20px}table{width:100%;border-collapse:collapse;font-size:13px;margin-top:14px}th{background:#f3f4f6;padding:8px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase}.no-print{margin-top:20px;text-align:center}@media print{.no-print{display:none}}</style></head><body>
+    <h1>Смета на ремонтные работы</h1>
+    <div style="color:#6b7280;font-size:13px;margin-top:6px;line-height:1.6">
+      ${client?.name?`Заказчик: <b>${esc(client.name)}</b><br>`:""}
+      ${deal.address?`Объект: ${esc(deal.address)}<br>`:""}
+      Дата: ${new Date().toLocaleDateString("ru-RU")}
+    </div>
+    <table><thead><tr><th>№</th><th>Наименование</th><th style="text-align:center">Кол-во</th><th style="text-align:center">Ед.</th><th style="text-align:right">Цена</th><th style="text-align:right">Сумма</th></tr></thead><tbody>${rows}</tbody></table>
+    <div style="margin-top:16px;text-align:right;font-size:14px">
+      ${disc>0?`Сумма: ${fmt(total)} ₸<br><span style="color:#dc2626">Скидка ${deal.discount}%: −${fmt(disc)} ₸</span><br>`:""}
+      <div style="font-size:20px;font-weight:800;margin-top:6px">Итого: ${fmt(final)} ₸</div>
+    </div>
+    <div class="no-print"><button onclick="window.print()" style="padding:12px 32px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:inherit">🖨 Сохранить PDF</button></div>
+    </body></html>`;
+    const blob = new Blob([html],{type:"text/html"});
+    const url = URL.createObjectURL(blob);
+    window.open(url,"_blank");
+    setTimeout(()=>URL.revokeObjectURL(url),30000);
+  };
+
   const generateContractDocx = async (c, client, ca) => {
     const clientName = client?.name || c.estClient || "договор";
     const num = c.number || c.id?.slice(-4) || "б-н";
@@ -4318,6 +4564,7 @@ export default function App() {
 
   const NAV_ITEMS = useMemo(() => [
     ...(currentUser.role !== "viewer" ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
+    { id:"deals",     icon:"🤝", label:"Сделки" },
     { id:"list",      icon:"📋", label:"Сметы" },
     { id:"contracts", icon:"📄", label:"Договора" },
     ...(currentUser.role !== "viewer" ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
@@ -4326,7 +4573,7 @@ export default function App() {
 
   // Наблюдатель не имеет доступа к дашборду/аналитике/админке — показываем сметы.
   // Вычисляем эффективный экран без setState во время рендера (иначе нарушаются правила хуков).
-  const effScreen = (currentUser.role === "viewer" && (screen === "dashboard" || screen === "analytics" || screen === "admin")) ? "list" : screen;
+  const effScreen = (currentUser.role === "viewer" && (screen === "dashboard" || screen === "analytics" || screen === "admin" || screen === "deals")) ? "list" : screen;
 
   return (
     <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#f3f4f6",minHeight:"100vh",color:"#111827",display:"flex",flexDirection:"column"}}>
@@ -5866,6 +6113,103 @@ export default function App() {
           </div>
         );
       })()}
+
+      {/* ── ТЕСТ: СДЕЛКИ (смета+договор в одной карточке) ── */}
+      {effScreen === "deals" && (
+        <div style={{maxWidth:960,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
+          <div className="contracts-header" style={{background:"#f3f4f6",borderBottom:"1px solid #e5e7eb",padding:"12px 24px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
+            <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
+            <div style={{width:28,height:28,borderRadius:6,background:"#db2777",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#fff"}}>T</div>
+            <div style={{fontWeight:800,fontSize:14,color:"#111827"}}>Сделки</div>
+            <span style={{fontSize:9,fontWeight:800,color:"#db2777",background:"rgba(219,39,119,.1)",borderRadius:4,padding:"2px 6px"}}>ТЕСТ</span>
+            <div style={{flex:1}}/>
+            {dealTab==="list" && currentUser.role!=="viewer" && (
+              <button className="btn btn-g" style={{fontSize:12,padding:"7px 14px",background:"#db2777"}} onClick={()=>{
+                setCurrentDeal({id:Date.now().toString(),clientId:"",address:"",objType:"Вторичка",area:"",status:"lead",works:[],discount:0,contragentId:contragents[0]?.id||"",advancePercent:30,contractNumber:nextContractNumber(),contractDate:new Date().toISOString().slice(0,10),note:"",createdAt:Date.now(),createdBy:currentUser.name,createdById:currentUser.id,manager:currentUser.name});
+                setDealTab("editor");
+              }}>+ Новая сделка</button>
+            )}
+          </div>
+
+          <div className="contracts-pad" style={{padding:"20px 24px"}}>
+            {dealTab==="list" && (
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                <div style={{background:"rgba(219,39,119,.06)",border:"1px solid rgba(219,39,119,.15)",borderRadius:8,padding:"10px 14px",fontSize:12,color:"#9d174d",lineHeight:1.5}}>
+                  🧪 <b>Тестовый раздел.</b> Одна карточка = клиент + работы + статус + договор. Смета и договор печатаются из одних данных. Сметы и Договора (старые разделы) пока работают как раньше.
+                </div>
+                {/* Фильтр по статусу */}
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  <button onClick={()=>setDealFilterStatus("")}
+                    style={{background:!dealFilterStatus?"#db2777":"rgba(0,0,0,.03)",color:!dealFilterStatus?"#fff":"#9ca3af",border:`1px solid ${!dealFilterStatus?"#db2777":"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Все</button>
+                  {DEAL_STATUSES.map(s=>(
+                    <button key={s.key} onClick={()=>setDealFilterStatus(v=>v===s.key?"":s.key)}
+                      style={{background:dealFilterStatus===s.key?s.bg:"rgba(0,0,0,.03)",color:dealFilterStatus===s.key?s.color:"#9ca3af",border:`1px solid ${dealFilterStatus===s.key?s.color:"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{s.label}</button>
+                  ))}
+                </div>
+                {deals.length===0 && (
+                  <div style={{textAlign:"center",padding:"50px 0",color:"#9ca3af"}}>
+                    <div style={{fontSize:40,marginBottom:12}}>🤝</div>
+                    <div style={{fontWeight:700,marginBottom:6}}>Сделок пока нет</div>
+                    <div style={{fontSize:12}}>Нажмите «+ Новая сделка», чтобы попробовать</div>
+                  </div>
+                )}
+                {[...deals].filter(d=>!dealFilterStatus||(d.status||"lead")===dealFilterStatus).sort((a,b)=>Number(b.id||0)-Number(a.id||0)).map(d=>{
+                  const client = contractClients.find(x=>x.id===d.clientId);
+                  const st = DEAL_STATUSES.find(s=>s.key===(d.status||"lead"))||DEAL_STATUSES[0];
+                  const total = (d.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
+                  const fin = Math.round(total*(1-(d.discount||0)/100));
+                  return (
+                    <div key={d.id} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"14px 18px",cursor:"pointer"}}
+                      onClick={()=>{ setCurrentDeal({...d}); setDealTab("editor"); }}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                        <div style={{minWidth:0,flex:1}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                            <span style={{fontWeight:700,fontSize:14,color:"#111827"}}>{client?.name||<span style={{color:"#9ca3af",fontStyle:"italic"}}>Клиент не выбран</span>}</span>
+                            <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:4,padding:"1px 7px",whiteSpace:"nowrap"}}>{st.label}</span>
+                          </div>
+                          <div style={{fontSize:12,color:"#9ca3af",marginTop:3}}>
+                            {d.objType||"Объект"}{d.address?` · 📍 ${d.address}`:""}
+                          </div>
+                          <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
+                            {(d.works||[]).filter(w=>w.name).length} позиций · {d.manager||d.createdBy||""}
+                            {d.contractNumber?` · договор №${d.contractNumber}`:""}
+                          </div>
+                        </div>
+                        <div style={{textAlign:"right",flexShrink:0}}>
+                          <div style={{fontWeight:800,fontSize:16,color:"#111827"}}>{fmt(fin)} ₸</div>
+                          {(currentUser.role==="admin"||(currentUser.role==="user"&&d.createdById===currentUser.id)) && (
+                            <button onClick={e=>{e.stopPropagation(); if(window.confirm("Удалить сделку?")) saveDeals(dealsRef.current.filter(x=>x.id!==d.id),{removedIds:[d.id],allowEmpty:true});}}
+                              style={{marginTop:6,background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {dealTab==="editor" && currentDeal && (
+              <DealEditor
+                deal={currentDeal}
+                clients={contractClients}
+                contragents={contragents}
+                onUpdate={setCurrentDeal}
+                onBack={()=>setDealTab("list")}
+                onEstimatePdf={()=>generateDealEstimatePdf(currentDeal)}
+                onContractPdf={(withStamp)=>generateDealContractPdf(currentDeal, withStamp)}
+                onAddClient={async (name)=>{
+                  const nc={id:Date.now().toString(),name:name||"Новый клиент",phone:"",address:currentDeal.address||"",iin:"",doc:"",type:"физ",createdAt:Date.now(),createdById:currentUser.id};
+                  await saveContractClients([...contractClients,nc]);
+                  setCurrentDeal(p=>({...p,clientId:nc.id}));
+                }}
+                onUpdateClient={(updated)=>saveContractClients(contractClients.map(x=>x.id===updated.id?updated:x))}
+                role={currentUser.role}
+                fmt={fmt}
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       {effScreen === "contracts" && (
         <div style={{maxWidth:960,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
