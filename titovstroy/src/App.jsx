@@ -6542,24 +6542,6 @@ export default function App() {
                   {/* Клиент + Объект — одна сетка */}
                   {!objInfoCollapsed && (
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-                    {/* Выбор клиента — на всю ширину если есть список */}
-                    {contractClients.length>0 && canEdit && (
-                      <div style={{gridColumn:"1 / -1"}}>
-                        <select className="fi" style={{fontSize:12}} value={obj.clientId||""}
-                          onChange={e=>{
-                            const c = contractClients.find(x=>x.id===e.target.value);
-                            if (c) {
-                              setObjLocal({ clientId:c.id, clientName:c.name||"", clientPhone:c.phone||"", clientType:c.type||"физ", clientIin:c.iin||"", clientDoc:c.doc||"", address: obj.address || c.address || "" });
-                              setTimeout(persistObj,0);
-                            } else {
-                              setObjLocal({ clientId:"" }); setTimeout(persistObj,0);
-                            }
-                          }}>
-                          <option value="">👤 Новый клиент</option>
-                          {contractClients.map(c=><option key={c.id} value={c.id}>{c.name||"Без имени"}</option>)}
-                        </select>
-                      </div>
-                    )}
                     <div>
                       <input className="fi" style={{fontSize:12}} value={obj.clientName||""} readOnly={!canEdit}
                         onChange={e=>setObjLocal({clientName:e.target.value})} onBlur={persistObj}
