@@ -278,6 +278,8 @@ const STORAGE_KEY        = "titovstroy-estimates";
 const BACKUPS_KEY        = "titovstroy-estimates-backups"; // снимки архива для восстановления
 const USERS_KEY          = "titovstroy-users";
 const SESSION_KEY        = "titovstroy-session";
+const PRESENCE_KEY       = "titovstroy-presence"; // { [userId]: lastSeenTs } — кто когда был онлайн
+const PRESENCE_ONLINE_MS = 2 * 60 * 1000; // «в сети», если активность была <2 мин назад
 const PRICES_KEY         = "titovstroy-prices";  // переопределённые цены {code: {fixedPrice?, tiers?}}
 const CATALOG_BACKUPS_KEY= "titovstroy-catalog-backups"; // снимки каталога (последние 10)
 const CONTRACTS_BACKUPS_KEY = "titovstroy-contracts-backups";
@@ -1229,7 +1231,7 @@ function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note })
 
 
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
-function AdminPageContent({ currentUser, onUsersChanged }) {
+function AdminPageContent({ currentUser, presence = {}, onUsersChanged }) {
   const [tab, setTab] = useState("users");
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1435,6 +1437,20 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
   };
   const roleLabel = r => r==="admin" ? "👑 Администратор" : r==="viewer" ? "👁 Наблюдатель" : "👤 Замерщик";
   const roleColor = r => r==="admin" ? "#ffffff" : r==="viewer" ? "#9ca3af" : "#9ca3af";
+  const PRESENCE_ONLINE = 2 * 60 * 1000;
+  const formatLastSeen = (ts) => {
+    if (!ts) return "ещё не заходил";
+    const diff = Date.now() - ts;
+    if (diff < 60 * 1000) return "только что";
+    if (diff < 60 * 60 * 1000) return `${Math.floor(diff/60000)} мин назад`;
+    const d = new Date(ts), now = new Date();
+    const time = d.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"});
+    const sameDay = d.toDateString() === now.toDateString();
+    const yest = new Date(now); yest.setDate(now.getDate()-1);
+    if (sameDay) return `сегодня в ${time}`;
+    if (d.toDateString() === yest.toDateString()) return `вчера в ${time}`;
+    return `${d.toLocaleDateString("ru-RU")} в ${time}`;
+  };
 
   return (
     <div className="page">
@@ -1475,6 +1491,11 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                       <span style={{fontWeight:700,fontSize:14,color:"#111827"}}>{u.name}</span>
                       <span style={{fontSize:10,fontWeight:700,color:roleColor(u.role),background:"rgba(0,0,0,.04)",borderRadius:4,padding:"2px 7px",whiteSpace:"nowrap"}}>{roleLabel(u.role)}</span>
                       {u.id === currentUser.id && <span style={{fontSize:10,color:"#9ca3af",background:"#e5e7eb",borderRadius:4,padding:"2px 7px"}}>вы</span>}
+                      {(()=>{ const online = (presence[u.id]||0) > Date.now()-PRESENCE_ONLINE; return (
+                        <span style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:10,fontWeight:700,color:online?"#059669":"#9ca3af",background:online?"rgba(5,150,105,.1)":"rgba(0,0,0,.04)",borderRadius:4,padding:"2px 7px",whiteSpace:"nowrap"}}>
+                          <span style={{width:6,height:6,borderRadius:"50%",background:online?"#059669":"#cbd5e1",display:"inline-block"}}/>
+                          {online?"В сети":formatLastSeen(presence[u.id])}
+                        </span>); })()}
                     </div>
                     <div style={{fontSize:12,color:"#9ca3af",marginTop:1}}>@{u.login}</div>
                   </div>
@@ -2250,6 +2271,44 @@ export default function App() {
 
   // Пользователи для выпадающего списка менеджеров
   const [allUsers, setAllUsers] = useState(DEFAULT_USERS);
+
+  // Присутствие { [userId]: lastSeenTs } — пишет каждый, видит только админ
+  const [presence, setPresence] = useState({});
+  // Сердцебиение: обновляем свою отметку «был в сети» при активности и раз в минуту
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    let stopped = false;
+    const touch = async () => {
+      if (stopped || document.visibilityState === "hidden") return;
+      try {
+        const r = await storage.getResult(PRESENCE_KEY);
+        let map = {};
+        if (r.status === "found" && r.value) { try { map = JSON.parse(r.value) || {}; } catch {} }
+        map[currentUser.id] = Date.now();
+        await storage.set(PRESENCE_KEY, JSON.stringify(map));
+        if (!stopped) setPresence(map);
+      } catch {}
+    };
+    touch();
+    const iv = setInterval(touch, 60 * 1000);
+    const onVis = () => { if (document.visibilityState === "visible") touch(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { stopped = true; clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+  }, [currentUser?.id]);
+  // Админ периодически подтягивает чужие отметки для отображения
+  useEffect(() => {
+    if (currentUser?.role !== "admin") return;
+    let stopped = false;
+    const pull = async () => {
+      try {
+        const r = await storage.getResult(PRESENCE_KEY);
+        if (!stopped && r.status === "found" && r.value) { try { setPresence(JSON.parse(r.value) || {}); } catch {} }
+      } catch {}
+    };
+    pull();
+    const iv = setInterval(pull, 60 * 1000);
+    return () => { stopped = true; clearInterval(iv); };
+  }, [currentUser?.role]);
 
   // Список смет { id, proj, rows, discount, note, updatedAt, total }
   const [estimates, setEstimates] = useState([]);
@@ -6112,6 +6171,7 @@ export default function App() {
       {screen === "admin" && currentUser.role === "admin" && (
         <AdminPageContent
           currentUser={currentUser}
+          presence={presence}
           onUsersChanged={async ()=>{ const u=await storage.get(USERS_KEY); if(u) setAllUsers(JSON.parse(u.value)); }}
         />
       )}
