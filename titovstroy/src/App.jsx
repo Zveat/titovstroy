@@ -2736,6 +2736,20 @@ export default function App() {
   }, [currentDeal]);
 
   const _estimatesLoaded = useRef(false); // защита: не сохранять пока не загрузились из Firebase
+  const _needResaveClean = useRef(null); // результат санитизации, который надо сохранить после снятия блокировки
+
+  // Чистка испорченных смет: parentId не может ссылаться на саму смету или на несуществующую/тоже-дочернюю.
+  const sanitizeEstimates = (list) => {
+    const byId = {}; list.forEach(e=>{ byId[e.id]=e; });
+    return list.map(e=>{
+      let pid = e.parentId;
+      // самоссылка / отсутствующий родитель / родитель сам является ДС → это основная смета
+      if (pid && (pid===e.id || !byId[pid] || byId[pid].parentId)) pid = null;
+      if (pid === e.parentId) return e; // ничего не меняли
+      const { parentId, dsNumber, ...rest } = e;
+      return pid ? { ...rest, parentId: pid, dsNumber } : rest; // снимаем parentId и dsNumber у основной
+    });
+  };
 
   const loadEstimates = useCallback(async () => {
     setLoadingList(true);
@@ -2750,7 +2764,12 @@ export default function App() {
       if (result.status === "found" && result.value) {
         try {
           const parsed = JSON.parse(result.value);
-          if (Array.isArray(parsed)) { setEstimates(parsed); estimatesRef.current = parsed; ok = true; }
+          if (Array.isArray(parsed)) {
+            const clean = sanitizeEstimates(parsed);
+            setEstimates(clean); estimatesRef.current = clean; ok = true;
+            // если санитизация что-то починила — пометим для сохранения после снятия блокировки
+            if (JSON.stringify(clean) !== JSON.stringify(parsed)) { _needResaveClean.current = clean; }
+          }
           else console.error("loadEstimates: данные не массив — не трогаем");
         } catch(e) {
           console.error("loadEstimates parse error — данные не тронуты", e);
@@ -2772,6 +2791,8 @@ export default function App() {
     }
     // Разрешаем запись ТОЛЬКО если успешно подтвердили состояние базы
     _estimatesLoaded.current = ok;
+    // теперь, когда запись разрешена, сохраняем результат санитизации (если что-то чинили)
+    if (ok && _needResaveClean.current) { const c = _needResaveClean.current; _needResaveClean.current = null; saveEstimates(c, { replace: true }); }
     setLoadingList(false);
   }, []);
 
@@ -6321,7 +6342,7 @@ export default function App() {
         const openObjectContract = async (obj, fromEst=null) => {
           const clientId = await ensureObjClient(obj);
           const works = fromEst ? estToContractWorks(fromEst) : [];
-          const isDs = fromEst && !!fromEst.parentId;
+          const isDs = !!(fromEst && fromEst.parentId && fromEst.parentId!==fromEst.id);
           const siblings = fromEst ? estimatesRef.current.filter(e=>e.parentId===fromEst.parentId) : [];
           const annexNum = isDs ? (fromEst.dsNumber||1)+1 : 1;
           const parentContract = isDs ? contractsRef.current.find(c=>c.estId===fromEst.parentId && (c.type||"repair_fiz")!=="annex") : null;
