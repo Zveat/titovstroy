@@ -4315,10 +4315,6 @@ export default function App() {
   // ─────────────────────────────────────────────────────────────────────────
   // Показать экран входа если не авторизован
   if (!currentUser) return <LoginScreen onLogin={setCurrentUser} />;
-  // Наблюдатель не имеет доступа к дашборду/аналитике — редиректим на сметы
-  if (currentUser.role === "viewer" && (screen === "dashboard" || screen === "analytics" || screen === "admin")) {
-    setScreen("list"); return null;
-  }
 
   const NAV_ITEMS = useMemo(() => [
     ...(currentUser.role !== "viewer" ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
@@ -4327,6 +4323,10 @@ export default function App() {
     ...(currentUser.role !== "viewer" ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
     ...(currentUser.role==="admin" ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
   ], [currentUser.role]);
+
+  // Наблюдатель не имеет доступа к дашборду/аналитике/админке — показываем сметы.
+  // Вычисляем эффективный экран без setState во время рендера (иначе нарушаются правила хуков).
+  const effScreen = (currentUser.role === "viewer" && (screen === "dashboard" || screen === "analytics" || screen === "admin")) ? "list" : screen;
 
   return (
     <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#f3f4f6",minHeight:"100vh",color:"#111827",display:"flex",flexDirection:"column"}}>
@@ -4449,10 +4449,10 @@ export default function App() {
         {/* Nav */}
         <nav style={{flex:1,padding:"10px 0",overflowY:"auto"}}>
           {NAV_ITEMS.map(item=>(
-            <div key={item.id} className={"nav-item"+(screen===item.id||(!["dashboard","list","contracts"].includes(screen)&&item.id==="list")?"":"")+((screen===item.id||(screen==="editor"&&item.id==="list"))?" active":"")}
+            <div key={item.id} className={"nav-item"+(effScreen===item.id||(!["dashboard","list","contracts"].includes(effScreen)&&item.id==="list")?"":"")+((effScreen===item.id||(effScreen==="editor"&&item.id==="list"))?" active":"")}
               onClick={()=>{ setScreen(item.id); }}>
               <span style={{fontSize:18,flexShrink:0,lineHeight:1}}>{item.icon}</span>
-              <span className="nav-label" style={{color:screen===item.id||(screen==="editor"&&item.id==="list")?"#2563eb":"#9ca3af",fontWeight:screen===item.id||(screen==="editor"&&item.id==="list")?600:400}}>{item.label}</span>
+              <span className="nav-label" style={{color:effScreen===item.id||(effScreen==="editor"&&item.id==="list")?"#2563eb":"#9ca3af",fontWeight:effScreen===item.id||(effScreen==="editor"&&item.id==="list")?600:400}}>{item.label}</span>
             </div>
           ))}
         </nav>
@@ -4471,10 +4471,10 @@ export default function App() {
       {/* ── МОБИЛЬНАЯ НАВИГАЦИЯ ── */}
       <div className="mob-nav">
         {NAV_ITEMS.map(item=>(
-          <div key={item.id} className={"mob-nav-item"+(screen===item.id||(screen==="editor"&&item.id==="list")?" active":"")}
+          <div key={item.id} className={"mob-nav-item"+(effScreen===item.id||(effScreen==="editor"&&item.id==="list")?" active":"")}
             onClick={()=>{ setScreen(item.id); }}>
             <span style={{fontSize:20}}>{item.icon}</span>
-            <span style={{fontSize:9,color:screen===item.id||(screen==="editor"&&item.id==="list")?"#2563eb":"#9ca3af",fontWeight:600}}>{item.label}</span>
+            <span style={{fontSize:9,color:effScreen===item.id||(effScreen==="editor"&&item.id==="list")?"#2563eb":"#9ca3af",fontWeight:600}}>{item.label}</span>
           </div>
         ))}
       </div>
@@ -4485,7 +4485,7 @@ export default function App() {
       {/* ═══════════════════════════════════════════════════════════════════
           ЭКРАН 0: ДАШБОРД
       ═══════════════════════════════════════════════════════════════════ */}
-      {screen === "dashboard" && (()=>{
+      {effScreen === "dashboard" && (()=>{
         const thisMonth = new Date().getMonth();
         const thisYear = new Date().getFullYear();
         const estimatesThisMonth = estimates.filter(e=>{ const d=new Date(e.updatedAt||e.createdAt||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
@@ -4669,7 +4669,7 @@ export default function App() {
       {/* ═══════════════════════════════════════════════════════════════════
           ЭКРАН 1: СПИСОК СМЕТ
       ═══════════════════════════════════════════════════════════════════ */}
-      {screen === "list" && (
+      {effScreen === "list" && (
         <div style={{maxWidth:960,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
           {/* Шапка */}
           <div className="list-header" style={{background:"#f3f4f6",borderBottom:"1px solid #e5e7eb",padding:"12px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
@@ -5651,7 +5651,7 @@ export default function App() {
       )}
 
       {/* ЭКРАН: АНАЛИТИКА */}
-      {screen === "analytics" && (()=>{
+      {effScreen === "analytics" && (()=>{
         const { baseEst, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType, TYPE_L2,
           wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin, funnel, winRateOverall, winRateSent, agreedB, sentB, catProfit, monthly, staleSent } = analyticsData;
         const PERIOD_BTNS = [["all","Всё время"],["month","Месяц"],["3month","3 месяца"],["week","Неделя"],["custom","Вручную"]];
@@ -5867,7 +5867,7 @@ export default function App() {
         );
       })()}
 
-      {screen === "contracts" && (
+      {effScreen === "contracts" && (
         <div style={{maxWidth:960,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
           {/* Шапка */}
           <div className="contracts-header" style={{background:"#f3f4f6",borderBottom:"1px solid #e5e7eb",padding:"12px 24px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
@@ -6182,7 +6182,7 @@ export default function App() {
       {/* ═══════════════════════════════════════════════════════════════════
           ЭКРАН 4: АДМИНКА
       ═══════════════════════════════════════════════════════════════════ */}
-      {screen === "admin" && currentUser.role === "admin" && (
+      {effScreen === "admin" && currentUser.role === "admin" && (
         <AdminPageContent
           currentUser={currentUser}
           presence={presence}
