@@ -268,6 +268,13 @@ const STATUSES = [
   { key:"agreed",    label:"Согласовано",        color:"#059669", bg:"#eff6ff"  },
   { key:"rejected",  label:"Отказ",              color:"#dc2626", bg:"rgba(220,38,38,.12)"   },
 ];
+const CONTRACT_STATUSES = [
+  { key:"draft",    label:"Черновик",    color:"#9ca3af", bg:"#f3f4f6"              },
+  { key:"active",   label:"Действующий", color:"#d97706", bg:"rgba(217,119,6,.12)" },
+  { key:"signed",   label:"Заключён",    color:"#059669", bg:"rgba(5,150,105,.1)"  },
+  { key:"done",     label:"Завершён",    color:"#2563eb", bg:"#eff6ff"             },
+  { key:"cancelled",label:"Расторгнут",  color:"#dc2626", bg:"rgba(220,38,38,.12)" },
+];
 const STORAGE_KEY        = "titovstroy-estimates";
 const BACKUPS_KEY        = "titovstroy-estimates-backups"; // снимки архива для восстановления
 const USERS_KEY          = "titovstroy-users";
@@ -1911,12 +1918,25 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
         <span style={{fontWeight:700,fontSize:15,color:"#111827"}}>{contract.number ? `${TYPE_LABELS[type]||""} №${contract.number}` : "Новый документ"}</span>
       </div>
 
-      {/* Тип документа */}
-      <div>
-        <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Тип документа</div>
-        <select style={fi} value={type} onChange={e=>upd({type:e.target.value})}>
-          {DOC_TYPES.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
-        </select>
+      {/* Тип документа + статус */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div>
+          <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Тип документа</div>
+          <select style={fi} value={type} onChange={e=>upd({type:e.target.value})}>
+            {DOC_TYPES.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Статус</div>
+          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+            {CONTRACT_STATUSES.map(s=>(
+              <button key={s.key} onClick={()=>upd({contractStatus:s.key})}
+                style={{background:(contract.contractStatus||"draft")===s.key?s.bg:"rgba(0,0,0,.03)",color:(contract.contractStatus||"draft")===s.key?s.color:"#9ca3af",border:`1px solid ${(contract.contractStatus||"draft")===s.key?s.color:"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}>
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Основные поля — номер и дата */}
@@ -2302,6 +2322,7 @@ export default function App() {
   const [listFilter, setListFilter] = useState(""); // "" | "Вторичка" | "Новостройка" | "Коммерция"
   const [listFilterManager, setListFilterManager] = useState(""); // "" = все
   const [listFilterStatus, setListFilterStatus] = useState(""); // "" = все статусы
+  const [contractFilterStatus, setContractFilterStatus] = useState(""); // "" = все статусы договоров
   const [listSort, setListSort] = useState("date"); // "date" | "sum" | "name"
   const debouncedListSearch = useDebounce(listSearch, 200);
 
@@ -5818,6 +5839,15 @@ export default function App() {
             {/* ── СПИСОК ДОГОВОРОВ ── */}
             {contractTab === "list" && (
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {/* Фильтр по статусу */}
+                <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:2}}>
+                  <button onClick={()=>setContractFilterStatus("")}
+                    style={{background:!contractFilterStatus?"#2563eb":"rgba(0,0,0,.03)",color:!contractFilterStatus?"#fff":"#9ca3af",border:`1px solid ${!contractFilterStatus?"#2563eb":"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Все</button>
+                  {CONTRACT_STATUSES.map(s=>(
+                    <button key={s.key} onClick={()=>setContractFilterStatus(v=>v===s.key?"":s.key)}
+                      style={{background:contractFilterStatus===s.key?s.bg:"rgba(0,0,0,.03)",color:contractFilterStatus===s.key?s.color:"#9ca3af",border:`1px solid ${contractFilterStatus===s.key?s.color:"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{s.label}</button>
+                  ))}
+                </div>
                 {contracts.length === 0 && (
                   <div style={{textAlign:"center",padding:"60px 0",color:"#9ca3af"}}>
                     <div style={{fontSize:40,marginBottom:12}}>📋</div>
@@ -5840,7 +5870,7 @@ export default function App() {
                   const childMap = {}; // parentId -> [child]
                   contracts.forEach(c=>{ if(isChildType(c) && c.mainNumber && numMap[c.mainNumber]){ const pid=numMap[c.mainNumber].id; (childMap[pid]||(childMap[pid]=[])).push(c); } });
                   const childIds = new Set(Object.values(childMap).flat().map(c=>c.id));
-                  const roots = contracts.filter(c=>!childIds.has(c.id));
+                  const roots = contracts.filter(c=>!childIds.has(c.id) && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus));
 
                   const renderContractCard = (c, isChild=false) => {
                     const client = contractClients.find(x=>x.id===c.clientId);
@@ -5855,9 +5885,12 @@ export default function App() {
                         <div style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:6,padding:"14px 18px",cursor:"pointer",transition:"all .15s",marginLeft:isChild?16:0,borderLeft:isChild?"3px solid #ede9fe":"1px solid #e5e7eb"}}
                           onClick={()=>{ setCurrentContract({...c}); setContractTab("editor"); }}>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-                            <div>
-                              <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>
-                                {contractTitle(c)}
+                            <div style={{minWidth:0,flex:1}}>
+                              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                                <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>
+                                  {contractTitle(c)}
+                                </div>
+                                {(()=>{ const s=CONTRACT_STATUSES.find(x=>x.key===(c.contractStatus||"draft"))||CONTRACT_STATUSES[0]; return <span style={{fontSize:10,fontWeight:700,color:s.color,background:s.bg,borderRadius:4,padding:"1px 7px",flexShrink:0,whiteSpace:"nowrap"}}>{s.label}</span>; })()}
                               </div>
                               <div style={{fontSize:12,color:"#9ca3af",marginTop:3}}>
                                 {client ? `👤 ${client.name}` : c.estClient ? `👤 ${c.estClient} (не добавлен)` : "Клиент не выбран"}
