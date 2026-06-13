@@ -4644,7 +4644,7 @@ export default function App() {
 
   const NAV_ITEMS = useMemo(() => [
     ...(currentUser.role !== "viewer" ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
-    { id:"objects",   icon:"📦", label:"Объекты" },
+    { id:"objects",   icon:"📦", label:"Объекты (разработка)" },
     { id:"list",      icon:"📋", label:"Сметы" },
     { id:"contracts", icon:"📄", label:"Договора" },
     ...(currentUser.role !== "viewer" ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
