@@ -274,7 +274,7 @@ const CONTRACT_STATUSES = [
   { key:"signed",  label:"Заключён",     color:"#059669", bg:"rgba(5,150,105,.1)"   },
   { key:"archive", label:"Архив",        color:"#6b7280", bg:"rgba(107,114,128,.12)"},
 ];
-// ТЕСТ: единая воронка «Сделки» (смета+договор в одной карточке)
+// Объекты — воронка статусов
 const DEAL_STATUSES = [
   { key:"lead",     label:"Лид",         color:"#6b7280", bg:"#f3f4f6"              },
   { key:"measure",  label:"Замер",       color:"#0891b2", bg:"rgba(8,145,178,.1)"   },
@@ -287,6 +287,9 @@ const DEAL_STATUSES = [
   { key:"done",     label:"Завершён",    color:"#374151", bg:"rgba(55,65,81,.08)"   },
   { key:"rejected", label:"Отказ",       color:"#dc2626", bg:"rgba(220,38,38,.12)"  },
 ];
+const OBJECTS_KEY         = "titovstroy-objects";
+const OBJECTS_BACKUPS_KEY = "titovstroy-objects-backups";
+// legacy ключ для миграции старых сделок
 const DEALS_KEY          = "titovstroy-deals";
 const DEALS_BACKUPS_KEY  = "titovstroy-deals-backups";
 const STORAGE_KEY        = "titovstroy-estimates";
@@ -2516,14 +2519,22 @@ export default function App() {
   const [contractTab, setContractTab] = useState("list"); // list | editor | clients | contragents
   const [currentContract, setCurrentContract] = useState(null);
 
-  // ТЕСТ: Сделки (единая карточка смета+договор)
+  // Объекты
+  const [objects, setObjects] = useState([]);
+  const objectsRef = useRef([]);
+  useEffect(() => { objectsRef.current = objects; }, [objects]);
+  const [objectTab, setObjectTab] = useState("list"); // list | workspace
+  const [currentObject, setCurrentObject] = useState(null);
+  const [objectFilterStatus, setObjectFilterStatus] = useState("");
+  const [objectReturnId, setObjectReturnId] = useState(null); // id объекта, куда вернуться из редактора сметы/договора
+  // legacy deals ref (не используется, но нужен для saveDeals ниже)
   const [deals, setDeals] = useState([]);
   const dealsRef = useRef([]);
   useEffect(() => { dealsRef.current = deals; }, [deals]);
-  const [dealTab, setDealTab] = useState("list"); // list | editor
+  const [dealTab, setDealTab] = useState("list");
   const [currentDeal, setCurrentDeal] = useState(null);
   const [dealFilterStatus, setDealFilterStatus] = useState("");
-  const [dealReturnId, setDealReturnId] = useState(null); // id сделки, куда вернуться из редактора сметы
+  const [dealReturnId, setDealReturnId] = useState(null);
   const [contractClientsTab, setContractClientsTab] = useState("list");
   const [sideCollapsed, setSideCollapsed] = useState(false);
   const [stampsBase64, setStampsBase64] = useState({});
@@ -2627,14 +2638,14 @@ export default function App() {
   const loadContracts = useCallback(async () => {
     let ok = true;
     try {
-      const [cr, cl, ca, dl] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY), storage.getResult(DEALS_KEY)]);
+      const [cr, cl, ca, ob] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY), storage.getResult(OBJECTS_KEY)]);
       // Договоры
       if (cr.status === "found" && cr.value) { try { const p = JSON.parse(cr.value); if (Array.isArray(p)) { setContracts(p); contractsRef.current = p; } } catch {} }
       else if (cr.status === "empty") { setContracts([]); contractsRef.current = []; }
       else { ok = false; } // unavailable — не трогаем
-      // Сделки (тест)
-      if (dl.status === "found" && dl.value) { try { const p = JSON.parse(dl.value); if (Array.isArray(p)) { setDeals(p); dealsRef.current = p; } } catch {} }
-      else if (dl.status === "empty") { setDeals([]); dealsRef.current = []; }
+      // Объекты
+      if (ob.status === "found" && ob.value) { try { const p = JSON.parse(ob.value); if (Array.isArray(p)) { setObjects(p); objectsRef.current = p; } } catch {} }
+      else if (ob.status === "empty") { setObjects([]); objectsRef.current = []; }
       // Клиенты
       if (cl.status === "found" && cl.value) { try { const p = JSON.parse(cl.value); if (Array.isArray(p)) { const cls = p.map(c=>({...c, createdAt:c.createdAt||Date.now()})); setContractClients(cls); clientsRef.current = cls; } } catch {} }
       else if (cl.status === "empty") { setContractClients([]); clientsRef.current = []; }
@@ -2661,6 +2672,10 @@ export default function App() {
   };
   const saveDeals = async (list, opts = {}) => {
     const r = await saveListProtected(DEALS_KEY, DEALS_BACKUPS_KEY, list, (fl)=>{ dealsRef.current = fl; setDeals(fl); }, { loadedRef: _contractsLoaded, ...opts });
+    return r;
+  };
+  const saveObjects = async (list, opts = {}) => {
+    const r = await saveListProtected(OBJECTS_KEY, OBJECTS_BACKUPS_KEY, list, (fl)=>{ objectsRef.current = fl; setObjects(fl); }, { loadedRef: _contractsLoaded, ...opts });
     return r;
   };
 
@@ -3238,8 +3253,13 @@ export default function App() {
   };
 
   // ── Сохранить текущую и вернуться к списку ──
-  // Вернуться из редактора сметы туда, откуда пришли (к сделке или в список смет)
+  // Вернуться из редактора сметы туда, откуда пришли (к объекту или в список смет)
   const _backFromEditor = () => {
+    if (objectReturnId) {
+      const obj = objectsRef.current.find(x=>x.id===objectReturnId);
+      setObjectReturnId(null);
+      if (obj) { setCurrentObject({...obj}); setObjectTab("workspace"); setScreen("objects"); return; }
+    }
     if (dealReturnId) {
       const dl = dealsRef.current.find(x=>x.id===dealReturnId);
       setDealReturnId(null);
@@ -3279,6 +3299,15 @@ export default function App() {
     estimatesRef.current = newList;
     setEstimates(newList);
     await saveEstimates(newList);
+    // если редактировали смету объекта — обновляем updatedAt объекта
+    if (objectReturnId) {
+      const obj = objectsRef.current.find(x=>x.id===objectReturnId);
+      if (obj) {
+        const updObj = {...obj, updatedAt: Date.now()};
+        const rest = objectsRef.current.filter(x=>x.id!==obj.id);
+        await saveObjects([...rest, updObj]);
+      }
+    }
     // если редактировали смету сделки — синхронизируем итог обратно в сделку
     if (dealReturnId) {
       const dl = dealsRef.current.find(x=>x.id===dealReturnId);
@@ -4604,7 +4633,7 @@ export default function App() {
 
   const NAV_ITEMS = useMemo(() => [
     ...(currentUser.role !== "viewer" ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
-    { id:"deals",     icon:"🤝", label:"Сделки" },
+    { id:"objects",   icon:"📦", label:"Объекты" },
     { id:"list",      icon:"📋", label:"Сметы" },
     { id:"contracts", icon:"📄", label:"Договора" },
     ...(currentUser.role !== "viewer" ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
@@ -4613,7 +4642,7 @@ export default function App() {
 
   // Наблюдатель не имеет доступа к дашборду/аналитике/админке — показываем сметы.
   // Вычисляем эффективный экран без setState во время рендера (иначе нарушаются правила хуков).
-  const effScreen = (currentUser.role === "viewer" && (screen === "dashboard" || screen === "analytics" || screen === "admin" || screen === "deals")) ? "list" : screen;
+  const effScreen = (currentUser.role === "viewer" && (screen === "dashboard" || screen === "analytics" || screen === "admin" || screen === "deals" || screen === "objects")) ? "list" : screen;
 
   return (
     <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#f3f4f6",minHeight:"100vh",color:"#111827",display:"flex",flexDirection:"column"}}>
@@ -4735,13 +4764,18 @@ export default function App() {
         </div>
         {/* Nav */}
         <nav style={{flex:1,padding:"10px 0",overflowY:"auto"}}>
-          {NAV_ITEMS.map(item=>(
-            <div key={item.id} className={"nav-item"+(effScreen===item.id||(!["dashboard","list","contracts"].includes(effScreen)&&item.id==="list")?"":"")+((effScreen===item.id||(effScreen==="editor"&&item.id==="list"))?" active":"")}
-              onClick={()=>{ setDealReturnId(null); setScreen(item.id); }}>
+          {NAV_ITEMS.map(item=>{
+            const isActiveEst = effScreen==="editor" && !objectReturnId && item.id==="list";
+            const isActiveObjEst = effScreen==="editor" && !!objectReturnId && item.id==="objects";
+            const isActive = effScreen===item.id || isActiveEst || isActiveObjEst;
+            return (
+            <div key={item.id} className={"nav-item"+(isActive?" active":"")}
+              onClick={()=>{ setDealReturnId(null); setObjectReturnId(null); setScreen(item.id); }}>
               <span style={{fontSize:18,flexShrink:0,lineHeight:1}}>{item.icon}</span>
-              <span className="nav-label" style={{color:effScreen===item.id||(effScreen==="editor"&&item.id==="list")?"#2563eb":"#9ca3af",fontWeight:effScreen===item.id||(effScreen==="editor"&&item.id==="list")?600:400}}>{item.label}</span>
+              <span className="nav-label" style={{color:isActive?"#2563eb":"#9ca3af",fontWeight:isActive?600:400}}>{item.label}</span>
             </div>
-          ))}
+            );
+          })}
         </nav>
         {/* Collapse + Выйти */}
         <div style={{borderTop:"1px solid #e5e7eb",padding:"8px 0"}}>
@@ -4757,13 +4791,18 @@ export default function App() {
 
       {/* ── МОБИЛЬНАЯ НАВИГАЦИЯ ── */}
       <div className="mob-nav">
-        {NAV_ITEMS.map(item=>(
-          <div key={item.id} className={"mob-nav-item"+(effScreen===item.id||(effScreen==="editor"&&item.id==="list")?" active":"")}
-            onClick={()=>{ setDealReturnId(null); setScreen(item.id); }}>
+        {NAV_ITEMS.map(item=>{
+          const isActiveEst = effScreen==="editor" && !objectReturnId && item.id==="list";
+          const isActiveObjEst = effScreen==="editor" && !!objectReturnId && item.id==="objects";
+          const isActive = effScreen===item.id || isActiveEst || isActiveObjEst;
+          return (
+          <div key={item.id} className={"mob-nav-item"+(isActive?" active":"")}
+            onClick={()=>{ setDealReturnId(null); setObjectReturnId(null); setScreen(item.id); }}>
             <span style={{fontSize:20}}>{item.icon}</span>
-            <span style={{fontSize:9,color:effScreen===item.id||(effScreen==="editor"&&item.id==="list")?"#2563eb":"#9ca3af",fontWeight:600}}>{item.label}</span>
+            <span style={{fontSize:9,color:isActive?"#2563eb":"#9ca3af",fontWeight:600}}>{item.label}</span>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* ── КОНТЕНТ ── */}
@@ -6155,104 +6194,333 @@ export default function App() {
       })()}
 
       {/* ── ТЕСТ: СДЕЛКИ (смета+договор в одной карточке) ── */}
-      {effScreen === "deals" && (
+      {effScreen === "objects" && (()=>{
+        // ── Вспомогательные функции для workspace ──
+        const openObjectEstimate = (obj) => {
+          const id = genId();
+          const cl = contractClients.find(x=>x.id===obj.clientId);
+          const cats2 = Object.keys(Gdyn);
+          const newEst = {
+            id,
+            objectId: obj.id,
+            proj: {...EMPTY_PROJ, name: cl?.name||"", address: obj.address||"", type: obj.objType||"Вторичка", manager: currentUser.name},
+            rows: {}, discount: 0, markup: 0, note: "", status: "new", comment: "",
+            createdAt: Date.now(), createdBy: currentUser.name, updatedAt: Date.now(), updatedBy: currentUser.name, total: 0,
+          };
+          const newList = [newEst, ...estimatesRef.current];
+          estimatesRef.current = newList;
+          setEstimates(newList);
+          saveEstimates(newList);
+          setObjectReturnId(obj.id);
+          setCurrentId(id);
+          setProj(newEst.proj);
+          setRows({});
+          setDiscount(0);
+          setMarkup(0);
+          setNote("");
+          setEstStatus("new");
+          setEstSentAt("");
+          setEstComment("");
+          setSearch("");
+          setActiveCat(cats2[0]);
+          setActiveSub(Object.keys(Gdyn[cats2[0]]||{})[0]);
+          setScreen("editor");
+        };
+
+        const openObjectEstimateEdit = (est, obj) => {
+          setObjectReturnId(obj.id);
+          setCurrentId(est.id);
+          setProj(est.proj||EMPTY_PROJ);
+          setRows(est.rows||{});
+          setDiscount(est.discount||0);
+          setMarkup(est.markup||0);
+          setNote(est.note||"");
+          setEstStatus(est.status||"new");
+          setEstSentAt(est.sentAt||"");
+          setEstComment(est.comment||"");
+          setSearch("");
+          const cats2 = Object.keys(Gdyn);
+          setActiveCat(cats2[0]);
+          setActiveSub(Object.keys(Gdyn[cats2[0]]||{})[0]);
+          setScreen("editor");
+        };
+
+        const openObjectContract = (obj) => {
+          const cl = contractClients.find(x=>x.id===obj.clientId);
+          const newC = {
+            id: Date.now().toString(),
+            objectId: obj.id,
+            number: nextContractNumber(),
+            date: new Date().toISOString().split("T")[0],
+            clientId: obj.clientId||"",
+            estClient: cl?.name||"",
+            contragentId: contragents[0]?.id||"",
+            works: [],
+            appendix: 1,
+            note: "",
+            createdBy: currentUser.name,
+            createdById: currentUser.id,
+          };
+          setCurrentContract(newC);
+          setObjectReturnId(obj.id);
+          setContractTab("editor");
+          setScreen("contracts");
+        };
+
+        const saveObjField = async (obj, patch) => {
+          const updated = {...obj, ...patch, updatedAt: Date.now()};
+          const list = objectsRef.current.map(x=>x.id===obj.id?updated:x);
+          await saveObjects(list);
+          setCurrentObject(updated);
+        };
+
+        return (
         <div style={{maxWidth:960,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
+          {/* Шапка */}
           <div className="contracts-header" style={{background:"#f3f4f6",borderBottom:"1px solid #e5e7eb",padding:"12px 24px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
-            <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
-            <div style={{width:28,height:28,borderRadius:6,background:"#db2777",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#fff"}}>T</div>
-            <div style={{fontWeight:800,fontSize:14,color:"#111827"}}>Сделки</div>
-            <span style={{fontSize:9,fontWeight:800,color:"#db2777",background:"rgba(219,39,119,.1)",borderRadius:4,padding:"2px 6px"}}>ТЕСТ</span>
+            {objectTab==="workspace" && (
+              <button onClick={()=>{ setObjectTab("list"); setCurrentObject(null); }} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
+            )}
+            <div style={{width:28,height:28,borderRadius:6,background:"#2563eb",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#fff"}}>📦</div>
+            <div style={{fontWeight:800,fontSize:14,color:"#111827"}}>{objectTab==="workspace" && currentObject ? (contractClients.find(x=>x.id===currentObject.clientId)?.name||"Объект") : "Объекты"}</div>
             <div style={{flex:1}}/>
-            {dealTab==="list" && currentUser.role!=="viewer" && (
-              <button className="btn btn-g" style={{fontSize:12,padding:"7px 14px",background:"#db2777"}} onClick={()=>{
-                setCurrentDeal({id:Date.now().toString(),clientId:"",address:"",objType:"Вторичка",area:"",status:"lead",works:[],discount:0,contragentId:contragents[0]?.id||"",advancePercent:30,contractNumber:nextContractNumber(),contractDate:new Date().toISOString().slice(0,10),note:"",createdAt:Date.now(),createdBy:currentUser.name,createdById:currentUser.id,manager:currentUser.name});
-                setDealTab("editor");
-              }}>+ Новая сделка</button>
+            {objectTab==="list" && currentUser.role!=="viewer" && (
+              <button className="btn btn-g" style={{fontSize:12,padding:"7px 14px"}} onClick={async ()=>{
+                const newObj = {id:genId(),clientId:"",address:"",objType:"Вторичка",area:"",status:"lead",note:"",manager:currentUser.name,createdBy:currentUser.name,createdById:currentUser.id,createdAt:Date.now(),updatedAt:Date.now()};
+                await saveObjects([newObj, ...objectsRef.current]);
+                setCurrentObject(newObj);
+                setObjectTab("workspace");
+              }}>+ Новый объект</button>
             )}
           </div>
 
-          <div className="contracts-pad" style={{padding:"20px 24px"}}>
-            {dealTab==="list" && (
-              <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                <div style={{background:"rgba(219,39,119,.06)",border:"1px solid rgba(219,39,119,.15)",borderRadius:8,padding:"10px 14px",fontSize:12,color:"#9d174d",lineHeight:1.5}}>
-                  🧪 <b>Тестовый раздел.</b> Одна карточка = клиент + работы + статус + договор. Смета и договор печатаются из одних данных. Сметы и Договора (старые разделы) пока работают как раньше.
-                </div>
-                {/* Фильтр по статусу */}
-                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                  <button onClick={()=>setDealFilterStatus("")}
-                    style={{background:!dealFilterStatus?"#db2777":"rgba(0,0,0,.03)",color:!dealFilterStatus?"#fff":"#9ca3af",border:`1px solid ${!dealFilterStatus?"#db2777":"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Все</button>
-                  {DEAL_STATUSES.map(s=>(
-                    <button key={s.key} onClick={()=>setDealFilterStatus(v=>v===s.key?"":s.key)}
-                      style={{background:dealFilterStatus===s.key?s.bg:"rgba(0,0,0,.03)",color:dealFilterStatus===s.key?s.color:"#9ca3af",border:`1px solid ${dealFilterStatus===s.key?s.color:"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{s.label}</button>
-                  ))}
-                </div>
-                {deals.length===0 && (
-                  <div style={{textAlign:"center",padding:"50px 0",color:"#9ca3af"}}>
-                    <div style={{fontSize:40,marginBottom:12}}>🤝</div>
-                    <div style={{fontWeight:700,marginBottom:6}}>Сделок пока нет</div>
-                    <div style={{fontSize:12}}>Нажмите «+ Новая сделка», чтобы попробовать</div>
-                  </div>
-                )}
-                {[...deals].filter(d=>!dealFilterStatus||(d.status||"lead")===dealFilterStatus).sort((a,b)=>Number(b.id||0)-Number(a.id||0)).map(d=>{
-                  const client = contractClients.find(x=>x.id===d.clientId);
-                  const st = DEAL_STATUSES.find(s=>s.key===(d.status||"lead"))||DEAL_STATUSES[0];
-                  const est = estimates.find(e=>e.id===d.estId);
-                  const fin = Math.round(est?.total || d.total || 0);
-                  const posCount = est ? Object.values(est.rows||{}).filter(r=>Number(r?.qty)>0).length : 0;
+          {/* Список объектов */}
+          {objectTab==="list" && (
+            <div className="contracts-pad" style={{padding:"20px 24px",display:"flex",flexDirection:"column",gap:10}}>
+              {/* Воронка-фильтр */}
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                <button onClick={()=>setObjectFilterStatus("")}
+                  style={{background:!objectFilterStatus?"#2563eb":"rgba(0,0,0,.03)",color:!objectFilterStatus?"#fff":"#9ca3af",border:`1px solid ${!objectFilterStatus?"#2563eb":"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Все ({objects.length})</button>
+                {DEAL_STATUSES.map(s=>{
+                  const cnt = objects.filter(o=>(o.status||"lead")===s.key).length;
+                  if(!cnt && objectFilterStatus!==s.key) return null;
                   return (
-                    <div key={d.id} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"14px 18px",cursor:"pointer"}}
-                      onClick={()=>{ setCurrentDeal({...d}); setDealTab("editor"); }}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-                        <div style={{minWidth:0,flex:1}}>
-                          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                            <span style={{fontWeight:700,fontSize:14,color:"#111827"}}>{client?.name||<span style={{color:"#9ca3af",fontStyle:"italic"}}>Клиент не выбран</span>}</span>
-                            <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:4,padding:"1px 7px",whiteSpace:"nowrap"}}>{st.label}</span>
-                          </div>
-                          <div style={{fontSize:12,color:"#9ca3af",marginTop:3}}>
-                            {d.objType||"Объект"}{d.address?` · 📍 ${d.address}`:""}
-                          </div>
-                          <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
-                            {est?`${posCount} позиций`:"смета не заполнена"} · {d.manager||d.createdBy||""}
-                            {d.contractNumber?` · договор №${d.contractNumber}`:""}
-                          </div>
-                        </div>
-                        <div style={{textAlign:"right",flexShrink:0}}>
-                          <div style={{fontWeight:800,fontSize:16,color:"#111827"}}>{fmt(fin)} ₸</div>
-                          {(currentUser.role==="admin"||(currentUser.role==="user"&&d.createdById===currentUser.id)) && (
-                            <button onClick={e=>{e.stopPropagation(); if(window.confirm("Удалить сделку?")) saveDeals(dealsRef.current.filter(x=>x.id!==d.id),{removedIds:[d.id],allowEmpty:true});}}
-                              style={{marginTop:6,background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                    <button key={s.key} onClick={()=>setObjectFilterStatus(v=>v===s.key?"":s.key)}
+                      style={{background:objectFilterStatus===s.key?s.bg:"rgba(0,0,0,.03)",color:objectFilterStatus===s.key?s.color:"#9ca3af",border:`1px solid ${objectFilterStatus===s.key?s.color:"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                      {s.label} {cnt>0&&<span style={{opacity:.6}}>({cnt})</span>}
+                    </button>
                   );
                 })}
               </div>
-            )}
-            {dealTab==="editor" && currentDeal && (
-              <DealEditor
-                deal={currentDeal}
-                clients={contractClients}
-                contragents={contragents}
-                estimate={estimates.find(e=>e.id===currentDeal.estId)||null}
-                onUpdate={setCurrentDeal}
-                onBack={()=>setDealTab("list")}
-                onOpenEstimate={()=>openDealEstimate(currentDeal)}
-                onEstimatePdf={()=>generateDealEstimatePdf(currentDeal)}
-                onContractPdf={(withStamp)=>generateDealContractPdf(currentDeal, withStamp)}
-                onAddClient={async (name)=>{
-                  const nc={id:Date.now().toString(),name:name||"Новый клиент",phone:"",address:currentDeal.address||"",iin:"",doc:"",type:"физ",createdAt:Date.now(),createdById:currentUser.id};
-                  await saveContractClients([...contractClients,nc]);
-                  setCurrentDeal(p=>({...p,clientId:nc.id}));
-                }}
-                onUpdateClient={(updated)=>saveContractClients(contractClients.map(x=>x.id===updated.id?updated:x))}
-                role={currentUser.role}
-                fmt={fmt}
-              />
-            )}
-          </div>
+
+              {objects.length===0 && (
+                <div style={{textAlign:"center",padding:"60px 0",color:"#9ca3af"}}>
+                  <div style={{fontSize:48,marginBottom:12}}>📦</div>
+                  <div style={{fontWeight:700,marginBottom:6}}>Объектов пока нет</div>
+                  <div style={{fontSize:12}}>Каждый объект — это папка с клиентом, сметами и договорами</div>
+                </div>
+              )}
+
+              {[...objects]
+                .filter(o=>!objectFilterStatus||(o.status||"lead")===objectFilterStatus)
+                .sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0))
+                .map(obj=>{
+                const client = contractClients.find(x=>x.id===obj.clientId);
+                const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"lead"))||DEAL_STATUSES[0];
+                const objEsts = estimates.filter(e=>e.objectId===obj.id);
+                const objCons = contracts.filter(c=>c.objectId===obj.id);
+                const bestEst = [...objEsts].sort((a,b)=>(b.total||0)-(a.total||0))[0];
+                const total = bestEst?.total||0;
+                return (
+                  <div key={obj.id} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"14px 18px",cursor:"pointer",transition:"all .15s"}}
+                    onClick={()=>{ setCurrentObject({...obj}); setObjectTab("workspace"); }}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                      <div style={{minWidth:0,flex:1}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                          <span style={{fontWeight:700,fontSize:14,color:"#111827"}}>{client?.name||<span style={{color:"#9ca3af",fontStyle:"italic",fontWeight:400}}>Клиент не выбран</span>}</span>
+                          <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:4,padding:"1px 7px",whiteSpace:"nowrap"}}>{st.label}</span>
+                        </div>
+                        <div style={{fontSize:12,color:"#9ca3af",marginTop:3}}>
+                          {obj.objType||"Вторичка"}{obj.address?` · 📍 ${obj.address}`:""}
+                          {obj.area?` · ${obj.area} м²`:""}
+                        </div>
+                        <div style={{fontSize:11,color:"#9ca3af",marginTop:3,display:"flex",gap:10}}>
+                          <span>📋 {objEsts.length} смет</span>
+                          <span>📄 {objCons.length} договоров</span>
+                          {obj.manager&&<span>👤 {obj.manager}</span>}
+                        </div>
+                      </div>
+                      <div style={{textAlign:"right",flexShrink:0}}>
+                        {total>0&&<div style={{fontWeight:800,fontSize:16,color:"#111827"}}>{fmt(total)} ₸</div>}
+                        {(currentUser.role==="admin"||(currentUser.role==="user"&&obj.createdById===currentUser.id)) && (
+                          <button onClick={e=>{e.stopPropagation(); if(window.confirm("Удалить объект?")) saveObjects(objectsRef.current.filter(x=>x.id!==obj.id),{removedIds:[obj.id],allowEmpty:true});}}
+                            style={{marginTop:6,background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Workspace объекта */}
+          {objectTab==="workspace" && currentObject && (()=>{
+            const obj = currentObject;
+            const client = contractClients.find(x=>x.id===obj.clientId);
+            const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"lead"))||DEAL_STATUSES[0];
+            const objEsts = estimates.filter(e=>e.objectId===obj.id).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+            const objCons = contracts.filter(c=>c.objectId===obj.id).sort((a,b)=>(b.id||0)-(a.id||0));
+            const canEdit = currentUser.role==="admin"||(currentUser.role==="user"&&obj.createdById===currentUser.id);
+
+            return (
+              <div style={{padding:"0 24px 40px"}}>
+                {/* Карточка объекта — редактируемые поля */}
+                <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"20px 22px",marginTop:20,display:"flex",flexDirection:"column",gap:14}}>
+                  {/* Статус — воронка */}
+                  <div>
+                    <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:8}}>Статус</div>
+                    <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                      {DEAL_STATUSES.map(s=>(
+                        <button key={s.key} disabled={!canEdit} onClick={()=>saveObjField(obj,{status:s.key})}
+                          style={{background:obj.status===s.key?s.bg:"rgba(0,0,0,.03)",color:obj.status===s.key?s.color:"#9ca3af",border:`1px solid ${obj.status===s.key?s.color:"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:canEdit?"pointer":"default",fontFamily:"inherit",transition:"all .12s"}}>
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Клиент */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                    <div>
+                      <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Клиент</div>
+                      <select className="fi" value={obj.clientId||""} disabled={!canEdit}
+                        onChange={e=>saveObjField(obj,{clientId:e.target.value})}>
+                        <option value="">— Выберите клиента —</option>
+                        {contractClients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Менеджер / Замерщик</div>
+                      <input className="fi" value={obj.manager||""} readOnly={!canEdit}
+                        onChange={e=>saveObjField(obj,{manager:e.target.value})}
+                        placeholder="Кто ведёт объект" />
+                    </div>
+                    <div>
+                      <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Адрес</div>
+                      <input className="fi" value={obj.address||""} readOnly={!canEdit}
+                        onChange={e=>saveObjField(obj,{address:e.target.value})}
+                        placeholder="ул. Примерная, д. 1" />
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                      <div>
+                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Тип</div>
+                        <select className="fi" value={obj.objType||"Вторичка"} disabled={!canEdit}
+                          onChange={e=>saveObjField(obj,{objType:e.target.value})}>
+                          {["Вторичка","Новостройка","Коммерция","Частный дом","Другое"].map(t=><option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Площадь</div>
+                        <input className="fi" value={obj.area||""} readOnly={!canEdit} type="number"
+                          onChange={e=>saveObjField(obj,{area:e.target.value})}
+                          placeholder="м²" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Заметка */}
+                  <div>
+                    <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Заметка</div>
+                    <textarea className="fi" rows={2} value={obj.note||""} readOnly={!canEdit}
+                      onChange={e=>saveObjField(obj,{note:e.target.value})}
+                      placeholder="Любая информация по объекту..." style={{resize:"vertical",minHeight:52}} />
+                  </div>
+                </div>
+
+                {/* Сметы объекта */}
+                <div style={{marginTop:24}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>📋 Сметы ({objEsts.length})</div>
+                    {currentUser.role!=="viewer" && (
+                      <button className="btn btn-g" style={{fontSize:12,padding:"6px 14px"}} onClick={()=>openObjectEstimate(obj)}>+ Новая смета</button>
+                    )}
+                  </div>
+                  {objEsts.length===0 && (
+                    <div style={{textAlign:"center",padding:"28px 0",color:"#9ca3af",background:"#f9fafb",borderRadius:8,border:"1px dashed #e5e7eb",fontSize:13}}>
+                      Смет пока нет — нажмите «+ Новая смета»
+                    </div>
+                  )}
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {objEsts.map(est=>{
+                      const posCount = Object.values(est.rows||{}).filter(r=>Number(r?.qty)>0).length;
+                      const stEst = STATUSES.find(s=>s.key===(est.status||"new"))||STATUSES[0];
+                      return (
+                        <div key={est.id} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"12px 16px",cursor:"pointer",transition:"all .12s"}}
+                          onClick={()=>openObjectEstimateEdit(est, obj)}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                            <div style={{minWidth:0,flex:1}}>
+                              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                                <span style={{fontWeight:600,fontSize:13,color:"#111827"}}>{est.proj?.name||"Без названия"}</span>
+                                <span style={{fontSize:10,fontWeight:700,color:stEst.color,background:stEst.bg,borderRadius:4,padding:"1px 6px"}}>{stEst.label}</span>
+                              </div>
+                              <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
+                                {posCount} позиций · {new Date(est.updatedAt||est.createdAt||0).toLocaleDateString("ru-RU")}
+                                {est.createdBy&&` · ${est.createdBy}`}
+                              </div>
+                            </div>
+                            <div style={{fontWeight:800,fontSize:15,color:"#111827",flexShrink:0}}>{fmt(est.total||0)} ₸</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Договоры объекта */}
+                <div style={{marginTop:24}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>📄 Договоры ({objCons.length})</div>
+                    {currentUser.role!=="viewer" && (
+                      <button className="btn btn-g" style={{fontSize:12,padding:"6px 14px"}} onClick={()=>openObjectContract(obj)}>+ Новый договор</button>
+                    )}
+                  </div>
+                  {objCons.length===0 && (
+                    <div style={{textAlign:"center",padding:"28px 0",color:"#9ca3af",background:"#f9fafb",borderRadius:8,border:"1px dashed #e5e7eb",fontSize:13}}>
+                      Договоров пока нет — нажмите «+ Новый договор»
+                    </div>
+                  )}
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {objCons.map(c=>{
+                      const cl2 = contractClients.find(x=>x.id===c.clientId);
+                      const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
+                      const stC = CONTRACT_STATUSES.find(x=>x.key===(c.contractStatus||"draft"))||CONTRACT_STATUSES[0];
+                      return (
+                        <div key={c.id} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"12px 16px",cursor:"pointer",transition:"all .12s"}}
+                          onClick={()=>{ setCurrentContract({...c}); setObjectReturnId(obj.id); setContractTab("editor"); setScreen("contracts"); }}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                            <div style={{minWidth:0,flex:1}}>
+                              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                                <span style={{fontWeight:600,fontSize:13,color:"#111827"}}>Договор №{c.number||"б/н"}</span>
+                                <span style={{fontSize:10,fontWeight:700,color:stC.color,background:stC.bg,borderRadius:4,padding:"1px 6px"}}>{stC.label}</span>
+                              </div>
+                              <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
+                                {cl2?.name||c.estClient||"Клиент не выбран"} · {new Date(c.date||Date.now()).toLocaleDateString("ru-RU")} · {(c.works||[]).length} позиций
+                              </div>
+                            </div>
+                            <div style={{fontWeight:800,fontSize:15,color:"#111827",flexShrink:0}}>{fmt(total)} ₸</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
-      )}
+        );
+      })()}
 
       {effScreen === "contracts" && (
         <div style={{maxWidth:960,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
@@ -6391,10 +6659,22 @@ export default function App() {
                 clients={contractClients}
                 contragents={contragents}
                 onUpdate={setCurrentContract}
-                onBack={()=>setContractTab("list")}
+                onBack={()=>{
+                  if (objectReturnId) {
+                    const obj = objectsRef.current.find(x=>x.id===objectReturnId);
+                    setObjectReturnId(null);
+                    if (obj) { setCurrentObject({...obj}); setObjectTab("workspace"); setScreen("objects"); return; }
+                  }
+                  setContractTab("list");
+                }}
                 onSave={async ()=>{
                   const list = contracts.filter(x=>x.id!==currentContract.id);
                   await saveContracts([...list, currentContract]);
+                  if (objectReturnId) {
+                    const obj = objectsRef.current.find(x=>x.id===objectReturnId);
+                    setObjectReturnId(null);
+                    if (obj) { setCurrentObject({...obj}); setObjectTab("workspace"); setScreen("objects"); return; }
+                  }
                   setContractTab("list");
                 }}
                 onPdf={(withStamp)=>{
