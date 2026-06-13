@@ -2252,14 +2252,12 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
 }
 
 // ── ТЕСТ: Редактор сделки (смета + договор в одной карточке) ──
-function DealEditor({ deal, clients, contragents, onUpdate, onBack, onEstimatePdf, onContractPdf, onAddClient, onUpdateClient, role, fmt }) {
+function DealEditor({ deal, clients, contragents, estimate, onUpdate, onBack, onOpenEstimate, onEstimatePdf, onContractPdf, onAddClient, onUpdateClient, role, fmt }) {
   const [withStamp, setWithStamp] = useState(true);
   const [showClientForm, setShowClientForm] = useState(false);
   const upd = (patch) => onUpdate(prev=>({...prev,...patch}));
-  const works = deal.works||[];
-  const total = works.reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
-  const disc = Math.round(total*(deal.discount||0)/100);
-  const fin = total - disc;
+  const posCount = estimate ? Object.values(estimate.rows||{}).filter(r=>Number(r?.qty)>0).length : 0;
+  const fin = Math.round(estimate?.total || 0);
   const readonly = role==="viewer";
   const client = clients.find(c=>c.id===deal.clientId);
   const stIdx = DEAL_STATUSES.findIndex(s=>s.key===(deal.status||"lead"));
@@ -2332,44 +2330,24 @@ function DealEditor({ deal, clients, contragents, onUpdate, onBack, onEstimatePd
           <input className="fi" type="number" disabled={readonly} value={deal.area||""} onChange={e=>upd({area:e.target.value})} placeholder="0"/></div>
       </div>
 
-      {/* РАБОТЫ (общие для сметы и договора) */}
+      {/* СМЕТА (настоящая, с каталогом) */}
       <div>
-        <div style={{fontSize:12,fontWeight:700,color:"#9ca3af",marginBottom:8}}>РАБОТЫ ({works.filter(w=>w.name).length}) <span style={{fontWeight:500,color:"#cbd5e1"}}>— одни для сметы и договора</span></div>
-        <div style={{background:"#f3f4f6",borderRadius:8,overflow:"hidden",border:"1px solid #e5e7eb"}}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 70px 55px 80px 80px 30px",padding:"8px 12px",fontSize:10,color:"#9ca3af",fontWeight:700}}>
-            <span>НАИМЕНОВАНИЕ</span><span style={{textAlign:"center"}}>КОЛ-ВО</span><span style={{textAlign:"center"}}>ЕД.</span><span style={{textAlign:"right"}}>ЦЕНА</span><span style={{textAlign:"right"}}>СУММА</span><span/>
-          </div>
-          {works.map((w,i)=>(
-            <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 70px 55px 80px 80px 30px",gap:4,padding:"6px 12px",borderTop:"1px solid #e5e7eb",alignItems:"center"}}>
-              <input value={w.name||""} disabled={readonly} onChange={e=>{const ws=[...works];ws[i]={...ws[i],name:e.target.value};upd({works:ws});}}
-                style={{background:"transparent",border:"none",color:"#111827",fontSize:12,fontFamily:"inherit",padding:0,outline:"none",width:"100%"}} placeholder="Работа..."/>
-              <input type="number" value={w.quantity||""} disabled={readonly} onChange={e=>{const ws=[...works];ws[i]={...ws[i],quantity:parseFloat(e.target.value)||0};upd({works:ws});}}
-                style={{background:"#fff",border:"1px solid #e5e7eb",color:"#111827",fontSize:11,borderRadius:4,padding:"3px 5px",textAlign:"center",fontFamily:"inherit",width:"100%"}}/>
-              <input value={w.unit||"м²"} disabled={readonly} onChange={e=>{const ws=[...works];ws[i]={...ws[i],unit:e.target.value};upd({works:ws});}}
-                style={{background:"#fff",border:"1px solid #e5e7eb",color:"#111827",fontSize:11,borderRadius:4,padding:"3px 5px",textAlign:"center",fontFamily:"inherit",width:"100%"}}/>
-              <input type="number" value={w.price||""} disabled={readonly} onChange={e=>{const ws=[...works];ws[i]={...ws[i],price:parseFloat(e.target.value)||0};upd({works:ws});}}
-                style={{background:"#fff",border:"1px solid #e5e7eb",color:"#111827",fontSize:11,borderRadius:4,padding:"3px 5px",textAlign:"right",fontFamily:"inherit",width:"100%"}}/>
-              <div style={{fontSize:12,fontWeight:700,color:"#111827",textAlign:"right"}}>{fmt(Number(w.quantity)*Number(w.price)||0)}</div>
-              {!readonly && <button onClick={()=>upd({works:works.filter((_,j)=>j!==i)})} style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:14,padding:0}}>✕</button>}
-            </div>
-          ))}
-          <div style={{padding:"8px 12px",borderTop:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            {!readonly ? <button onClick={()=>upd({works:[...works,{name:"",quantity:0,unit:"м²",price:0}]})} className="btn btn-g" style={{fontSize:11,padding:"5px 12px"}}>+ Добавить позицию</button> : <span/>}
-            <div style={{display:"flex",alignItems:"center",gap:12}}>
-              <div style={{display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#9ca3af"}}>
-                <span>Скидка</span>
-                <input type="number" min="0" max="100" disabled={readonly} value={deal.discount||0} onChange={e=>upd({discount:Math.min(100,Math.max(0,Number(e.target.value)||0))})}
-                  style={{width:46,background:"#f3f4f6",border:"1px solid #e5e7eb",color:"#111827",borderRadius:4,padding:"3px 6px",fontSize:11,textAlign:"right",fontFamily:"inherit",outline:"none"}}/>
-                <span>%</span>
+        <div style={{fontSize:12,fontWeight:700,color:"#9ca3af",marginBottom:8}}>СМЕТА <span style={{fontWeight:500,color:"#cbd5e1"}}>— заполняется через каталог, как в разделе «Сметы»</span></div>
+        <div style={{background:"#f3f4f6",border:"1px solid #e5e7eb",borderRadius:8,padding:"16px 18px"}}>
+          {estimate ? (
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:13,color:"#111827",fontWeight:700}}>{posCount} позиций на {fmt(fin)} ₸</div>
+                <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>Смета заполнена через каталог</div>
               </div>
-              {disc>0 ? (
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:11,color:"#dc2626"}}>− {fmt(disc)} ₸</div>
-                  <div style={{fontWeight:800,fontSize:16,color:"#111827"}}>{fmt(fin)} ₸</div>
-                </div>
-              ) : <div style={{fontWeight:800,fontSize:16,color:"#111827"}}>{fmt(total)} ₸</div>}
+              {!readonly && <button onClick={onOpenEstimate} className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}}>✏️ Редактировать смету</button>}
             </div>
-          </div>
+          ) : (
+            <div style={{textAlign:"center",padding:"6px 0"}}>
+              <div style={{fontSize:13,color:"#6b7280",marginBottom:12}}>Смета ещё не заполнена</div>
+              {!readonly && <button onClick={onOpenEstimate} className="btn btn-g" style={{fontSize:13,padding:"10px 20px"}}>📋 Заполнить смету (каталог)</button>}
+            </div>
+          )}
         </div>
       </div>
 
@@ -2545,6 +2523,7 @@ export default function App() {
   const [dealTab, setDealTab] = useState("list"); // list | editor
   const [currentDeal, setCurrentDeal] = useState(null);
   const [dealFilterStatus, setDealFilterStatus] = useState("");
+  const [dealReturnId, setDealReturnId] = useState(null); // id сделки, куда вернуться из редактора сметы
   const [contractClientsTab, setContractClientsTab] = useState("list");
   const [sideCollapsed, setSideCollapsed] = useState(false);
   const [stampsBase64, setStampsBase64] = useState({});
@@ -3259,13 +3238,22 @@ export default function App() {
   };
 
   // ── Сохранить текущую и вернуться к списку ──
+  // Вернуться из редактора сметы туда, откуда пришли (к сделке или в список смет)
+  const _backFromEditor = () => {
+    if (dealReturnId) {
+      const dl = dealsRef.current.find(x=>x.id===dealReturnId);
+      setDealReturnId(null);
+      if (dl) { setCurrentDeal({...dl}); setDealTab("editor"); setScreen("deals"); return; }
+    }
+    setScreen("list");
+  };
   const saveAndBack = async () => {
     const cur = estimatesRef.current;
     const exists = cur.find(e => e.id === currentId);
     // ЗАЩИТА: не затирать смету с позициями пустой версией (если не явный сброс)
     if (exists && countFilled(exists.rows) > 0 && countFilled(rows) === 0 && !_allowEmptySave.current) {
       if (_autoSaveRef.current) clearTimeout(_autoSaveRef.current);
-      setScreen("list");
+      _backFromEditor();
       return;
     }
     const pId = currentParentId || exists?.parentId;
@@ -3291,7 +3279,16 @@ export default function App() {
     estimatesRef.current = newList;
     setEstimates(newList);
     await saveEstimates(newList);
-    setScreen("list");
+    // если редактировали смету сделки — синхронизируем итог обратно в сделку
+    if (dealReturnId) {
+      const dl = dealsRef.current.find(x=>x.id===dealReturnId);
+      if (dl) {
+        const updDeal = {...dl, estId: currentId, total: final, updatedAt: Date.now()};
+        const rest = dealsRef.current.filter(x=>x.id!==dl.id);
+        await saveDeals([...rest, updDeal]);
+      }
+    }
+    _backFromEditor();
   };
 
   // ── Новая доп. смета (ДС) к существующей ──
@@ -3848,12 +3845,53 @@ export default function App() {
     setTimeout(()=>URL.revokeObjectURL(url),20000);
   };
 
-  // ТЕСТ: из сделки печатаем смету (простая таблица) или договор (переиспользуем генератор договора)
-  const dealToContract = (deal) => ({
-    type:"repair_fiz", number:deal.contractNumber||"", date:deal.contractDate||deal.createdAtDate||new Date().toISOString().slice(0,10),
-    clientId:deal.clientId, contragentId:deal.contragentId, works:deal.works||[], discount:deal.discount||0,
-    advancePercent:deal.advancePercent??30, note:deal.note||"",
-  });
+  // ТЕСТ: смета сделки = настоящая смета (estId). Работы для договора/печати берём из неё.
+  const estimateToWorks = (est) => {
+    if (!est) return [];
+    const catalog = getEffectiveCatalog();
+    const mm = 1 + (est.markup||0)/100;
+    return Object.entries(est.rows||{}).filter(([,r])=>Number(r?.qty)>0).map(([key,r])=>{
+      const w = catalog.find(x=>x.name===key)||catalog.find(x=>x.code===key);
+      if(!w) return null;
+      const qty = Number(r.qty||0);
+      const cpxPct = r.cpxPct!==undefined ? Number(r.cpxPct) : undefined;
+      const rawPrice = r.manualPrice!==undefined && r.manualPrice!=="" ? Number(r.manualPrice) : getPrice(w, qty, r.complexity||"std", cpxPct);
+      const price = rawPrice ? rawPrice*mm : 0;
+      const displayName = r.manualName!==undefined ? r.manualName : w.name;
+      const displayUnit = r.manualUnit!==undefined ? r.manualUnit : (w.unit||"м²");
+      return {name:displayName,quantity:qty,unit:displayUnit,price:price?Math.round(price):0};
+    }).filter(Boolean);
+  };
+  const dealEstimate = (deal) => estimatesRef.current.find(e=>e.id===deal.estId) || null;
+  const dealToContract = (deal) => {
+    const est = dealEstimate(deal);
+    return {
+      type:"repair_fiz", number:deal.contractNumber||"", date:deal.contractDate||new Date().toISOString().slice(0,10),
+      clientId:deal.clientId, contragentId:deal.contragentId, works:estimateToWorks(est), discount:(est?.discount)||0,
+      advancePercent:deal.advancePercent??30, note:deal.note||"",
+    };
+  };
+  // Открыть/создать настоящую смету для сделки (полный редактор с каталогом)
+  const openDealEstimate = (deal) => {
+    setDealReturnId(deal.id);
+    let est = dealEstimate(deal);
+    if (!est) {
+      const cl = contractClients.find(x=>x.id===deal.clientId);
+      const id = genId();
+      est = {
+        id, proj:{...EMPTY_PROJ, name:cl?.name||"", phone:cl?.phone||"", address:deal.address||cl?.address||"", type:deal.objType||"Вторичка", area:deal.area||"", manager:deal.manager||currentUser.name},
+        rows:{}, discount:0, markup:0, note:"", status:"new", comment:"", _dealId:deal.id,
+        createdAt:Date.now(), createdBy:currentUser.name, updatedAt:Date.now(), updatedBy:currentUser.name, total:0,
+      };
+      const newList = [est, ...estimatesRef.current];
+      estimatesRef.current = newList; setEstimates(newList); saveEstimates(newList);
+      const upd = {...deal, estId:id};
+      setCurrentDeal(upd);
+      const dl = dealsRef.current.filter(x=>x.id!==deal.id);
+      saveDeals([...dl, upd]);
+    }
+    openEstimate(est);
+  };
   const generateDealContractPdf = (deal, withStamp=true) => {
     const client = contractClients.find(x=>x.id===deal.clientId);
     const ca = contragents.find(x=>x.id===deal.contragentId);
@@ -3861,9 +3899,11 @@ export default function App() {
   };
   const generateDealEstimatePdf = (deal) => {
     const client = contractClients.find(x=>x.id===deal.clientId);
-    const works = (deal.works||[]).filter(w=>w.name);
+    const est = dealEstimate(deal);
+    const works = estimateToWorks(est).filter(w=>w.name);
     const total = works.reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
-    const disc = Math.round(total*(deal.discount||0)/100);
+    const dPct = est?.discount||0;
+    const disc = Math.round(total*dPct/100);
     const final = total - disc;
     const esc = s => String(s||"").replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));
     const rows = works.map((w,i)=>`<tr><td style="padding:6px 8px;border-bottom:1px solid #eee">${i+1}</td><td style="padding:6px 8px;border-bottom:1px solid #eee">${esc(w.name)}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">${w.quantity||0}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">${esc(w.unit||"м²")}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${fmt(w.price||0)}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${fmt((Number(w.quantity)*Number(w.price))||0)}</td></tr>`).join("");
@@ -3877,7 +3917,7 @@ export default function App() {
     </div>
     <table><thead><tr><th>№</th><th>Наименование</th><th style="text-align:center">Кол-во</th><th style="text-align:center">Ед.</th><th style="text-align:right">Цена</th><th style="text-align:right">Сумма</th></tr></thead><tbody>${rows}</tbody></table>
     <div style="margin-top:16px;text-align:right;font-size:14px">
-      ${disc>0?`Сумма: ${fmt(total)} ₸<br><span style="color:#dc2626">Скидка ${deal.discount}%: −${fmt(disc)} ₸</span><br>`:""}
+      ${disc>0?`Сумма: ${fmt(total)} ₸<br><span style="color:#dc2626">Скидка ${dPct}%: −${fmt(disc)} ₸</span><br>`:""}
       <div style="font-size:20px;font-weight:800;margin-top:6px">Итого: ${fmt(final)} ₸</div>
     </div>
     <div class="no-print"><button onclick="window.print()" style="padding:12px 32px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:inherit">🖨 Сохранить PDF</button></div>
@@ -4697,7 +4737,7 @@ export default function App() {
         <nav style={{flex:1,padding:"10px 0",overflowY:"auto"}}>
           {NAV_ITEMS.map(item=>(
             <div key={item.id} className={"nav-item"+(effScreen===item.id||(!["dashboard","list","contracts"].includes(effScreen)&&item.id==="list")?"":"")+((effScreen===item.id||(effScreen==="editor"&&item.id==="list"))?" active":"")}
-              onClick={()=>{ setScreen(item.id); }}>
+              onClick={()=>{ setDealReturnId(null); setScreen(item.id); }}>
               <span style={{fontSize:18,flexShrink:0,lineHeight:1}}>{item.icon}</span>
               <span className="nav-label" style={{color:effScreen===item.id||(effScreen==="editor"&&item.id==="list")?"#2563eb":"#9ca3af",fontWeight:effScreen===item.id||(effScreen==="editor"&&item.id==="list")?600:400}}>{item.label}</span>
             </div>
@@ -4719,7 +4759,7 @@ export default function App() {
       <div className="mob-nav">
         {NAV_ITEMS.map(item=>(
           <div key={item.id} className={"mob-nav-item"+(effScreen===item.id||(effScreen==="editor"&&item.id==="list")?" active":"")}
-            onClick={()=>{ setScreen(item.id); }}>
+            onClick={()=>{ setDealReturnId(null); setScreen(item.id); }}>
             <span style={{fontSize:20}}>{item.icon}</span>
             <span style={{fontSize:9,color:effScreen===item.id||(effScreen==="editor"&&item.id==="list")?"#2563eb":"#9ca3af",fontWeight:600}}>{item.label}</span>
           </div>
@@ -6156,8 +6196,9 @@ export default function App() {
                 {[...deals].filter(d=>!dealFilterStatus||(d.status||"lead")===dealFilterStatus).sort((a,b)=>Number(b.id||0)-Number(a.id||0)).map(d=>{
                   const client = contractClients.find(x=>x.id===d.clientId);
                   const st = DEAL_STATUSES.find(s=>s.key===(d.status||"lead"))||DEAL_STATUSES[0];
-                  const total = (d.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
-                  const fin = Math.round(total*(1-(d.discount||0)/100));
+                  const est = estimates.find(e=>e.id===d.estId);
+                  const fin = Math.round(est?.total || d.total || 0);
+                  const posCount = est ? Object.values(est.rows||{}).filter(r=>Number(r?.qty)>0).length : 0;
                   return (
                     <div key={d.id} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"14px 18px",cursor:"pointer"}}
                       onClick={()=>{ setCurrentDeal({...d}); setDealTab("editor"); }}>
@@ -6171,7 +6212,7 @@ export default function App() {
                             {d.objType||"Объект"}{d.address?` · 📍 ${d.address}`:""}
                           </div>
                           <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
-                            {(d.works||[]).filter(w=>w.name).length} позиций · {d.manager||d.createdBy||""}
+                            {est?`${posCount} позиций`:"смета не заполнена"} · {d.manager||d.createdBy||""}
                             {d.contractNumber?` · договор №${d.contractNumber}`:""}
                           </div>
                         </div>
@@ -6193,8 +6234,10 @@ export default function App() {
                 deal={currentDeal}
                 clients={contractClients}
                 contragents={contragents}
+                estimate={estimates.find(e=>e.id===currentDeal.estId)||null}
                 onUpdate={setCurrentDeal}
                 onBack={()=>setDealTab("list")}
+                onOpenEstimate={()=>openDealEstimate(currentDeal)}
                 onEstimatePdf={()=>generateDealEstimatePdf(currentDeal)}
                 onContractPdf={(withStamp)=>generateDealContractPdf(currentDeal, withStamp)}
                 onAddClient={async (name)=>{
