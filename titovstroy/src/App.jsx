@@ -2408,53 +2408,78 @@ export default function App() {
 
   useEffect(() => { loadEstimates(); loadContracts(); }, []);
 
-  // ── Сохранение всего списка ──
-  const saveEstimates = useCallback(async (list) => {
-    // Не писать пока начальная загрузка не подтверждена — иначе пустой стейт перетрёт данные
+  // ── Сохранение списка смет с защитой от рассинхрона ──
+  // opts.replace=true — записать ровно `list` (восстановление из бэкапа)
+  // opts.removedIds — id, которые нужно удалить из объединённого набора (явное удаление)
+  const saveEstimates = useCallback(async (list, opts = {}) => {
     if (!_estimatesLoaded.current) { console.warn("saveEstimates заблокирован: данные ещё не загружены/недоступны"); return; }
     if (!Array.isArray(list)) { console.error("saveEstimates: список не массив — отмена"); return; }
-    // ФИНАЛЬНЫЙ ПРЕДОХРАНИТЕЛЬ: не затирать непустую базу пустым списком без явного разрешения
+    const { replace = false, removedIds = [] } = opts;
+
+    // Читаем актуальное состояние базы (могли изменить другие устройства)
+    let stored = [];
+    let prevValue = null, prevStatus = "empty";
     try {
       const prevCheck = await storage.getResult(STORAGE_KEY);
+      prevStatus = prevCheck.status; prevValue = prevCheck.value;
       if (prevCheck.status === "found" && prevCheck.value) {
-        let prevArr = []; try { prevArr = JSON.parse(prevCheck.value); } catch {}
-        if (Array.isArray(prevArr) && prevArr.length > 0 && list.length === 0 && !_allowEmptySave.current) {
-          console.error("saveEstimates ЗАБЛОКИРОВАН: попытка записать пустой список поверх", prevArr.length, "смет");
-          return;
-        }
-      } else if (prevCheck.status === "unavailable" && list.length === 0) {
-        // База недоступна и мы собираемся писать пусто — слишком рискованно
-        console.error("saveEstimates ЗАБЛОКИРОВАН: база недоступна, пустая запись отменена");
+        try { const p = JSON.parse(prevCheck.value); if (Array.isArray(p)) stored = p; } catch {}
+      } else if (prevCheck.status === "unavailable") {
+        // База недоступна — не рискуем перезаписывать, чтобы не затереть чужие данные
+        console.error("saveEstimates ЗАБЛОКИРОВАН: база недоступна");
+        setCloudError(true);
         return;
       }
     } catch(e) { console.warn("guard check err", e); }
+
+    // СЛИЯНИЕ: объединяем по id, для общих id берём запись с более свежим updatedAt.
+    // Сметы из базы, которых нет в текущем списке, СОХРАНЯЕМ (другое устройство их добавило).
+    let finalList;
+    if (replace) {
+      finalList = list;
+    } else {
+      const map = new Map();
+      for (const e of stored) if (e && e.id) map.set(e.id, e);
+      for (const e of list) {
+        if (!e || !e.id) continue;
+        const ex = map.get(e.id);
+        if (!ex) map.set(e.id, e);
+        else map.set(e.id, (e.updatedAt || 0) >= (ex.updatedAt || 0) ? e : ex);
+      }
+      for (const id of removedIds) map.delete(id);
+      finalList = [...map.values()];
+    }
+
+    // ФИНАЛЬНЫЙ ПРЕДОХРАНИТЕЛЬ: не затирать непустую базу пустым результатом без явного разрешения
+    if (stored.length > 0 && finalList.length === 0 && !_allowEmptySave.current) {
+      console.error("saveEstimates ЗАБЛОКИРОВАН: результат пустой поверх", stored.length, "смет");
+      return;
+    }
+
+    // Синхронизируем UI с объединённым набором (чтобы не потерять подтянутые чужие сметы)
+    estimatesRef.current = finalList;
+    setEstimates(finalList);
+
     setSaving(true);
     try {
-      // Авто-бэкап: перед перезаписью сохраняем снимок предыдущего архива (последние 20)
+      // Авто-бэкап предыдущего состояния (последние 20)
       try {
-        const prev = await storage.get(STORAGE_KEY);
-        if (prev && prev.value) {
+        if (prevStatus === "found" && prevValue) {
           const bRaw = await storage.get(BACKUPS_KEY);
           let backups = [];
           try { if (bRaw && bRaw.value) backups = JSON.parse(bRaw.value); } catch {}
           if (!Array.isArray(backups)) backups = [];
           const last = backups[0];
-          // не плодим одинаковые снимки подряд
-          if (!last || last.data !== prev.value) {
-            backups.unshift({ ts: Date.now(), by: currentUser?.name || "", count: (()=>{try{return JSON.parse(prev.value).length;}catch{return 0;}})(), data: prev.value });
+          if (!last || last.data !== prevValue) {
+            backups.unshift({ ts: Date.now(), by: currentUser?.name || "", count: stored.length, data: prevValue });
             backups = backups.slice(0, 20);
             await storage.set(BACKUPS_KEY, JSON.stringify(backups));
           }
         }
       } catch(e) { console.warn("backup err", e); }
-      const res = await storage.set(STORAGE_KEY, JSON.stringify(list));
-      // Если запись в облако не прошла — поднимаем видимый баннер (данные только локально)
-      if (res && res.fbOk === false) {
-        console.error("Firebase save FAILED:", res.fbError);
-        setCloudError(true);
-      } else {
-        setCloudError(false);
-      }
+      const res = await storage.set(STORAGE_KEY, JSON.stringify(finalList));
+      if (res && res.fbOk === false) { console.error("Firebase save FAILED:", res.fbError); setCloudError(true); }
+      else { setCloudError(false); }
     } catch(e) { console.error(e); setCloudError(true); }
     setSaving(false);
   }, [currentUser]);
@@ -2479,9 +2504,11 @@ export default function App() {
     try { list = JSON.parse(snap.data); } catch { window.alert("Не удалось прочитать бэкап"); return; }
     if (!Array.isArray(list)) { window.alert("Бэкап повреждён"); return; }
     if (!window.confirm(`Восстановить архив на момент ${new Date(snap.ts).toLocaleString("ru-RU")}?\nСметы: ${list.length}. Текущая версия уйдёт в бэкап и её можно вернуть обратно.`)) return;
+    _allowEmptySave.current = true; // восстановление может заменить на меньший набор
     estimatesRef.current = list;
     setEstimates(list);
-    await saveEstimates(list); // текущая версия попадёт в бэкап автоматически
+    await saveEstimates(list, { replace: true }); // ровно снимок, текущая версия уйдёт в бэкап
+    setTimeout(() => { _allowEmptySave.current = false; }, 1500);
     setBackupsModal(null);
     window.alert("Архив восстановлен ✓");
   };
@@ -2779,9 +2806,9 @@ export default function App() {
     const newList = estimatesRef.current.filter(e => e.id !== id);
     estimatesRef.current = newList;
     setEstimates(newList);
-    // явное удаление — разрешаем сохранить даже если список стал пустым
+    // явное удаление — разрешаем пустой результат и удаляем по id из объединённого набора
     _allowEmptySave.current = true;
-    await saveEstimates(newList);
+    await saveEstimates(newList, { removedIds: [id] });
     setTimeout(() => { _allowEmptySave.current = false; }, 1000);
     setDeleteConfirm(null);
   };
