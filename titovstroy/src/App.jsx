@@ -3352,7 +3352,7 @@ export default function App() {
     setActiveCat(cats[0]);
     setActiveSub(Object.keys(Gdyn[cats[0]]||{})[0]);
     // Сохраняем parentId до открытия редактора — автосохранение подхватит
-    const newEst = {id, parentId: parentEst.id, dsNumber, proj:{...(parentEst.proj||EMPTY_PROJ)}, rows:{}, discount:0, markup:parentEst.markup||0, note:"", status:"new", comment:"", createdAt:Date.now(), createdBy:currentUser.name, updatedAt:Date.now(), updatedBy:currentUser.name, total:0};
+    const newEst = {id, parentId: parentEst.id, dsNumber, ...(parentEst.objectId?{objectId:parentEst.objectId}:{}), proj:{...(parentEst.proj||EMPTY_PROJ)}, rows:{}, discount:0, markup:parentEst.markup||0, note:"", status:"new", comment:"", createdAt:Date.now(), createdBy:currentUser.name, updatedAt:Date.now(), updatedBy:currentUser.name, total:0};
     const newList = [newEst, ...cur];
     estimatesRef.current = newList;
     setEstimates(newList);
@@ -4644,7 +4644,7 @@ export default function App() {
 
   const NAV_ITEMS = useMemo(() => [
     ...(currentUser.role !== "viewer" ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
-    { id:"objects",   icon:"📦", label:"Объекты (разработка)" },
+    { id:"objects",   icon:"📦", label:"Объекты" },
     { id:"list",      icon:"📋", label:"Сметы" },
     { id:"contracts", icon:"📄", label:"Договора" },
     ...(currentUser.role !== "viewer" ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
@@ -6220,7 +6220,9 @@ export default function App() {
         });
         // Авто-синхронизация скрытой записи клиента (нужна договорам/PDF). Возвращает clientId.
         const ensureObjClient = async (obj) => {
-          const cdata = { name: obj.clientName||"", phone: obj.clientPhone||"", address: obj.address||"", iin: obj.clientIin||"", doc: obj.clientDoc||"", type: obj.clientType||"физ" };
+          const isYur = obj.clientType==="юр";
+          const cdata = { name: obj.clientName||"", phone: obj.clientPhone||"", address: obj.address||"", iin: obj.clientIin||"", doc: obj.clientDoc||"", type: obj.clientType||"физ",
+            ...(isYur ? { director: obj.clientDirector||"", directorShort: obj.clientDirectorShort||"", bank: obj.clientBank||"", bik: obj.clientBik||"", account: obj.clientAccount||"", email: obj.clientEmail||"" } : {}) };
           let clientId = obj.clientId;
           const list = clientsRef.current;
           if (clientId && list.find(c=>c.id===clientId)) {
@@ -6233,6 +6235,25 @@ export default function App() {
             setCurrentObject(updObj);
           }
           return clientId;
+        };
+
+        // Конвертация строк сметы в позиции договора (как кнопка 📄 в разделе Сметы)
+        const estToContractWorks = (est) => {
+          const catalog = getEffectiveCatalog();
+          const mm = 1 + (est.markup||0)/100;
+          return Object.entries(est.rows||{}).filter(([,r])=>Number(r?.qty)>0).map(([key,r])=>{
+            const w = catalog.find(x=>x.name===key)||catalog.find(x=>x.code===key);
+            if(!w) return null;
+            const qty = Number(r.qty||0);
+            const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
+            const rawPrice = r.manualPrice !== undefined && r.manualPrice !== "" ? Number(r.manualPrice) : getPrice(w, qty, r.complexity||"std", cpxPct);
+            const price = rawPrice ? rawPrice * mm : null;
+            const ew = getEffectiveWork(w);
+            const pf = (!price && ew.priceFrom) ? Math.round(ew.priceFrom * mm) : null;
+            const displayName = r.manualName !== undefined ? r.manualName : w.name;
+            const displayUnit = r.manualUnit !== undefined ? r.manualUnit : (w.unit||"м²");
+            return {name:displayName,category:w.cat||"",subcategory:w.sub||"",quantity:qty,unit:displayUnit,price:price?Math.round(price):0,priceFrom:pf||undefined};
+          }).filter(Boolean);
         };
         // ── Вспомогательные функции для workspace ──
         const openObjectEstimate = (obj) => {
@@ -6286,21 +6307,30 @@ export default function App() {
           setScreen("editor");
         };
 
-        const openObjectContract = async (obj) => {
+        const openObjectContract = async (obj, fromEst=null) => {
           const clientId = await ensureObjClient(obj);
+          const works = fromEst ? estToContractWorks(fromEst) : [];
+          const isDs = fromEst && !!fromEst.parentId;
+          const siblings = fromEst ? estimatesRef.current.filter(e=>e.parentId===fromEst.parentId) : [];
+          const annexNum = isDs ? (fromEst.dsNumber||1)+1 : 1;
+          const parentContract = isDs ? contractsRef.current.find(c=>c.estId===fromEst.parentId && (c.type||"repair_fiz")!=="annex") : null;
           const newC = {
             id: Date.now().toString(),
             objectId: obj.id,
-            number: nextContractNumber(),
+            number: fromEst && !isDs ? nextContractNumber() : (isDs ? "" : nextContractNumber()),
             date: new Date().toISOString().split("T")[0],
             clientId,
             estClient: obj.clientName||"",
             estPhone: obj.clientPhone||"",
             estAddress: obj.address||"",
             contragentId: contragents[0]?.id||"",
-            works: [],
-            appendix: 1,
+            works,
+            discount: fromEst?.discount||0,
+            appendix: annexNum,
+            estId: fromEst?.id||"",
             note: "",
+            type: isDs ? "annex" : "repair_fiz",
+            ...(isDs && parentContract ? {mainNumber: parentContract.number||"", mainDate: parentContract.date||""} : {}),
             createdBy: currentUser.name,
             createdById: currentUser.id,
           };
@@ -6416,7 +6446,9 @@ export default function App() {
             // Текст печатаем локально (отзывчиво), сохраняем на blur. Синхронизируем скрытую запись клиента.
             const setObjLocal = (patch) => setCurrentObject(p=>({...p,...patch}));
             const persistObj = () => setCurrentObject(p=>{
-              const cdata = { name:p.clientName||"", phone:p.clientPhone||"", address:p.address||"", iin:p.clientIin||"", doc:p.clientDoc||"", type:p.clientType||"физ" };
+              const isYurP = p.clientType==="юр";
+              const cdata = { name:p.clientName||"", phone:p.clientPhone||"", address:p.address||"", iin:p.clientIin||"", doc:p.clientDoc||"", type:p.clientType||"физ",
+                ...(isYurP ? { director:p.clientDirector||"", directorShort:p.clientDirectorShort||"", bank:p.clientBank||"", bik:p.clientBik||"", account:p.clientAccount||"", email:p.clientEmail||"" } : {}) };
               let clientId = p.clientId;
               const cl = clientId && clientsRef.current.find(c=>c.id===clientId);
               if (cl) {
@@ -6493,6 +6525,38 @@ export default function App() {
                         onChange={e=>setObjLocal({clientDoc:e.target.value})} onBlur={persistObj}
                         placeholder={obj.clientType==="юр"?"Устав / доверенность":"Документ (уд. личности №...)"} />
                     </div>
+                    {obj.clientType==="юр" && (<>
+                      <div style={{gridColumn:"1 / -1"}}>
+                        <input className="fi" style={{fontSize:12}} value={obj.clientDirector||""} readOnly={!canEdit}
+                          onChange={e=>setObjLocal({clientDirector:e.target.value})} onBlur={persistObj}
+                          placeholder="Директор (полностью, напр. Иванов Иван Иванович)" />
+                      </div>
+                      <div>
+                        <input className="fi" style={{fontSize:12}} value={obj.clientDirectorShort||""} readOnly={!canEdit}
+                          onChange={e=>setObjLocal({clientDirectorShort:e.target.value})} onBlur={persistObj}
+                          placeholder="Директор кратко (Иванов И.И.)" />
+                      </div>
+                      <div>
+                        <input className="fi" style={{fontSize:12}} value={obj.clientEmail||""} readOnly={!canEdit}
+                          onChange={e=>setObjLocal({clientEmail:e.target.value})} onBlur={persistObj}
+                          placeholder="Email" />
+                      </div>
+                      <div>
+                        <input className="fi" style={{fontSize:12}} value={obj.clientBank||""} readOnly={!canEdit}
+                          onChange={e=>setObjLocal({clientBank:e.target.value})} onBlur={persistObj}
+                          placeholder="Банк" />
+                      </div>
+                      <div>
+                        <input className="fi" style={{fontSize:12}} value={obj.clientBik||""} readOnly={!canEdit}
+                          onChange={e=>setObjLocal({clientBik:e.target.value})} onBlur={persistObj}
+                          placeholder="БИК" />
+                      </div>
+                      <div>
+                        <input className="fi" style={{fontSize:12}} value={obj.clientAccount||""} readOnly={!canEdit}
+                          onChange={e=>setObjLocal({clientAccount:e.target.value})} onBlur={persistObj}
+                          placeholder="ИИК (расчётный счёт)" />
+                      </div>
+                    </>)}
                     <div style={{gridColumn:"1 / -1"}}>
                       <input className="fi" style={{fontSize:12}} value={obj.address||""} readOnly={!canEdit}
                         onChange={e=>setObjLocal({address:e.target.value})} onBlur={persistObj}
@@ -6536,15 +6600,17 @@ export default function App() {
                     </div>
                   )}
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                    {objEsts.map(est=>{
+                    {objEsts.map((est,estIdx)=>{
+                      const isChild = !!est.parentId;
                       const posCount = Object.values(est.rows||{}).filter(r=>Number(r?.qty)>0).length;
                       const stEst = STATUSES.find(s=>s.key===(est.status||"new"))||STATUSES[0];
                       return (
-                        <div key={est.id} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"12px 16px",cursor:"pointer",transition:"all .12s"}}
+                        <div key={est.id} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"12px 16px",cursor:"pointer",marginLeft:isChild?16:0,borderLeft:isChild?"3px solid #d1fae5":"1px solid #e5e7eb"}}
                           onClick={()=>openObjectEstimateEdit(est, obj)}>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                                {isChild && <span style={{fontSize:10,fontWeight:700,color:"#059669",background:"rgba(5,150,105,.08)",borderRadius:3,padding:"1px 6px"}}>ДС №{est.dsNumber||1}</span>}
                                 <span style={{fontWeight:600,fontSize:13,color:"#111827"}}>{est.proj?.name||obj.clientName||obj.address||"Новая смета"}</span>
                                 <span style={{fontSize:10,fontWeight:700,color:stEst.color,background:stEst.bg,borderRadius:4,padding:"1px 6px"}}>{stEst.label}</span>
                               </div>
@@ -6553,7 +6619,25 @@ export default function App() {
                                 {est.createdBy&&` · ${est.createdBy}`}
                               </div>
                             </div>
-                            <div style={{fontWeight:800,fontSize:15,color:"#111827",flexShrink:0}}>{fmt(est.total||0)} ₸</div>
+                            <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
+                              <div style={{fontWeight:800,fontSize:15,color:"#111827"}}>{fmt(est.total||0)} ₸</div>
+                              <div style={{display:"flex",gap:4}} onClick={e=>e.stopPropagation()}>
+                                <button title="Создать договор из сметы" onClick={()=>openObjectContract(obj,est)}
+                                  style={{background:"rgba(184,144,74,.08)",color:"#2563eb",border:"1px solid #eff6ff",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄</button>
+                                {currentUser.role!=="viewer" && !isChild && (
+                                  <button title="Доп. смета (ДС)" onClick={()=>{ setObjectReturnId(obj.id); newSupplementaryEstimate(est); }}
+                                    style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>+ДС</button>
+                                )}
+                                {currentUser.role!=="viewer" && (
+                                  <button title="Дублировать" onClick={()=>duplicateEstimate(est)}
+                                    style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(100,100,200,.15)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>⧉</button>
+                                )}
+                                {(currentUser.role==="admin"||(currentUser.role==="user"&&est.createdBy===currentUser.name)) && (
+                                  <button title="Удалить смету" onClick={()=>{ if(window.confirm("Удалить смету?")) deleteEstimate(est.id); }}
+                                    style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </div>
                       );
@@ -6578,22 +6662,37 @@ export default function App() {
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
                     {objCons.map(c=>{
                       const cl2 = contractClients.find(x=>x.id===c.clientId);
+                      const ca2 = contragents.find(x=>x.id===c.contragentId);
                       const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
                       const stC = CONTRACT_STATUSES.find(x=>x.key===(c.contractStatus||"draft"))||CONTRACT_STATUSES[0];
+                      const TLABEL = {repair_fiz:"Договор",annex:"Приложение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронь"};
+                      const conTitle = c.type==="annex" ? `Приложение №${c.appendix||2}`+(c.mainNumber?` к №${c.mainNumber}`:"") : `${TLABEL[c.type||"repair_fiz"]||"Договор"} №${c.number||"б/н"}`;
                       return (
                         <div key={c.id} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"12px 16px",cursor:"pointer",transition:"all .12s"}}
                           onClick={()=>{ setCurrentContract({...c}); setObjectReturnId(obj.id); setContractTab("editor"); setScreen("contracts"); }}>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                                <span style={{fontWeight:600,fontSize:13,color:"#111827"}}>Договор №{c.number||"б/н"}</span>
+                                <span style={{fontWeight:600,fontSize:13,color:"#111827"}}>{conTitle}</span>
                                 <span style={{fontSize:10,fontWeight:700,color:stC.color,background:stC.bg,borderRadius:4,padding:"1px 6px"}}>{stC.label}</span>
                               </div>
                               <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
                                 {cl2?.name||c.estClient||"Клиент не выбран"} · {new Date(c.date||Date.now()).toLocaleDateString("ru-RU")} · {(c.works||[]).length} позиций
                               </div>
                             </div>
-                            <div style={{fontWeight:800,fontSize:15,color:"#111827",flexShrink:0}}>{fmt(total)} ₸</div>
+                            <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
+                              <div style={{fontWeight:800,fontSize:15,color:"#111827"}}>{fmt(total)} ₸</div>
+                              <div style={{display:"flex",gap:4}} onClick={e=>e.stopPropagation()}>
+                                <button onClick={()=>generateContractPdf(c,cl2,ca2)}
+                                  style={{background:"#e5e7eb",color:"#374151",border:"1px solid #e5e7eb",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>
+                                <button onClick={()=>generateContractGDoc(c,cl2,ca2)}
+                                  style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>
+                                {(currentUser.role==="admin"||(currentUser.role==="user"&&c.createdBy===currentUser.name)) && (
+                                  <button onClick={()=>{ if(window.confirm("Удалить договор?")) saveContracts(contractsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
+                                    style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </div>
                       );
