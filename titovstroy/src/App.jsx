@@ -262,10 +262,11 @@ const fmtDate = (ts) => {
 const EMPTY_PROJ = { name:"", type:"Вторичка", area:"", address:"", phone:"", manager:"" };
 
 const STATUSES = [
-  { key:"new",       label:"Новая",       color:"#2563eb", bg:"#eff6ff"   },
-  { key:"progress",  label:"В работе",    color:"#d97706", bg:"rgba(217,119,6,.12)"  },
-  { key:"agreed",    label:"Согласовано", color:"#059669", bg:"#eff6ff"  },
-  { key:"rejected",  label:"Отказ",       color:"#dc2626", bg:"rgba(220,38,38,.12)"   },
+  { key:"new",       label:"Новая",              color:"#2563eb", bg:"#eff6ff"   },
+  { key:"progress",  label:"В работе",           color:"#d97706", bg:"rgba(217,119,6,.12)"  },
+  { key:"sent",      label:"Отправлено клиенту", color:"#7c3aed", bg:"rgba(124,58,237,.1)"  },
+  { key:"agreed",    label:"Согласовано",        color:"#059669", bg:"#eff6ff"  },
+  { key:"rejected",  label:"Отказ",              color:"#dc2626", bg:"rgba(220,38,38,.12)"   },
 ];
 const STORAGE_KEY        = "titovstroy-estimates";
 const BACKUPS_KEY        = "titovstroy-estimates-backups"; // снимки архива для восстановления
@@ -1343,7 +1344,8 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
         const margin = src.margin !== undefined ? Number(src.margin) : (w.margin ?? 0.4);
         const priceFrom = src.priceFrom !== undefined ? (src.priceFrom ? Number(src.priceFrom) : null) : (w.priceFrom ?? null);
         if (cost !== null && !isNaN(cost) && cost > 0) {
-          const price = Math.round(cost / (1 - margin));
+          const safeMargin = Math.min(0.99, Math.max(0, Number(margin) || 0));
+          const price = Math.round(cost / (1 - safeMargin));
           overrides[code] = { cost, margin, fixedPrice: price, tiers: [], ...(priceFrom ? {priceFrom} : {}) };
         } else if (priceFrom) {
           overrides[code] = { ...(overrides[code]||{}), priceFrom };
@@ -1738,7 +1740,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                         const baseMargin = w.margin ?? 0.4;
                         const ovCost = ov?.cost !== undefined ? ov.cost : baseCost;
                         const ovMargin = ov?.margin !== undefined ? ov.margin : baseMargin;
-                        const price = (ovCost !== null && ovCost !== "" && Number(ovCost) > 0) ? Math.round(Number(ovCost) / (1 - Number(ovMargin))) : (ov?.fixedPrice || w.fixedPrice || null);
+                        const price = (ovCost !== null && ovCost !== "" && Number(ovCost) > 0) ? Math.round(Number(ovCost) / (1 - Math.min(0.99, Math.max(0, Number(ovMargin)||0)))) : (ov?.fixedPrice || w.fixedPrice || null);
                         const profit = (ovCost !== null && ovCost !== "" && Number(ovCost) > 0 && price) ? price - Number(ovCost) : null;
                         const isEven = rows.length % 2 === 0;
                         rows.push(
@@ -1803,7 +1805,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
                                 <input type="number" min="0" max="100" step="1"
                                   value={Math.round(ovMargin*100)}
                                   onChange={e=>{
-                                    const val = e.target.value===""?baseMargin:Number(e.target.value)/100;
+                                    const val = e.target.value===""?baseMargin:Math.min(0.99, Math.max(0, Number(e.target.value)/100));
                                     setLocalPrices(prev=>({...prev,[w.code]:{...(prev?.[w.code]||{}),margin:val}}));
                                     priceCardCache[w.code] = {...(priceCardCache[w.code]||{}), margin:val, cost:ovCost};
                                   }}
@@ -2237,6 +2239,7 @@ export default function App() {
   useEffect(() => { estimatesRef.current = estimates; }, [estimates]);
   const [loadingList, setLoadingList] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [syncStatus, setSyncStatus] = useState("idle"); // idle | saving | saved | error
 
   // Текущая смета в редакторе
   const [currentId, setCurrentId] = useState(null);
@@ -2257,6 +2260,7 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [estStatus, setEstStatus] = useState("new");
+  const [estSentAt, setEstSentAt] = useState("");
   const [estComment, setEstComment] = useState("");
   const [showStats, setShowStats] = useState(false);
   const [statsPeriod, setStatsPeriod] = useState("all"); // all | month | week | 3month
@@ -2351,7 +2355,7 @@ export default function App() {
       saveEstimates(newList);
     }, 1500);
     return () => clearTimeout(_autoSaveRef.current);
-  }, [rows, proj, discount, markup, note, estStatus, estComment]);
+  }, [rows, proj, discount, markup, note, estStatus, estSentAt, estComment]);
 
   // ── Загрузка списка смет из shared storage ──
   const loadContracts = useCallback(async () => {
@@ -2520,6 +2524,7 @@ export default function App() {
     setEstimates(finalList);
 
     setSaving(true);
+    setSyncStatus("saving");
     try {
       // Авто-бэкап предыдущего состояния (последние 20)
       try {
@@ -2537,9 +2542,9 @@ export default function App() {
         }
       } catch(e) { console.warn("backup err", e); }
       const res = await storage.set(STORAGE_KEY, JSON.stringify(finalList));
-      if (res && res.fbOk === false) { console.error("Firebase save FAILED:", res.fbError); setCloudError(true); }
-      else { setCloudError(false); }
-    } catch(e) { console.error(e); setCloudError(true); }
+      if (res && res.fbOk === false) { console.error("Firebase save FAILED:", res.fbError); setCloudError(true); setSyncStatus("error"); }
+      else { setCloudError(false); setSyncStatus("saved"); setTimeout(()=>setSyncStatus("idle"), 3000); }
+    } catch(e) { console.error(e); setCloudError(true); setSyncStatus("error"); }
     setSaving(false);
   }, [currentUser]);
 
@@ -2832,6 +2837,7 @@ export default function App() {
     setMarkup(est.markup || 0);
     setNote(est.note || "");
     setEstStatus(est.status || "new");
+    setEstSentAt(est.sentAt || "");
     setEstComment(est.comment || "");
     setSearch("");
     setActiveCat(cats[0]);
@@ -2851,6 +2857,7 @@ export default function App() {
     setMarkup(0);
     setNote("");
     setEstStatus("new");
+    setEstSentAt("");
     setEstComment("");
     setSearch("");
     setActiveCat(cats[0]);
@@ -2874,6 +2881,7 @@ export default function App() {
       id: currentId,
       proj, rows, discount, markup, note,
       status: estStatus,
+      sentAt: estStatus === "sent" ? (estSentAt || exists?.sentAt || new Date().toISOString().slice(0,10)) : (exists?.sentAt || null),
       comment: estComment,
       createdAt: exists?.createdAt || Date.now(),
       createdBy: exists?.createdBy || currentUser.name,
@@ -2907,6 +2915,7 @@ export default function App() {
     setMarkup(parentEst.markup||0);
     setNote("");
     setEstStatus("new");
+    setEstSentAt("");
     setEstComment("");
     setSearch("");
     setActiveCat(cats[0]);
@@ -4282,7 +4291,9 @@ export default function App() {
                 {" · "}<span style={{color:"#2563eb"}}>{currentUser.role==="admin"?"Администратор":currentUser.role==="viewer"?"Просмотр":currentUser.name}</span>
               </div>
             </div>
-            {saving && <span style={{fontSize:11,color:"#9ca3af"}}>💾 Сохранение...</span>}
+            <span style={{fontSize:11,fontWeight:600,display:"flex",alignItems:"center",gap:5,padding:"4px 10px",borderRadius:20,background: syncStatus==="saving"?"rgba(37,99,235,.08)":syncStatus==="saved"?"rgba(5,150,105,.08)":syncStatus==="error"?"rgba(220,38,38,.08)":"rgba(0,0,0,.04)",color:syncStatus==="saving"?"#2563eb":syncStatus==="saved"?"#059669":syncStatus==="error"?"#dc2626":"#9ca3af",transition:"all .3s"}}>
+              {syncStatus==="saving"?"⏳ Сохраняю...":syncStatus==="saved"?"☁ Сохранено":syncStatus==="error"?"⚠ Ошибка синка":"☁ Синк"}
+            </span>
           </div>
 
           {/* Статы */}
@@ -4546,6 +4557,7 @@ export default function App() {
                               : <span style={{fontSize:11,color:"#9ca3af",fontStyle:"italic",flexShrink:0}}>черновик</span>}
                           </div>
                           {est.comment&&<div style={{fontSize:11,color:"#9ca3af",marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>💬 {est.comment}</div>}
+                          {est.status==="sent"&&est.sentAt&&<div style={{fontSize:11,color:"#7c3aed",marginTop:2,fontWeight:600}}>📤 Отправлено {new Date(est.sentAt).toLocaleDateString("ru-RU")}</div>}
                           {/* Строка 2: мета + дата + кнопки */}
                           <div style={{display:"flex",alignItems:"center",gap:6,marginTop:5}} onClick={e=>e.stopPropagation()}>
                             <span style={{fontSize:11,color:"#9ca3af",background:"rgba(0,0,0,.03)",borderRadius:4,padding:"1px 6px"}}>{dProj?.type||"—"}</span>
@@ -5140,12 +5152,19 @@ export default function App() {
                   <div style={{fontSize:10,color:"#9ca3af",fontWeight:700,letterSpacing:1.2,textTransform:"uppercase",marginBottom:8}}>Статус</div>
                   <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                     {STATUSES.map(s=>(
-                      <button key={s.key} onClick={()=>setEstStatus(s.key)}
+                      <button key={s.key} onClick={()=>{setEstStatus(s.key);if(s.key==="sent"&&!estSentAt)setEstSentAt(new Date().toISOString().slice(0,10));}}
                         style={{fontSize:11,fontWeight:700,padding:"4px 12px",borderRadius:6,cursor:"pointer",fontFamily:"inherit",border:`1px solid ${estStatus===s.key?s.color:"rgba(0,0,0,.04)"}`,background:estStatus===s.key?s.bg:"transparent",color:estStatus===s.key?s.color:"#9ca3af",transition:"all .15s"}}>
                         {s.label}
                       </button>
                     ))}
                   </div>
+                  {estStatus==="sent" && (
+                    <div style={{marginTop:8,display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:11,color:"#7c3aed",fontWeight:600}}>Дата отправки:</span>
+                      <input type="date" className="fi" value={estSentAt} onChange={e=>setEstSentAt(e.target.value)}
+                        style={{fontSize:12,padding:"3px 8px",borderRadius:6,border:"1px solid rgba(124,58,237,.3)",width:150,color:"#7c3aed",fontFamily:"inherit"}}/>
+                    </div>
+                  )}
                 </div>
                 {/* Комментарий для менеджера */}
                 <div className="card" style={{padding:14}}>
