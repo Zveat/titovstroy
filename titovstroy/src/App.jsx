@@ -273,6 +273,9 @@ const USERS_KEY          = "titovstroy-users";
 const SESSION_KEY        = "titovstroy-session";
 const PRICES_KEY         = "titovstroy-prices";  // переопределённые цены {code: {fixedPrice?, tiers?}}
 const CATALOG_BACKUPS_KEY= "titovstroy-catalog-backups"; // снимки каталога (последние 10)
+const CONTRACTS_BACKUPS_KEY = "titovstroy-contracts-backups";
+const CLIENTS_BACKUPS_KEY   = "titovstroy-clients-backups";
+const CONTRAGENTS_BACKUPS_KEY = "titovstroy-contragents-backups";
 const CATALOG_KEY    = "titovstroy-catalog";
 const CONTRACTS_KEY  = "titovstroy-contracts";
 const CLIENTS_KEY    = "titovstroy-clients";
@@ -2264,7 +2267,12 @@ export default function App() {
   const contractsRef = useRef([]);
   useEffect(() => { contractsRef.current = contracts; }, [contracts]);
   const [contractClients, setContractClients] = useState([]);
+  const clientsRef = useRef([]);
+  useEffect(() => { clientsRef.current = contractClients; }, [contractClients]);
   const [contragents, setContragents] = useState([{id:"1",name:"ТОО TITOVSTROY",bin:"231040002769",bank:'АО "Kaspi Bank"',bik:"CASPKZKA",account:"KZ38722S000030058973",director:"Титов В.Е.",phone:"8707 667 8766",email:"titovstroy@mail.ru",address:"Казахстан, район им.Казыбек би, улица Кирпичная, дом 8г"}]);
+  const contragentsRef = useRef([]);
+  useEffect(() => { contragentsRef.current = contragents; }, [contragents]);
+  const _contractsLoaded = useRef(false);
   const [contractTab, setContractTab] = useState("list"); // list | editor | clients | contragents
   const [currentContract, setCurrentContract] = useState(null);
   const [contractClientsTab, setContractClientsTab] = useState("list");
@@ -2346,17 +2354,37 @@ export default function App() {
 
   // ── Загрузка списка смет из shared storage ──
   const loadContracts = useCallback(async () => {
+    let ok = true;
     try {
-      const [cr, cl, ca] = await Promise.all([storage.get(CONTRACTS_KEY), storage.get(CLIENTS_KEY), storage.get(CONTRAGENTS_KEY)]);
-      if (cr) setContracts(JSON.parse(cr.value));
-      if (cl) { const cls = JSON.parse(cl.value); setContractClients(cls.map(c=>({...c, createdAt: c.createdAt||Date.now()}))); }
-      if (ca) setContragents(JSON.parse(ca.value));
-    } catch(e) { console.error(e); }
+      const [cr, cl, ca] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY)]);
+      // Договоры
+      if (cr.status === "found" && cr.value) { try { const p = JSON.parse(cr.value); if (Array.isArray(p)) { setContracts(p); contractsRef.current = p; } } catch {} }
+      else if (cr.status === "empty") { setContracts([]); contractsRef.current = []; }
+      else { ok = false; } // unavailable — не трогаем
+      // Клиенты
+      if (cl.status === "found" && cl.value) { try { const p = JSON.parse(cl.value); if (Array.isArray(p)) { const cls = p.map(c=>({...c, createdAt:c.createdAt||Date.now()})); setContractClients(cls); clientsRef.current = cls; } } catch {} }
+      else if (cl.status === "empty") { setContractClients([]); clientsRef.current = []; }
+      else { ok = false; }
+      // Контрагенты
+      if (ca.status === "found" && ca.value) { try { const p = JSON.parse(ca.value); if (Array.isArray(p)) { setContragents(p); contragentsRef.current = p; } } catch {} }
+      // контрагенты: если пусто/недоступно — оставляем дефолтный, не трогаем
+    } catch(e) { console.error(e); ok = false; }
+    _contractsLoaded.current = ok;
   }, []);
 
-  const saveContracts = async (list) => { setContracts(list); await storage.set(CONTRACTS_KEY, JSON.stringify(list)); };
-  const saveContractClients = async (list) => { const patched = list.map(c=>({...c, createdAt: c.createdAt||Date.now()})); setContractClients(patched); await storage.set(CLIENTS_KEY, JSON.stringify(patched)); };
-  const saveContragents = async (list) => { setContragents(list); await storage.set(CONTRAGENTS_KEY, JSON.stringify(list)); };
+  const saveContracts = async (list, opts = {}) => {
+    const r = await saveListProtected(CONTRACTS_KEY, CONTRACTS_BACKUPS_KEY, list, (fl)=>{ contractsRef.current = fl; setContracts(fl); }, { loadedRef: _contractsLoaded, ...opts });
+    return r;
+  };
+  const saveContractClients = async (list, opts = {}) => {
+    const patched = list.map(c=>({...c, createdAt: c.createdAt||Date.now()}));
+    const r = await saveListProtected(CLIENTS_KEY, CLIENTS_BACKUPS_KEY, patched, (fl)=>{ clientsRef.current = fl; setContractClients(fl); }, { loadedRef: _contractsLoaded, ...opts });
+    return r;
+  };
+  const saveContragents = async (list, opts = {}) => {
+    const r = await saveListProtected(CONTRAGENTS_KEY, CONTRAGENTS_BACKUPS_KEY, list, (fl)=>{ contragentsRef.current = fl; setContragents(fl); }, { loadedRef: _contractsLoaded, ...opts });
+    return r;
+  };
 
   // Автосохранение договора
   const _contractAutoSave = useRef(null);
@@ -2365,7 +2393,7 @@ export default function App() {
     if (_contractAutoSave.current) clearTimeout(_contractAutoSave.current);
     _contractAutoSave.current = setTimeout(async () => {
       const list = contractsRef.current.filter(x=>x.id!==currentContract.id);
-      await saveContracts([...list, currentContract]);
+      await saveContracts([...list, {...currentContract, updatedAt: Date.now()}]);
     }, 1500);
     return () => clearTimeout(_contractAutoSave.current);
   }, [currentContract]);
@@ -2486,6 +2514,66 @@ export default function App() {
       else { setCloudError(false); }
     } catch(e) { console.error(e); setCloudError(true); }
     setSaving(false);
+  }, [currentUser]);
+
+  // ── УНИВЕРСАЛЬНОЕ защищённое сохранение списка (договоры, клиенты, контрагенты) ──
+  // Та же логика, что у смет: слияние по id, бэкап, защита от затирания, баннер при сбое облака.
+  const saveListProtected = useCallback(async (key, backupKey, list, applyState, opts = {}) => {
+    if (!Array.isArray(list)) { console.error("saveListProtected: не массив", key); return; }
+    const { replace = false, removedIds = [], allowEmpty = false, loadedRef = null } = opts;
+    if (loadedRef && !loadedRef.current) { console.warn("saveListProtected заблокирован: не загружено", key); return; }
+
+    let stored = [], prevValue = null, prevStatus = "empty";
+    try {
+      const prevCheck = await storage.getResult(key);
+      prevStatus = prevCheck.status; prevValue = prevCheck.value;
+      if (prevCheck.status === "found" && prevCheck.value) {
+        try { const p = JSON.parse(prevCheck.value); if (Array.isArray(p)) stored = p; } catch {}
+      } else if (prevCheck.status === "unavailable") {
+        console.error("saveListProtected ЗАБЛОКИРОВАН: база недоступна", key);
+        setCloudError(true);
+        return;
+      }
+    } catch(e) { console.warn("guard check err", e); }
+
+    let finalList;
+    if (replace) finalList = list;
+    else {
+      const map = new Map();
+      for (const e of stored) if (e && e.id) map.set(e.id, e);
+      for (const e of list) {
+        if (!e || !e.id) continue;
+        const ex = map.get(e.id);
+        if (!ex) map.set(e.id, e);
+        else map.set(e.id, (e.updatedAt || 0) >= (ex.updatedAt || 0) ? e : ex);
+      }
+      for (const id of removedIds) map.delete(id);
+      finalList = [...map.values()];
+    }
+
+    if (stored.length > 0 && finalList.length === 0 && !allowEmpty) {
+      console.error("saveListProtected ЗАБЛОКИРОВАН: пусто поверх", stored.length, key);
+      return;
+    }
+
+    if (applyState) applyState(finalList);
+
+    try {
+      if (prevStatus === "found" && prevValue) {
+        const bRaw = await storage.get(backupKey);
+        let backups = [];
+        try { if (bRaw && bRaw.value) backups = JSON.parse(bRaw.value); } catch {}
+        if (!Array.isArray(backups)) backups = [];
+        if (!backups[0] || backups[0].data !== prevValue) {
+          backups.unshift({ ts: Date.now(), by: currentUser?.name || "", count: stored.length, data: prevValue });
+          await storage.set(backupKey, JSON.stringify(backups.slice(0, 20)));
+        }
+      }
+      const res = await storage.set(key, JSON.stringify(finalList));
+      if (res && res.fbOk === false) { console.error("Firebase save FAILED:", key, res.fbError); setCloudError(true); }
+      else { setCloudError(false); }
+    } catch(e) { console.error(e); setCloudError(true); }
+    return finalList;
   }, [currentUser]);
 
   // Сколько позиций (с qty>0) в наборе rows
@@ -5383,7 +5471,7 @@ export default function App() {
                                   generateContractGDoc(c, cl, ca2);
                                 }} style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>
                                 {currentUser.role==="admin" && (
-                                  <button onClick={e=>{e.stopPropagation(); if(window.confirm("Удалить документ?")) saveContracts(contracts.filter(x=>x.id!==c.id));}}
+                                  <button onClick={e=>{e.stopPropagation(); if(window.confirm("Удалить документ?")) saveContracts(contractsRef.current.filter(x=>x.id!==c.id), {removedIds:[c.id], allowEmpty:true});}}
                                     style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                                 )}
                               </div>
@@ -5465,7 +5553,7 @@ export default function App() {
                       <div style={{display:"flex",gap:5}}>
                         <button onClick={()=>{ setCurrentContract({...c,_mode:"editClient"}); setContractTab("clientEditor"); }}
                           style={{background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
-                        {currentUser.role==="admin"&&<button onClick={()=>{ if(window.confirm("Удалить клиента?")) saveContractClients(contractClients.filter(x=>x.id!==c.id)); }}
+                        {currentUser.role==="admin"&&<button onClick={()=>{ if(window.confirm("Удалить клиента?")) saveContractClients(clientsRef.current.filter(x=>x.id!==c.id), {removedIds:[c.id], allowEmpty:true}); }}
                           style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
                       </div>
                     </div>
@@ -5532,7 +5620,7 @@ export default function App() {
                       <div style={{display:"flex",gap:5}}>
                         <button onClick={()=>{ setCurrentContract({...c,_mode:"editCA"}); setContractTab("caEditor"); }}
                           style={{background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
-                        {currentUser.role==="admin"&&contragents.length>1&&<button onClick={()=>{ if(window.confirm("Удалить?")) saveContragents(contragents.filter(x=>x.id!==c.id)); }}
+                        {currentUser.role==="admin"&&contragents.length>1&&<button onClick={()=>{ if(window.confirm("Удалить?")) saveContragents(contragentsRef.current.filter(x=>x.id!==c.id), {removedIds:[c.id], allowEmpty:true}); }}
                           style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
                       </div>
                     </div>
