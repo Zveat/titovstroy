@@ -2823,22 +2823,108 @@ export default function App() {
     const avgCon = totalCon ? Math.round(totalSumCon/totalCon) : 0;
     const byStatus = {}; for(const s of STATUSES) byStatus[s.key]=baseEst.filter(e=>(e.status||"new")===s.key).length;
     const byType = {}; for(const e of baseEst){ const t=e.proj?.type||"--"; byType[t]=(byType[t]||0)+1; }
-    const catSums = {};
     const catalogForStats = getEffectiveCatalog();
+    // Карта работ по имени и коду (строки смет ключуются по name, старые иногда по code)
+    const workLookup = new Map();
+    for(const w of catalogForStats){ if(w?.name) workLookup.set(w.name, w); if(w?.code) workLookup.set(w.code, w); }
+    // Себестоимость одной сметы по заполненным позициям
+    const estCost = (e) => {
+      let cost = 0;
+      for(const [key,r] of Object.entries(e.rows||{})){
+        const qty = Number(r?.qty||0); if(!qty) continue;
+        const w = workLookup.get(key);
+        if(w) cost += (Number(w.cost)||0)*qty;
+      }
+      return cost;
+    };
+
+    // ── A. Финансовый обзор ──
+    // По согласованным (заработано) и по всем с суммой (потенциал)
+    const agreedEst   = withSumEst.filter(e=>e.status==="agreed");
+    const wonRevenue  = agreedEst.reduce((s,e)=>s+(e.total||0),0);
+    const wonCost     = agreedEst.reduce((s,e)=>s+estCost(e),0);
+    const wonProfit   = wonRevenue - wonCost;
+    const wonMargin   = wonRevenue>0 ? Math.round(wonProfit/wonRevenue*100) : 0;
+    const allRevenue  = totalSumEst;
+    const allCost     = withSumEst.reduce((s,e)=>s+estCost(e),0);
+    const allProfit   = allRevenue - allCost;
+    const allMargin   = allRevenue>0 ? Math.round(allProfit/allRevenue*100) : 0;
+
+    // ── B. Воронка с деньгами и прибылью + конверсия ──
+    const funnel = STATUSES.map(s=>{
+      const list = baseEst.filter(e=>(e.status||"new")===s.key);
+      const sum  = list.reduce((a,e)=>a+(e.total||0),0);
+      const cost = list.reduce((a,e)=>a+estCost(e),0);
+      return { key:s.key, label:s.label, color:s.color, bg:s.bg, count:list.length, sum, profit:sum-cost };
+    });
+    const sentB   = funnel.find(f=>f.key==="sent")   || {count:0,sum:0,profit:0};
+    const agreedB = funnel.find(f=>f.key==="agreed") || {count:0,sum:0,profit:0};
+    const winRateOverall = totalEst>0 ? Math.round(agreedB.count/totalEst*100) : 0;
+    const winRateSent    = (sentB.count+agreedB.count)>0 ? Math.round(agreedB.count/(sentB.count+agreedB.count)*100) : 0;
+
+    // ── D. Рентабельность по категориям (по цене позиций, до скидки) ──
+    const catFin = {};
     for(const e of baseEst){
-      const items = e.rows ? Object.entries(e.rows).filter(([,r])=>Number(r?.qty)>0) : [];
-      for(const [code,] of items){ const w=catalogForStats.find(x=>x.code===code); if(w){catSums[w.cat]=(catSums[w.cat]||0)+1;} }
+      for(const [key,r] of Object.entries(e.rows||{})){
+        const qty=Number(r?.qty||0); if(!qty) continue;
+        const w=workLookup.get(key); if(!w) continue;
+        const mp = Number(r.manualPrice);
+        const price = (r.manualPrice!==undefined&&r.manualPrice!==""&&!isNaN(mp)) ? mp : getPrice(w, qty, r.complexity||"std", r.cpxPct!==undefined?Number(r.cpxPct):undefined);
+        const c = w.cat||"—";
+        if(!catFin[c]) catFin[c]={cat:c, revenue:0, cost:0};
+        if(price) catFin[c].revenue += price*qty;
+        catFin[c].cost += (Number(w.cost)||0)*qty;
+      }
     }
-    const topCats = Object.entries(catSums).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    const catProfit = Object.values(catFin)
+      .map(c=>({...c, profit:c.revenue-c.cost, margin:c.revenue>0?Math.round((c.revenue-c.cost)/c.revenue*100):0}))
+      .sort((a,b)=>b.profit-a.profit).slice(0,8);
+    const topCats = catProfit.slice(0,5).map(c=>[c.cat, c.revenue]); // совместимость
+
+    // ── C. Менеджеры: оборот, прибыль, маржа, конверсия ──
     const validManagerNames = new Set(nonViewerUsers.map(u=>u.name));
     const managers = [...new Set(estimates.map(e=>e.proj?.manager||"").filter(m=>m&&validManagerNames.has(m)))];
     const managerStats = managers.map(m=>{
       const mes = baseEst.filter(e=>(e.proj?.manager||"")===m);
-      return {name:m, count:mes.length, sum:mes.filter(e=>e.total>0).reduce((s,e)=>s+e.total,0), agreed:mes.filter(e=>e.status==="agreed").length};
-    }).sort((a,b)=>b.sum-a.sum);
+      const withSum = mes.filter(e=>e.total>0);
+      const sum = withSum.reduce((s,e)=>s+e.total,0);
+      const cost = withSum.reduce((s,e)=>s+estCost(e),0);
+      const profit = sum-cost;
+      const sent = mes.filter(e=>e.status==="sent").length;
+      const agreed = mes.filter(e=>e.status==="agreed").length;
+      const conv = (sent+agreed)>0 ? Math.round(agreed/(sent+agreed)*100) : 0;
+      return {name:m, count:mes.length, sum, profit, margin: sum>0?Math.round(profit/sum*100):0, sent, agreed, conv};
+    }).sort((a,b)=>b.profit-a.profit);
+
+    // ── E. Динамика по месяцам ──
+    const monthMap = {};
+    for(const e of withSumEst){
+      const d = new Date(e.updatedAt||e.createdAt||0);
+      const key = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+      if(!monthMap[key]) monthMap[key]={key, revenue:0, cost:0};
+      monthMap[key].revenue += e.total||0;
+      monthMap[key].cost += estCost(e);
+    }
+    const MONTH_RU = ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"];
+    const monthly = Object.values(monthMap).sort((a,b)=>a.key.localeCompare(b.key)).slice(-12).map(m=>{
+      const [y,mo]=m.key.split("-");
+      return {...m, label: MONTH_RU[Number(mo)-1]+" "+y.slice(2), profit:m.revenue-m.cost};
+    });
+
+    // ── F. «Зависшие» отправленные сметы ──
+    const STALE_DAYS = 5;
+    const nowMs = Date.now();
+    const staleSent = estimates
+      .filter(e=>e.status==="sent")
+      .map(e=>{ const base = e.sentAt? new Date(e.sentAt).getTime() : (e.updatedAt||0); return {e, days: Math.floor((nowMs-base)/864e5)}; })
+      .filter(x=>x.days>=STALE_DAYS)
+      .sort((a,b)=>b.days-a.days)
+      .slice(0,10);
     const TYPE_L2 = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронирование"};
     const byConType = {}; for(const c of baseCon){ const t=TYPE_L2[c.type||"repair_fiz"]||"--"; byConType[t]=(byConType[t]||0)+1; }
-    return { baseEst, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType, TYPE_L2 };
+    return { baseEst, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType, TYPE_L2,
+      wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin,
+      funnel, winRateOverall, winRateSent, agreedB, sentB, catProfit, monthly, staleSent };
   }, [estimates, contracts, statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers, catalogVersion]);
 
   // Защита от краша: если activeCat не в Gdyn — берём первый
@@ -4312,6 +4398,14 @@ export default function App() {
         const totalSumMonth = estimatesThisMonth.filter(e=>(e.total||0)>0).reduce((s,e)=> s + (e.total||0), 0);
         const recentContracts = [...contracts].filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,5);
         const recentEstimates = [...estimates].filter(e=>(e.total||0)>0).sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0)).slice(0,5);
+        // Финансы за месяц (по согласованным сметам)
+        const _dashCat = getEffectiveCatalog();
+        const _dashLook = new Map(); for(const w of _dashCat){ if(w?.name)_dashLook.set(w.name,w); if(w?.code)_dashLook.set(w.code,w); }
+        const _dashCost = e=>{ let c=0; for(const [k,r] of Object.entries(e.rows||{})){ const q=Number(r?.qty||0); if(!q) continue; const w=_dashLook.get(k); if(w)c+=(Number(w.cost)||0)*q; } return c; };
+        const agreedMonth = estimatesThisMonth.filter(e=>e.status==="agreed"&&(e.total||0)>0);
+        const revMonth = agreedMonth.reduce((s,e)=>s+(e.total||0),0);
+        const profitMonth = revMonth - agreedMonth.reduce((s,e)=>s+_dashCost(e),0);
+        const marginMonth = revMonth>0 ? Math.round(profitMonth/revMonth*100) : 0;
         return (
         <div style={{maxWidth:960,margin:"0 auto",padding:"40px 40px 80px"}}>
           {/* Заголовок */}
@@ -4336,6 +4430,8 @@ export default function App() {
               {label:"Смет за месяц",    value:estimatesThisMonth.filter(e=>(e.total||0)>0).length,  sub:"из "+estimates.filter(e=>(e.total||0)>0).length+" с суммой всего", color:"#2563eb"},
               {label:"Договоров за месяц",value:contractsThisMonth.filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).length, sub:"из "+contracts.filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).length+" с суммой всего", color:"#2563eb"},
               {label:"Объём за месяц",   value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма смет за месяц",                          color:"#059669"},
+              {label:"Прибыль за месяц", value:fmt(Math.round(profitMonth))+" ₸", sub:"по согласованным сметам", color:"#059669"},
+              {label:"Маржа за месяц",   value:marginMonth+"%", sub:"согласованные сметы", color:marginMonth>=35?"#059669":marginMonth>=20?"#d97706":"#ef4444"},
               {label:"Клиентов за месяц",value:clientsThisMonth.length,    sub:"из "+contractClients.length+" всего", color:"#2563eb"},
             ].map((s,i)=>(
               <div key={i} style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:8,padding:"18px 18px 16px",boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
@@ -5459,7 +5555,8 @@ export default function App() {
 
       {/* ЭКРАН: АНАЛИТИКА */}
       {screen === "analytics" && (()=>{
-        const { baseEst, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType, TYPE_L2 } = analyticsData;
+        const { baseEst, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType, TYPE_L2,
+          wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin, funnel, winRateOverall, winRateSent, agreedB, sentB, catProfit, monthly, staleSent } = analyticsData;
         const PERIOD_BTNS = [["all","Всё время"],["month","Месяц"],["3month","3 месяца"],["week","Неделя"],["custom","Вручную"]];
         return (
           <div style={{maxWidth:960,margin:"0 auto",padding:"40px 40px 80px"}}>
@@ -5504,6 +5601,100 @@ export default function App() {
                 </div>
               ))}
             </div>
+
+            {/* ── A. Финансовый обзор ── */}
+            <div style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 2px rgba(0,0,0,.04)"}}>
+              <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
+                <span style={{fontSize:11,color:"#059669",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>💰 Финансы — согласованные сметы (заработано)</span>
+                <span style={{fontSize:11,color:"#9ca3af"}}>в выбранном периоде</span>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
+                {[
+                  ["Выручка", fmt(Math.round(wonRevenue))+" ₸", "#2563eb"],
+                  ["Себестоимость", fmt(Math.round(wonCost))+" ₸", "#6b7280"],
+                  ["Валовая прибыль", fmt(Math.round(wonProfit))+" ₸", "#059669"],
+                  ["Средняя маржа", wonMargin+"%", wonMargin>=35?"#059669":wonMargin>=20?"#d97706":"#ef4444"],
+                ].map(([l,v,c],i)=>(
+                  <div key={i} style={{padding:"12px 14px",background:"#f9fafb",borderRadius:8,borderLeft:`3px solid ${c}`}}>
+                    <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase",letterSpacing:.8,marginBottom:6}}>{l}</div>
+                    <div style={{fontSize:19,fontWeight:900,color:c,lineHeight:1}}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{marginTop:12,paddingTop:12,borderTop:"1px dashed #e5e7eb",display:"flex",gap:18,flexWrap:"wrap",fontSize:12,color:"#6b7280"}}>
+                <span>Потенциал (все сметы с суммой): <b style={{color:"#374151"}}>{fmt(Math.round(allRevenue))} ₸</b> выручка · прибыль <b style={{color:"#059669"}}>{fmt(Math.round(allProfit))} ₸</b> · маржа <b style={{color:"#374151"}}>{allMargin}%</b></span>
+              </div>
+            </div>
+
+            {/* ── B. Воронка с деньгами и конверсией ── */}
+            <div style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 2px rgba(0,0,0,.04)"}}>
+              <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
+                <span style={{fontSize:11,color:"#7c3aed",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>🪜 Воронка продаж (деньги)</span>
+                <span style={{fontSize:12,color:"#6b7280"}}>Win-rate: <b style={{color:"#059669"}}>{winRateOverall}%</b> от всех · <b style={{color:"#7c3aed"}}>{winRateSent}%</b> от отправленных</span>
+              </div>
+              {(() => {
+                const maxSum = Math.max(1, ...funnel.map(f=>f.sum));
+                return (
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {funnel.map(f=>(
+                      <div key={f.key} style={{display:"flex",alignItems:"center",gap:12}}>
+                        <span style={{fontSize:12,fontWeight:600,color:f.color,width:140,flexShrink:0}}>{f.label}</span>
+                        <div style={{flex:1,background:"rgba(0,0,0,.04)",borderRadius:6,height:26,position:"relative",overflow:"hidden"}}>
+                          <div style={{width:`${Math.round(f.sum/maxSum*100)}%`,minWidth:f.count>0?2:0,height:"100%",background:f.bg,borderLeft:`3px solid ${f.color}`}}/>
+                          <span style={{position:"absolute",left:10,top:0,height:"100%",display:"flex",alignItems:"center",gap:8,fontSize:11,fontWeight:700,color:f.color}}>{f.count} шт · {fmt(Math.round(f.sum))} ₸</span>
+                        </div>
+                        <span style={{fontSize:11,color:"#059669",width:130,textAlign:"right",flexShrink:0}}>{f.profit>0?"приб. "+fmt(Math.round(f.profit))+" ₸":"—"}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* ── E. Динамика по месяцам ── */}
+            {monthly.length>0 && (
+              <div style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 2px rgba(0,0,0,.04)"}}>
+                <div style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:16}}>📈 Динамика по месяцам</div>
+                {(() => {
+                  const maxRev = Math.max(1, ...monthly.map(m=>m.revenue));
+                  return (
+                    <div style={{display:"flex",alignItems:"flex-end",gap:10,height:160,overflowX:"auto",paddingBottom:4}}>
+                      {monthly.map(m=>(
+                        <div key={m.key} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,minWidth:46,flex:"1 0 46px"}}>
+                          <div style={{fontSize:9,color:"#059669",fontWeight:700,whiteSpace:"nowrap"}}>{m.profit>0?Math.round(m.profit/1000)+"k":""}</div>
+                          <div style={{display:"flex",alignItems:"flex-end",gap:2,height:110,width:"100%",justifyContent:"center"}}>
+                            <div title={"Выручка: "+fmt(Math.round(m.revenue))+" ₸"} style={{width:14,height:`${Math.max(2,Math.round(m.revenue/maxRev*110))}px`,background:"#93c5fd",borderRadius:"3px 3px 0 0"}}/>
+                            <div title={"Прибыль: "+fmt(Math.round(m.profit))+" ₸"} style={{width:14,height:`${Math.max(2,Math.round(Math.max(0,m.profit)/maxRev*110))}px`,background:"#059669",borderRadius:"3px 3px 0 0"}}/>
+                          </div>
+                          <div style={{fontSize:10,color:"#9ca3af",whiteSpace:"nowrap"}}>{m.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+                <div style={{display:"flex",gap:16,marginTop:10,fontSize:11,color:"#9ca3af"}}>
+                  <span><span style={{display:"inline-block",width:10,height:10,background:"#93c5fd",borderRadius:2,marginRight:5}}/>Выручка</span>
+                  <span><span style={{display:"inline-block",width:10,height:10,background:"#059669",borderRadius:2,marginRight:5}}/>Прибыль</span>
+                </div>
+              </div>
+            )}
+
+            {/* ── F. «Зависшие» отправленные сметы ── */}
+            {staleSent.length>0 && (
+              <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:"18px 20px",marginBottom:16}}>
+                <div style={{fontSize:11,color:"#b45309",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>⏰ Зависли у клиента (без движения 5+ дней)</div>
+                <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                  {staleSent.map(({e,days})=>(
+                    <div key={e.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"rgba(255,255,255,.6)",borderRadius:8,cursor:currentUser.role!=="viewer"?"pointer":"default"}} onClick={()=>{ if(currentUser.role!=="viewer") openEstimate(e); }}>
+                      <span style={{fontSize:13,color:"#111827",flex:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.proj?.name||"Без названия"}{e.proj?.phone?` · 📞 ${e.proj.phone}`:""}</span>
+                      {e.total>0&&<span style={{fontSize:12,fontWeight:700,color:"#2563eb"}}>{fmt(e.total)} ₸</span>}
+                      <span style={{fontSize:11,fontWeight:700,color:"#dc2626",whiteSpace:"nowrap"}}>{days} дн.</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(380px,1fr))",gap:16,marginBottom:16}}>
               <div style={{background:"#f3f4f6",border:"1px solid #e5e7eb",borderRadius:6,padding:"18px"}}>
                 <div style={{fontSize:11,color:"#d97706",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>Сметы</div>
@@ -5530,20 +5721,48 @@ export default function App() {
                 {totalCon===0 && <div style={{textAlign:"center",color:"#374151",fontSize:13,padding:"30px 0"}}>Нет договоров за период</div>}
               </div>
             </div>
+            {/* ── C. Менеджеры по прибыли ── */}
             {!statsManager && managerStats.length>0 && (
-              <div style={{background:"#f3f4f6",border:"1px solid #e5e7eb",borderRadius:6,padding:"18px",marginBottom:16}}>
-                <div style={{fontSize:10,color:"#9ca3af",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>По менеджерам</div>
-                <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                  {managerStats.map(m=>(<div key={m.name} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"rgba(255,255,255,.03)",borderRadius:8,cursor:"pointer"}} onClick={()=>setStatsManager(m.name)}><span style={{fontSize:13,color:"#374151",flex:1}}>👤 {m.name}</span><span style={{fontSize:11,color:"#9ca3af"}}>{m.count} смет</span><span style={{fontSize:14,fontWeight:700,color:"#111827"}}>{fmt(m.sum)} </span>{m.agreed>0&&<span style={{fontSize:10,color:"#059669",background:"#eff6ff",borderRadius:5,padding:"2px 8px"}}>v{m.agreed}</span>}</div>))}
+              <div style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 2px rgba(0,0,0,.04)"}}>
+                <div style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>👥 Менеджеры — прибыль и конверсия</div>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10,padding:"0 12px",fontSize:9,color:"#9ca3af",textTransform:"uppercase",letterSpacing:.5}}>
+                    <span style={{flex:1}}>Менеджер</span>
+                    <span style={{width:70,textAlign:"right"}}>Оборот</span>
+                    <span style={{width:70,textAlign:"right"}}>Прибыль</span>
+                    <span style={{width:46,textAlign:"right"}}>Маржа</span>
+                    <span style={{width:54,textAlign:"right"}}>Конв.</span>
+                  </div>
+                  {managerStats.map(m=>(
+                    <div key={m.name} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"#f9fafb",borderRadius:8,cursor:"pointer"}} onClick={()=>setStatsManager(m.name)}>
+                      <span style={{fontSize:13,color:"#111827",flex:1,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>👤 {m.name} <span style={{fontSize:10,color:"#9ca3af"}}>· {m.count}</span></span>
+                      <span style={{fontSize:12,fontWeight:600,color:"#374151",width:70,textAlign:"right"}}>{fmt(Math.round(m.sum/1000))}k</span>
+                      <span style={{fontSize:12,fontWeight:700,color:"#059669",width:70,textAlign:"right"}}>{fmt(Math.round(m.profit/1000))}k</span>
+                      <span style={{fontSize:12,fontWeight:700,width:46,textAlign:"right",color:m.margin>=35?"#059669":m.margin>=20?"#d97706":"#ef4444"}}>{m.margin}%</span>
+                      <span style={{fontSize:12,fontWeight:700,color:"#7c3aed",width:54,textAlign:"right"}}>{m.conv}%</span>
+                    </div>
+                  ))}
                 </div>
+                <div style={{fontSize:10,color:"#9ca3af",marginTop:8}}>Оборот/прибыль — в тыс. ₸. Конверсия = согласовано / (отправлено + согласовано).</div>
               </div>
             )}
-            {topCats.length>0 && (
-              <div style={{background:"#f3f4f6",border:"1px solid #e5e7eb",borderRadius:6,padding:"18px"}}>
-                <div style={{fontSize:10,color:"#9ca3af",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>Топ категорий работ</div>
-                <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                  {topCats.map(([cat,n],i)=>(<div key={cat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"7px 12px",background:"rgba(255,255,255,.03)",borderRadius:6}}><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:10,color:"#9ca3af",minWidth:16}}>{i+1}.</span><span style={{color:"#9ca3af"}}>{cat}</span></div><span style={{fontWeight:700,color:"#2563eb"}}>{n} смет</span></div>))}
+
+            {/* ── D. Рентабельность по категориям ── */}
+            {catProfit.length>0 && (
+              <div style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:10,padding:"18px 20px",boxShadow:"0 1px 2px rgba(0,0,0,.04)"}}>
+                <div style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>🏗 Рентабельность по категориям работ</div>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {catProfit.map((c,i)=>(
+                    <div key={c.cat} style={{display:"flex",alignItems:"center",gap:10,fontSize:12,padding:"9px 12px",background:"#f9fafb",borderRadius:8}}>
+                      <span style={{fontSize:10,color:"#9ca3af",minWidth:16}}>{i+1}.</span>
+                      <span style={{color:"#111827",fontWeight:500,flex:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.cat}</span>
+                      <span style={{color:"#6b7280",width:90,textAlign:"right"}}>выр. {fmt(Math.round(c.revenue/1000))}k</span>
+                      <span style={{color:"#059669",fontWeight:700,width:90,textAlign:"right"}}>приб. {fmt(Math.round(c.profit/1000))}k</span>
+                      <span style={{fontWeight:700,width:46,textAlign:"right",color:c.margin>=35?"#059669":c.margin>=20?"#d97706":"#ef4444"}}>{c.margin}%</span>
+                    </div>
+                  ))}
                 </div>
+                <div style={{fontSize:10,color:"#9ca3af",marginTop:8}}>По ценам позиций до скидки. Суммы в тыс. ₸.</div>
               </div>
             )}
             {totalEst===0&&totalCon===0&&<div style={{textAlign:"center",color:"#374151",fontSize:13,padding:"60px 0"}}><div style={{fontSize:32,marginBottom:12}}>📊</div>Нет данных за выбранный период</div>}
