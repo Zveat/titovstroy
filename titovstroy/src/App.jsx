@@ -1682,7 +1682,7 @@ function AdminPageContent({ currentUser, onUsersChanged }) {
               <thead>
                 <tr style={{background:"#ffffff",position:"sticky",top:0,zIndex:5}}>
                   {["Подкатегория","Название работы","Ед.","Себестоимость ₸","Маржа %","Цена для клиента ₸","Цена от ₸","Валовая прибыль ₸",""].map((h,i)=>(
-                    <th key={i} style={{padding:"10px 12px",textAlign:i>=3&&i<=7?"right":"left",fontSize:10,fontWeight:700,color:h==="Цена от ₸"?"#b8904a":"#9ca3af",textTransform:"uppercase",letterSpacing:.5,borderBottom:"2px solid #e5e7eb",whiteSpace:"normal",lineHeight:1.2,verticalAlign:"bottom"}}>
+                    <th key={i} style={{padding:"10px 12px",textAlign:i>=3&&i<=7?"right":"left",fontSize:10,fontWeight:700,color:h==="Цена от ₸"?"#b8904a":"#9ca3af",textTransform:"uppercase",letterSpacing:.5,borderBottom:"2px solid #e5e7eb",whiteSpace:"normal",overflowWrap:"anywhere",wordBreak:"break-word",lineHeight:1.2,verticalAlign:"bottom"}}>
                       {h}
                     </th>
                   ))}
