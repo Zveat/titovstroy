@@ -367,11 +367,18 @@ const storage = {
     // Сначала localStorage — всегда надёжно и мгновенно
     try { localStorage.setItem(key, value); localStorage.setItem(key + _TS_SUFFIX, Date.now().toString()); } catch(e) {}
     _mem[key] = value;
-    // Firebase в фоне — не блокируем UI, но обеспечиваем синхронизацию
+    // Firebase — ОЖИДАЕМ результат, чтобы знать, ушли ли данные в облако
+    let fbOk = false, fbError = null;
     if (_fbDb) {
-      set(ref(_fbDb, _fbKey(key)), parsed).catch(e => console.warn("FB set error:", e));
+      try {
+        const res = await _race(set(ref(_fbDb, _fbKey(key)), parsed), 12000);
+        if (res === _TIMEOUT) { fbError = "timeout"; }
+        else { fbOk = true; }
+      } catch(e) { fbError = e?.message || String(e); console.warn("FB set error:", e); }
+    } else {
+      fbError = "firebase not configured";
     }
-    return { value };
+    return { value, fbOk, fbError };
   },
 };
 
@@ -2207,6 +2214,7 @@ export default function App() {
   });
   const [showAdmin, setShowAdmin] = useState(false);
   const [loadError, setLoadError] = useState(false); // не удалось загрузить из Firebase — сохранение заблокировано
+  const [cloudError, setCloudError] = useState(false); // последнее сохранение не ушло в облако (только локально)
 
   // Экраны: "list" | "editor" | "contracts"
   const [screen, setScreen] = useState("dashboard");
@@ -2439,8 +2447,15 @@ export default function App() {
           }
         }
       } catch(e) { console.warn("backup err", e); }
-      await storage.set(STORAGE_KEY, JSON.stringify(list));
-    } catch(e) { console.error(e); }
+      const res = await storage.set(STORAGE_KEY, JSON.stringify(list));
+      // Если запись в облако не прошла — поднимаем видимый баннер (данные только локально)
+      if (res && res.fbOk === false) {
+        console.error("Firebase save FAILED:", res.fbError);
+        setCloudError(true);
+      } else {
+        setCloudError(false);
+      }
+    } catch(e) { console.error(e); setCloudError(true); }
     setSaving(false);
   }, [currentUser]);
 
@@ -3962,6 +3977,12 @@ export default function App() {
         <div style={{position:"fixed",top:0,left:0,right:0,zIndex:500,background:"#dc2626",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
           ⚠️ Не удалось загрузить данные из базы. НЕ редактируйте сметы — сохранение отключено для защиты данных.
           <button onClick={()=>window.location.reload()} style={{background:"#fff",color:"#dc2626",border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Обновить</button>
+        </div>
+      )}
+      {!loadError && cloudError && (
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:500,background:"#d97706",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
+          ⚠️ Данные сохранены ТОЛЬКО на этом устройстве — облако недоступно. На других устройствах изменений не будет. Проверьте интернет/правила Firebase.
+          <button onClick={()=>setCloudError(false)} style={{background:"#fff",color:"#d97706",border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Скрыть</button>
         </div>
       )}
       {/* Панель администратора */}
