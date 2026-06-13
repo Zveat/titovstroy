@@ -6434,28 +6434,24 @@ export default function App() {
 
             return (
               <div style={{padding:"0 24px 40px"}}>
-                {/* Карточка объекта — редактируемые поля */}
-                <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"20px 22px",marginTop:20,display:"flex",flexDirection:"column",gap:14}}>
-                  {/* Статус — воронка */}
-                  <div>
-                    <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:8}}>Статус</div>
-                    <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                      {DEAL_STATUSES.map(s=>(
-                        <button key={s.key} disabled={!canEdit} onClick={()=>saveObjField(obj,{status:s.key})}
-                          style={{background:obj.status===s.key?s.bg:"rgba(0,0,0,.03)",color:obj.status===s.key?s.color:"#9ca3af",border:`1px solid ${obj.status===s.key?s.color:"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:canEdit?"pointer":"default",fontFamily:"inherit",transition:"all .12s"}}>
-                          {s.label}
-                        </button>
-                      ))}
-                    </div>
+                {/* Карточка объекта — компактная */}
+                <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px 16px",marginTop:16,display:"flex",flexDirection:"column",gap:10}}>
+                  {/* Статус */}
+                  <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                    {DEAL_STATUSES.map(s=>(
+                      <button key={s.key} disabled={!canEdit} onClick={()=>saveObjField(obj,{status:s.key})}
+                        style={{background:obj.status===s.key?s.bg:"rgba(0,0,0,.03)",color:obj.status===s.key?s.color:"#9ca3af",border:`1px solid ${obj.status===s.key?s.color:"#e5e7eb"}`,borderRadius:6,padding:"3px 9px",fontSize:11,fontWeight:600,cursor:canEdit?"pointer":"default",fontFamily:"inherit",transition:"all .12s"}}>
+                        {s.label}
+                      </button>
+                    ))}
                   </div>
 
-                  {/* Клиент — можно выбрать существующего или заполнить вручную */}
-                  <div>
-                    <div style={{fontSize:11,color:"#2563eb",fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>👤 Клиент</div>
+                  {/* Клиент + Объект — одна сетка */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                    {/* Выбор клиента — на всю ширину если есть список */}
                     {contractClients.length>0 && canEdit && (
-                      <div style={{marginBottom:12}}>
-                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Выбрать из существующих</div>
-                        <select className="fi" value={obj.clientId||""}
+                      <div style={{gridColumn:"1 / -1"}}>
+                        <select className="fi" style={{fontSize:12}} value={obj.clientId||""}
                           onChange={e=>{
                             const c = contractClients.find(x=>x.id===e.target.value);
                             if (c) {
@@ -6465,85 +6461,64 @@ export default function App() {
                               setObjLocal({ clientId:"" }); setTimeout(persistObj,0);
                             }
                           }}>
-                          <option value="">— Новый клиент (заполнить ниже) —</option>
+                          <option value="">👤 Новый клиент</option>
                           {contractClients.map(c=><option key={c.id} value={c.id}>{c.name||"Без имени"}</option>)}
                         </select>
                       </div>
                     )}
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-                      <div>
-                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>ФИО / Название</div>
-                        <input className="fi" value={obj.clientName||""} readOnly={!canEdit}
-                          onChange={e=>setObjLocal({clientName:e.target.value})} onBlur={persistObj}
-                          placeholder="Иванов Иван Иванович" />
-                      </div>
-                      <div>
-                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Тип лица</div>
-                        <select className="fi" value={obj.clientType||"физ"} disabled={!canEdit}
-                          onChange={e=>{ setObjLocal({clientType:e.target.value}); setTimeout(persistObj,0); }}>
-                          <option value="физ">Физ. лицо</option>
-                          <option value="юр">Юр. лицо</option>
-                        </select>
-                      </div>
-                      <div>
-                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Телефон</div>
-                        <input className="fi" value={obj.clientPhone||""} readOnly={!canEdit}
-                          onChange={e=>setObjLocal({clientPhone:e.target.value})} onBlur={persistObj}
-                          placeholder="+7 707 ..." />
-                      </div>
-                      <div>
-                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>{obj.clientType==="юр"?"БИН":"ИИН"}</div>
-                        <input className="fi" value={obj.clientIin||""} readOnly={!canEdit}
-                          onChange={e=>setObjLocal({clientIin:e.target.value})} onBlur={persistObj}
-                          placeholder="12 цифр" />
-                      </div>
-                      <div style={{gridColumn:"1 / -1"}}>
-                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Документ (основание)</div>
-                        <input className="fi" value={obj.clientDoc||""} readOnly={!canEdit}
-                          onChange={e=>setObjLocal({clientDoc:e.target.value})} onBlur={persistObj}
-                          placeholder={obj.clientType==="юр"?"Устав / доверенность":"уд. личности №..."} />
-                      </div>
+                    <div>
+                      <input className="fi" style={{fontSize:12}} value={obj.clientName||""} readOnly={!canEdit}
+                        onChange={e=>setObjLocal({clientName:e.target.value})} onBlur={persistObj}
+                        placeholder="ФИО / Название" />
                     </div>
-                  </div>
-
-                  {/* Объект */}
-                  <div>
-                    <div style={{fontSize:11,color:"#2563eb",fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>📍 Объект</div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-                      <div style={{gridColumn:"1 / -1"}}>
-                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Адрес</div>
-                        <input className="fi" value={obj.address||""} readOnly={!canEdit}
-                          onChange={e=>setObjLocal({address:e.target.value})} onBlur={persistObj}
-                          placeholder="ул. Примерная, д. 1" />
-                      </div>
-                      <div>
-                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Тип объекта</div>
-                        <select className="fi" value={obj.objType||"Вторичка"} disabled={!canEdit}
-                          onChange={e=>{ setObjLocal({objType:e.target.value}); setTimeout(persistObj,0); }}>
-                          {["Вторичка","Новостройка","Коммерция","Частный дом","Другое"].map(t=><option key={t} value={t}>{t}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Площадь, м²</div>
-                        <input className="fi" value={obj.area||""} readOnly={!canEdit} type="number"
-                          onChange={e=>setObjLocal({area:e.target.value})} onBlur={persistObj}
-                          placeholder="75" />
-                      </div>
-                      <div style={{gridColumn:"1 / -1"}}>
-                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Менеджер / Замерщик</div>
-                        <input className="fi" value={obj.manager||""} readOnly={!canEdit}
-                          onChange={e=>setObjLocal({manager:e.target.value})} onBlur={persistObj}
-                          placeholder="Кто ведёт объект" />
-                      </div>
+                    <div>
+                      <input className="fi" style={{fontSize:12}} value={obj.clientPhone||""} readOnly={!canEdit}
+                        onChange={e=>setObjLocal({clientPhone:e.target.value})} onBlur={persistObj}
+                        placeholder="Телефон" />
                     </div>
-                  </div>
-
-                  {/* Заметка */}
-                  <div>
-                    <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Заметка</div>
-                    <textarea className="fi" rows={2} value={obj.note||""} readOnly={!canEdit}
-                      onChange={e=>setObjLocal({note:e.target.value})} onBlur={persistObj}
-                      placeholder="Любая информация по объекту..." style={{resize:"vertical",minHeight:52}} />
+                    <div>
+                      <select className="fi" style={{fontSize:12}} value={obj.clientType||"физ"} disabled={!canEdit}
+                        onChange={e=>{ setObjLocal({clientType:e.target.value}); setTimeout(persistObj,0); }}>
+                        <option value="физ">Физ. лицо</option>
+                        <option value="юр">Юр. лицо</option>
+                      </select>
+                    </div>
+                    <div>
+                      <input className="fi" style={{fontSize:12}} value={obj.clientIin||""} readOnly={!canEdit}
+                        onChange={e=>setObjLocal({clientIin:e.target.value})} onBlur={persistObj}
+                        placeholder={obj.clientType==="юр"?"БИН":"ИИН"} />
+                    </div>
+                    <div style={{gridColumn:"2 / -1"}}>
+                      <input className="fi" style={{fontSize:12}} value={obj.clientDoc||""} readOnly={!canEdit}
+                        onChange={e=>setObjLocal({clientDoc:e.target.value})} onBlur={persistObj}
+                        placeholder={obj.clientType==="юр"?"Устав / доверенность":"Документ (уд. личности №...)"} />
+                    </div>
+                    <div style={{gridColumn:"1 / -1"}}>
+                      <input className="fi" style={{fontSize:12}} value={obj.address||""} readOnly={!canEdit}
+                        onChange={e=>setObjLocal({address:e.target.value})} onBlur={persistObj}
+                        placeholder="📍 Адрес объекта" />
+                    </div>
+                    <div>
+                      <select className="fi" style={{fontSize:12}} value={obj.objType||"Вторичка"} disabled={!canEdit}
+                        onChange={e=>{ setObjLocal({objType:e.target.value}); setTimeout(persistObj,0); }}>
+                        {["Вторичка","Новостройка","Коммерция","Частный дом","Другое"].map(t=><option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <input className="fi" style={{fontSize:12}} value={obj.area||""} readOnly={!canEdit} type="number"
+                        onChange={e=>setObjLocal({area:e.target.value})} onBlur={persistObj}
+                        placeholder="Площадь, м²" />
+                    </div>
+                    <div>
+                      <input className="fi" style={{fontSize:12}} value={obj.manager||""} readOnly={!canEdit}
+                        onChange={e=>setObjLocal({manager:e.target.value})} onBlur={persistObj}
+                        placeholder="Менеджер" />
+                    </div>
+                    <div style={{gridColumn:"1 / -1"}}>
+                      <textarea className="fi" rows={2} style={{fontSize:12,resize:"vertical",minHeight:44}} value={obj.note||""} readOnly={!canEdit}
+                        onChange={e=>setObjLocal({note:e.target.value})} onBlur={persistObj}
+                        placeholder="Заметка..." />
+                    </div>
                   </div>
                 </div>
 
@@ -6570,7 +6545,7 @@ export default function App() {
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                                <span style={{fontWeight:600,fontSize:13,color:"#111827"}}>{est.proj?.name||"Без названия"}</span>
+                                <span style={{fontWeight:600,fontSize:13,color:"#111827"}}>{est.proj?.name||obj.clientName||obj.address||"Новая смета"}</span>
                                 <span style={{fontSize:10,fontWeight:700,color:stEst.color,background:stEst.bg,borderRadius:4,padding:"1px 6px"}}>{stEst.label}</span>
                               </div>
                               <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
@@ -6596,7 +6571,8 @@ export default function App() {
                   </div>
                   {objCons.length===0 && (
                     <div style={{textAlign:"center",padding:"28px 0",color:"#9ca3af",background:"#f9fafb",borderRadius:8,border:"1px dashed #e5e7eb",fontSize:13}}>
-                      Договоров пока нет — нажмите «+ Новый договор»
+                      Договоров пока нет<br/>
+                      <span style={{fontSize:11,color:"#d1d5db"}}>«+ Новый договор» — откроет редактор договора с данными этого объекта</span>
                     </div>
                   )}
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
