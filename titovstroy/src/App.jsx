@@ -2222,6 +2222,7 @@ export default function App() {
   const [showAdmin, setShowAdmin] = useState(false);
   const [loadError, setLoadError] = useState(false); // не удалось загрузить из Firebase — сохранение заблокировано
   const [cloudError, setCloudError] = useState(false); // последнее сохранение не ушло в облако (только локально)
+  const [listBackups, setListBackups] = useState(null); // {label, items, onRestore}
 
   // Экраны: "list" | "editor" | "contracts"
   const [screen, setScreen] = useState("dashboard");
@@ -2384,6 +2385,31 @@ export default function App() {
   const saveContragents = async (list, opts = {}) => {
     const r = await saveListProtected(CONTRAGENTS_KEY, CONTRAGENTS_BACKUPS_KEY, list, (fl)=>{ contragentsRef.current = fl; setContragents(fl); }, { loadedRef: _contractsLoaded, ...opts });
     return r;
+  };
+
+  // Бэкапы списков (договоры/клиенты/контрагенты)
+  const openListBackups = async (kind) => {
+    const cfg = {
+      contracts:   { backupKey: CONTRACTS_BACKUPS_KEY,   label: "договоров",   save: (l)=>saveContracts(l, {replace:true, allowEmpty:true}) },
+      clients:     { backupKey: CLIENTS_BACKUPS_KEY,     label: "клиентов",    save: (l)=>saveContractClients(l, {replace:true, allowEmpty:true}) },
+      contragents: { backupKey: CONTRAGENTS_BACKUPS_KEY, label: "контрагентов", save: (l)=>saveContragents(l, {replace:true, allowEmpty:true}) },
+    }[kind];
+    if (!cfg) return;
+    const bRaw = await storage.get(cfg.backupKey);
+    let items = []; try { if (bRaw?.value) items = JSON.parse(bRaw.value); } catch {}
+    setListBackups({
+      label: cfg.label,
+      items: Array.isArray(items) ? items : [],
+      onRestore: async (snap) => {
+        if (!snap?.data) return;
+        let list; try { list = JSON.parse(snap.data); } catch { window.alert("Бэкап повреждён"); return; }
+        if (!Array.isArray(list)) { window.alert("Бэкап повреждён"); return; }
+        if (!window.confirm(`Восстановить список ${cfg.label} на ${new Date(snap.ts).toLocaleString("ru-RU")}? Записей: ${list.length}.`)) return;
+        await cfg.save(list);
+        setListBackups(null);
+        window.alert("Восстановлено ✓");
+      },
+    });
   };
 
   // Автосохранение договора
@@ -5180,6 +5206,32 @@ export default function App() {
       {/* ═══════════════════════════════════════════════════════════════════
           КП МОДАЛ
       ═══════════════════════════════════════════════════════════════════ */}
+      {listBackups !== null && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:320,padding:16}} onClick={()=>setListBackups(null)}>
+          <div style={{background:"#fff",borderRadius:10,padding:"20px 22px",maxWidth:480,width:"100%",maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={{fontWeight:800,fontSize:16,color:"#111827"}}>🕘 Бэкапы {listBackups.label}</div>
+              <button onClick={()=>setListBackups(null)} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#9ca3af"}}>✕</button>
+            </div>
+            <div style={{fontSize:12,color:"#9ca3af",marginBottom:14}}>Снимки перед каждым изменением (последние 20). Можно откатиться к любому.</div>
+            {listBackups.items.length===0 && <div style={{textAlign:"center",padding:"30px 0",color:"#9ca3af",fontSize:13}}>Бэкапов пока нет — появятся после первого изменения</div>}
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {listBackups.items.map((snap,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"10px 12px",background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:8}}>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:600,color:"#111827"}}>{new Date(snap.ts).toLocaleString("ru-RU")}</div>
+                    <div style={{fontSize:11,color:"#9ca3af"}}>Записей: {snap.count}{snap.by?` · ${snap.by}`:""}{i===0?" · последний":""}</div>
+                  </div>
+                  <button onClick={()=>listBackups.onRestore(snap)}
+                    style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(37,99,235,.2)",borderRadius:6,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                    Восстановить
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {backupsModal!==null && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:320,padding:16}}
           onClick={()=>setBackupsModal(null)}>
@@ -5388,6 +5440,12 @@ export default function App() {
             <div style={{width:28,height:28,borderRadius:6,background:"#2563eb",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#f3f4f6"}}>T</div>
             <div style={{fontWeight:800,fontSize:14,color:"#111827"}}>Договоры</div>
             <div style={{flex:1}}/>
+            {["list","clients","contragents"].includes(contractTab) && currentUser.role === "admin" && (
+              <button onClick={()=>openListBackups(contractTab)}
+                style={{background:"rgba(0,0,0,.03)",color:"#6b7280",border:"1px solid #e5e7eb",borderRadius:8,padding:"7px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                🕘 Бэкапы
+              </button>
+            )}
             {contractTab === "list" && currentUser.role !== "viewer" && (
               <button className="btn btn-g" style={{fontSize:12,padding:"7px 14px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:"",date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:""}); setContractTab("editor"); }}>+ Новый</button>
             )}
