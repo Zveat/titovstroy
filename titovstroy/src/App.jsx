@@ -6340,6 +6340,36 @@ export default function App() {
           setScreen("contracts");
         };
 
+        // Создать доп. соглашение (приложение) к существующему договору
+        const createObjectAnnex = async (obj, mainC) => {
+          const clientId = await ensureObjClient(obj);
+          const existing = contractsRef.current.filter(c=>c.type==="annex" && c.mainNumber===mainC.number);
+          const annexNum = existing.length + 2; // основной договор = №1
+          const newC = {
+            id: Date.now().toString(),
+            objectId: obj.id,
+            number: "",
+            date: new Date().toISOString().split("T")[0],
+            clientId,
+            contragentId: mainC.contragentId || contragents[0]?.id || "",
+            estClient: obj.clientName||"",
+            estPhone: obj.clientPhone||"",
+            estAddress: obj.address||"",
+            works: [],
+            appendix: annexNum,
+            note: "",
+            type: "annex",
+            mainNumber: mainC.number||"",
+            mainDate: mainC.date||"",
+            createdBy: currentUser.name,
+            createdById: currentUser.id,
+          };
+          setCurrentContract(newC);
+          setObjectReturnId(obj.id);
+          setContractTab("editor");
+          setScreen("contracts");
+        };
+
         const saveObjField = async (obj, patch) => {
           const updated = {...obj, ...patch, updatedAt: Date.now()};
           const list = objectsRef.current.map(x=>x.id===obj.id?updated:x);
@@ -6622,8 +6652,8 @@ export default function App() {
                             <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
                               <div style={{fontWeight:800,fontSize:15,color:"#111827"}}>{fmt(est.total||0)} ₸</div>
                               <div style={{display:"flex",gap:4}} onClick={e=>e.stopPropagation()}>
-                                <button title="Создать договор из сметы" onClick={()=>openObjectContract(obj,est)}
-                                  style={{background:"rgba(184,144,74,.08)",color:"#2563eb",border:"1px solid #eff6ff",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄</button>
+                                <button title={isChild?"Создать доп. соглашение из этой ДС":"Создать договор из сметы"} onClick={()=>openObjectContract(obj,est)}
+                                  style={{background:"rgba(184,144,74,.08)",color:"#2563eb",border:"1px solid #eff6ff",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄 {isChild?"Доп.согл":"Договор"}</button>
                                 {currentUser.role!=="viewer" && !isChild && (
                                   <button title="Доп. смета (ДС)" onClick={()=>{ setObjectReturnId(obj.id); newSupplementaryEstimate(est); }}
                                     style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>+ДС</button>
@@ -6649,14 +6679,11 @@ export default function App() {
                 <div style={{marginTop:24}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                     <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>📄 Договоры ({objCons.length})</div>
-                    {currentUser.role!=="viewer" && (
-                      <button className="btn btn-g" style={{fontSize:12,padding:"6px 14px"}} onClick={()=>openObjectContract(obj)}>+ Новый договор</button>
-                    )}
                   </div>
                   {objCons.length===0 && (
                     <div style={{textAlign:"center",padding:"28px 0",color:"#9ca3af",background:"#f9fafb",borderRadius:8,border:"1px dashed #e5e7eb",fontSize:13}}>
                       Договоров пока нет<br/>
-                      <span style={{fontSize:11,color:"#d1d5db"}}>«+ Новый договор» — откроет редактор договора с данными этого объекта</span>
+                      <span style={{fontSize:11,color:"#d1d5db"}}>Создайте смету выше и нажмите <b>📄</b> на её карточке — договор сформируется со всеми позициями</span>
                     </div>
                   )}
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -6683,6 +6710,10 @@ export default function App() {
                             <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
                               <div style={{fontWeight:800,fontSize:15,color:"#111827"}}>{fmt(total)} ₸</div>
                               <div style={{display:"flex",gap:4}} onClick={e=>e.stopPropagation()}>
+                                {currentUser.role!=="viewer" && c.type!=="annex" && (
+                                  <button title="Создать доп. соглашение к договору" onClick={()=>createObjectAnnex(obj,c)}
+                                    style={{background:"rgba(124,58,237,.08)",color:"#7c3aed",border:"1px solid rgba(124,58,237,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>+ Доп. согл.</button>
+                                )}
                                 <button onClick={()=>generateContractPdf(c,cl2,ca2)}
                                   style={{background:"#e5e7eb",color:"#374151",border:"1px solid #e5e7eb",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>
                                 <button onClick={()=>generateContractGDoc(c,cl2,ca2)}
