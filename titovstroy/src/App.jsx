@@ -4089,6 +4089,17 @@ export default function App() {
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   };
 
+  // ── Следующий свободный номер договора ──
+  // Берём максимальный числовой префикс из номеров существующих договоров и +1.
+  const nextContractNumber = useCallback(() => {
+    let max = 0;
+    for (const c of (contractsRef.current || [])) {
+      const m = String(c.number || "").match(/\d+/);   // первая группа цифр
+      if (m) { const n = parseInt(m[0], 10); if (n > max) max = n; }
+    }
+    return String(max + 1).padStart(4, "0");           // напр. "0007"
+  }, []);
+
   // ── Дублировать смету ──
   const duplicateEstimate = async (est) => {
     const id = genId();
@@ -5467,7 +5478,7 @@ export default function App() {
               </button>
             )}
             {contractTab === "list" && currentUser.role !== "viewer" && (
-              <button className="btn btn-g" style={{fontSize:12,padding:"7px 14px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:"",date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:""}); setContractTab("editor"); }}>+ Новый</button>
+              <button className="btn btn-g" style={{fontSize:12,padding:"7px 14px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:""}); setContractTab("editor"); }}>+ Новый</button>
             )}
           </div>
 
