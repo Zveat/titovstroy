@@ -2482,6 +2482,7 @@ export default function App() {
   const [currentId, setCurrentId] = useState(null);
   const [currentParentId, setCurrentParentId] = useState(null);
   const [currentDsNumber, setCurrentDsNumber] = useState(null);
+  const [currentObjectId, setCurrentObjectId] = useState(null); // объект, к которому привязана открытая смета
   const [activeCat, setActiveCat] = useState(cats[0]);
   const [activeSub, setActiveSub] = useState(Object.keys(Gdyn[cats[0]]||{})[0]);
   const [rows, setRows] = useState({});
@@ -2564,6 +2565,7 @@ export default function App() {
   const filteredEstimates = useMemo(() => {
     const q = debouncedListSearch.toLowerCase().trim();
     return estimates
+      .filter(e => !e.objectId) // сметы объектов живут внутри объекта, не в общем списке
       .filter(e => !listFilter || e.proj?.type === listFilter)
       .filter(e => !listFilterManager || (e.proj?.manager||e.createdBy||"") === listFilterManager)
       .filter(e => !listFilterStatus || (e.status||"new") === listFilterStatus)
@@ -2625,7 +2627,8 @@ export default function App() {
       // parentId/dsNumber берём из стейта (новая ДС) ИЛИ из сохранённой записи (открытая ДС)
       const pId = currentParentId || exists?.parentId;
       const dsN = currentDsNumber || exists?.dsNumber;
-      const updated = { id:currentId, proj, rows, discount, markup, note, status:estStatus, sentAt: estStatus==="sent" ? (estSentAt||exists?.sentAt||new Date().toISOString().slice(0,10)) : (exists?.sentAt||null), comment:estComment, createdAt:exists?.createdAt||Date.now(), createdBy:exists?.createdBy||currentUser?.name, updatedAt:Date.now(), updatedBy:currentUser?.name, total:final, ...(exists?.objectId ? {objectId:exists.objectId} : {}), ...(pId ? {parentId:pId, dsNumber:dsN} : {}) };
+      const objId = currentObjectId || exists?.objectId || null;
+      const updated = { id:currentId, proj, rows, discount, markup, note, status:estStatus, sentAt: estStatus==="sent" ? (estSentAt||exists?.sentAt||new Date().toISOString().slice(0,10)) : (exists?.sentAt||null), comment:estComment, createdAt:exists?.createdAt||Date.now(), createdBy:exists?.createdBy||currentUser?.name, updatedAt:Date.now(), updatedBy:currentUser?.name, total:final, ...(objId ? {objectId:objId} : {}), ...(pId ? {parentId:pId, dsNumber:dsN} : {}) };
       updated.history = _appendHistory(exists, updated);
       const newList = exists ? cur.map(e=>e.id===currentId?updated:e) : [updated,...cur];
       setEstimates(newList);
@@ -3216,6 +3219,7 @@ export default function App() {
     setCurrentId(est.id);
     setCurrentParentId(est.parentId || null);
     setCurrentDsNumber(est.dsNumber || null);
+    setCurrentObjectId(est.objectId || null);
     const validNames = new Set(nonViewerUsers.map(u=>u.name));
     const p = est.proj || {...EMPTY_PROJ};
     setProj({...p, manager: validNames.has(p.manager||"") ? p.manager : ""});
@@ -3238,6 +3242,7 @@ export default function App() {
     setCurrentId(id);
     setCurrentParentId(null);
     setCurrentDsNumber(null);
+    setCurrentObjectId(null);
     setProj({...EMPTY_PROJ, manager: currentUser.name, _createdBy: currentUser.name, _createdById: currentUser.id});
     setRows({});
     setDiscount(0);
@@ -3255,10 +3260,14 @@ export default function App() {
   // ── Сохранить текущую и вернуться к списку ──
   // Вернуться из редактора сметы туда, откуда пришли (к объекту или в список смет)
   const _backFromEditor = () => {
-    if (objectReturnId) {
-      const obj = objectsRef.current.find(x=>x.id===objectReturnId);
+    const retObjId = objectReturnId || currentObjectId;
+    if (retObjId) {
+      const obj = objectsRef.current.find(x=>x.id===retObjId);
       setObjectReturnId(null);
-      if (obj) { setCurrentObject({...obj}); setObjectTab("workspace"); setScreen("objects"); return; }
+      setObjectTab("workspace");
+      setScreen("objects");
+      if (obj) setCurrentObject({...obj});
+      return;
     }
     if (dealReturnId) {
       const dl = dealsRef.current.find(x=>x.id===dealReturnId);
@@ -3289,7 +3298,7 @@ export default function App() {
       updatedAt: Date.now(),
       updatedBy: currentUser.name,
       total: final,
-      ...(exists?.objectId ? {objectId:exists.objectId} : {}),
+      ...((currentObjectId || exists?.objectId) ? {objectId: currentObjectId || exists.objectId} : {}),
       ...(pId ? {parentId:pId, dsNumber:dsN} : {}),
     };
     updated.history = _appendHistory(exists, updated);
@@ -3330,6 +3339,7 @@ export default function App() {
     setCurrentId(id);
     setCurrentParentId(parentEst.id);
     setCurrentDsNumber(dsNumber);
+    setCurrentObjectId(parentEst.objectId || null);
     setProj({...(parentEst.proj||EMPTY_PROJ), manager: currentUser.name});
     setRows({});
     setDiscount(0);
@@ -5304,8 +5314,8 @@ export default function App() {
           </div>
 
           <div style={{maxWidth:1160,margin:"0 auto",padding:"18px 18px"}}>
-            {/* ОБЪЕКТ — скрываем, если смета открыта из карточки объекта (поля ведутся в объекте) */}
-            {!objectReturnId && (
+            {/* ОБЪЕКТ — скрываем, если смета привязана к объекту (поля ведутся в объекте) */}
+            {!currentObjectId && (
             <div className="card up" style={{padding:"16px 20px",marginBottom:16}}>
               <div style={{fontSize:10,fontWeight:700,color:"#2563eb",letterSpacing:1.5,textTransform:"uppercase",marginBottom:11}}>Информация об объекте</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:10}}>
@@ -6240,6 +6250,7 @@ export default function App() {
           setEstimates(newList);
           saveEstimates(newList);
           setObjectReturnId(obj.id);
+          setCurrentObjectId(obj.id);
           setCurrentId(id);
           setProj(newEst.proj);
           setRows({});
@@ -6257,6 +6268,7 @@ export default function App() {
 
         const openObjectEstimateEdit = (est, obj) => {
           setObjectReturnId(obj.id);
+          setCurrentObjectId(obj.id);
           setCurrentId(est.id);
           // proj синхронизируем из объекта (клиент/адрес ведутся в объекте)
           setProj({...(est.proj||EMPTY_PROJ), ...objProj(obj)});
@@ -6404,12 +6416,19 @@ export default function App() {
             // Текст печатаем локально (отзывчиво), сохраняем на blur. Синхронизируем скрытую запись клиента.
             const setObjLocal = (patch) => setCurrentObject(p=>({...p,...patch}));
             const persistObj = () => setCurrentObject(p=>{
-              const upd = {...p, updatedAt: Date.now()};
-              saveObjects(objectsRef.current.map(x=>x.id===p.id?upd:x));
-              if (p.clientId) {
-                const cl = clientsRef.current.find(c=>c.id===p.clientId);
-                if (cl) saveContractClients(clientsRef.current.map(c=>c.id===p.clientId?{...c,name:p.clientName||"",phone:p.clientPhone||"",address:p.address||"",iin:p.clientIin||"",doc:p.clientDoc||"",type:p.clientType||"физ"}:c));
+              const cdata = { name:p.clientName||"", phone:p.clientPhone||"", address:p.address||"", iin:p.clientIin||"", doc:p.clientDoc||"", type:p.clientType||"физ" };
+              let clientId = p.clientId;
+              const cl = clientId && clientsRef.current.find(c=>c.id===clientId);
+              if (cl) {
+                // обновляем связанную запись клиента
+                saveContractClients(clientsRef.current.map(c=>c.id===clientId?{...c,...cdata}:c));
+              } else if ((p.clientName||"").trim()) {
+                // имя введено, но клиент не связан — создаём запись (появится в списке, нужна договорам)
+                clientId = Date.now().toString();
+                saveContractClients([...clientsRef.current, { id:clientId, ...cdata, createdAt:Date.now(), createdById:currentUser.id, _fromObject:p.id }]);
               }
+              const upd = {...p, clientId: clientId||"", updatedAt: Date.now()};
+              saveObjects(objectsRef.current.map(x=>x.id===p.id?upd:x));
               return upd;
             });
 
@@ -6430,9 +6449,27 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Клиент — поля ведутся прямо здесь */}
+                  {/* Клиент — можно выбрать существующего или заполнить вручную */}
                   <div>
                     <div style={{fontSize:11,color:"#2563eb",fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>👤 Клиент</div>
+                    {contractClients.length>0 && canEdit && (
+                      <div style={{marginBottom:12}}>
+                        <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Выбрать из существующих</div>
+                        <select className="fi" value={obj.clientId||""}
+                          onChange={e=>{
+                            const c = contractClients.find(x=>x.id===e.target.value);
+                            if (c) {
+                              setObjLocal({ clientId:c.id, clientName:c.name||"", clientPhone:c.phone||"", clientType:c.type||"физ", clientIin:c.iin||"", clientDoc:c.doc||"", address: obj.address || c.address || "" });
+                              setTimeout(persistObj,0);
+                            } else {
+                              setObjLocal({ clientId:"" }); setTimeout(persistObj,0);
+                            }
+                          }}>
+                          <option value="">— Новый клиент (заполнить ниже) —</option>
+                          {contractClients.map(c=><option key={c.id} value={c.id}>{c.name||"Без имени"}</option>)}
+                        </select>
+                      </div>
+                    )}
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
                       <div>
                         <div style={{fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>ФИО / Название</div>
@@ -6659,7 +6696,7 @@ export default function App() {
                   const childMap = {}; // parentId -> [child]
                   contracts.forEach(c=>{ if(isChildType(c) && c.mainNumber && numMap[c.mainNumber]){ const pid=numMap[c.mainNumber].id; (childMap[pid]||(childMap[pid]=[])).push(c); } });
                   const childIds = new Set(Object.values(childMap).flat().map(c=>c.id));
-                  const roots = contracts.filter(c=>!childIds.has(c.id) && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus));
+                  const roots = contracts.filter(c=>!childIds.has(c.id) && !c.objectId && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus));
 
                   const renderContractCard = (c, isChild=false) => {
                     const client = contractClients.find(x=>x.id===c.clientId);
