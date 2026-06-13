@@ -3367,6 +3367,32 @@ export default function App() {
   const subs = Object.keys(Gdyn[safeCat] || {});
   const safeActiveSub = subs.includes(activeSub) ? activeSub : (subs[0]||"");
 
+  // ── Перенести смету (и её доп. сметы) в новый объект ──
+  const moveEstimateToObject = async (est) => {
+    if (est.objectId) { window.alert("Эта смета уже привязана к объекту"); return; }
+    const p = est.proj || {};
+    if (!window.confirm(`Создать объект из сметы «${p.name||"Без названия"}» и перенести её туда?`)) return;
+    const objId = genId();
+    const newObj = {
+      id: objId,
+      clientId:"", clientName: p.name||"", clientPhone: p.phone||"", clientType:"физ",
+      clientIin:"", clientDoc:"", address: p.address||"", objType: p.type||"Вторичка",
+      area: p.area||"", status:"inwork", note:"",
+      manager: est.proj?.manager || currentUser.name,
+      createdBy: est.createdBy || currentUser.name, createdById: currentUser.id,
+      createdAt: est.createdAt || Date.now(), updatedAt: Date.now(),
+    };
+    // привязываем смету + все её доп. сметы
+    const childIds = new Set(estimatesRef.current.filter(e=>e.parentId===est.id).map(e=>e.id));
+    const newList = estimatesRef.current.map(e=>{
+      if (e.id===est.id || childIds.has(e.id)) return {...e, objectId: objId};
+      return e;
+    });
+    await saveObjects([newObj, ...objectsRef.current]);
+    await saveEstimates(newList, { replace:true });
+    window.alert(`Объект создан ✓ Смета перенесена в «Объекты»`);
+  };
+
   // ── Открыть смету на редактирование ──
   const openEstimate = (est) => {
     setCurrentId(est.id);
@@ -5361,6 +5387,13 @@ export default function App() {
                               style={{background:"rgba(184,144,74,.08)",color:"#2563eb",border:"1px solid #eff6ff",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
                               📄
                             </button>
+                            {currentUser.role !== "viewer" && !isChild && !est.objectId && (
+                              <button onClick={()=>moveEstimateToObject(est)}
+                                title="Создать объект из этой сметы и перенести в раздел Объекты"
+                                style={{background:"rgba(37,99,235,.08)",color:"#2563eb",border:"1px solid rgba(37,99,235,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0,fontWeight:700}}>
+                                📦 В объект
+                              </button>
+                            )}
                             {currentUser.role !== "viewer" && !isChild && (
                               <button onClick={()=>newSupplementaryEstimate(est)}
                                 title="Создать доп. смету (ДС)"
@@ -6521,7 +6554,7 @@ export default function App() {
             <div style={{flex:1}}/>
             {objectTab==="list" && currentUser.role!=="viewer" && (
               <button className="btn btn-g" style={{fontSize:12,padding:"7px 14px"}} onClick={async ()=>{
-                const newObj = {id:genId(),clientId:"",clientName:"",clientPhone:"",clientType:"физ",clientIin:"",clientDoc:"",address:"",objType:"Вторичка",area:"",status:"lead",note:"",manager:currentUser.name,createdBy:currentUser.name,createdById:currentUser.id,createdAt:Date.now(),updatedAt:Date.now()};
+                const newObj = {id:genId(),clientId:"",clientName:"",clientPhone:"",clientType:"физ",clientIin:"",clientDoc:"",address:"",objType:"Вторичка",area:"",status:"new",note:"",manager:currentUser.name,createdBy:currentUser.name,createdById:currentUser.id,createdAt:Date.now(),updatedAt:Date.now()};
                 await saveObjects([newObj, ...objectsRef.current]);
                 setCurrentObject(newObj);
                 setObjectTab("workspace");
