@@ -348,7 +348,11 @@ const storage = {
           fbResponded = false; // таймаут — НЕ знаем что в базе
         } else {
           fbResponded = true;
-          if (snap && snap.exists()) return { value: JSON.stringify(snap.val()), status: "found" };
+          if (snap && snap.exists()) {
+            const v = snap.val();
+            // Новый формат — строка JSON; старый — вложенный объект (обратная совместимость)
+            return { value: typeof v === "string" ? v : JSON.stringify(v), status: "found" };
+          }
         }
       }
     } catch(e) { console.warn("FB get error:", e); fbResponded = false; }
@@ -363,15 +367,15 @@ const storage = {
     return r.status === "found" ? { value: r.value } : null;
   },
   async set(key, value) {
-    const parsed = (() => { try { return JSON.parse(value); } catch { return value; } })();
     // Сначала localStorage — всегда надёжно и мгновенно
     try { localStorage.setItem(key, value); localStorage.setItem(key + _TS_SUFFIX, Date.now().toString()); } catch(e) {}
     _mem[key] = value;
-    // Firebase — ОЖИДАЕМ результат, чтобы знать, ушли ли данные в облако
+    // Firebase — пишем СТРОКУ JSON целиком (а не вложенный объект),
+    // иначе ключи с символами / . # $ [ ] (напр. названия работ со слэшем) ломают запись.
     let fbOk = false, fbError = null;
     if (_fbDb) {
       try {
-        const res = await _race(set(ref(_fbDb, _fbKey(key)), parsed), 12000);
+        const res = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000);
         if (res === _TIMEOUT) { fbError = "timeout"; }
         else { fbOk = true; }
       } catch(e) { fbError = e?.message || String(e); console.warn("FB set error:", e); }
