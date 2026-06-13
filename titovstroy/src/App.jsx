@@ -1243,7 +1243,7 @@ function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note })
 
 
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
-function AdminPageContent({ currentUser, presence = {}, onUsersChanged }) {
+function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]} }) {
   const [tab, setTab] = useState("users");
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1266,6 +1266,8 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged }) {
   const [editingCat, setEditingCat] = useState(null);
   const [editingSub, setEditingSub] = useState(null);
   const [catalogBackupsModal, setCatalogBackupsModal] = useState(null);
+  const [adminEditItem, setAdminEditItem] = useState(null); // {mode:"newClient"|"editClient"|"newCA"|"editCA", data:{}}
+  const [adminSubTab, setAdminSubTab] = useState("list"); // "list"|"clientEditor"|"caEditor"
 
   const openCatalogBackups = async () => {
     const bRaw = await storage.get(CATALOG_BACKUPS_KEY);
@@ -1473,11 +1475,11 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged }) {
 
       {/* Табы */}
       <div style={{display:"flex",gap:3,marginBottom:24,background:"#f3f4f6",borderRadius:10,padding:4}}>
-        {[["users","👥 Сотрудники"],["prices","💰 Прайс-лист"]].map(([t,label])=>(
-          <button key={t} onClick={()=>setTab(t)} style={{
+        {[["users","👥 Сотрудники"],["clients","👥 Клиенты"],["contragents","🏢 Реквизиты"],["prices","💰 Прайс-лист"]].map(([t,label])=>(
+          <button key={t} onClick={()=>{ setTab(t); setAdminSubTab("list"); }} style={{
             flex:1,padding:"11px",borderRadius:8,border:"none",cursor:"pointer",
-            fontFamily:"inherit",fontSize:13,fontWeight:700,
-            background: tab===t ? "#f3f4f6" : "transparent",
+            fontFamily:"inherit",fontSize:12,fontWeight:700,
+            background: tab===t ? "#fff" : "transparent",
             color: tab===t ? "#111827" : "#6b7280",transition:"all .1s"
           }}>{label}</button>
         ))}
@@ -1573,6 +1575,139 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged }) {
 
           {msg && <div style={{marginTop:14,textAlign:"center",fontSize:13,fontWeight:600,color: msg.startsWith("✓") ? "#059669" : "#dc2626",padding:"10px",background:msg.startsWith("✓")?"rgba(76,175,125,.08)":"rgba(220,38,38,.08)",borderRadius:8}}>{msg}</div>}
           {saving && <div style={{textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:8}}>💾 Сохранение...</div>}
+        </div>
+      ) : tab === "clients" ? (
+        /* КЛИЕНТЫ */
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {adminSubTab === "list" && (<>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontWeight:700,color:"#9ca3af",fontSize:12}}>КЛИЕНТЫ ({clients.length})</div>
+              {currentUser.role !== "viewer" && (
+                <button onClick={()=>{ setAdminEditItem({mode:"newClient",data:{id:Date.now().toString(),name:"",phone:"",address:"",iin:"",doc:"",type:"физ",createdAt:Date.now(),createdById:currentUser.id}}); setAdminSubTab("clientEditor"); }}
+                  className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
+              )}
+            </div>
+            {clients.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#374151",fontSize:13}}>Клиентов пока нет</div>}
+            {clients.map(c=>(
+              <div key={c.id} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px 16px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>{c.name||"Без имени"}</div>
+                    <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
+                      {c.type==="физ"?"👤 Физ. лицо":"🏢 Юр. лицо"}
+                      {c.iin&&<span style={{marginLeft:8}}>ИИН: {c.iin}</span>}
+                    </div>
+                    {c.phone&&<div style={{fontSize:12,color:"#9ca3af",marginTop:1}}>📞 {c.phone}</div>}
+                    {c.address&&<div style={{fontSize:12,color:"#9ca3af",marginTop:1}}>📍 {c.address}</div>}
+                  </div>
+                  <div style={{display:"flex",gap:5}}>
+                    {(currentUser.role==="admin"||(currentUser.role==="user"&&c.createdById===currentUser.id))&&(
+                      <button onClick={()=>{ setAdminEditItem({mode:"editClient",data:{...c}}); setAdminSubTab("clientEditor"); }}
+                        style={{background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                    )}
+                    {(currentUser.role==="admin"||(currentUser.role==="user"&&c.createdById===currentUser.id))&&(
+                      <button onClick={()=>{ if(window.confirm("Удалить клиента?")) saveClients(clientsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
+                        style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </>)}
+          {adminSubTab === "clientEditor" && adminEditItem && (<>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <button onClick={()=>setAdminSubTab("list")} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:18}}>←</button>
+              <span style={{fontWeight:700,fontSize:15,color:"#111827"}}>{adminEditItem.mode==="newClient"?"Новый клиент":"Редактировать клиента"}</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div>
+                <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Тип</div>
+                <select className="fi" value={adminEditItem.data.type||"физ"} onChange={e=>setAdminEditItem(p=>({...p,data:{...p.data,type:e.target.value}}))}>
+                  <option value="физ">Физ. лицо</option>
+                  <option value="юр">Юр. лицо</option>
+                </select>
+              </div>
+              {[
+                ["ФИО / Название организации","name"],
+                ["Телефон","phone"],
+                ["Адрес","address"],
+                ...(adminEditItem.data.type==="юр"
+                  ? [["БИН","iin"],["Директор (полностью)","director"],["Директор (кратко)","directorShort"],["Банк","bank"],["БИК","bik"],["ИИК (номер счёта)","account"],["Почта","email"]]
+                  : [["ИИН","iin"],["Документ (уд. личности)","doc"]]
+                )
+              ].map(([label,field])=>(
+                <div key={field}>
+                  <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>{label}</div>
+                  <input className="fi" value={adminEditItem.data[field]||""} onChange={e=>setAdminEditItem(p=>({...p,data:{...p.data,[field]:e.target.value}}))} placeholder={label}/>
+                </div>
+              ))}
+            </div>
+            <button className="btn btn-g" onClick={()=>{
+              const d = adminEditItem.data;
+              const list = adminEditItem.mode==="newClient" ? [...clients,d] : clients.map(x=>x.id===d.id?d:x);
+              saveClients(list);
+              setAdminSubTab("list");
+            }}>← Готово</button>
+          </>)}
+        </div>
+      ) : tab === "contragents" ? (
+        /* РЕКВИЗИТЫ МОЙ ЮР. ЛИЦ */
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {adminSubTab === "list" && (<>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontWeight:700,color:"#9ca3af",fontSize:12}}>МОИ ЮР. ЛИЦА / РЕКВИЗИТЫ ({contragents.length})</div>
+              {currentUser.role==="admin" && (
+                <button onClick={()=>{ setAdminEditItem({mode:"newCA",data:{id:Date.now().toString(),name:"",bin:"",bank:"",bik:"",account:"",director:"",phone:"",email:"",address:""}}); setAdminSubTab("caEditor"); }}
+                  className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
+              )}
+            </div>
+            {contragents.map(c=>(
+              <div key={c.id} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px 16px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>{c.name}</div>
+                    <div style={{fontSize:12,color:"#9ca3af",marginTop:1}}>БИН: {c.bin} · {c.bank}</div>
+                    <div style={{fontSize:12,color:"#9ca3af",marginTop:1}}>Директор: {c.director} · {c.phone}</div>
+                  </div>
+                  {currentUser.role==="admin" && (
+                    <div style={{display:"flex",gap:5}}>
+                      <button onClick={()=>{ setAdminEditItem({mode:"editCA",data:{...c}}); setAdminSubTab("caEditor"); }}
+                        style={{background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                      {contragents.length>1&&<button onClick={()=>{ if(window.confirm("Удалить?")) saveContragents(contragentsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
+                        style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </>)}
+          {adminSubTab === "caEditor" && adminEditItem && (<>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <button onClick={()=>setAdminSubTab("list")} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:18}}>←</button>
+              <span style={{fontWeight:700,fontSize:15,color:"#111827"}}>{adminEditItem.mode==="newCA"?"Новые реквизиты":"Редактировать реквизиты"}</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div style={{gridColumn:"1/-1"}}>
+                <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Файл печати</div>
+                <select className="fi" value={adminEditItem.data.stampFile||"stamp.jpg"} onChange={e=>setAdminEditItem(p=>({...p,data:{...p.data,stampFile:e.target.value}}))}>
+                  <option value="stamp.jpg">stamp.jpg</option>
+                  <option value="stamp2.jpg">stamp2.jpg</option>
+                </select>
+              </div>
+              {[["Название","name"],["БИН","bin"],["Банк","bank"],["БИК","bik"],["Расчётный счёт","account"],["Директор","director"],["Телефон","phone"],["Email","email"],["Адрес","address"]].map(([label,field])=>(
+                <div key={field}>
+                  <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>{label}</div>
+                  <input className="fi" value={adminEditItem.data[field]||""} onChange={e=>setAdminEditItem(p=>({...p,data:{...p.data,[field]:e.target.value}}))} placeholder={label}/>
+                </div>
+              ))}
+            </div>
+            <button className="btn btn-g" onClick={()=>{
+              const d = adminEditItem.data;
+              const list = adminEditItem.mode==="newCA" ? [...contragents,d] : contragents.map(x=>x.id===d.id?d:x);
+              saveContragents(list);
+              setAdminSubTab("list");
+            }}>← Готово</button>
+          </>)}
         </div>
       ) : (
         /* ПРАЙС-ЛИСТ */
@@ -6778,7 +6913,7 @@ export default function App() {
 
           {/* Табы */}
           <div style={{display:"flex",gap:4,padding:"12px 20px 0",borderBottom:"1px solid #e5e7eb",background:"#f3f4f6"}}>
-            {[["list","📋 Список"],["clients","👥 Клиенты"],["contragents","🏢 ТОО"]].map(([k,l])=>(
+            {[["list","📋 Список"]].map(([k,l])=>(
               <button key={k} onClick={()=>setContractTab(k)}
                 style={{background:"none",border:"none",borderBottom:`2px solid ${contractTab===k?"#2563eb":"transparent"}`,color:contractTab===k?"#2563eb":"#9ca3af",cursor:"pointer",padding:"8px 14px",fontSize:13,fontWeight:600,fontFamily:"inherit",transition:"all .15s"}}>
                 {l}
@@ -6937,147 +7072,6 @@ export default function App() {
               />
             )}
 
-            {/* ── КЛИЕНТЫ ── */}
-            {contractTab === "clients" && (
-              <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div style={{fontWeight:700,color:"#9ca3af",fontSize:12}}>КЛИЕНТЫ ({contractClients.length})</div>
-                  {currentUser.role !== "viewer" && (
-                    <button onClick={()=>{ setCurrentContract({id:Date.now().toString(),name:"",phone:"",address:"",iin:"",doc:"",type:"физ",createdAt:Date.now(),createdById:currentUser.id,_mode:"newClient"}); setContractTab("clientEditor"); }}
-                      className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
-                  )}
-                </div>
-                {contractClients.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#374151",fontSize:13}}>Клиентов пока нет</div>}
-                {contractClients.map(c=>(
-                  <div key={c.id} style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px 16px"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                      <div>
-                        <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>{c.name||"Без имени"}</div>
-                        <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
-                          {c.type==="физ"?"👤 Физ. лицо":"🏢 Юр. лицо"}
-                          {c.iin&&<span style={{marginLeft:8}}>ИИН: {c.iin}</span>}
-                        </div>
-                        {c.phone&&<div style={{fontSize:12,color:"#9ca3af",marginTop:1}}>📞 {c.phone}</div>}
-                        {c.address&&<div style={{fontSize:12,color:"#9ca3af",marginTop:1}}>📍 {c.address}</div>}
-                      </div>
-                      <div style={{display:"flex",gap:5}}>
-                        {(currentUser.role==="admin" || (currentUser.role==="user" && c.createdById===currentUser.id)) && (
-                          <button onClick={()=>{ setCurrentContract({...c,_mode:"editClient"}); setContractTab("clientEditor"); }}
-                            style={{background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
-                        )}
-                        {(currentUser.role==="admin" || (currentUser.role==="user" && c.createdById===currentUser.id)) && (
-                          <button onClick={()=>{ if(window.confirm("Удалить клиента?")) saveContractClients(clientsRef.current.filter(x=>x.id!==c.id), {removedIds:[c.id], allowEmpty:true}); }}
-                            style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* ── РЕДАКТОР КЛИЕНТА ── */}
-            {contractTab === "clientEditor" && currentContract?._mode?.includes("Client") && (
-              <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                  <button onClick={()=>setContractTab("clients")} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:18}}>←</button>
-                  <span style={{fontWeight:700,fontSize:15,color:"#111827"}}>{currentContract._mode==="newClient"?"Новый клиент":"Редактировать клиента"}</span>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                  <div>
-                    <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Тип</div>
-                    <select className="fi" value={currentContract.type||"физ"} onChange={e=>setCurrentContract(p=>({...p,type:e.target.value}))}>
-                      <option value="физ">Физ. лицо</option>
-                      <option value="юр">Юр. лицо</option>
-                    </select>
-                  </div>
-                  {[
-                    ["ФИО / Название организации","name"],
-                    ["Телефон","phone"],
-                    ["Адрес","address"],
-                    ...(currentContract.type==="юр"
-                      ? [["БИН","iin"],["Директор (полностью)","director"],["Директор (кратко, напр. Багаутдинов Н.Р.)","directorShort"],["Банк","bank"],["БИК","bik"],["ИИК (номер счёта)","account"],["Почта","email"]]
-                      : [["ИИН","iin"],["Документ (уд. личности)","doc"]]
-                    )
-                  ].map(([label,field])=>(
-                    <div key={field}>
-                      <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>{label}</div>
-                      <input className="fi" value={currentContract[field]||""} onChange={e=>setCurrentContract(p=>({...p,[field]:e.target.value}))} placeholder={label}/>
-                    </div>
-                  ))}
-                </div>
-                <button className="btn btn-g" onClick={()=>{
-                  const {_mode,...clientData} = currentContract;
-                  const list = _mode==="newClient" ? [...contractClients,clientData] : contractClients.map(x=>x.id===clientData.id?clientData:x);
-                  saveContractClients(list);
-                  setContractTab("clients");
-                }}>← Готово</button>
-              </div>
-            )}
-
-            {/* ── ТОО ── */}
-            {contractTab === "contragents" && (
-              <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div style={{fontWeight:700,color:"#9ca3af",fontSize:12}}>ТОО / ПОДРЯДЧИКИ ({contragents.length})</div>
-                  {currentUser.role==="admin" && (
-                    <button onClick={()=>{ setCurrentContract({id:Date.now().toString(),name:"",bin:"",bank:"",bik:"",account:"",director:"",phone:"",email:"",address:"",_mode:"newCA"}); setContractTab("caEditor"); }}
-                      className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
-                  )}
-                </div>
-                {contragents.map(c=>(
-                  <div key={c.id} style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px 16px"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                      <div>
-                        <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>{c.name}</div>
-                        <div style={{fontSize:12,color:"#9ca3af",marginTop:1}}>БИН: {c.bin} · {c.bank}</div>
-                        <div style={{fontSize:12,color:"#9ca3af",marginTop:1}}>Директор: {c.director} · {c.phone}</div>
-                      </div>
-                      {currentUser.role==="admin" && (
-                        <div style={{display:"flex",gap:5}}>
-                          <button onClick={()=>{ setCurrentContract({...c,_mode:"editCA"}); setContractTab("caEditor"); }}
-                            style={{background:"#e5e7eb",color:"#9ca3af",border:"1px solid #e5e7eb",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
-                          {contragents.length>1&&<button onClick={()=>{ if(window.confirm("Удалить?")) saveContragents(contragentsRef.current.filter(x=>x.id!==c.id), {removedIds:[c.id], allowEmpty:true}); }}
-                            style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* ── РЕДАКТОР ТОО ── */}
-            {contractTab === "caEditor" && currentContract?._mode?.includes("CA") && (
-              <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                  <button onClick={()=>setContractTab("contragents")} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:18}}>←</button>
-                  <span style={{fontWeight:700,fontSize:15,color:"#111827"}}>{currentContract._mode==="newCA"?"Новое ТОО":"Редактировать ТОО"}</span>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                  <div style={{gridColumn:"1/-1"}}>
-                    <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>Файл печати</div>
-                    <select className="fi" value={currentContract.stampFile||"stamp.jpg"} onChange={e=>setCurrentContract(p=>({...p,stampFile:e.target.value}))}>
-                      <option value="stamp.jpg">stamp.jpg</option>
-                      <option value="stamp2.jpg">stamp2.jpg</option>
-                    </select>
-                  </div>
-                  {[["Название","name"],["БИН","bin"],["Банк","bank"],["БИК","bik"],["Расчётный счёт","account"],["Директор","director"],["Телефон","phone"],["Email","email"],["Адрес","address"]].map(([label,field])=>(
-                    <div key={field}>
-                      <div style={{fontSize:11,color:"#9ca3af",marginBottom:4}}>{label}</div>
-                      <input className="fi" value={currentContract[field]||""} onChange={e=>setCurrentContract(p=>({...p,[field]:e.target.value}))} placeholder={label}/>
-                    </div>
-                  ))}
-                </div>
-                <button className="btn btn-g" onClick={()=>{
-                  const {_mode,...caData} = currentContract;
-                  const list = _mode==="newCA" ? [...contragents,caData] : contragents.map(x=>x.id===caData.id?caData:x);
-                  saveContragents(list);
-                  setContractTab("contragents");
-                }}>← Готово</button>
-              </div>
-            )}
-
           </div>
         </div>
       )}
@@ -7090,6 +7084,12 @@ export default function App() {
           currentUser={currentUser}
           presence={presence}
           onUsersChanged={async ()=>{ const u=await storage.get(USERS_KEY); if(u) setAllUsers(JSON.parse(u.value)); }}
+          clients={contractClients}
+          saveClients={saveContractClients}
+          clientsRef={clientsRef}
+          contragents={contragents}
+          saveContragents={saveContragents}
+          contragentsRef={contragentsRef}
         />
       )}
 
