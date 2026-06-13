@@ -269,11 +269,10 @@ const STATUSES = [
   { key:"rejected",  label:"Отказ",              color:"#dc2626", bg:"rgba(220,38,38,.12)"   },
 ];
 const CONTRACT_STATUSES = [
-  { key:"draft",    label:"Черновик",    color:"#9ca3af", bg:"#f3f4f6"              },
-  { key:"active",   label:"Действующий", color:"#d97706", bg:"rgba(217,119,6,.12)" },
-  { key:"signed",   label:"Заключён",    color:"#059669", bg:"rgba(5,150,105,.1)"  },
-  { key:"done",     label:"Завершён",    color:"#2563eb", bg:"#eff6ff"             },
-  { key:"cancelled",label:"Расторгнут",  color:"#dc2626", bg:"rgba(220,38,38,.12)" },
+  { key:"draft",   label:"Черновик",     color:"#9ca3af", bg:"#f3f4f6"              },
+  { key:"sign",    label:"На подписание", color:"#d97706", bg:"rgba(217,119,6,.12)" },
+  { key:"signed",  label:"Заключён",     color:"#059669", bg:"rgba(5,150,105,.1)"   },
+  { key:"archive", label:"Архив",        color:"#6b7280", bg:"rgba(107,114,128,.12)"},
 ];
 const STORAGE_KEY        = "titovstroy-estimates";
 const BACKUPS_KEY        = "titovstroy-estimates-backups"; // снимки архива для восстановления
