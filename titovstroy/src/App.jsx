@@ -2390,6 +2390,7 @@ export default function App() {
   // Бэкапы списков (договоры/клиенты/контрагенты)
   const openListBackups = async (kind) => {
     const cfg = {
+      list:        { backupKey: CONTRACTS_BACKUPS_KEY,   label: "договоров",   save: (l)=>saveContracts(l, {replace:true, allowEmpty:true}) },
       contracts:   { backupKey: CONTRACTS_BACKUPS_KEY,   label: "договоров",   save: (l)=>saveContracts(l, {replace:true, allowEmpty:true}) },
       clients:     { backupKey: CLIENTS_BACKUPS_KEY,     label: "клиентов",    save: (l)=>saveContractClients(l, {replace:true, allowEmpty:true}) },
       contragents: { backupKey: CONTRAGENTS_BACKUPS_KEY, label: "контрагентов", save: (l)=>saveContragents(l, {replace:true, allowEmpty:true}) },
