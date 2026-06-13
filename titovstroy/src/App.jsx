@@ -2625,9 +2625,10 @@ export default function App() {
       if (exists && countFilled(exists.rows) > 0 && countFilled(rows) === 0 && !_allowEmptySave.current) {
         return;
       }
-      // parentId/dsNumber берём из стейта (новая ДС) ИЛИ из сохранённой записи (открытая ДС)
-      const pId = currentParentId || exists?.parentId;
-      const dsN = currentDsNumber || exists?.dsNumber;
+      // parentId/dsNumber берём из стейта (новая ДС) ИЛИ из сохранённой записи (открытая ДС). Игнорируем самоссылку.
+      const _ep = exists?.parentId && exists.parentId!==currentId ? exists.parentId : null;
+      const pId = currentParentId || _ep;
+      const dsN = pId ? (currentDsNumber || exists?.dsNumber) : null;
       const objId = currentObjectId || exists?.objectId || null;
       const updated = { id:currentId, proj, rows, discount, markup, note, status:estStatus, sentAt: estStatus==="sent" ? (estSentAt||exists?.sentAt||new Date().toISOString().slice(0,10)) : (exists?.sentAt||null), comment:estComment, createdAt:exists?.createdAt||Date.now(), createdBy:exists?.createdBy||currentUser?.name, updatedAt:Date.now(), updatedBy:currentUser?.name, total:final, ...(objId ? {objectId:objId} : {}), ...(pId ? {parentId:pId, dsNumber:dsN} : {}) };
       updated.history = _appendHistory(exists, updated);
@@ -3286,8 +3287,9 @@ export default function App() {
       _backFromEditor();
       return;
     }
-    const pId = currentParentId || exists?.parentId;
-    const dsN = currentDsNumber || exists?.dsNumber;
+    const _ep = exists?.parentId && exists.parentId!==currentId ? exists.parentId : null;
+    const pId = currentParentId || _ep;
+    const dsN = pId ? (currentDsNumber || exists?.dsNumber) : null;
     const updated = {
       id: currentId,
       proj, rows, discount, markup, note,
@@ -6276,6 +6278,8 @@ export default function App() {
           saveEstimates(newList);
           setObjectReturnId(obj.id);
           setCurrentObjectId(obj.id);
+          setCurrentParentId(null);
+          setCurrentDsNumber(null);
           setCurrentId(id);
           setProj(newEst.proj);
           setRows({});
@@ -6294,6 +6298,9 @@ export default function App() {
         const openObjectEstimateEdit = (est, obj) => {
           setObjectReturnId(obj.id);
           setCurrentObjectId(obj.id);
+          const _validParent = est.parentId && est.parentId!==est.id ? est.parentId : null;
+          setCurrentParentId(_validParent);
+          setCurrentDsNumber(_validParent ? (est.dsNumber||null) : null);
           setCurrentId(est.id);
           // proj синхронизируем из объекта (клиент/адрес ведутся в объекте)
           setProj({...(est.proj||EMPTY_PROJ), ...objProj(obj)});
@@ -6446,15 +6453,16 @@ export default function App() {
             const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"lead"))||DEAL_STATUSES[0];
             const _allEsts = estimates.filter(e=>e.objectId===obj.id);
             const _allCons = contracts.filter(c=>c.objectId===obj.id);
-            // Дерево смет: основная смета → под ней доп. сметы (ДС)
-            const _estMains = _allEsts.filter(e=>!e.parentId).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+            // Дерево смет: основная смета → под ней доп. сметы (ДС). parentId===id (битая ссылка) трактуем как основную.
+            const _estIsMain = (e) => !e.parentId || e.parentId===e.id;
+            const _estMains = _allEsts.filter(_estIsMain).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
             const objEsts = [];
             _estMains.forEach(m=>{
               objEsts.push(m);
-              _allEsts.filter(e=>e.parentId===m.id).sort((a,b)=>(a.dsNumber||0)-(b.dsNumber||0)).forEach(ch=>objEsts.push(ch));
+              _allEsts.filter(e=>!_estIsMain(e) && e.parentId===m.id).sort((a,b)=>(a.dsNumber||0)-(b.dsNumber||0)).forEach(ch=>objEsts.push(ch));
             });
             // осиротевшие ДС (родитель удалён) — показываем в конце
-            _allEsts.filter(e=>e.parentId && !_estMains.some(m=>m.id===e.parentId)).forEach(ch=>objEsts.push(ch));
+            _allEsts.filter(e=>!_estIsMain(e) && !_estMains.some(m=>m.id===e.parentId)).forEach(ch=>objEsts.push(ch));
             // Дерево договоров: основной договор → под ним доп. соглашения (приложения)
             const _conMains = _allCons.filter(c=>(c.type||"repair_fiz")!=="annex").sort((a,b)=>(b.id||0)-(a.id||0));
             const objCons = [];
@@ -6635,7 +6643,7 @@ export default function App() {
                   )}
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
                     {objEsts.map((est,estIdx)=>{
-                      const isChild = !!est.parentId;
+                      const isChild = !_estIsMain(est);
                       const posCount = Object.values(est.rows||{}).filter(r=>Number(r?.qty)>0).length;
                       const stEst = STATUSES.find(s=>s.key===(est.status||"new"))||STATUSES[0];
                       return (
