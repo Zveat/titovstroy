@@ -1475,7 +1475,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
 
       {/* Табы */}
       <div style={{display:"flex",gap:3,marginBottom:24,background:"#f3f4f6",borderRadius:10,padding:4}}>
-        {[["users","👥 Сотрудники"],["clients","👥 Клиенты"],["contragents","🏢 Реквизиты"],["prices","💰 Прайс-лист"]].map(([t,label])=>(
+        {[["users","👥 Сотрудники"],["clients","👥 Клиенты"],["contragents","🏢 Реквизиты"],["prices","💰 Прайс-лист"],["backups","🗄 Бэкапы"]].map(([t,label])=>(
           <button key={t} onClick={()=>{ setTab(t); setAdminSubTab("list"); }} style={{
             flex:1,padding:"11px",borderRadius:8,border:"none",cursor:"pointer",
             fontFamily:"inherit",fontSize:12,fontWeight:700,
@@ -2042,6 +2042,29 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
               {priceSaving && !priceMsg && <span style={{fontSize:12,color:"#9ca3af"}}>💾 Сохранение...</span>}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── БЭКАПЫ ── */}
+      {tab === "backups" && (
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{fontWeight:700,color:"#374151",fontSize:14,marginBottom:4}}>Восстановление данных</div>
+          <div style={{fontSize:12,color:"#9ca3af",marginBottom:8}}>Бэкапы создаются автоматически при каждом сохранении. Выберите раздел чтобы восстановить данные на нужный момент.</div>
+          {[
+            { label:"📋 Сметы", desc:"Все сметы и доп. сметы (в том числе из объектов)", fn: onBackupEstimates },
+            { label:"📄 Договора", desc:"Все договора и доп. соглашения", fn: onBackupContracts },
+            { label:"📦 Объекты", desc:"Список объектов с данными клиентов", fn: onBackupObjects },
+          ].map(({label,desc,fn})=>(
+            <div key={label} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"16px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+              <div>
+                <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>{label}</div>
+                <div style={{fontSize:12,color:"#9ca3af",marginTop:2}}>{desc}</div>
+              </div>
+              <button onClick={fn} style={{background:"rgba(0,0,0,.03)",color:"#374151",border:"1px solid #e5e7eb",borderRadius:8,padding:"8px 16px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",fontWeight:600}}>
+                🕘 Просмотреть бэкапы
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -2821,6 +2844,7 @@ export default function App() {
       contracts:   { backupKey: CONTRACTS_BACKUPS_KEY,   label: "договоров",   save: (l)=>saveContracts(l, {replace:true, allowEmpty:true}) },
       clients:     { backupKey: CLIENTS_BACKUPS_KEY,     label: "клиентов",    save: (l)=>saveContractClients(l, {replace:true, allowEmpty:true}) },
       contragents: { backupKey: CONTRAGENTS_BACKUPS_KEY, label: "контрагентов", save: (l)=>saveContragents(l, {replace:true, allowEmpty:true}) },
+      objects:     { backupKey: OBJECTS_BACKUPS_KEY,     label: "объектов",    save: (l)=>saveObjects(l, {replace:true, allowEmpty:true}) },
     }[kind];
     if (!cfg) return;
     const bRaw = await storage.get(cfg.backupKey);
@@ -7123,6 +7147,9 @@ export default function App() {
           contragents={contragents}
           saveContragents={saveContragents}
           contragentsRef={contragentsRef}
+          onBackupEstimates={openBackups}
+          onBackupContracts={()=>openListBackups("contracts")}
+          onBackupObjects={()=>openListBackups("objects")}
         />
       )}
 
