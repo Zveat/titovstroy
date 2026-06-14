@@ -276,10 +276,10 @@ const CONTRACT_STATUSES = [
 ];
 // Объекты — статусы жизненного цикла
 const DEAL_STATUSES = [
-  { key:"new",      label:"Черновик", color:"#6b7280", bg:"#f3f4f6"              },
-  { key:"inwork",   label:"В работе", color:"#16a34a", bg:"rgba(22,163,74,.1)"   },
-  { key:"done",     label:"Сдан",     color:"#059669", bg:"rgba(5,150,105,.1)"   },
-  { key:"rejected", label:"Отменён",  color:"#dc2626", bg:"rgba(220,38,38,.12)"  },
+  { key:"new",      label:"Черновик",                color:"#6b7280", bg:"#f3f4f6"              },
+  { key:"approval", label:"Согласование с клиентом", color:"#d97706", bg:"rgba(217,119,6,.12)"  },
+  { key:"signed",   label:"Договор подписан",        color:"#059669", bg:"rgba(5,150,105,.1)"   },
+  { key:"archive",  label:"Архив",                   color:"#6b7280", bg:"rgba(107,114,128,.12)"},
 ];
 const OBJECTS_KEY         = "titovstroy-objects";
 const OBJECTS_BACKUPS_KEY = "titovstroy-objects-backups";
@@ -2676,6 +2676,8 @@ export default function App() {
   const [objInfoCollapsed, setObjInfoCollapsed] = useState(false); // свёрнут ли блок инфо клиента/объекта
   const [currentObject, setCurrentObject] = useState(null);
   const [objectFilterStatus, setObjectFilterStatus] = useState("");
+  const [objectFilterType, setObjectFilterType] = useState("");
+  const [objectFilterManager, setObjectFilterManager] = useState("");
   const [objectSearch, setObjectSearch] = useState("");
   const [objectReturnId, setObjectReturnId] = useState(null); // id объекта, куда вернуться из редактора сметы/договора
   // legacy deals ref (не используется, но нужен для saveDeals ниже)
@@ -3383,19 +3385,17 @@ export default function App() {
     const allProfit   = allRevenue - allCost;
     const allMargin   = allRevenue>0 ? Math.round(allProfit/allRevenue*100) : 0;
 
-    // ── B. Воронка по статусам объектов (деньги + прибыль) ──
-    const funnel = DEAL_STATUSES.map(s=>{
-      const list = baseObjs.filter(o=>(o.status||"new")===s.key);
-      const sum  = list.reduce((a,o)=>a+objVal(o),0);
-      const cost = list.reduce((a,o)=>a+objCost(o),0);
+    // ── B. Воронка с деньгами и прибылью + конверсия (по сметам, как было) ──
+    const funnel = STATUSES.map(s=>{
+      const list = baseEstimates.filter(e=>(e.status||"new")===s.key);
+      const sum  = list.reduce((a,e)=>a+(e.total||0),0);
+      const cost = list.reduce((a,e)=>a+estCost(e),0);
       return { key:s.key, label:s.label, color:s.color, bg:s.bg, count:list.length, sum, profit:sum-cost };
     });
-    const inworkB = funnel.find(f=>f.key==="inwork") || {count:0,sum:0,profit:0};
-    const doneB   = funnel.find(f=>f.key==="done")   || {count:0,sum:0,profit:0};
-    const rejB    = funnel.find(f=>f.key==="rejected")|| {count:0,sum:0,profit:0};
-    const sentB = inworkB, agreedB = doneB; // совместимость с разметкой
-    const winRateOverall = totalEst>0 ? Math.round(doneB.count/totalEst*100) : 0;
-    const winRateSent    = (doneB.count+rejB.count)>0 ? Math.round(doneB.count/(doneB.count+rejB.count)*100) : 0;
+    const sentB   = funnel.find(f=>f.key==="sent")   || {count:0,sum:0,profit:0};
+    const agreedB = funnel.find(f=>f.key==="agreed") || {count:0,sum:0,profit:0};
+    const winRateOverall = baseEstimates.length>0 ? Math.round(agreedB.count/baseEstimates.length*100) : 0;
+    const winRateSent    = (sentB.count+agreedB.count)>0 ? Math.round(agreedB.count/(sentB.count+agreedB.count)*100) : 0;
 
     // ── D. Рентабельность по категориям (по сметам объектов в периоде) ──
     const objIdSet = new Set(baseObjs.map(o=>o.id));
@@ -3427,9 +3427,9 @@ export default function App() {
       const sum = withSum.reduce((s,o)=>s+objVal(o),0);
       const cost = withSum.reduce((s,o)=>s+objCost(o),0);
       const profit = sum-cost;
-      const inwork = mos.filter(o=>o.status==="inwork").length;
-      const done = mos.filter(o=>o.status==="done").length;
-      const conv = (done+mos.filter(o=>o.status==="rejected").length)>0 ? Math.round(done/(done+mos.filter(o=>o.status==="rejected").length)*100) : 0;
+      const inwork = mos.filter(o=>o.status==="approval").length;
+      const done = mos.filter(o=>o.status==="signed").length;
+      const conv = (done+inwork)>0 ? Math.round(done/(done+inwork)*100) : 0;
       return {name:m, count:mos.length, sum, profit, margin: sum>0?Math.round(profit/sum*100):0, sent:inwork, agreed:done, conv};
     }).sort((a,b)=>b.profit-a.profit);
 
@@ -3452,7 +3452,7 @@ export default function App() {
     const STALE_DAYS = 14;
     const nowMs = Date.now();
     const staleSent = objects
-      .filter(o=>o.status==="inwork")
+      .filter(o=>o.status==="approval")
       .map(o=>({e:{id:o.id, proj:{name:o.clientName||o.address||"Объект", phone:o.clientPhone}, total:objVal(o), _obj:o}, days: Math.floor((nowMs-(o.updatedAt||0))/864e5)}))
       .filter(x=>x.days>=STALE_DAYS)
       .sort((a,b)=>b.days-a.days)
@@ -3479,7 +3479,7 @@ export default function App() {
       id: objId,
       clientId:"", clientName: p.name||"", clientPhone: p.phone||"", clientType:"физ",
       clientIin:"", clientDoc:"", address: p.address||"", objType: p.type||"Вторичка",
-      area: p.area||"", status:"inwork", note:"",
+      area: p.area||"", status:"approval", note:"",
       manager: est.proj?.manager || currentUser.name,
       createdBy: est.createdBy || currentUser.name, createdById: currentUser.id,
       createdAt: est.createdAt || Date.now(), updatedAt: Date.now(),
@@ -6391,8 +6391,8 @@ export default function App() {
             {/* ── B. Воронка с деньгами и конверсией ── */}
             <div style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 2px rgba(0,0,0,.04)"}}>
               <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
-                <span style={{fontSize:11,color:"#7c3aed",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>🪜 Объекты по статусам (деньги)</span>
-                <span style={{fontSize:12,color:"#6b7280"}}>Сдано: <b style={{color:"#059669"}}>{winRateOverall}%</b> от всех · <b style={{color:"#7c3aed"}}>{winRateSent}%</b> без учёта отменённых</span>
+                <span style={{fontSize:11,color:"#7c3aed",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>🪜 Воронка продаж (деньги)</span>
+                <span style={{fontSize:12,color:"#6b7280"}}>Win-rate: <b style={{color:"#059669"}}>{winRateOverall}%</b> от всех · <b style={{color:"#7c3aed"}}>{winRateSent}%</b> от отправленных</span>
               </div>
               {(() => {
                 const maxSum = Math.max(1, ...funnel.map(f=>f.sum));
@@ -6444,7 +6444,7 @@ export default function App() {
             {/* ── F. «Зависшие» объекты в работе ── */}
             {staleSent.length>0 && (
               <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:"18px 20px",marginBottom:16}}>
-                <div style={{fontSize:11,color:"#b45309",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>⏰ Объекты в работе без движения 14+ дней</div>
+                <div style={{fontSize:11,color:"#b45309",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>⏰ На согласовании без движения 14+ дней</div>
                 <div style={{display:"flex",flexDirection:"column",gap:5}}>
                   {staleSent.map(({e,days})=>(
                     <div key={e.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"rgba(255,255,255,.6)",borderRadius:8,cursor:currentUser.role!=="viewer"?"pointer":"default"}} onClick={()=>{ if(currentUser.role!=="viewer"&&e._obj){ setCurrentObject({...e._obj}); setObjectTab("workspace"); setScreen("objects"); } }}>
@@ -6719,6 +6719,28 @@ export default function App() {
                   );
                 })}
               </div>
+              {/* Фильтр по типу объекта */}
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {["","Вторичка","Новостройка","Коммерция"].map(t=>(
+                  <button key={t||"all"} onClick={()=>setObjectFilterType(t)}
+                    style={{background:objectFilterType===t?"#eff6ff":"rgba(0,0,0,.03)",color:objectFilterType===t?"#2563eb":"#9ca3af",border:`1px solid ${objectFilterType===t?"rgba(37,99,235,.4)":"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                    {t||"Все типы"}
+                  </button>
+                ))}
+              </div>
+              {/* Фильтр по сотруднику */}
+              {nonViewerUsers.length>1 && (
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  <button onClick={()=>setObjectFilterManager("")}
+                    style={{background:!objectFilterManager?"#eff6ff":"rgba(0,0,0,.03)",color:!objectFilterManager?"#2563eb":"#9ca3af",border:`1px solid ${!objectFilterManager?"rgba(37,99,235,.4)":"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Все сотрудники</button>
+                  {nonViewerUsers.map(u=>(
+                    <button key={u.id} onClick={()=>setObjectFilterManager(v=>v===u.name?"":u.name)}
+                      style={{background:objectFilterManager===u.name?"#eff6ff":"rgba(0,0,0,.03)",color:objectFilterManager===u.name?"#2563eb":"#9ca3af",border:`1px solid ${objectFilterManager===u.name?"rgba(37,99,235,.4)":"#e5e7eb"}`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                      👤 {u.name}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {objects.length===0 && (
                 <div style={{textAlign:"center",padding:"60px 0",color:"#9ca3af"}}>
@@ -6731,6 +6753,8 @@ export default function App() {
               {[...objects]
                 .filter(o=>{
                   if(objectFilterStatus && (o.status||"new")!==objectFilterStatus) return false;
+                  if(objectFilterType && (o.objType||"Вторичка")!==objectFilterType) return false;
+                  if(objectFilterManager && (o.manager||"")!==objectFilterManager) return false;
                   if(objectSearch){
                     const q=objectSearch.toLowerCase();
                     if(!((o.clientName||"").toLowerCase().includes(q)||(o.address||"").toLowerCase().includes(q)||(o.phone||"").toLowerCase().includes(q))) return false;
