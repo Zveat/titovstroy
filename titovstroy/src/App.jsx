@@ -1243,7 +1243,7 @@ function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note })
 
 
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
-function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]} }) {
+function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, onBackupEstimates=()=>{}, onBackupContracts=()=>{}, onBackupObjects=()=>{} }) {
   const [tab, setTab] = useState("users");
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1709,7 +1709,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
             }}>← Готово</button>
           </>)}
         </div>
-      ) : (
+      ) : tab === "prices" ? (
         /* ПРАЙС-ЛИСТ */
         <div style={{paddingBottom:90}}>
           {/* Поиск + кнопка добавить */}
@@ -2043,7 +2043,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
             </div>
           )}
         </div>
-      )}
+      ) : null}
 
       {/* ── БЭКАПЫ ── */}
       {tab === "backups" && (
