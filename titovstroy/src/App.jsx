@@ -283,6 +283,8 @@ const DEAL_STATUSES = [
 ];
 const OBJECTS_KEY         = "titovstroy-objects";
 const OBJECTS_BACKUPS_KEY = "titovstroy-objects-backups";
+// единый снимок рабочего пространства: объекты + их сметы + их договора
+const WORKSPACE_BACKUPS_KEY = "titovstroy-workspace-backups";
 // legacy ключ для миграции старых сделок
 const DEALS_KEY          = "titovstroy-deals";
 const DEALS_BACKUPS_KEY  = "titovstroy-deals-backups";
@@ -1243,7 +1245,7 @@ function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note })
 
 
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
-function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, onBackupEstimates=()=>{}, onBackupContracts=()=>{}, onBackupObjects=()=>{} }) {
+function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, onBackupWorkspace=()=>{} }) {
   const [tab, setTab] = useState("users");
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2049,22 +2051,16 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
       {tab === "backups" && (
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
           <div style={{fontWeight:700,color:"#374151",fontSize:14,marginBottom:4}}>Восстановление данных</div>
-          <div style={{fontSize:12,color:"#9ca3af",marginBottom:8}}>Бэкапы создаются автоматически при каждом сохранении. Выберите раздел чтобы восстановить данные на нужный момент.</div>
-          {[
-            { label:"📋 Сметы", desc:"Все сметы и доп. сметы (в том числе из объектов)", fn: onBackupEstimates },
-            { label:"📄 Договора", desc:"Все договора и доп. соглашения", fn: onBackupContracts },
-            { label:"📦 Объекты", desc:"Список объектов с данными клиентов", fn: onBackupObjects },
-          ].map(({label,desc,fn})=>(
-            <div key={label} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"16px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
-              <div>
-                <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>{label}</div>
-                <div style={{fontSize:12,color:"#9ca3af",marginTop:2}}>{desc}</div>
-              </div>
-              <button onClick={fn} style={{background:"rgba(0,0,0,.03)",color:"#374151",border:"1px solid #e5e7eb",borderRadius:8,padding:"8px 16px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",fontWeight:600}}>
-                🕘 Просмотреть бэкапы
-              </button>
+          <div style={{fontSize:12,color:"#9ca3af",marginBottom:8}}>Снимки рабочего пространства создаются автоматически. Каждый снимок — это все объекты вместе с их сметами и договорами. Восстановление возвращает всё целиком на выбранный момент.</div>
+          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"16px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+            <div>
+              <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>📦 Объекты, сметы и договора</div>
+              <div style={{fontSize:12,color:"#9ca3af",marginTop:2}}>Единый снимок: объекты + вложенные сметы и договора</div>
             </div>
-          ))}
+            <button onClick={onBackupWorkspace} style={{background:"rgba(37,99,235,.08)",color:"#2563eb",border:"1px solid rgba(37,99,235,.2)",borderRadius:8,padding:"8px 16px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",fontWeight:700}}>
+              🕘 Просмотреть бэкапы
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -2705,6 +2701,7 @@ export default function App() {
   const stampBase64 = stampsBase64["stamp.jpg"] || "";
   const [listSearch, setListSearch] = useState("");
   const [backupsModal, setBackupsModal] = useState(null); // null | массив снимков
+  const [wsBackupsModal, setWsBackupsModal] = useState(null); // единый бэкап объектов (со сметами/договорами)
   const [importModal, setImportModal] = useState(false);
   const [importText, setImportText] = useState("");
   const [importBusy, setImportBusy] = useState(false);
@@ -2718,8 +2715,10 @@ export default function App() {
   // Мемоизированный фильтрованный/сортированный список смет
   const filteredEstimates = useMemo(() => {
     const q = debouncedListSearch.toLowerCase().trim();
+    const objIds = new Set(objects.map(o=>o.id));
     return estimates
-      .filter(e => !e.objectId) // сметы объектов живут внутри объекта, не в общем списке
+      // показываем сметы без объекта ИЛИ привязанные к НЕсуществующему объекту (сироты после восстановления)
+      .filter(e => !e.objectId || !objIds.has(e.objectId))
       .filter(e => !listFilter || e.proj?.type === listFilter)
       .filter(e => !listFilterManager || (e.proj?.manager||e.createdBy||"") === listFilterManager)
       .filter(e => !listFilterStatus || (e.status||"new") === listFilterStatus)
@@ -2730,7 +2729,7 @@ export default function App() {
         if (listSort==="name") return (a.proj?.name||"").localeCompare(b.proj?.name||"","ru");
         return (b.updatedAt||0)-(a.updatedAt||0);
       });
-  }, [estimates, listFilter, listFilterManager, listFilterStatus, debouncedListSearch, listSort]);
+  }, [estimates, objects, listFilter, listFilterManager, listFilterStatus, debouncedListSearch, listSort]);
 
   // Когда каталог меняется — синхронизируем activeCat/activeSub
   useEffect(() => {
@@ -3115,7 +3114,67 @@ export default function App() {
     await saveEstimates(list, { replace: true }); // ровно снимок, текущая версия уйдёт в бэкап
     setTimeout(() => { _allowEmptySave.current = false; }, 1500);
     setBackupsModal(null);
-    window.alert("Архив восстановлен ✓");
+    const objIds = new Set(objectsRef.current.map(o=>o.id));
+    const inObjects = list.filter(e=>e.objectId && objIds.has(e.objectId)).length;
+    const standalone = list.length - inObjects;
+    window.alert(`Восстановлено смет: ${list.length}\n• в объектах: ${inObjects}\n• в общем списке «Сметы»: ${standalone}`);
+  };
+
+  // ── Единый бэкап рабочего пространства: объекты + их сметы + их договора ──
+  const _wsSnapTimer = useRef(null);
+  useEffect(() => {
+    // снимок делаем только когда всё загружено (иначе запишем пустоту)
+    if (!_estimatesLoaded.current || !_contractsLoaded.current) return;
+    if (_wsSnapTimer.current) clearTimeout(_wsSnapTimer.current);
+    _wsSnapTimer.current = setTimeout(async () => {
+      try {
+        const snap = {
+          ts: Date.now(),
+          by: currentUser?.name || "",
+          objects: objectsRef.current,
+          estimates: estimatesRef.current,
+          contracts: contractsRef.current,
+          counts: { o: objectsRef.current.length, e: estimatesRef.current.length, c: contractsRef.current.length },
+        };
+        const raw = await storage.get(WORKSPACE_BACKUPS_KEY);
+        let arr = []; try { if (raw?.value) arr = JSON.parse(raw.value); } catch {}
+        if (!Array.isArray(arr)) arr = [];
+        // не плодим одинаковые подряд снимки
+        const prev = arr[0];
+        const sig = JSON.stringify(snap.counts) + "|" + JSON.stringify(snap.objects).length + JSON.stringify(snap.estimates).length;
+        if (prev && prev._sig === sig) return;
+        snap._sig = sig;
+        arr = [snap, ...arr].slice(0, 20);
+        await storage.set(WORKSPACE_BACKUPS_KEY, JSON.stringify(arr));
+      } catch (e) { console.warn("ws snapshot err", e); }
+    }, 4000);
+    return () => { if (_wsSnapTimer.current) clearTimeout(_wsSnapTimer.current); };
+  }, [objects, estimates, contracts]);
+
+  const openWorkspaceBackups = async () => {
+    try {
+      const raw = await storage.get(WORKSPACE_BACKUPS_KEY);
+      let arr = []; try { if (raw?.value) arr = JSON.parse(raw.value); } catch {}
+      setWsBackupsModal(Array.isArray(arr) ? arr : []);
+    } catch { setWsBackupsModal([]); }
+  };
+
+  const restoreWorkspace = async (snap) => {
+    if (!snap) return;
+    const o = Array.isArray(snap.objects) ? snap.objects : [];
+    const e = Array.isArray(snap.estimates) ? snap.estimates : [];
+    const c = Array.isArray(snap.contracts) ? snap.contracts : [];
+    if (!window.confirm(`Восстановить рабочее пространство на ${new Date(snap.ts).toLocaleString("ru-RU")}?\n\nОбъектов: ${o.length}\nСмет: ${e.length}\nДоговоров: ${c.length}\n\nТекущее состояние уйдёт в бэкап.`)) return;
+    _allowEmptySave.current = true;
+    objectsRef.current = o; setObjects(o);
+    estimatesRef.current = e; setEstimates(e);
+    contractsRef.current = c; setContracts(c);
+    await saveObjects(o, { replace: true, allowEmpty: true });
+    await saveEstimates(e, { replace: true });
+    await saveContracts(c, { replace: true, allowEmpty: true });
+    setTimeout(() => { _allowEmptySave.current = false; }, 1500);
+    setWsBackupsModal(null);
+    window.alert(`Восстановлено ✓\nОбъектов: ${o.length} · Смет: ${e.length} · Договоров: ${c.length}`);
   };
 
   // ── Импорт смет из JSON (восстановление из PDF) ──
@@ -4852,15 +4911,14 @@ export default function App() {
   const NAV_ITEMS = useMemo(() => [
     ...(currentUser.role !== "viewer" ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
     { id:"objects",   icon:"📦", label:"Объекты" },
-    { id:"list",      icon:"📋", label:"Сметы" },
-    { id:"contracts", icon:"📄", label:"Договора" },
+    { id:"contracts", icon:"📄", label:"Прочие договора" },
     ...(currentUser.role !== "viewer" ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
     ...(currentUser.role==="admin" ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
   ], [currentUser.role]);
 
-  // Наблюдатель не имеет доступа к дашборду/аналитике/админке — показываем сметы.
+  // Наблюдатель не имеет доступа к дашборду/аналитике/админке — показываем объекты.
   // Вычисляем эффективный экран без setState во время рендера (иначе нарушаются правила хуков).
-  const effScreen = (currentUser.role === "viewer" && (screen === "dashboard" || screen === "analytics" || screen === "admin" || screen === "deals" || screen === "objects")) ? "list" : screen;
+  const effScreen = (currentUser.role === "viewer" && (screen === "dashboard" || screen === "analytics" || screen === "admin" || screen === "deals")) ? "objects" : screen;
 
   return (
     <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#f3f4f6",minHeight:"100vh",color:"#111827",display:"flex",flexDirection:"column"}}>
@@ -5088,8 +5146,8 @@ export default function App() {
           <div style={{fontSize:13,color:"#111827",fontWeight:700,marginBottom:14}}>Разделы</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:12,marginBottom:36}}>
             {[
-              {id:"list",      icon:"≡",title:"Сметы",      desc:"Расчёт и архив смет",    stat:estimates.length+" смет",      color:"#2563eb",bg:"#ffffff",border:"#e5e7eb"},
-              {id:"contracts", icon:"◻",title:"Договора",   desc:"Договора и соглашения",  stat:contracts.length+" договоров", color:"#2563eb",bg:"#ffffff",border:"#e5e7eb"},
+              {id:"objects",   icon:"▦",title:"Объекты",     desc:"Клиенты, сметы, договора", stat:objects.length+" объектов",   color:"#2563eb",bg:"#ffffff",border:"#e5e7eb"},
+              {id:"contracts", icon:"◻",title:"Прочие договора", desc:"Договора вне объектов",  stat:contracts.length+" договоров", color:"#2563eb",bg:"#ffffff",border:"#e5e7eb"},
               {id:"analytics", icon:"↗",title:"Аналитика",  desc:"Статистика и отчёты",    stat:"За "+new Date().toLocaleDateString("ru-RU",{month:"long"}), color:"#2563eb",bg:"#ffffff",border:"#e5e7eb"},
             ].map(card=>(
               <div key={card.id} onClick={()=>{ setScreen(card.id); }}
@@ -6126,6 +6184,36 @@ export default function App() {
         </div>
       )}
 
+      {/* Единый бэкап рабочего пространства */}
+      {wsBackupsModal!==null && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:320,padding:16}}
+          onClick={()=>setWsBackupsModal(null)}>
+          <div style={{background:"#fff",borderRadius:10,padding:"20px 22px",maxWidth:520,width:"100%",maxHeight:"80vh",overflowY:"auto"}}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={{fontWeight:800,fontSize:16,color:"#111827"}}>🕘 Бэкапы рабочего пространства</div>
+              <button onClick={()=>setWsBackupsModal(null)} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#9ca3af"}}>✕</button>
+            </div>
+            <div style={{fontSize:12,color:"#9ca3af",marginBottom:14}}>Каждый снимок — объекты вместе со сметами и договорами (последние 20). Восстановление вернёт всё целиком.</div>
+            {wsBackupsModal.length===0 && <div style={{textAlign:"center",padding:"30px 0",color:"#9ca3af",fontSize:13}}>Снимков пока нет — появятся автоматически после изменений</div>}
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {wsBackupsModal.map((snap,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"10px 12px",background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:8}}>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:600,color:"#111827"}}>{new Date(snap.ts).toLocaleString("ru-RU")}</div>
+                    <div style={{fontSize:11,color:"#9ca3af"}}>📦 {snap.counts?.o??(snap.objects?.length||0)} · 📋 {snap.counts?.e??(snap.estimates?.length||0)} · 📄 {snap.counts?.c??(snap.contracts?.length||0)}{snap.by?` · ${snap.by}`:""}{i===0?" · последний":""}</div>
+                  </div>
+                  <button onClick={()=>restoreWorkspace(snap)}
+                    style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(37,99,235,.2)",borderRadius:6,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                    Восстановить
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {importModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:320,padding:16}}
           onClick={()=>!importBusy && setImportModal(false)}>
@@ -6955,7 +7043,7 @@ export default function App() {
           <div className="contracts-header" style={{background:"#f3f4f6",borderBottom:"1px solid #e5e7eb",padding:"12px 24px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
             <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
             <div style={{width:28,height:28,borderRadius:6,background:"#2563eb",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#f3f4f6"}}>T</div>
-            <div style={{fontWeight:800,fontSize:14,color:"#111827"}}>Договоры</div>
+            <div style={{fontWeight:800,fontSize:14,color:"#111827"}}>Прочие договора</div>
             <div style={{flex:1}}/>
             {["list","clients","contragents"].includes(contractTab) && currentUser.role === "admin" && (
               <button onClick={()=>openListBackups(contractTab)}
@@ -6968,15 +7056,6 @@ export default function App() {
             )}
           </div>
 
-          {/* Табы */}
-          <div style={{display:"flex",gap:4,padding:"12px 20px 0",borderBottom:"1px solid #e5e7eb",background:"#f3f4f6"}}>
-            {[["list","📋 Список"]].map(([k,l])=>(
-              <button key={k} onClick={()=>setContractTab(k)}
-                style={{background:"none",border:"none",borderBottom:`2px solid ${contractTab===k?"#2563eb":"transparent"}`,color:contractTab===k?"#2563eb":"#9ca3af",cursor:"pointer",padding:"8px 14px",fontSize:13,fontWeight:600,fontFamily:"inherit",transition:"all .15s"}}>
-                {l}
-              </button>
-            ))}
-          </div>
           </>)}
 
           <div className="contracts-pad" style={{padding:"20px 24px"}}>
@@ -7015,7 +7094,9 @@ export default function App() {
                   const childMap = {}; // parentId -> [child]
                   contracts.forEach(c=>{ if(isChildType(c) && c.mainNumber && numMap[c.mainNumber]){ const pid=numMap[c.mainNumber].id; (childMap[pid]||(childMap[pid]=[])).push(c); } });
                   const childIds = new Set(Object.values(childMap).flat().map(c=>c.id));
-                  const roots = contracts.filter(c=>!childIds.has(c.id) && !c.objectId && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus));
+                  const _objIds = new Set(objects.map(o=>o.id));
+                  // показываем договоры без объекта ИЛИ привязанные к несуществующему объекту (сироты)
+                  const roots = contracts.filter(c=>!childIds.has(c.id) && (!c.objectId || !_objIds.has(c.objectId)) && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus));
 
                   const renderContractCard = (c, isChild=false) => {
                     const client = contractClients.find(x=>x.id===c.clientId);
@@ -7147,9 +7228,7 @@ export default function App() {
           contragents={contragents}
           saveContragents={saveContragents}
           contragentsRef={contragentsRef}
-          onBackupEstimates={openBackups}
-          onBackupContracts={()=>openListBackups("contracts")}
-          onBackupObjects={()=>openListBackups("objects")}
+          onBackupWorkspace={openWorkspaceBackups}
         />
       )}
 
