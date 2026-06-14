@@ -3351,6 +3351,10 @@ export default function App() {
     const baseObjs = objects
       .filter(o => inRange(o.updatedAt||o.createdAt||0))
       .filter(o => !statsManager || (o.manager||"")===statsManager);
+    // сметы в периоде (для финансового блока «согласованные сметы», как было раньше)
+    const baseEstimates = estimates
+      .filter(e => inRange(e.updatedAt||e.createdAt||0))
+      .filter(e => !statsManager || (e.proj?.manager||"")===statsManager);
     const baseCon = contracts
       .filter(c => inRange(new Date(c.date||0).getTime()))
       .filter(c => (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0)
@@ -3367,15 +3371,15 @@ export default function App() {
     const byStatus = {}; for(const s of DEAL_STATUSES) byStatus[s.key]=baseObjs.filter(o=>(o.status||"new")===s.key).length;
     const byType = {}; for(const o of baseObjs){ const t=objType(o); byType[t]=(byType[t]||0)+1; }
 
-    // ── A. Финансовый обзор ──
-    // Заработано = сданные объекты (статус "done"). Потенциал = все объекты с суммой.
-    const wonObjs     = baseObjs.filter(o=>o.status==="done");
-    const wonRevenue  = wonObjs.reduce((s,o)=>s+objVal(o),0);
-    const wonCost     = wonObjs.reduce((s,o)=>s+objCost(o),0);
+    // ── A. Финансовый обзор (по согласованным сметам — как было раньше) ──
+    const agreedEst   = baseEstimates.filter(e=>e.status==="agreed"&&(e.total||0)>0);
+    const wonRevenue  = agreedEst.reduce((s,e)=>s+(e.total||0),0);
+    const wonCost     = agreedEst.reduce((s,e)=>s+estCost(e),0);
     const wonProfit   = wonRevenue - wonCost;
     const wonMargin   = wonRevenue>0 ? Math.round(wonProfit/wonRevenue*100) : 0;
-    const allRevenue  = totalSumEst;
-    const allCost     = withSumEst.reduce((s,o)=>s+objCost(o),0);
+    const withSumEstimates = baseEstimates.filter(e=>(e.total||0)>0);
+    const allRevenue  = withSumEstimates.reduce((s,e)=>s+(e.total||0),0);
+    const allCost     = withSumEstimates.reduce((s,e)=>s+estCost(e),0);
     const allProfit   = allRevenue - allCost;
     const allMargin   = allRevenue>0 ? Math.round(allProfit/allRevenue*100) : 0;
 
@@ -5105,11 +5109,16 @@ export default function App() {
       {effScreen === "dashboard" && (()=>{
         const thisMonth = new Date().getMonth();
         const thisYear = new Date().getFullYear();
-        const estimatesThisMonth = estimates.filter(e=>{ const d=new Date(e.updatedAt||e.createdAt||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
-        const contractsThisMonth = contracts.filter(c=>{ const d=new Date(c.date||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
-        const clientsThisMonth = contractClients.filter(c=>{ const d=new Date(c.createdAt||0); return c.createdAt && d.getMonth()===thisMonth&&d.getFullYear()===thisYear; });
+        const _inMonth = ts => { const d=new Date(ts||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; };
+        const estimatesThisMonth = estimates.filter(e=>_inMonth(e.updatedAt||e.createdAt||0));
+        const contractsThisMonth = contracts.filter(c=>_inMonth(c.date||0));
+        const clientsThisMonth = contractClients.filter(c=>c.createdAt && _inMonth(c.createdAt));
         const newClientsCount = clientsThisMonth.length;
-        const totalSumMonth = estimatesThisMonth.filter(e=>(e.total||0)>0).reduce((s,e)=> s + (e.total||0), 0);
+        // объекты и их суммы (сумма объекта = все его сметы)
+        const _estByObjId = {}; for(const e of estimates){ if(e.objectId){ (_estByObjId[e.objectId]||(_estByObjId[e.objectId]=[])).push(e); } }
+        const _objVal = o => (_estByObjId[o.id]||[]).reduce((s,e)=>s+(e.total||0),0);
+        const objectsThisMonth = objects.filter(o=>_inMonth(o.updatedAt||o.createdAt||0));
+        const totalSumMonth = objectsThisMonth.reduce((s,o)=>s+_objVal(o), 0);
         const recentContracts = [...contracts].filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,5);
         const recentEstimates = [...estimates].filter(e=>(e.total||0)>0).sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0)).slice(0,5);
         // Финансы за месяц (по согласованным сметам)
@@ -5141,9 +5150,9 @@ export default function App() {
           {/* Статы */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:32}}>
             {[
-              {label:"Смет за месяц",    value:estimatesThisMonth.filter(e=>(e.total||0)>0).length,  sub:"из "+estimates.filter(e=>(e.total||0)>0).length+" с суммой всего", color:"#2563eb"},
+              {label:"Объектов за месяц", value:objectsThisMonth.length,  sub:"из "+objects.length+" всего", color:"#2563eb"},
               {label:"Договоров за месяц",value:contractsThisMonth.filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).length, sub:"из "+contracts.filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).length+" с суммой всего", color:"#2563eb"},
-              {label:"Объём за месяц",   value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма смет за месяц",                          color:"#059669"},
+              {label:"Объём за месяц",   value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма объектов за месяц",                          color:"#059669"},
               {label:"Прибыль за месяц", value:fmt(Math.round(profitMonth))+" ₸", sub:"по согласованным сметам", color:"#059669"},
               {label:"Маржа за месяц",   value:marginMonth+"%", sub:"согласованные сметы", color:marginMonth>=35?"#059669":marginMonth>=20?"#d97706":"#ef4444"},
               {label:"Клиентов за месяц",value:clientsThisMonth.length,    sub:"из "+contractClients.length+" всего", color:"#2563eb"},
@@ -6358,7 +6367,7 @@ export default function App() {
             {/* ── A. Финансовый обзор ── */}
             <div style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 2px rgba(0,0,0,.04)"}}>
               <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
-                <span style={{fontSize:11,color:"#059669",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>💰 Финансы — сданные объекты (заработано)</span>
+                <span style={{fontSize:11,color:"#059669",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>💰 Финансы — согласованные сметы (заработано)</span>
                 <span style={{fontSize:11,color:"#9ca3af"}}>в выбранном периоде</span>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
@@ -6375,7 +6384,7 @@ export default function App() {
                 ))}
               </div>
               <div style={{marginTop:12,paddingTop:12,borderTop:"1px dashed #e5e7eb",display:"flex",gap:18,flexWrap:"wrap",fontSize:12,color:"#6b7280"}}>
-                <span>Потенциал (все объекты с суммой): <b style={{color:"#374151"}}>{fmt(Math.round(allRevenue))} ₸</b> выручка · прибыль <b style={{color:"#059669"}}>{fmt(Math.round(allProfit))} ₸</b> · маржа <b style={{color:"#374151"}}>{allMargin}%</b></span>
+                <span>Потенциал (все сметы с суммой): <b style={{color:"#374151"}}>{fmt(Math.round(allRevenue))} ₸</b> выручка · прибыль <b style={{color:"#059669"}}>{fmt(Math.round(allProfit))} ₸</b> · маржа <b style={{color:"#374151"}}>{allMargin}%</b></span>
               </div>
             </div>
 
@@ -6733,8 +6742,8 @@ export default function App() {
                 const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"new"))||DEAL_STATUSES[0];
                 const objEsts = estimates.filter(e=>e.objectId===obj.id);
                 const objCons = contracts.filter(c=>c.objectId===obj.id);
-                const bestEst = [...objEsts].sort((a,b)=>(b.total||0)-(a.total||0))[0];
-                const total = bestEst?.total||0;
+                // сумма объекта = все сметы (основная + доп. сметы)
+                const total = objEsts.reduce((s,e)=>s+(e.total||0),0);
                 return (
                   <div key={obj.id} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"14px 18px",cursor:"pointer",transition:"all .15s"}}
                     onClick={()=>{ setCurrentObject({...obj}); setObjectTab("workspace"); }}>
