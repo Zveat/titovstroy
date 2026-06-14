@@ -3325,22 +3325,6 @@ export default function App() {
       fromTs = ms===Infinity ? 0 : now - ms;
     }
     const inRange = ts => (ts||0) >= fromTs && (ts||0) <= toTs;
-    const baseEst = estimates
-      .filter(e => inRange(e.updatedAt||e.createdAt||0))
-      .filter(e => !statsManager || (e.proj?.manager||"")=== statsManager);
-    const baseCon = contracts
-      .filter(c => inRange(new Date(c.date||0).getTime()))
-      .filter(c => (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0)
-      .filter(c => !statsManager || (c.manager||"")=== statsManager);
-    const totalEst = baseEst.length;
-    const withSumEst = baseEst.filter(e=>e.total>0);
-    const totalSumEst = withSumEst.reduce((s,e)=>s+e.total,0);
-    const avgEst = withSumEst.length ? Math.round(totalSumEst/withSumEst.length) : 0;
-    const totalCon = baseCon.length;
-    const totalSumCon = baseCon.reduce((s,c)=>s+(c.works||[]).reduce((ss,w)=>ss+(w.quantity*w.price||0),0),0);
-    const avgCon = totalCon ? Math.round(totalSumCon/totalCon) : 0;
-    const byStatus = {}; for(const s of STATUSES) byStatus[s.key]=baseEst.filter(e=>(e.status||"new")===s.key).length;
-    const byType = {}; for(const e of baseEst){ const t=e.proj?.type||"--"; byType[t]=(byType[t]||0)+1; }
     const catalogForStats = getEffectiveCatalog();
     // Карта работ по имени и коду (строки смет ключуются по name, старые иногда по code)
     const workLookup = new Map();
@@ -3356,33 +3340,64 @@ export default function App() {
       return cost;
     };
 
+    // ── ОБЪЕКТ-ЦЕНТРИЧНАЯ МОДЕЛЬ ──
+    // Единица учёта — ОБЪЕКТ (сделка). Стоимость объекта = сумма всех его смет (основная + доп. сметы).
+    const estByObj = {}; // objectId -> [сметы]
+    for(const e of estimates){ if(e.objectId){ (estByObj[e.objectId]||(estByObj[e.objectId]=[])).push(e); } }
+    const objVal  = (o) => (estByObj[o.id]||[]).reduce((s,e)=>s+(e.total||0),0);
+    const objCost = (o) => (estByObj[o.id]||[]).reduce((s,e)=>s+estCost(e),0);
+    const objType = (o) => o.objType || "—";
+
+    const baseObjs = objects
+      .filter(o => inRange(o.updatedAt||o.createdAt||0))
+      .filter(o => !statsManager || (o.manager||"")===statsManager);
+    const baseCon = contracts
+      .filter(c => inRange(new Date(c.date||0).getTime()))
+      .filter(c => (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0)
+      .filter(c => !statsManager || (c.manager||"")=== statsManager);
+
+    // Сводка по объектам (заменяет старые «сметы»)
+    const totalEst = baseObjs.length;
+    const withSumEst = baseObjs.filter(o=>objVal(o)>0);
+    const totalSumEst = withSumEst.reduce((s,o)=>s+objVal(o),0);
+    const avgEst = withSumEst.length ? Math.round(totalSumEst/withSumEst.length) : 0;
+    const totalCon = baseCon.length;
+    const totalSumCon = baseCon.reduce((s,c)=>s+(c.works||[]).reduce((ss,w)=>ss+(w.quantity*w.price||0),0),0);
+    const avgCon = totalCon ? Math.round(totalSumCon/totalCon) : 0;
+    const byStatus = {}; for(const s of DEAL_STATUSES) byStatus[s.key]=baseObjs.filter(o=>(o.status||"new")===s.key).length;
+    const byType = {}; for(const o of baseObjs){ const t=objType(o); byType[t]=(byType[t]||0)+1; }
+
     // ── A. Финансовый обзор ──
-    // По согласованным (заработано) и по всем с суммой (потенциал)
-    const agreedEst   = withSumEst.filter(e=>e.status==="agreed");
-    const wonRevenue  = agreedEst.reduce((s,e)=>s+(e.total||0),0);
-    const wonCost     = agreedEst.reduce((s,e)=>s+estCost(e),0);
+    // Заработано = сданные объекты (статус "done"). Потенциал = все объекты с суммой.
+    const wonObjs     = baseObjs.filter(o=>o.status==="done");
+    const wonRevenue  = wonObjs.reduce((s,o)=>s+objVal(o),0);
+    const wonCost     = wonObjs.reduce((s,o)=>s+objCost(o),0);
     const wonProfit   = wonRevenue - wonCost;
     const wonMargin   = wonRevenue>0 ? Math.round(wonProfit/wonRevenue*100) : 0;
     const allRevenue  = totalSumEst;
-    const allCost     = withSumEst.reduce((s,e)=>s+estCost(e),0);
+    const allCost     = withSumEst.reduce((s,o)=>s+objCost(o),0);
     const allProfit   = allRevenue - allCost;
     const allMargin   = allRevenue>0 ? Math.round(allProfit/allRevenue*100) : 0;
 
-    // ── B. Воронка с деньгами и прибылью + конверсия ──
-    const funnel = STATUSES.map(s=>{
-      const list = baseEst.filter(e=>(e.status||"new")===s.key);
-      const sum  = list.reduce((a,e)=>a+(e.total||0),0);
-      const cost = list.reduce((a,e)=>a+estCost(e),0);
+    // ── B. Воронка по статусам объектов (деньги + прибыль) ──
+    const funnel = DEAL_STATUSES.map(s=>{
+      const list = baseObjs.filter(o=>(o.status||"new")===s.key);
+      const sum  = list.reduce((a,o)=>a+objVal(o),0);
+      const cost = list.reduce((a,o)=>a+objCost(o),0);
       return { key:s.key, label:s.label, color:s.color, bg:s.bg, count:list.length, sum, profit:sum-cost };
     });
-    const sentB   = funnel.find(f=>f.key==="sent")   || {count:0,sum:0,profit:0};
-    const agreedB = funnel.find(f=>f.key==="agreed") || {count:0,sum:0,profit:0};
-    const winRateOverall = totalEst>0 ? Math.round(agreedB.count/totalEst*100) : 0;
-    const winRateSent    = (sentB.count+agreedB.count)>0 ? Math.round(agreedB.count/(sentB.count+agreedB.count)*100) : 0;
+    const inworkB = funnel.find(f=>f.key==="inwork") || {count:0,sum:0,profit:0};
+    const doneB   = funnel.find(f=>f.key==="done")   || {count:0,sum:0,profit:0};
+    const rejB    = funnel.find(f=>f.key==="rejected")|| {count:0,sum:0,profit:0};
+    const sentB = inworkB, agreedB = doneB; // совместимость с разметкой
+    const winRateOverall = totalEst>0 ? Math.round(doneB.count/totalEst*100) : 0;
+    const winRateSent    = (doneB.count+rejB.count)>0 ? Math.round(doneB.count/(doneB.count+rejB.count)*100) : 0;
 
-    // ── D. Рентабельность по категориям (по цене позиций, до скидки) ──
+    // ── D. Рентабельность по категориям (по сметам объектов в периоде) ──
+    const objIdSet = new Set(baseObjs.map(o=>o.id));
+    const estForCats = estimates.filter(e=>e.objectId && objIdSet.has(e.objectId));
     const catFin = {};
-    for(const e of baseEst){
+    for(const e of estForCats){
       for(const [key,r] of Object.entries(e.rows||{})){
         const qty=Number(r?.qty||0); if(!qty) continue;
         const w=workLookup.get(key); if(!w) continue;
@@ -3399,29 +3414,29 @@ export default function App() {
       .sort((a,b)=>b.profit-a.profit).slice(0,8);
     const topCats = catProfit.slice(0,5).map(c=>[c.cat, c.revenue]); // совместимость
 
-    // ── C. Менеджеры: оборот, прибыль, маржа, конверсия ──
+    // ── C. Менеджеры: объекты, оборот, прибыль, маржа, % сдачи ──
     const validManagerNames = new Set(nonViewerUsers.map(u=>u.name));
-    const managers = [...new Set(estimates.map(e=>e.proj?.manager||"").filter(m=>m&&validManagerNames.has(m)))];
+    const managers = [...new Set(objects.map(o=>o.manager||"").filter(m=>m&&validManagerNames.has(m)))];
     const managerStats = managers.map(m=>{
-      const mes = baseEst.filter(e=>(e.proj?.manager||"")===m);
-      const withSum = mes.filter(e=>e.total>0);
-      const sum = withSum.reduce((s,e)=>s+e.total,0);
-      const cost = withSum.reduce((s,e)=>s+estCost(e),0);
+      const mos = baseObjs.filter(o=>(o.manager||"")===m);
+      const withSum = mos.filter(o=>objVal(o)>0);
+      const sum = withSum.reduce((s,o)=>s+objVal(o),0);
+      const cost = withSum.reduce((s,o)=>s+objCost(o),0);
       const profit = sum-cost;
-      const sent = mes.filter(e=>e.status==="sent").length;
-      const agreed = mes.filter(e=>e.status==="agreed").length;
-      const conv = (sent+agreed)>0 ? Math.round(agreed/(sent+agreed)*100) : 0;
-      return {name:m, count:mes.length, sum, profit, margin: sum>0?Math.round(profit/sum*100):0, sent, agreed, conv};
+      const inwork = mos.filter(o=>o.status==="inwork").length;
+      const done = mos.filter(o=>o.status==="done").length;
+      const conv = (done+mos.filter(o=>o.status==="rejected").length)>0 ? Math.round(done/(done+mos.filter(o=>o.status==="rejected").length)*100) : 0;
+      return {name:m, count:mos.length, sum, profit, margin: sum>0?Math.round(profit/sum*100):0, sent:inwork, agreed:done, conv};
     }).sort((a,b)=>b.profit-a.profit);
 
-    // ── E. Динамика по месяцам ──
+    // ── E. Динамика по месяцам (по объектам и их сумме) ──
     const monthMap = {};
-    for(const e of withSumEst){
-      const d = new Date(e.updatedAt||e.createdAt||0);
+    for(const o of withSumEst){
+      const d = new Date(o.updatedAt||o.createdAt||0);
       const key = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
       if(!monthMap[key]) monthMap[key]={key, revenue:0, cost:0};
-      monthMap[key].revenue += e.total||0;
-      monthMap[key].cost += estCost(e);
+      monthMap[key].revenue += objVal(o);
+      monthMap[key].cost += objCost(o);
     }
     const MONTH_RU = ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"];
     const monthly = Object.values(monthMap).sort((a,b)=>a.key.localeCompare(b.key)).slice(-12).map(m=>{
@@ -3429,21 +3444,21 @@ export default function App() {
       return {...m, label: MONTH_RU[Number(mo)-1]+" "+y.slice(2), profit:m.revenue-m.cost};
     });
 
-    // ── F. «Зависшие» отправленные сметы ──
-    const STALE_DAYS = 5;
+    // ── F. «Зависшие» объекты в работе (без движения 14+ дней) ──
+    const STALE_DAYS = 14;
     const nowMs = Date.now();
-    const staleSent = estimates
-      .filter(e=>e.status==="sent")
-      .map(e=>{ const base = e.sentAt? new Date(e.sentAt).getTime() : (e.updatedAt||0); return {e, days: Math.floor((nowMs-base)/864e5)}; })
+    const staleSent = objects
+      .filter(o=>o.status==="inwork")
+      .map(o=>({e:{id:o.id, proj:{name:o.clientName||o.address||"Объект", phone:o.clientPhone}, total:objVal(o), _obj:o}, days: Math.floor((nowMs-(o.updatedAt||0))/864e5)}))
       .filter(x=>x.days>=STALE_DAYS)
       .sort((a,b)=>b.days-a.days)
       .slice(0,10);
     const TYPE_L2 = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронирование"};
     const byConType = {}; for(const c of baseCon){ const t=TYPE_L2[c.type||"repair_fiz"]||"--"; byConType[t]=(byConType[t]||0)+1; }
-    return { baseEst, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType, TYPE_L2,
+    return { baseEst: baseObjs, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType, TYPE_L2,
       wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin,
       funnel, winRateOverall, winRateSent, agreedB, sentB, catProfit, monthly, staleSent };
-  }, [estimates, contracts, statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers, catalogVersion]);
+  }, [estimates, contracts, objects, statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers, catalogVersion]);
 
   // Защита от краша: если activeCat не в Gdyn — берём первый
   const safeCat = Gdyn[activeCat] ? activeCat : (Object.keys(Gdyn)[0]||"");
@@ -6300,7 +6315,7 @@ export default function App() {
           <div className="page">
             <div style={{marginBottom:24}}>
               <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#111827"}}>📊 Аналитика</h1>
-              <div style={{fontSize:12,color:"#9ca3af",marginTop:4}}>Статистика по сметам и договорам</div>
+              <div style={{fontSize:12,color:"#9ca3af",marginTop:4}}>Статистика по объектам и договорам</div>
             </div>
             <div className="an-filters" style={{background:"#f3f4f6",border:"1px solid #e5e7eb",borderRadius:6,padding:"16px 18px",marginBottom:20,display:"flex",flexWrap:"wrap",gap:16}}>
               <div style={{flex:"1 1 300px"}}>
@@ -6330,7 +6345,7 @@ export default function App() {
               </div>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:20}}>
-              {[["Смет",totalEst,"в периоде","#2563eb"],["Объём смет",fmt(totalSumEst)+" ₸","сумма","#2563eb"],["Ср. чек",fmt(avgEst)+" ₸","по сметам","#059669"],["Договоров",totalCon,"в периоде","#2563eb"],["Объём дог.",fmt(totalSumCon)+" ₸","сумма","#2563eb"],["Ср. дог.",fmt(avgCon)+" ₸","по договорам","#059669"]].map(([l,v,s,c],i)=>(
+              {[["Объектов",totalEst,"в периоде","#2563eb"],["Объём",fmt(totalSumEst)+" ₸","сумма смет","#2563eb"],["Ср. чек",fmt(avgEst)+" ₸","на объект","#059669"],["Договоров",totalCon,"в периоде","#2563eb"],["Объём дог.",fmt(totalSumCon)+" ₸","сумма","#2563eb"],["Ср. дог.",fmt(avgCon)+" ₸","по договорам","#059669"]].map(([l,v,s,c],i)=>(
                 <div key={i} style={{background:"#f3f4f6",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px 14px 12px",position:"relative",overflow:"hidden"}}>
                   <div style={{position:"absolute",top:0,left:0,width:3,height:"100%",background:c,borderRadius:"3px 0 0 3px"}}/>
                   <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase",letterSpacing:.8,marginBottom:6}}>{l}</div>
@@ -6343,7 +6358,7 @@ export default function App() {
             {/* ── A. Финансовый обзор ── */}
             <div style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 2px rgba(0,0,0,.04)"}}>
               <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
-                <span style={{fontSize:11,color:"#059669",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>💰 Финансы — согласованные сметы (заработано)</span>
+                <span style={{fontSize:11,color:"#059669",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>💰 Финансы — сданные объекты (заработано)</span>
                 <span style={{fontSize:11,color:"#9ca3af"}}>в выбранном периоде</span>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
@@ -6360,15 +6375,15 @@ export default function App() {
                 ))}
               </div>
               <div style={{marginTop:12,paddingTop:12,borderTop:"1px dashed #e5e7eb",display:"flex",gap:18,flexWrap:"wrap",fontSize:12,color:"#6b7280"}}>
-                <span>Потенциал (все сметы с суммой): <b style={{color:"#374151"}}>{fmt(Math.round(allRevenue))} ₸</b> выручка · прибыль <b style={{color:"#059669"}}>{fmt(Math.round(allProfit))} ₸</b> · маржа <b style={{color:"#374151"}}>{allMargin}%</b></span>
+                <span>Потенциал (все объекты с суммой): <b style={{color:"#374151"}}>{fmt(Math.round(allRevenue))} ₸</b> выручка · прибыль <b style={{color:"#059669"}}>{fmt(Math.round(allProfit))} ₸</b> · маржа <b style={{color:"#374151"}}>{allMargin}%</b></span>
               </div>
             </div>
 
             {/* ── B. Воронка с деньгами и конверсией ── */}
             <div style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 2px rgba(0,0,0,.04)"}}>
               <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
-                <span style={{fontSize:11,color:"#7c3aed",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>🪜 Воронка продаж (деньги)</span>
-                <span style={{fontSize:12,color:"#6b7280"}}>Win-rate: <b style={{color:"#059669"}}>{winRateOverall}%</b> от всех · <b style={{color:"#7c3aed"}}>{winRateSent}%</b> от отправленных</span>
+                <span style={{fontSize:11,color:"#7c3aed",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>🪜 Объекты по статусам (деньги)</span>
+                <span style={{fontSize:12,color:"#6b7280"}}>Сдано: <b style={{color:"#059669"}}>{winRateOverall}%</b> от всех · <b style={{color:"#7c3aed"}}>{winRateSent}%</b> без учёта отменённых</span>
               </div>
               {(() => {
                 const maxSum = Math.max(1, ...funnel.map(f=>f.sum));
@@ -6417,14 +6432,14 @@ export default function App() {
               </div>
             )}
 
-            {/* ── F. «Зависшие» отправленные сметы ── */}
+            {/* ── F. «Зависшие» объекты в работе ── */}
             {staleSent.length>0 && (
               <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:"18px 20px",marginBottom:16}}>
-                <div style={{fontSize:11,color:"#b45309",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>⏰ Зависли у клиента (без движения 5+ дней)</div>
+                <div style={{fontSize:11,color:"#b45309",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>⏰ Объекты в работе без движения 14+ дней</div>
                 <div style={{display:"flex",flexDirection:"column",gap:5}}>
                   {staleSent.map(({e,days})=>(
-                    <div key={e.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"rgba(255,255,255,.6)",borderRadius:8,cursor:currentUser.role!=="viewer"?"pointer":"default"}} onClick={()=>{ if(currentUser.role!=="viewer") openEstimate(e); }}>
-                      <span style={{fontSize:13,color:"#111827",flex:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.proj?.name||"Без названия"}{e.proj?.phone?` · 📞 ${e.proj.phone}`:""}</span>
+                    <div key={e.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"rgba(255,255,255,.6)",borderRadius:8,cursor:currentUser.role!=="viewer"?"pointer":"default"}} onClick={()=>{ if(currentUser.role!=="viewer"&&e._obj){ setCurrentObject({...e._obj}); setObjectTab("workspace"); setScreen("objects"); } }}>
+                      <span style={{fontSize:13,color:"#111827",flex:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.proj?.name||"Объект"}{e.proj?.phone?` · 📞 ${e.proj.phone}`:""}</span>
                       {e.total>0&&<span style={{fontSize:12,fontWeight:700,color:"#2563eb"}}>{fmt(e.total)} ₸</span>}
                       <span style={{fontSize:11,fontWeight:700,color:"#dc2626",whiteSpace:"nowrap"}}>{days} дн.</span>
                     </div>
@@ -6435,10 +6450,10 @@ export default function App() {
 
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(380px,1fr))",gap:16,marginBottom:16}}>
               <div style={{background:"#f3f4f6",border:"1px solid #e5e7eb",borderRadius:6,padding:"18px"}}>
-                <div style={{fontSize:11,color:"#d97706",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>Сметы</div>
+                <div style={{fontSize:11,color:"#d97706",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>Объекты</div>
                 <div style={{fontSize:10,color:"#9ca3af",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По статусам</div>
                 <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:14}}>
-                  {STATUSES.map(s=>(
+                  {DEAL_STATUSES.map(s=>(
                     <div key={s.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(0,0,0,.02)",borderRadius:6}}>
                       <span style={{fontSize:12,color:s.color,fontWeight:600}}>{s.label}</span>
                       <div style={{display:"flex",alignItems:"center",gap:10}}>
