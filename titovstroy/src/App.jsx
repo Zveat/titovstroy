@@ -247,6 +247,12 @@ function groupData(works) {
 
 // ─── УТИЛИТЫ ────────────────────────────────────────────────────────────────
 const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+// Себестоимость за единицу с учётом разового ручного переопределения в строке сметы
+const rowCostPerUnit = (r, w) => (r && r.manualCost !== undefined && r.manualCost !== "" && !isNaN(Number(r.manualCost))) ? Number(r.manualCost) : (Number(w?.cost) || 0);
+// Дубликаты позиций в смете: ключ строки = "<имя работы>␟<id>". Базовое имя для резолва каталога.
+const DUP_SEP = "␟";
+const baseNameOf = (key) => typeof key === "string" && key.includes(DUP_SEP) ? key.split(DUP_SEP)[0] : key;
+const isDupKey = (key) => typeof key === "string" && key.includes(DUP_SEP);
 const fmtDate = (ts) => {
   const d = new Date(ts);
   const today = new Date();
@@ -3247,6 +3253,21 @@ export default function App() {
   // ── Вычисления текущей сметы ──
   const setRow = useCallback((name, field, val) =>
     setRows(p => ({ ...p, [name]: { ...p[name], [field]: val } })), []);
+  // Дублировать позицию: создаёт строку-копию с синтетическим ключом (живёт только в этой смете)
+  const duplicateRow = useCallback((baseName, baseWork) => {
+    const key = baseNameOf(baseName) + DUP_SEP + genId();
+    setRows(p => {
+      const src = p[baseName] || p[baseNameOf(baseName)] || {};
+      const copy = { ...src };
+      delete copy.editingName; delete copy.editingUnit;
+      if (!Number(copy.qty)) copy.qty = "";
+      if (copy.manualName === undefined) copy.manualName = (baseWork?.name || baseNameOf(baseName)) + " (копия)";
+      return { ...p, [key]: copy };
+    });
+    setShowSelectedOnly(true);
+  }, []);
+  const deleteRowKey = useCallback((key) =>
+    setRows(p => { const n = { ...p }; delete n[key]; return n; }), []);
 
   const rowPrice = (work) => {
     const r = rows[work.name] || {};
@@ -3293,6 +3314,22 @@ export default function App() {
       catMap[cat] = catTotal;
       grandTotal += catTotal;
     }
+    // Дубликаты позиций — добавляем в суммы каталога/раздела/итог
+    const _byName = new Map(); for(const ww of getEffectiveCatalog()){ if(ww?.name) _byName.set(ww.name, ww); }
+    for (const [key, r] of Object.entries(rows)) {
+      if (!isDupKey(key)) continue;
+      const qty = Number(r?.qty||0); if (!qty) continue;
+      const w = _byName.get(baseNameOf(key)); if (!w) continue;
+      const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
+      const mp = Number(r.manualPrice);
+      const price = (r.manualPrice !== undefined && r.manualPrice !== "" && !isNaN(mp)) ? mp : getPrice(w, qty, r.complexity || "std", cpxPct);
+      if (price) {
+        const k2 = (w.cat||"")+"||"+(w.sub||"");
+        subMap[k2] = (subMap[k2]||0) + qty*price;
+        catMap[w.cat||""] = (catMap[w.cat||""]||0) + qty*price;
+        grandTotal += qty*price;
+      }
+    }
     return { subMap, catMap, grand: grandTotal };
   }, [rows, catalogVersion]);
   const subSum = (cat, sub) => allSumMap.subMap[cat+"||"+sub] || 0;
@@ -3320,8 +3357,21 @@ export default function App() {
         if (pf) fromOut.push({ ...w, name: displayName, unit: displayUnit, qty, priceFrom: pf });
       }
     }
+    // Дубликаты позиций (синтетические ключи) — добавляем как отдельные строки
+    const _byName = new Map(); for(const ww of getEffectiveCatalog()){ if(ww?.name) _byName.set(ww.name, ww); }
+    for (const [key, r] of Object.entries(rows)) {
+      if (!isDupKey(key)) continue;
+      const qty = Number(r?.qty||0); if (qty <= 0) continue;
+      const w = _byName.get(baseNameOf(key)); if (!w) continue;
+      const displayName = r.manualName !== undefined ? r.manualName : (w.name+" (копия)");
+      const displayUnit = r.manualUnit !== undefined ? r.manualUnit : w.unit;
+      const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
+      const mp = Number(r.manualPrice);
+      const price = (r.manualPrice!==undefined && r.manualPrice!=="" && !isNaN(mp)) ? mp : getPrice(w, qty, r.complexity||"std", cpxPct);
+      if (price) out.push({ ...w, name: displayName, unit: displayUnit, qty, price: price*mm, total: qty*price*mm });
+    }
     return { items: out, fromItems: fromOut };
-  }, [rows, markup]);
+  }, [rows, markup, catalogVersion]);
   const kpItems = kpData.items;
   const kpFromItems = kpData.fromItems;
   const filledCount = useMemo(() => Object.values(rows).filter(r => Number(r?.qty) > 0).length, [rows]);
@@ -3357,8 +3407,8 @@ export default function App() {
       let cost = 0;
       for(const [key,r] of Object.entries(e.rows||{})){
         const qty = Number(r?.qty||0); if(!qty) continue;
-        const w = workLookup.get(key);
-        if(w) cost += (Number(w.cost)||0)*qty;
+        const w = workLookup.get(key) || workLookup.get(baseNameOf(key));
+        if(w) cost += rowCostPerUnit(r,w)*qty;
       }
       return cost;
     };
@@ -3425,13 +3475,13 @@ export default function App() {
     for(const e of estForCats){
       for(const [key,r] of Object.entries(e.rows||{})){
         const qty=Number(r?.qty||0); if(!qty) continue;
-        const w=workLookup.get(key); if(!w) continue;
+        const w=workLookup.get(key) || workLookup.get(baseNameOf(key)); if(!w) continue;
         const mp = Number(r.manualPrice);
         const price = (r.manualPrice!==undefined&&r.manualPrice!==""&&!isNaN(mp)) ? mp : getPrice(w, qty, r.complexity||"std", r.cpxPct!==undefined?Number(r.cpxPct):undefined);
         const c = w.cat||"—";
         if(!catFin[c]) catFin[c]={cat:c, revenue:0, cost:0};
         if(price) catFin[c].revenue += price*qty;
-        catFin[c].cost += (Number(w.cost)||0)*qty;
+        catFin[c].cost += rowCostPerUnit(r,w)*qty;
       }
     }
     const catProfit = Object.values(catFin)
@@ -4216,7 +4266,7 @@ export default function App() {
     const catalog = getEffectiveCatalog();
     const mm = 1 + (est.markup||0)/100;
     return Object.entries(est.rows||{}).filter(([,r])=>Number(r?.qty)>0).map(([key,r])=>{
-      const w = catalog.find(x=>x.name===key)||catalog.find(x=>x.code===key);
+      const w = catalog.find(x=>x.name===key)||catalog.find(x=>x.code===key)||catalog.find(x=>x.name===baseNameOf(key));
       if(!w) return null;
       const qty = Number(r.qty||0);
       const cpxPct = r.cpxPct!==undefined ? Number(r.cpxPct) : undefined;
@@ -4876,16 +4926,17 @@ export default function App() {
       if (!Number(r?.qty) > 0 && Number(r?.qty) !== 0) continue;
       const qty = Number(r.qty || 0);
       if (qty <= 0) continue;
-      const w = catalog.find(x => x.name === key) || catalog.find(x => x.code === key);
+      const w = catalog.find(x => x.name === key) || catalog.find(x => x.code === key) || catalog.find(x => x.name === baseNameOf(key));
       if (!w) continue;
-      const price = getPrice(w, qty, r.complexity || "std");
+      const mp0 = Number(r.manualPrice);
+      const price = (r.manualPrice!==undefined && r.manualPrice!=="" && !isNaN(mp0)) ? mp0*qty : getPrice(w, qty, r.complexity || "std", r.cpxPct!==undefined?Number(r.cpxPct):undefined);
       works.push({
         code: w.code || null,
-        name: w.name,
+        name: r.manualName!==undefined ? r.manualName : w.name,
         category: w.cat,
         subcategory: w.sub,
         quantity: qty,
-        unit: w.unit || "м²",
+        unit: r.manualUnit!==undefined ? r.manualUnit : (w.unit || "м²"),
         pricePerUnit: price ? Math.round(price / qty) : 0,
         total: price ? Math.round(price) : 0,
       });
@@ -5175,7 +5226,7 @@ export default function App() {
         // объекты и их суммы
         const _estByObjId = {}; for(const e of estimates){ if(e.objectId){ (_estByObjId[e.objectId]||(_estByObjId[e.objectId]=[])).push(e); } }
         const _objVal = o => (_estByObjId[o.id]||[]).reduce((s,e)=>s+(e.total||0),0);
-        const _objCost = o => { const cat = getEffectiveCatalog(); const lk = new Map(); for(const w of cat){ if(w?.name)lk.set(w.name,w); if(w?.code)lk.set(w.code,w); } let c=0; for(const e of (_estByObjId[o.id]||[])){ for(const [k,r] of Object.entries(e.rows||{})){ const q=Number(r?.qty||0); if(!q) continue; const w=lk.get(k); if(w)c+=(Number(w.cost)||0)*q; } } return c; };
+        const _objCost = o => { const cat = getEffectiveCatalog(); const lk = new Map(); for(const w of cat){ if(w?.name)lk.set(w.name,w); if(w?.code)lk.set(w.code,w); } let c=0; for(const e of (_estByObjId[o.id]||[])){ for(const [k,r] of Object.entries(e.rows||{})){ const q=Number(r?.qty||0); if(!q) continue; const w=lk.get(k)||lk.get(baseNameOf(k)); if(w)c+=rowCostPerUnit(r,w)*q; } } return c; };
         const objectsThisMonth = objects.filter(o=>_inMonth(o.updatedAt||o.createdAt||0));
         const objectsWithSum = objectsThisMonth.filter(o=>_objVal(o)>0);
         const totalSumMonth = objectsWithSum.reduce((s,o)=>s+_objVal(o), 0);
@@ -5564,7 +5615,7 @@ export default function App() {
                               const catalog = getEffectiveCatalog();
                               const mm = 1 + (est.markup||0) / 100;
                               const works = Object.entries(est.rows||{}).filter(([,r])=>Number(r?.qty)>0).map(([key,r])=>{
-                                const w = catalog.find(x=>x.name===key)||catalog.find(x=>x.code===key);
+                                const w = catalog.find(x=>x.name===key)||catalog.find(x=>x.code===key)||catalog.find(x=>x.name===baseNameOf(key));
                                 if(!w) return null;
                                 const qty = Number(r.qty||0);
                                 const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
@@ -5754,6 +5805,13 @@ export default function App() {
                   const r = rows[w.name]||{};
                   if (Number(r.qty||0) > 0) selectedWorks.push({...w, cat, sub});
                 }
+                // дубликаты (синтетические ключи) — показываем как отдельные строки
+                const _byNameSel = new Map(); for(const ww of getEffectiveCatalog()){ if(ww?.name) _byNameSel.set(ww.name, ww); }
+                for (const [key, r] of Object.entries(rows)) {
+                  if (!isDupKey(key) || Number(r?.qty||0) <= 0) continue;
+                  const bw = _byNameSel.get(baseNameOf(key));
+                  if (bw) selectedWorks.push({ ...bw, name: key, _isDup: true });
+                }
                 return (
                   <div className="card up">
                     <div style={{padding:"12px 16px",borderBottom:"1px solid #e2e8f0",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -5777,21 +5835,43 @@ export default function App() {
                         const displayUnit = r.manualUnit !== undefined ? r.manualUnit : (work.unit||"м²");
                         return (
                           <div key={work.name} style={{display:"grid",gridTemplateColumns:"1fr 50px 120px 76px 90px",gap:4,padding:"8px 16px",borderBottom:"1px solid #f3f4f6",alignItems:"center"}}>
-                            <div>
-                              <div style={{fontSize:13,color:"#0f172a",fontWeight:500}}>{displayName}</div>
+                            <div style={{minWidth:0}}>
+                              {r.editingName ? (
+                                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                                  <input autoFocus style={{fontSize:13,background:"#f8fafc",border:"1px solid #2563eb",color:"#0f172a",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",outline:"none",width:"100%",minWidth:0}}
+                                    value={r.manualName !== undefined ? r.manualName : work.name}
+                                    onChange={e=>setRow(work.name,"manualName",e.target.value)}
+                                    onBlur={()=>setRow(work.name,"editingName",false)}
+                                    onKeyDown={e=>{if(e.key==="Enter"||e.key==="Escape")setRow(work.name,"editingName",false);}}/>
+                                  {r.manualName !== undefined && <span onClick={()=>{setRow(work.name,"manualName",undefined);setRow(work.name,"editingName",false);}} title="Сбросить" style={{cursor:"pointer",fontSize:10,color:"#ef4444",flexShrink:0}}>✕</span>}
+                                </div>
+                              ) : (
+                                <div style={{display:"flex",alignItems:"center",gap:5}}>
+                                  <span style={{fontSize:13,color:"#0f172a",fontWeight:500}}>{displayName}</span>
+                                  {work._isDup && <span style={{fontSize:9,fontWeight:700,color:"#2563eb",background:"#eff6ff",border:"1px solid rgba(37,99,235,.2)",borderRadius:10,padding:"0 6px",flexShrink:0}}>копия</span>}
+                                  {currentUser.role!=="viewer" && <span onClick={()=>setRow(work.name,"editingName",true)} title="Изменить название" style={{cursor:"pointer",fontSize:10,color:"#94a3b8",opacity:.6,flexShrink:0,lineHeight:1}}>✏</span>}
+                                </div>
+                              )}
                               <div style={{fontSize:10,color:"#94a3b8"}}>{work.cat} · {work.sub}</div>
                               {showFinancial && currentUser.role!=="viewer" && qty > 0 && (() => {
-                                const costPerUnit = work.cost || 0;
+                                const costPerUnit = rowCostPerUnit(r, work);
                                 const dp = price ?? getBasePrice(work);
                                 const marginPct = dp && dp > 0 && costPerUnit > 0 ? Math.round((dp - costPerUnit) / dp * 100) : null;
                                 const grossProfit = dp != null && costPerUnit > 0 ? (dp - costPerUnit) * qty : null;
-                                return (costPerUnit > 0) ? (
-                                  <div style={{display:"flex",flexWrap:"wrap",gap:"4px 12px",marginTop:3,fontSize:10,color:"#64748b"}}>
-                                    <span>Себест: <b style={{color:"#334155"}}>{fmt(costPerUnit * qty)} ₸</b></span>
+                                return (
+                                  <div style={{display:"flex",flexWrap:"wrap",gap:"4px 12px",marginTop:3,fontSize:10,color:"#64748b",alignItems:"center"}}>
+                                    <span style={{display:"inline-flex",alignItems:"center",gap:3}}>Себест/ед:
+                                      <input type="number" min="0" placeholder={String(Number(work.cost)||0)}
+                                        value={r.manualCost!==undefined?r.manualCost:(work.cost||"")}
+                                        onChange={e=>setRow(work.name,"manualCost",e.target.value===""?undefined:Number(e.target.value))}
+                                        style={{width:64,border:"1px solid #e2e8f0",borderRadius:4,padding:"1px 5px",fontSize:11,textAlign:"right",fontFamily:"inherit",background:"#fff",color:r.manualCost!==undefined?"#2563eb":"#334155",fontWeight:r.manualCost!==undefined?700:400}}/>
+                                      {r.manualCost!==undefined && <span onClick={()=>setRow(work.name,"manualCost",undefined)} title="Сбросить" style={{cursor:"pointer",color:"#ef4444"}}>✕</span>}
+                                    </span>
+                                    {costPerUnit > 0 && <span>Себест: <b style={{color:"#334155"}}>{fmt(costPerUnit * qty)} ₸</b></span>}
                                     {marginPct !== null && <span>Маржа: <b style={{color: marginPct>=35?"#059669":marginPct>=20?"#d97706":"#ef4444"}}>{marginPct}%</b></span>}
                                     {grossProfit !== null && grossProfit > 0 && <span>Прибыль: <b style={{color:"#059669"}}>{fmt(Math.round(grossProfit))} ₸</b></span>}
                                   </div>
-                                ) : null;
+                                );
                               })()}
                             </div>
                             <div style={{textAlign:"center"}}>
@@ -5813,7 +5893,7 @@ export default function App() {
                             </div>
                             <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:6}}>
                               <span style={{fontSize:13,fontWeight:700,color:total>0?"#2563eb":"#94a3b8"}}>{total>0?fmt(total):"—"}</span>
-                              <button onClick={()=>setRow(work.name,"qty","")} title="Убрать из сметы"
+                              <button onClick={()=>{ work._isDup ? deleteRowKey(work.name) : setRow(work.name,"qty",""); }} title={work._isDup?"Удалить копию":"Убрать из сметы"}
                                 style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:14,padding:0,lineHeight:1}}>✕</button>
                             </div>
                           </div>
@@ -5897,7 +5977,7 @@ export default function App() {
                       ? (work.tiers||[]).map(t=>`${t.min}–${t.max}: ${fmt(t.price)} ₸`).join(" · ")
                       : null;
                     const isEditingThisPrice = editingPriceRow === work.name || editPrices;
-                    const costPerUnit = work.cost || 0;
+                    const costPerUnit = rowCostPerUnit(r, work);
                     const marginPct = displayPrice && displayPrice > 0 && costPerUnit > 0
                       ? Math.round((displayPrice - costPerUnit) / displayPrice * 100)
                       : null;
@@ -5944,9 +6024,10 @@ export default function App() {
                             {r.manualName !== undefined && <span onClick={()=>{setRow(work.name,"manualName",undefined);setRow(work.name,"editingName",false);}} title="Сбросить" style={{cursor:"pointer",fontSize:10,color:"#ef4444",flexShrink:0}}>✕</span>}
                           </div>
                         ) : (
-                          <div style={{display:"flex",alignItems:"center",gap:4}}>
+                          <div style={{display:"flex",alignItems:"center",gap:6}}>
                             <span style={{fontSize:13,color:filled?"#0f172a":"#94a3b8",lineHeight:1.3}}>{r.manualName !== undefined ? r.manualName : work.name}</span>
                             {currentUser.role!=="viewer" && <span onClick={()=>setRow(work.name,"editingName",true)} title="Изменить название" style={{cursor:"pointer",fontSize:10,color:"#94a3b8",opacity:.6,flexShrink:0,lineHeight:1}}>✏</span>}
+                            {currentUser.role!=="viewer" && <span onClick={()=>duplicateRow(work.name,work)} title="Дублировать позицию" style={{cursor:"pointer",fontSize:11,color:"#2563eb",opacity:.7,flexShrink:0,lineHeight:1}}>⧉</span>}
                           </div>
                         )}
                         {tierHint && <div style={{fontSize:10,color:"#334155",marginTop:1}}>{tierHint}</div>}
@@ -5961,7 +6042,14 @@ export default function App() {
                           </div>
                         )}
                         {showFinancial && currentUser.role!=="viewer" && qty > 0 && (
-                          <div style={{display:"flex",flexWrap:"wrap",gap:"4px 12px",marginTop:4,fontSize:10,color:"#64748b"}}>
+                          <div style={{display:"flex",flexWrap:"wrap",gap:"4px 12px",marginTop:4,fontSize:10,color:"#64748b",alignItems:"center"}}>
+                            <span style={{display:"inline-flex",alignItems:"center",gap:3}}>Себест/ед:
+                              <input type="number" min="0" placeholder={String(Number(work.cost)||0)}
+                                value={r.manualCost!==undefined?r.manualCost:(work.cost||"")}
+                                onChange={e=>setRow(work.name,"manualCost",e.target.value===""?undefined:Number(e.target.value))}
+                                style={{width:64,border:"1px solid #e2e8f0",borderRadius:4,padding:"1px 5px",fontSize:11,textAlign:"right",fontFamily:"inherit",background:"#fff",color:r.manualCost!==undefined?"#2563eb":"#334155",fontWeight:r.manualCost!==undefined?700:400}}/>
+                              {r.manualCost!==undefined && <span onClick={()=>setRow(work.name,"manualCost",undefined)} title="Сбросить" style={{cursor:"pointer",color:"#ef4444"}}>✕</span>}
+                            </span>
                             {costPerUnit > 0 && <span>Себест: <b style={{color:"#334155"}}>{fmt(costPerUnit * qty)} ₸</b></span>}
                             {marginPct !== null && (
                               <span>Маржа: <b style={{color: marginPct>=35?"#059669":marginPct>=20?"#d97706":"#ef4444"}}>{marginPct}%</b></span>
@@ -6025,12 +6113,14 @@ export default function App() {
                         const subWorks = (Gdyn[safeCat]?.[safeActiveSub]||[]);
                         let subCost=0, subProfit=0;
                         for(const w of subWorks){
-                          const qty=Number((rows[w.name]||{}).qty||0);
+                          const rr=rows[w.name]||{};
+                          const qty=Number(rr.qty||0);
                           const p=rowPrice(w); const bp=getBasePrice(w);
                           const dp=p??bp;
-                          const c=(w.cost||0)*qty;
+                          const cpu=rowCostPerUnit(rr,w);
+                          const c=cpu*qty;
                           subCost+=c;
-                          if(qty>0&&dp!=null) subProfit+=(dp-(w.cost||0))*qty;
+                          if(qty>0&&dp!=null) subProfit+=(dp-cpu)*qty;
                         }
                         return subCost>0 ? (
                           <span style={{fontSize:11,color:"#64748b"}}>
@@ -6116,9 +6206,10 @@ export default function App() {
                         const allFilled = getEffectiveCatalog().filter(w => Number((rows[w.name]||{}).qty||0) > 0);
                         let totalCost=0, totalRevenue=0;
                         for(const w of allFilled){
-                          const qty=Number((rows[w.name]||{}).qty||0);
+                          const rr=rows[w.name]||{};
+                          const qty=Number(rr.qty||0);
                           const p=rowPrice(w); const bp=getBasePrice(w); const dp=p??bp;
-                          totalCost += (w.cost||0)*qty;
+                          totalCost += rowCostPerUnit(rr,w)*qty;
                           if(dp!=null) totalRevenue += dp*qty;
                         }
                         const revenueAfterDiscount = final; // уже с учётом скидки
@@ -6743,7 +6834,7 @@ export default function App() {
           const catalog = getEffectiveCatalog();
           const mm = 1 + (est.markup||0)/100;
           return Object.entries(est.rows||{}).filter(([,r])=>Number(r?.qty)>0).map(([key,r])=>{
-            const w = catalog.find(x=>x.name===key)||catalog.find(x=>x.code===key);
+            const w = catalog.find(x=>x.name===key)||catalog.find(x=>x.code===key)||catalog.find(x=>x.name===baseNameOf(key));
             if(!w) return null;
             const qty = Number(r.qty||0);
             const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
