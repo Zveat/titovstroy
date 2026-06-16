@@ -6840,28 +6840,34 @@ export default function App() {
         };
 
         return (
-        <div style={{maxWidth:960,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
+        <div className="page" style={{maxWidth:960,minHeight:"100vh"}}>
           {/* Шапка */}
-          <div className="contracts-header" style={{background:"linear-gradient(135deg,#0f172a,#1e293b)",borderBottom:"1px solid #0f172a",padding:"14px 24px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10,boxShadow:"0 2px 12px rgba(15,23,42,.2)"}}>
-            {objectTab==="workspace" && (
-              <button onClick={()=>{ setObjectTab("list"); setCurrentObject(null); }} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
-            )}
-            <div style={{width:28,height:28,borderRadius:8,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#fff",boxShadow:"0 2px 8px rgba(37,99,235,.45)"}}>📦</div>
-            <div style={{fontWeight:800,fontSize:14,color:"#f1f5f9"}}>{objectTab==="workspace" && currentObject ? (currentObject.clientName||"Новый объект") : "Объекты"}</div>
-            <div style={{flex:1}}/>
-            {objectTab==="list" && currentUser.role!=="viewer" && (
-              <button className="btn btn-g" style={{fontSize:12,padding:"7px 14px"}} onClick={async ()=>{
-                const newObj = {id:genId(),clientId:"",clientName:"",clientPhone:"",clientType:"физ",clientIin:"",clientDoc:"",address:"",objType:"Вторичка",area:"",status:"new",note:"",manager:currentUser.name,createdBy:currentUser.name,createdById:currentUser.id,createdAt:Date.now(),updatedAt:Date.now()};
-                await saveObjects([newObj, ...objectsRef.current]);
-                setCurrentObject(newObj);
-                setObjectTab("workspace");
-              }}>+ Новый объект</button>
-            )}
+          <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"22px 26px",marginBottom:20,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
+            <div style={{position:"absolute",top:-30,right:-30,width:160,height:160,borderRadius:"50%",background:"rgba(59,130,246,.08)"}}/>
+            <div style={{position:"relative",zIndex:1,display:"flex",alignItems:"center",gap:13,flexWrap:"wrap"}}>
+              {objectTab==="workspace" && (
+                <button onClick={()=>{ setObjectTab("list"); setCurrentObject(null); }} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:22,lineHeight:1,padding:"0 4px"}}>←</button>
+              )}
+              <div style={{width:40,height:40,borderRadius:11,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,boxShadow:"0 3px 12px rgba(37,99,235,.5)"}}>📦</div>
+              <div style={{minWidth:0}}>
+                <h1 style={{margin:0,fontSize:21,fontWeight:900,color:"#fff",lineHeight:1.1}}>{objectTab==="workspace" && currentObject ? (currentObject.clientName||"Новый объект") : "Объекты"}</h1>
+                <div style={{fontSize:12,color:"rgba(255,255,255,.7)",marginTop:3}}>{objectTab==="workspace" ? "Карточка объекта · сметы и договора" : "Клиенты, сметы и договора"}</div>
+              </div>
+              <div style={{flex:1}}/>
+              {objectTab==="list" && currentUser.role!=="viewer" && (
+                <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={async ()=>{
+                  const newObj = {id:genId(),clientId:"",clientName:"",clientPhone:"",clientType:"физ",clientIin:"",clientDoc:"",address:"",objType:"Вторичка",area:"",status:"new",note:"",manager:currentUser.name,createdBy:currentUser.name,createdById:currentUser.id,createdAt:Date.now(),updatedAt:Date.now()};
+                  await saveObjects([newObj, ...objectsRef.current]);
+                  setCurrentObject(newObj);
+                  setObjectTab("workspace");
+                }}>+ Новый объект</button>
+              )}
+            </div>
           </div>
 
           {/* Список объектов */}
           {objectTab==="list" && (
-            <div className="contracts-pad" style={{padding:"20px 24px",display:"flex",flexDirection:"column",gap:10}}>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
               {/* Поиск */}
               <input value={objectSearch} onChange={e=>setObjectSearch(e.target.value)} placeholder="🔍 Поиск по клиенту, телефону, адресу..."
                 style={{border:"1px solid #e2e8f0",borderRadius:7,padding:"7px 12px",fontSize:13,width:"100%",boxSizing:"border-box",outline:"none",fontFamily:"inherit"}}/>
@@ -6998,9 +7004,9 @@ export default function App() {
             });
 
             return (
-              <div style={{padding:"0 24px 40px"}}>
+              <div>
                 {/* Карточка объекта — компактная */}
-                <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"14px 16px",marginTop:16,display:"flex",flexDirection:"column",gap:10}}>
+                <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
                   {/* Статус */}
                   <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                     {DEAL_STATUSES.map(s=>(
@@ -7235,28 +7241,34 @@ export default function App() {
       })()}
 
       {effScreen === "contracts" && (
-        <div style={{maxWidth:960,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
+        <div className="page" style={{maxWidth:960,minHeight:"100vh"}}>
           {/* Шапка + табы — скрываем в режиме редактора договора (у него своя шапка) */}
           {contractTab !== "editor" && (<>
-          <div className="contracts-header" style={{background:"linear-gradient(135deg,#0f172a,#1e293b)",borderBottom:"1px solid #0f172a",padding:"14px 24px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10,boxShadow:"0 2px 12px rgba(15,23,42,.2)"}}>
-            <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
-            <div style={{width:28,height:28,borderRadius:8,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#fff",boxShadow:"0 2px 8px rgba(37,99,235,.45)"}}>📄</div>
-            <div style={{fontWeight:800,fontSize:14,color:"#f1f5f9"}}>Прочие договора</div>
-            <div style={{flex:1}}/>
-            {["list","clients","contragents"].includes(contractTab) && currentUser.role === "admin" && (
-              <button onClick={()=>openListBackups(contractTab)}
-                style={{background:"rgba(255,255,255,.08)",color:"#cbd5e1",border:"1px solid rgba(255,255,255,.15)",borderRadius:8,padding:"7px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                🕘 Бэкапы
-              </button>
-            )}
-            {contractTab === "list" && currentUser.role !== "viewer" && (
-              <button className="btn btn-g" style={{fontSize:12,padding:"7px 14px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:"",createdBy:currentUser.name,createdById:currentUser.id}); setContractTab("editor"); }}>+ Новый</button>
-            )}
+          <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"22px 26px",marginBottom:20,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
+            <div style={{position:"absolute",top:-30,right:-30,width:160,height:160,borderRadius:"50%",background:"rgba(59,130,246,.08)"}}/>
+            <div style={{position:"relative",zIndex:1,display:"flex",alignItems:"center",gap:13,flexWrap:"wrap"}}>
+              <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:22,lineHeight:1,padding:"0 4px"}}>←</button>
+              <div style={{width:40,height:40,borderRadius:11,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,boxShadow:"0 3px 12px rgba(37,99,235,.5)"}}>📄</div>
+              <div style={{minWidth:0}}>
+                <h1 style={{margin:0,fontSize:21,fontWeight:900,color:"#fff",lineHeight:1.1}}>Прочие договора</h1>
+                <div style={{fontSize:12,color:"rgba(255,255,255,.7)",marginTop:3}}>Договора вне объектов · клиенты и контрагенты</div>
+              </div>
+              <div style={{flex:1}}/>
+              {["list","clients","contragents"].includes(contractTab) && currentUser.role === "admin" && (
+                <button onClick={()=>openListBackups(contractTab)}
+                  style={{background:"rgba(255,255,255,.08)",color:"#cbd5e1",border:"1px solid rgba(255,255,255,.15)",borderRadius:8,padding:"8px 13px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                  🕘 Бэкапы
+                </button>
+              )}
+              {contractTab === "list" && currentUser.role !== "viewer" && (
+                <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:"",createdBy:currentUser.name,createdById:currentUser.id}); setContractTab("editor"); }}>+ Новый</button>
+              )}
+            </div>
           </div>
 
           </>)}
 
-          <div className="contracts-pad" style={{padding:"20px 24px"}}>
+          <div style={{paddingTop:0}}>
 
             {/* ── СПИСОК ДОГОВОРОВ ── */}
             {contractTab === "list" && (
