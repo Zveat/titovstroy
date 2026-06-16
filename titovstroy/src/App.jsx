@@ -1483,11 +1483,11 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
       </div>
 
       {/* Табы */}
-      <div style={{display:"flex",gap:3,marginBottom:24,background:"#f8fafc",borderRadius:10,padding:4}}>
+      <div className="admin-tabs" style={{display:"flex",gap:3,marginBottom:24,background:"#f8fafc",borderRadius:10,padding:4,overflowX:"auto"}}>
         {[["users","👥 Сотрудники"],["clients","👥 Клиенты"],["contragents","🏢 Реквизиты"],["prices","💰 Прайс-лист"],["backups","🗄 Бэкапы"]].map(([t,label])=>(
           <button key={t} onClick={()=>{ setTab(t); setAdminSubTab("list"); }} style={{
             flex:1,padding:"11px",borderRadius:8,border:"none",cursor:"pointer",
-            fontFamily:"inherit",fontSize:12,fontWeight:700,
+            fontFamily:"inherit",fontSize:12,fontWeight:700,whiteSpace:"nowrap",
             background: tab===t ? "#fff" : "transparent",
             color: tab===t ? "#0f172a" : "#64748b",transition:"all .1s"
           }}>{label}</button>
@@ -4970,7 +4970,7 @@ export default function App() {
   const NAV_ITEMS = useMemo(() => [
     ...(currentUser.role !== "viewer" ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
     { id:"objects",   icon:"📦", label:"Объекты" },
-    { id:"contracts", icon:"📄", label:"Прочие договора" },
+    { id:"contracts", icon:"📄", label:"Прочие договора", short:"Договора" },
     ...(currentUser.role !== "viewer" ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
     ...(currentUser.role==="admin" ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
   ], [currentUser.role]);
@@ -5096,6 +5096,10 @@ export default function App() {
           .kpi-grid{grid-template-columns:1fr 1fr!important;gap:10px!important}
           .kpi-grid>div{padding:14px 13px!important;border-radius:14px!important;min-width:0!important}
           .kpi-val{font-size:18px!important;overflow-wrap:anywhere!important}
+          /* Категории работ: имя на отдельной строке, цифры ниже */
+          .an-catrow{flex-wrap:wrap!important;row-gap:4px!important}
+          .an-catrow .an-cat-name{flex:1 1 100%!important;white-space:normal!important;order:-1}
+          .an-catrow>span:not(.an-cat-name){width:auto!important;flex:1!important;text-align:left!important;font-size:11px!important}
         }
         @media(max-width:380px){
           .kpi-grid{grid-template-columns:1fr!important}
@@ -5152,7 +5156,7 @@ export default function App() {
           <div key={item.id} className={"mob-nav-item"+(isActive?" active":"")}
             onClick={()=>{ setDealReturnId(null); setObjectReturnId(null); setScreen(item.id); }}>
             <span style={{fontSize:20}}>{item.icon}</span>
-            <span style={{fontSize:9,color:isActive?"#60a5fa":"#64748b",fontWeight:600}}>{item.label}</span>
+            <span style={{fontSize:9.5,color:isActive?"#2563eb":"#64748b",fontWeight:600,whiteSpace:"nowrap"}}>{item.short||item.label}</span>
           </div>
           );
         })}
@@ -6667,9 +6671,11 @@ export default function App() {
                         <span style={{fontSize:11,color:"#94a3b8",minWidth:18,fontWeight:700}}>#{i+1}</span>
                         <div style={{flex:1,minWidth:0}}>
                           <div style={{fontSize:13,color:"#0f172a",fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{o.clientName||"Без клиента"}</div>
-                          <div style={{fontSize:11,color:"#94a3b8"}}>{o.objType||"Вторичка"}{o.address?` · ${o.address}`:""}</div>
+                          <div style={{display:"flex",alignItems:"center",gap:6,marginTop:2,flexWrap:"wrap"}}>
+                            <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:4,padding:"1px 6px"}}>{st.label}</span>
+                            <span style={{fontSize:11,color:"#94a3b8",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.objType||"Вторичка"}{o.address?` · ${o.address}`:""}</span>
+                          </div>
                         </div>
-                        <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:3,padding:"1px 6px",flexShrink:0}}>{st.label}</span>
                         <span style={{fontSize:13,fontWeight:800,color:"#0f172a",flexShrink:0}}>{fmt(v)} ₸</span>
                       </div>
                     );
@@ -6684,9 +6690,9 @@ export default function App() {
                 <div style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>🏗 Рентабельность по категориям работ</div>
                 <div style={{display:"flex",flexDirection:"column",gap:6}}>
                   {catProfit.map((c,i)=>(
-                    <div key={c.cat} style={{display:"flex",alignItems:"center",gap:10,fontSize:12,padding:"9px 12px",background:"#f9fafb",borderRadius:8}}>
+                    <div key={c.cat} className="an-catrow" style={{display:"flex",alignItems:"center",gap:10,fontSize:12,padding:"9px 12px",background:"#f9fafb",borderRadius:8}}>
                       <span style={{fontSize:10,color:"#94a3b8",minWidth:16}}>{i+1}.</span>
-                      <span style={{color:"#0f172a",fontWeight:500,flex:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.cat}</span>
+                      <span className="an-cat-name" style={{color:"#0f172a",fontWeight:500,flex:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.cat}</span>
                       <span style={{color:"#64748b",width:90,textAlign:"right"}}>выр. {fmt(Math.round(c.revenue/1000))}k</span>
                       <span style={{color:"#059669",fontWeight:700,width:90,textAlign:"right"}}>приб. {fmt(Math.round(c.profit/1000))}k</span>
                       <span style={{fontWeight:700,width:46,textAlign:"right",color:c.margin>=35?"#059669":c.margin>=20?"#d97706":"#ef4444"}}>{c.margin}%</span>
