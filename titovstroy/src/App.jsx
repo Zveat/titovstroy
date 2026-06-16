@@ -5128,25 +5128,19 @@ export default function App() {
         const thisMonth = new Date().getMonth();
         const thisYear = new Date().getFullYear();
         const _inMonth = ts => { const d=new Date(ts||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; };
-        const estimatesThisMonth = estimates.filter(e=>_inMonth(e.updatedAt||e.createdAt||0));
         const contractsThisMonth = contracts.filter(c=>_inMonth(c.date||0));
-        const clientsThisMonth = contractClients.filter(c=>c.createdAt && _inMonth(c.createdAt));
-        const newClientsCount = clientsThisMonth.length;
         // объекты и их суммы (сумма объекта = все его сметы)
         const _estByObjId = {}; for(const e of estimates){ if(e.objectId){ (_estByObjId[e.objectId]||(_estByObjId[e.objectId]=[])).push(e); } }
         const _objVal = o => (_estByObjId[o.id]||[]).reduce((s,e)=>s+(e.total||0),0);
+        const _objCost = o => { const cat = getEffectiveCatalog(); const lk = new Map(); for(const w of cat){ if(w?.name)lk.set(w.name,w); if(w?.code)lk.set(w.code,w); } let c=0; for(const e of (_estByObjId[o.id]||[])){ for(const [k,r] of Object.entries(e.rows||{})){ const q=Number(r?.qty||0); if(!q) continue; const w=lk.get(k); if(w)c+=(Number(w.cost)||0)*q; } } return c; };
         const objectsThisMonth = objects.filter(o=>_inMonth(o.updatedAt||o.createdAt||0));
-        const totalSumMonth = objectsThisMonth.reduce((s,o)=>s+_objVal(o), 0);
+        const objectsWithSum = objectsThisMonth.filter(o=>_objVal(o)>0);
+        const totalSumMonth = objectsWithSum.reduce((s,o)=>s+_objVal(o), 0);
+        const totalCostMonth = objectsWithSum.reduce((s,o)=>s+_objCost(o), 0);
+        const profitMonth = totalSumMonth - totalCostMonth;
+        const marginMonth = totalSumMonth>0 ? Math.round(profitMonth/totalSumMonth*100) : 0;
         const recentContracts = [...contracts].filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,5);
         const recentEstimates = [...estimates].filter(e=>(e.total||0)>0).sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0)).slice(0,5);
-        // Финансы за месяц (по согласованным сметам)
-        const _dashCat = getEffectiveCatalog();
-        const _dashLook = new Map(); for(const w of _dashCat){ if(w?.name)_dashLook.set(w.name,w); if(w?.code)_dashLook.set(w.code,w); }
-        const _dashCost = e=>{ let c=0; for(const [k,r] of Object.entries(e.rows||{})){ const q=Number(r?.qty||0); if(!q) continue; const w=_dashLook.get(k); if(w)c+=(Number(w.cost)||0)*q; } return c; };
-        const agreedMonth = estimatesThisMonth.filter(e=>e.status==="agreed"&&(e.total||0)>0);
-        const revMonth = agreedMonth.reduce((s,e)=>s+(e.total||0),0);
-        const profitMonth = revMonth - agreedMonth.reduce((s,e)=>s+_dashCost(e),0);
-        const marginMonth = revMonth>0 ? Math.round(profitMonth/revMonth*100) : 0;
         return (
         <div className="page">
           {/* Заголовок */}
@@ -5168,12 +5162,12 @@ export default function App() {
           {/* Статы */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:32}}>
             {[
-              {label:"Объектов за месяц", value:objectsThisMonth.length,  sub:"из "+objects.length+" всего", color:"#2563eb"},
-              {label:"Договоров за месяц",value:contractsThisMonth.filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).length, sub:"из "+contracts.filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).length+" с суммой всего", color:"#2563eb"},
-              {label:"Объём за месяц",   value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма объектов за месяц",                          color:"#059669"},
-              {label:"Прибыль за месяц", value:fmt(Math.round(profitMonth))+" ₸", sub:"по согласованным сметам", color:"#059669"},
-              {label:"Маржа за месяц",   value:marginMonth+"%", sub:"согласованные сметы", color:marginMonth>=35?"#059669":marginMonth>=20?"#d97706":"#ef4444"},
-              {label:"Клиентов за месяц",value:clientsThisMonth.length,    sub:"из "+contractClients.length+" всего", color:"#2563eb"},
+              {label:"Объектов за месяц",  value:objectsThisMonth.length,  sub:"из "+objects.length+" всего", color:"#2563eb"},
+              {label:"Объектов в работе", value:objects.filter(o=>o.status==="approval").length, sub:"согласование с клиентом", color:"#d97706"},
+              {label:"Договоров подписано",value:objects.filter(o=>o.status==="signed").length,  sub:"из "+objects.length+" всего объектов", color:"#059669"},
+              {label:"Объём за месяц",    value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма смет объектов за месяц", color:"#059669"},
+              {label:"Прибыль за месяц",  value:fmt(Math.round(profitMonth))+" ₸",   sub:"выручка минус себестоимость", color:"#059669"},
+              {label:"Маржа за месяц",    value:marginMonth+"%", sub:"по объектам месяца", color:marginMonth>=35?"#059669":marginMonth>=20?"#d97706":"#ef4444"},
             ].map((s,i)=>(
               <div key={i} style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:8,padding:"18px 18px 16px",boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
                 
@@ -5204,39 +5198,34 @@ export default function App() {
             ))}
           </div>
 
-          {/* Воронка по статусам */}
-          {(() => {
-            const real = estimates.filter(e => (e.total||0) > 0 || (e.status&&e.status!=="new"));
-            const byKey = {};
-            for (const s of STATUSES) byKey[s.key] = { count:0, sum:0 };
-            for (const e of real) { const k=(e.status||"new"); if(!byKey[k]) byKey[k]={count:0,sum:0}; byKey[k].count++; byKey[k].sum+=(e.total||0); }
-            const totalCount = real.length;
-            if (totalCount === 0) return null;
-            const maxCount = Math.max(1, ...STATUSES.map(s=>byKey[s.key]?.count||0));
-            const sentN = byKey.sent?.count||0, agreedN = byKey.agreed?.count||0;
-            const convOverall = totalCount>0 ? Math.round(agreedN/totalCount*100) : 0;
-            const convSent = (sentN+agreedN)>0 ? Math.round(agreedN/(sentN+agreedN)*100) : 0;
+          {/* Воронка по статусам объектов */}
+          {objects.length > 0 && (()=>{
+            const maxCount = Math.max(1, ...DEAL_STATUSES.map(s=>objects.filter(o=>(o.status||"new")===s.key).length));
+            const signedCount = objects.filter(o=>o.status==="signed").length;
+            const nonArchive = objects.filter(o=>o.status!=="archive").length;
+            const convToSigned = nonArchive>0 ? Math.round(signedCount/nonArchive*100) : 0;
             return (
               <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"20px 22px",marginBottom:36,boxShadow:"0 1px 2px rgba(0,0,0,.04)"}}>
                 <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:16}}>
-                  <span style={{fontWeight:700,fontSize:15,color:"#111827"}}>Воронка по статусам</span>
+                  <span style={{fontWeight:700,fontSize:15,color:"#111827"}}>Статусы объектов</span>
                   <span style={{fontSize:12,color:"#6b7280"}}>
-                    Конверсия в согласование: <b style={{color:"#059669"}}>{convOverall}%</b>
-                    {(sentN+agreedN)>0 && <span style={{color:"#9ca3af"}}> · из отправленных <b style={{color:"#7c3aed"}}>{convSent}%</b></span>}
+                    Договоров подписано: <b style={{color:"#059669"}}>{convToSigned}%</b>
+                    <span style={{color:"#9ca3af"}}> · {objects.length} объектов всего</span>
                   </span>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                  {STATUSES.map(s=>{
-                    const d = byKey[s.key]||{count:0,sum:0};
-                    const w = Math.round((d.count/maxCount)*100);
+                  {DEAL_STATUSES.map(s=>{
+                    const list = objects.filter(o=>(o.status||"new")===s.key);
+                    const sum = list.reduce((acc,o)=>acc+(_estByObjId[o.id]||[]).reduce((ss,e)=>ss+(e.total||0),0),0);
+                    const w = Math.round((list.length/maxCount)*100);
                     return (
                       <div key={s.key} style={{display:"flex",alignItems:"center",gap:12}}>
-                        <span className="an-bar-label" style={{fontSize:12,fontWeight:600,color:s.color,width:140,flexShrink:0}}>{s.label}</span>
+                        <span className="an-bar-label" style={{fontSize:12,fontWeight:600,color:s.color,width:160,flexShrink:0}}>{s.label}</span>
                         <div style={{flex:1,minWidth:60,background:"rgba(0,0,0,.04)",borderRadius:6,height:24,position:"relative",overflow:"hidden"}}>
-                          <div style={{width:`${w}%`,minWidth:d.count>0?28:0,height:"100%",background:s.bg,borderLeft:`3px solid ${s.color}`,transition:"width .3s"}}/>
-                          <span style={{position:"absolute",left:8,top:0,height:"100%",display:"flex",alignItems:"center",fontSize:12,fontWeight:700,color:s.color}}>{d.count}</span>
+                          <div style={{width:`${w}%`,minWidth:list.length>0?28:0,height:"100%",background:s.bg,borderLeft:`3px solid ${s.color}`,transition:"width .3s"}}/>
+                          <span style={{position:"absolute",left:8,top:0,height:"100%",display:"flex",alignItems:"center",fontSize:12,fontWeight:700,color:s.color}}>{list.length}</span>
                         </div>
-                        <span className="an-bar-right" style={{fontSize:12,color:"#6b7280",width:130,textAlign:"right",flexShrink:0}}>{d.sum>0?fmt(Math.round(d.sum))+" ₸":"—"}</span>
+                        <span className="an-bar-right" style={{fontSize:12,color:"#6b7280",width:130,textAlign:"right",flexShrink:0}}>{sum>0?fmt(Math.round(sum))+" ₸":"—"}</span>
                       </div>
                     );
                   })}
@@ -5252,7 +5241,7 @@ export default function App() {
               <div>
                 <div style={{fontSize:13,color:"#111827",fontWeight:700,marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span>Последние сметы</span>
-                  <span onClick={()=>setScreen("list")} style={{color:"#2563eb",cursor:"pointer",textTransform:"none",fontSize:11,letterSpacing:0}}>все →</span>
+                  <span onClick={()=>setScreen("objects")} style={{color:"#2563eb",cursor:"pointer",textTransform:"none",fontSize:11,letterSpacing:0}}>все →</span>
                 </div>
                 <div style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:6,overflow:"hidden"}}>
                   {recentEstimates.map((est,i,arr)=>{
