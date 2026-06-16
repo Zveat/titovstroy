@@ -3381,7 +3381,9 @@ export default function App() {
     const baseEstimates = estimates
       .filter(e => inRange(e.updatedAt||e.createdAt||0))
       .filter(e => !statsManager || (e.proj?.manager||"")===statsManager);
+    // Договора, сформированные ВНУТРИ объектов (привязаны к объекту), без «Прочих договоров»
     const baseCon = contracts
+      .filter(c => c.objectId)
       .filter(c => inRange(new Date(c.date||0).getTime()))
       .filter(c => (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0)
       .filter(c => !statsManager || (c.manager||"")=== statsManager);
@@ -6466,7 +6468,7 @@ export default function App() {
               </div>
             </div>
             <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14,marginBottom:20}}>
-              {[["Объектов",totalEst,"в периоде","#2563eb","📋"],["Объём объектов",fmt(totalSumEst)+" ₸","сумма смет","#2563eb","💰"],["Ср. чек",fmt(avgEst)+" ₸","на объект","#059669","🎯"]].map(([l,v,s,c,ic],i)=>(
+              {[["Объектов",totalEst,"в периоде","#2563eb","📋"],["Объём объектов",fmt(totalSumEst)+" ₸","сумма смет","#2563eb","💰"],["Ср. чек",fmt(avgEst)+" ₸","на объект","#059669","🎯"],["Договоров",totalCon,"по объектам","#2563eb","📄"],["Объём договоров",fmt(totalSumCon)+" ₸","сумма договоров","#2563eb","🧾"],["Средний договор",fmt(avgCon)+" ₸","на договор","#059669","📊"]].map(([l,v,s,c,ic],i)=>(
                 <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"16px 18px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",position:"relative",overflow:"hidden",transition:"transform .18s ease,box-shadow .18s ease"}}
                   onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
                   onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)";}}>
@@ -6592,6 +6594,12 @@ export default function App() {
                   ))}
                 </div>
                 {Object.keys(byType).length>0 && <><div style={{fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типу объекта</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(<span key={t} style={{fontSize:11,padding:"3px 10px",borderRadius:4,background:"rgba(0,0,0,.04)",color:"#94a3b8"}}>{t}: <strong style={{color:"#0f172a"}}>{n}</strong></span>))}</div></>}
+              </div>
+              <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"18px"}}>
+                <div style={{fontSize:11,color:"#d97706",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>Договора по объектам</div>
+                {Object.keys(byConType).length>0 && <><div style={{fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типам</div><div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:14}}>{Object.entries(byConType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(<div key={t} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(0,0,0,.02)",borderRadius:8}}><span style={{fontSize:12,color:"#94a3b8"}}>{t}</span><span style={{fontSize:13,fontWeight:700,color:"#2563eb"}}>{n}</span></div>))}</div></>}
+                {baseCon.length>0 && <><div style={{fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>Договора в периоде</div><div style={{display:"flex",flexDirection:"column",gap:3}}>{[...baseCon].sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,6).map(c=>{const obj=objects.find(o=>o.id===c.objectId);const sum=(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);return(<div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(0,0,0,.02)",borderRadius:8,cursor:"pointer"}} onClick={()=>{if(obj){setCurrentObject({...obj});setObjectTab("workspace");setScreen("objects");}}}><div style={{minWidth:0}}><div style={{fontSize:12,color:"#0f172a",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{TYPE_L2[c.type||"repair_fiz"]} #{c.number||"--"}</div><div style={{fontSize:10,color:"#94a3b8"}}>{obj?.clientName||"--"}</div></div><span style={{fontSize:12,fontWeight:700,color:"#2563eb",flexShrink:0,marginLeft:8}}>{fmt(sum)} ₸</span></div>);})}</div></>}
+                {totalCon===0 && <div style={{textAlign:"center",color:"#334155",fontSize:13,padding:"30px 0"}}>Нет договоров по объектам за период</div>}
               </div>
             </div>
             {/* ── C. Менеджеры по прибыли ── */}
@@ -6883,9 +6891,17 @@ export default function App() {
           {/* Список объектов */}
           {objectTab==="list" && (
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
-              {/* Поиск */}
-              <input value={objectSearch} onChange={e=>setObjectSearch(e.target.value)} placeholder="🔍 Поиск по клиенту, телефону, адресу..."
-                style={{border:"1px solid #e2e8f0",borderRadius:7,padding:"7px 12px",fontSize:13,width:"100%",boxSizing:"border-box",outline:"none",fontFamily:"inherit"}}/>
+              {/* Поиск + сортировка */}
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <input value={objectSearch} onChange={e=>setObjectSearch(e.target.value)} placeholder="🔍 Поиск по клиенту, телефону, адресу..."
+                  style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:13,flex:1,minWidth:0,boxSizing:"border-box",outline:"none",fontFamily:"inherit"}}/>
+                <button onClick={()=>setObjectDateSort(v=>v==="new"?"old":"new")}
+                  title={objectDateSort==="new"?"Сначала новые (нажмите для старых)":"Сначала старые (нажмите для новых)"}
+                  style={{display:"flex",alignItems:"center",gap:5,border:"1px solid #e2e8f0",background:"#fff",borderRadius:8,padding:"8px 11px",fontSize:12,fontWeight:600,color:"#475569",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
+                  <span style={{fontSize:10,color:"#94a3b8"}}>дата</span>
+                  <span style={{fontSize:13,color:"#2563eb"}}>{objectDateSort==="new"?"↓":"↑"}</span>
+                </button>
+              </div>
               {/* Фильтр по статусу */}
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 <button onClick={()=>setObjectFilterStatus("")}
@@ -6923,14 +6939,6 @@ export default function App() {
                   ))}
                 </div>
               )}
-              {/* Сортировка по дате создания */}
-              <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-                <span style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>📅 Сортировка:</span>
-                {[["new","Сначала новые"],["old","Сначала старые"]].map(([k,l])=>(
-                  <button key={k} onClick={()=>setObjectDateSort(k)}
-                    style={{background:objectDateSort===k?"#eff6ff":"rgba(0,0,0,.03)",color:objectDateSort===k?"#2563eb":"#94a3b8",border:`1px solid ${objectDateSort===k?"rgba(37,99,235,.4)":"#e2e8f0"}`,borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
-                ))}
-              </div>
 
               {objects.length===0 && (
                 <div style={{textAlign:"center",padding:"60px 0",color:"#94a3b8"}}>
