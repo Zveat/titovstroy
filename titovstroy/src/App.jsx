@@ -1474,9 +1474,12 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
 
   return (
     <div className="page">
-      <div style={{marginBottom:24}}>
-        <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#0f172a"}}>⚙️ Администрирование</h1>
-        <div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>Сотрудники и прайс-лист</div>
+      <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"24px 28px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
+        <div style={{position:"absolute",top:-30,right:-30,width:160,height:160,borderRadius:"50%",background:"rgba(59,130,246,.08)"}}/>
+        <div style={{position:"relative",zIndex:1}}>
+          <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#fff"}}>⚙️ Администрирование</h1>
+          <div style={{fontSize:13,color:"rgba(255,255,255,.75)",marginTop:4}}>Сотрудники и прайс-лист</div>
+        </div>
       </div>
 
       {/* Табы */}
@@ -5387,11 +5390,11 @@ export default function App() {
       {effScreen === "list" && (
         <div style={{maxWidth:960,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
           {/* Шапка */}
-          <div className="list-header" style={{background:"#ffffff",borderBottom:"1px solid #e2e8f0",padding:"12px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
+          <div className="list-header" style={{background:"linear-gradient(135deg,#0f172a,#1e293b)",borderBottom:"1px solid #0f172a",padding:"14px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10,boxShadow:"0 2px 12px rgba(15,23,42,.2)"}}>
             <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
-              <div style={{width:28,height:28,borderRadius:8,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,color:"#ffffff",flexShrink:0,boxShadow:"0 2px 8px rgba(37,99,235,.35)"}}>T</div>
+              <div style={{width:28,height:28,borderRadius:8,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,color:"#ffffff",flexShrink:0,boxShadow:"0 2px 8px rgba(37,99,235,.45)"}}>T</div>
               <div style={{minWidth:0}}>
-                <div style={{fontWeight:800,fontSize:13,whiteSpace:"nowrap",color:"#0f172a"}}>TitovStroy</div>
+                <div style={{fontWeight:800,fontSize:13,whiteSpace:"nowrap",color:"#f1f5f9"}}>TitovStroy</div>
                 <div style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>
                   <span style={{color:"#2563eb"}}>{currentUser.role==="admin"?"👑":currentUser.role==="viewer"?"👁":"👤"}</span>{" "}{currentUser.name}
                 </div>
@@ -6839,12 +6842,12 @@ export default function App() {
         return (
         <div style={{maxWidth:960,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
           {/* Шапка */}
-          <div className="contracts-header" style={{background:"#ffffff",borderBottom:"1px solid #e2e8f0",padding:"12px 24px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
+          <div className="contracts-header" style={{background:"linear-gradient(135deg,#0f172a,#1e293b)",borderBottom:"1px solid #0f172a",padding:"14px 24px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10,boxShadow:"0 2px 12px rgba(15,23,42,.2)"}}>
             {objectTab==="workspace" && (
               <button onClick={()=>{ setObjectTab("list"); setCurrentObject(null); }} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
             )}
-            <div style={{width:28,height:28,borderRadius:8,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#fff",boxShadow:"0 2px 8px rgba(37,99,235,.35)"}}>📦</div>
-            <div style={{fontWeight:800,fontSize:14,color:"#0f172a"}}>{objectTab==="workspace" && currentObject ? (currentObject.clientName||"Новый объект") : "Объекты"}</div>
+            <div style={{width:28,height:28,borderRadius:8,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#fff",boxShadow:"0 2px 8px rgba(37,99,235,.45)"}}>📦</div>
+            <div style={{fontWeight:800,fontSize:14,color:"#f1f5f9"}}>{objectTab==="workspace" && currentObject ? (currentObject.clientName||"Новый объект") : "Объекты"}</div>
             <div style={{flex:1}}/>
             {objectTab==="list" && currentUser.role!=="viewer" && (
               <button className="btn btn-g" style={{fontSize:12,padding:"7px 14px"}} onClick={async ()=>{
@@ -7235,14 +7238,14 @@ export default function App() {
         <div style={{maxWidth:960,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
           {/* Шапка + табы — скрываем в режиме редактора договора (у него своя шапка) */}
           {contractTab !== "editor" && (<>
-          <div className="contracts-header" style={{background:"#ffffff",borderBottom:"1px solid #e2e8f0",padding:"12px 24px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
+          <div className="contracts-header" style={{background:"linear-gradient(135deg,#0f172a,#1e293b)",borderBottom:"1px solid #0f172a",padding:"14px 24px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10,boxShadow:"0 2px 12px rgba(15,23,42,.2)"}}>
             <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
-            <div style={{width:28,height:28,borderRadius:8,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#fff",boxShadow:"0 2px 8px rgba(37,99,235,.35)"}}>📄</div>
-            <div style={{fontWeight:800,fontSize:14,color:"#0f172a"}}>Прочие договора</div>
+            <div style={{width:28,height:28,borderRadius:8,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#fff",boxShadow:"0 2px 8px rgba(37,99,235,.45)"}}>📄</div>
+            <div style={{fontWeight:800,fontSize:14,color:"#f1f5f9"}}>Прочие договора</div>
             <div style={{flex:1}}/>
             {["list","clients","contragents"].includes(contractTab) && currentUser.role === "admin" && (
               <button onClick={()=>openListBackups(contractTab)}
-                style={{background:"rgba(0,0,0,.03)",color:"#64748b",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                style={{background:"rgba(255,255,255,.08)",color:"#cbd5e1",border:"1px solid rgba(255,255,255,.15)",borderRadius:8,padding:"7px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
                 🕘 Бэкапы
               </button>
             )}
