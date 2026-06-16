@@ -5179,9 +5179,9 @@ export default function App() {
         <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40}}>
 
           {/* Заголовок — Hero Banner */}
-          <div style={{background:"linear-gradient(135deg,#1e3a8a 0%,#2563eb 60%,#3b82f6 100%)",borderRadius:16,padding:"28px 32px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(37,99,235,.35)"}}>
-            <div style={{position:"absolute",top:-30,right:-30,width:180,height:180,borderRadius:"50%",background:"rgba(255,255,255,.06)"}}/>
-            <div style={{position:"absolute",bottom:-50,right:60,width:120,height:120,borderRadius:"50%",background:"rgba(255,255,255,.04)"}}/>
+          <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"28px 32px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
+            <div style={{position:"absolute",top:-30,right:-30,width:180,height:180,borderRadius:"50%",background:"rgba(59,130,246,.08)"}}/>
+            <div style={{position:"absolute",bottom:-50,right:60,width:120,height:120,borderRadius:"50%",background:"rgba(59,130,246,.05)"}}/>
             <div style={{position:"relative",zIndex:1,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
               <div>
                 <div style={{fontSize:22,fontWeight:900,color:"#fff",letterSpacing:-.5,marginBottom:4,fontFamily:"'Poppins',sans-serif"}}>
@@ -6412,8 +6412,8 @@ export default function App() {
         const PERIOD_BTNS = [["all","Всё время"],["month","Месяц"],["3month","3 месяца"],["week","Неделя"],["custom","Вручную"]];
         return (
           <div className="page">
-            <div style={{background:"linear-gradient(135deg,#1e3a8a 0%,#2563eb 60%,#3b82f6 100%)",borderRadius:16,padding:"24px 28px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(37,99,235,.3)"}}>
-              <div style={{position:"absolute",top:-30,right:-30,width:160,height:160,borderRadius:"50%",background:"rgba(255,255,255,.06)"}}/>
+            <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"24px 28px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
+              <div style={{position:"absolute",top:-30,right:-30,width:160,height:160,borderRadius:"50%",background:"rgba(59,130,246,.08)"}}/>
               <div style={{position:"relative",zIndex:1}}>
                 <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#fff"}}>📊 Аналитика</h1>
                 <div style={{fontSize:13,color:"rgba(255,255,255,.75)",marginTop:4}}>Статистика по объектам и договорам</div>
