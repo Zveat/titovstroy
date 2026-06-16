@@ -3477,9 +3477,28 @@ export default function App() {
       .slice(0,10);
     const TYPE_L2 = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронирование"};
     const byConType = {}; for(const c of baseCon){ const t=TYPE_L2[c.type||"repair_fiz"]||"--"; byConType[t]=(byConType[t]||0)+1; }
+
+    // ── G. Средний цикл сделки (от создания до подписания, в днях) ──
+    const signedObjs = baseObjs.filter(o=>o.status==="signed"&&o.createdAt&&o.updatedAt&&o.updatedAt>o.createdAt);
+    const avgDealDays = signedObjs.length>0 ? Math.round(signedObjs.reduce((s,o)=>s+Math.floor((o.updatedAt-o.createdAt)/864e5),0)/signedObjs.length) : null;
+
+    // ── H. Конверсия по типу объекта ──
+    const convByType = {};
+    for(const o of baseObjs){
+      const t = o.objType||"Вторичка";
+      if(!convByType[t]) convByType[t]={total:0,signed:0,sumAll:0,sumSigned:0};
+      convByType[t].total++;
+      convByType[t].sumAll += objVal(o);
+      if(o.status==="signed"){ convByType[t].signed++; convByType[t].sumSigned+=objVal(o); }
+    }
+
+    // ── I. Топ-5 объектов периода по сумме ──
+    const topObjects = [...withSumEst].sort((a,b)=>objVal(b)-objVal(a)).slice(0,5);
+
     return { baseEst: baseObjs, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType, TYPE_L2,
       wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin,
-      funnel, winRateOverall, winRateSent, agreedB, sentB, catProfit, monthly, staleSent };
+      funnel, winRateOverall, winRateSent, agreedB, sentB, catProfit, monthly, staleSent,
+      avgDealDays, signedObjsCount: signedObjs.length, convByType, topObjects, objVal };
   }, [estimates, contracts, objects, statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers, catalogVersion]);
 
   // Защита от краша: если activeCat не в Gdyn — берём первый
@@ -5128,164 +5147,192 @@ export default function App() {
         const thisMonth = new Date().getMonth();
         const thisYear = new Date().getFullYear();
         const _inMonth = ts => { const d=new Date(ts||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; };
-        const contractsThisMonth = contracts.filter(c=>_inMonth(c.date||0));
-        // объекты и их суммы (сумма объекта = все его сметы)
+        // объекты и их суммы
         const _estByObjId = {}; for(const e of estimates){ if(e.objectId){ (_estByObjId[e.objectId]||(_estByObjId[e.objectId]=[])).push(e); } }
         const _objVal = o => (_estByObjId[o.id]||[]).reduce((s,e)=>s+(e.total||0),0);
         const _objCost = o => { const cat = getEffectiveCatalog(); const lk = new Map(); for(const w of cat){ if(w?.name)lk.set(w.name,w); if(w?.code)lk.set(w.code,w); } let c=0; for(const e of (_estByObjId[o.id]||[])){ for(const [k,r] of Object.entries(e.rows||{})){ const q=Number(r?.qty||0); if(!q) continue; const w=lk.get(k); if(w)c+=(Number(w.cost)||0)*q; } } return c; };
         const objectsThisMonth = objects.filter(o=>_inMonth(o.updatedAt||o.createdAt||0));
         const objectsWithSum = objectsThisMonth.filter(o=>_objVal(o)>0);
         const totalSumMonth = objectsWithSum.reduce((s,o)=>s+_objVal(o), 0);
-        const totalCostMonth = objectsWithSum.reduce((s,o)=>s+_objCost(o), 0);
-        const profitMonth = totalSumMonth - totalCostMonth;
-        const marginMonth = totalSumMonth>0 ? Math.round(profitMonth/totalSumMonth*100) : 0;
+        const signedMonth = objectsThisMonth.filter(o=>o.status==="signed"&&_objVal(o)>0);
+        const signedRevMonth = signedMonth.reduce((s,o)=>s+_objVal(o), 0);
+        const signedCostMonth = signedMonth.reduce((s,o)=>s+_objCost(o), 0);
+        const profitMonth = signedRevMonth - signedCostMonth;
+        const marginMonth = signedRevMonth>0 ? Math.round(profitMonth/signedRevMonth*100) : 0;
+        const approvalObjs = objects.filter(o=>o.status==="approval");
+        const signedObjs = objects.filter(o=>o.status==="signed");
+        const pipelineSum = approvalObjs.reduce((s,o)=>s+_objVal(o), 0);
+        const now = Date.now();
+        const staleObjs = approvalObjs.filter(o=>(now-(o.updatedAt||o.createdAt||0))>14*864e5);
+        const recentObjects = [...objects].sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0)).slice(0,6);
         const recentContracts = [...contracts].filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,5);
-        const recentEstimates = [...estimates].filter(e=>(e.total||0)>0).sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0)).slice(0,5);
+        const monthName = new Date().toLocaleDateString("ru-RU",{month:"long"});
         return (
-        <div className="page">
-          {/* Заголовок */}
-          <div style={{marginBottom:32,display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
-            <div>
-              <h1 style={{margin:0,fontSize:26,fontWeight:900,color:"#111827",letterSpacing:-.5}}>
-                TitovStroy <span style={{color:"#2563eb"}}>CRM</span>
-              </h1>
-              <div style={{fontSize:13,color:"#6b7280",marginTop:4}}>
-                {new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
-                {" · "}<span style={{color:"#2563eb"}}>{currentUser.role==="admin"?"Администратор":currentUser.role==="viewer"?"Просмотр":currentUser.name}</span>
+        <div className="page" style={{background:"#f8fafc",minHeight:"100vh",paddingBottom:40}}>
+
+          {/* Заголовок — Hero Banner */}
+          <div style={{background:"linear-gradient(135deg,#1e3a8a 0%,#2563eb 60%,#3b82f6 100%)",borderRadius:16,padding:"28px 32px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(37,99,235,.35)"}}>
+            <div style={{position:"absolute",top:-30,right:-30,width:180,height:180,borderRadius:"50%",background:"rgba(255,255,255,.06)"}}/>
+            <div style={{position:"absolute",bottom:-50,right:60,width:120,height:120,borderRadius:"50%",background:"rgba(255,255,255,.04)"}}/>
+            <div style={{position:"relative",zIndex:1,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+              <div>
+                <div style={{fontSize:22,fontWeight:900,color:"#fff",letterSpacing:-.5,marginBottom:4}}>
+                  TitovStroy <span style={{opacity:.75}}>CRM</span>
+                </div>
+                <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>
+                  {new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
+                  {" · "}<span style={{color:"#bfdbfe",fontWeight:600}}>{currentUser.role==="admin"?"Администратор":currentUser.role==="viewer"?"Просмотр":currentUser.name}</span>
+                </div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                {staleObjs.length>0&&<span style={{background:"rgba(251,191,36,.2)",color:"#fde68a",border:"1px solid rgba(251,191,36,.3)",borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:700}}>⚠ {staleObjs.length} требуют внимания</span>}
+                <span style={{fontSize:11,fontWeight:600,display:"flex",alignItems:"center",gap:5,padding:"4px 12px",borderRadius:20,background:"rgba(255,255,255,.15)",color:"rgba(255,255,255,.9)",backdropFilter:"blur(4px)"}}>
+                  {syncStatus==="saving"?"⏳ Сохраняю...":syncStatus==="saved"?"✓ Сохранено":syncStatus==="error"?"⚠ Ошибка":"☁ Синк"}
+                </span>
               </div>
             </div>
-            <span style={{fontSize:11,fontWeight:600,display:"flex",alignItems:"center",gap:5,padding:"4px 10px",borderRadius:20,background: syncStatus==="saving"?"rgba(37,99,235,.08)":syncStatus==="saved"?"rgba(5,150,105,.08)":syncStatus==="error"?"rgba(220,38,38,.08)":"rgba(0,0,0,.04)",color:syncStatus==="saving"?"#2563eb":syncStatus==="saved"?"#059669":syncStatus==="error"?"#dc2626":"#9ca3af",transition:"all .3s"}}>
-              {syncStatus==="saving"?"⏳ Сохраняю...":syncStatus==="saved"?"☁ Сохранено":syncStatus==="error"?"⚠ Ошибка синка":"☁ Синк"}
-            </span>
+            {/* Мини-метрики в баннере */}
+            <div style={{display:"flex",gap:24,marginTop:20,flexWrap:"wrap"}}>
+              {[
+                {label:"Объектов всего",  val:objects.length},
+                {label:"В согласовании", val:approvalObjs.length},
+                {label:"Договоров",       val:signedObjs.length},
+              ].map((m,i)=>(
+                <div key={i} style={{textAlign:"center"}}>
+                  <div style={{fontSize:26,fontWeight:900,color:"#fff",lineHeight:1}}>{m.val}</div>
+                  <div style={{fontSize:11,color:"rgba(255,255,255,.6)",marginTop:3}}>{m.label}</div>
+                </div>
+              ))}
+            </div>
           </div>
 
-          {/* Статы */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:32}}>
+          {/* KPI карточки */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(175px,1fr))",gap:12,marginBottom:24}}>
             {[
-              {label:"Объектов за месяц",  value:objectsThisMonth.length,  sub:"из "+objects.length+" всего", color:"#2563eb"},
-              {label:"Объектов в работе", value:objects.filter(o=>o.status==="approval").length, sub:"согласование с клиентом", color:"#d97706"},
-              {label:"Договоров подписано",value:objects.filter(o=>o.status==="signed").length,  sub:"из "+objects.length+" всего объектов", color:"#059669"},
-              {label:"Объём за месяц",    value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма смет объектов за месяц", color:"#059669"},
-              {label:"Прибыль за месяц",  value:fmt(Math.round(profitMonth))+" ₸",   sub:"выручка минус себестоимость", color:"#059669"},
-              {label:"Маржа за месяц",    value:marginMonth+"%", sub:"по объектам месяца", color:marginMonth>=35?"#059669":marginMonth>=20?"#d97706":"#ef4444"},
+              {label:"Объектов за "+monthName, value:objectsThisMonth.length, sub:"активность месяца",
+               icon:"📋", grad:"linear-gradient(135deg,#eff6ff,#dbeafe)", accent:"#2563eb", border:"rgba(37,99,235,.2)"},
+              {label:"Объём за "+monthName, value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма смет",
+               icon:"💰", grad:"linear-gradient(135deg,#f0fdf4,#dcfce7)", accent:"#059669", border:"rgba(5,150,105,.2)"},
+              {label:"Прибыль за "+monthName, value:fmt(Math.round(profitMonth))+" ₸", sub:"по подписанным",
+               icon:"📈", grad:"linear-gradient(135deg,#f0fdf4,#dcfce7)", accent:profitMonth>0?"#059669":"#ef4444", border:profitMonth>0?"rgba(5,150,105,.2)":"rgba(239,68,68,.2)"},
+              {label:"Маржа за "+monthName, value:marginMonth+"%", sub:"рентабельность",
+               icon:"🎯", grad:"linear-gradient(135deg,"+(marginMonth>=35?"#f0fdf4,#dcfce7":marginMonth>=20?"#fffbeb,#fef3c7":"#fef2f2,#fee2e2")+")", accent:marginMonth>=35?"#059669":marginMonth>=20?"#d97706":"#ef4444", border:marginMonth>=35?"rgba(5,150,105,.2)":marginMonth>=20?"rgba(217,119,6,.2)":"rgba(239,68,68,.2)"},
+              {label:"Пайплайн (согласование)", value:fmt(Math.round(pipelineSum))+" ₸", sub:approvalObjs.length+" объектов",
+               icon:"🔄", grad:"linear-gradient(135deg,#fffbeb,#fef3c7)", accent:"#d97706", border:"rgba(217,119,6,.2)"},
+              {label:"Договоров подписано", value:signedObjs.length, sub:"из "+objects.length+" всего",
+               icon:"✅", grad:"linear-gradient(135deg,#f0fdf4,#dcfce7)", accent:"#059669", border:"rgba(5,150,105,.2)"},
             ].map((s,i)=>(
-              <div key={i} style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:8,padding:"18px 18px 16px",boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
-                
-                <div style={{fontSize:11,color:"#9ca3af",fontWeight:500,marginBottom:8}}>{s.label}</div>
-                <div style={{fontSize:28,fontWeight:800,color:"#111827",lineHeight:1,marginBottom:6}}>{s.value}</div>
-                {s.sub && <div style={{fontSize:11,color:"#9ca3af",marginTop:4}}>{s.sub}</div>}
+              <div key={i} style={{background:s.grad,border:`1px solid ${s.border}`,borderRadius:12,padding:"18px 16px",boxShadow:"0 1px 4px rgba(0,0,0,.06)",transition:"transform .15s,box-shadow .15s"}}
+                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 6px 16px rgba(0,0,0,.1)";}}
+                onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 4px rgba(0,0,0,.06)";}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                  <div style={{fontSize:11,color:"#6b7280",fontWeight:600,lineHeight:1.3,flex:1}}>{s.label}</div>
+                  <span style={{fontSize:18,marginLeft:6}}>{s.icon}</span>
+                </div>
+                <div style={{fontSize:22,fontWeight:900,color:s.accent,lineHeight:1,marginBottom:5}}>{s.value}</div>
+                <div style={{fontSize:11,color:"#9ca3af"}}>{s.sub}</div>
               </div>
             ))}
           </div>
 
-          {/* Разделы */}
-          <div style={{fontSize:13,color:"#111827",fontWeight:700,marginBottom:14}}>Разделы</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:12,marginBottom:36}}>
-            {[
-              {id:"objects",   icon:"▦",title:"Объекты",     desc:"Клиенты, сметы, договора", stat:objects.length+" объектов",   color:"#2563eb",bg:"#ffffff",border:"#e5e7eb"},
-              {id:"contracts", icon:"◻",title:"Прочие договора", desc:"Договора вне объектов",  stat:contracts.length+" договоров", color:"#2563eb",bg:"#ffffff",border:"#e5e7eb"},
-              {id:"analytics", icon:"↗",title:"Аналитика",  desc:"Статистика и отчёты",    stat:"За "+new Date().toLocaleDateString("ru-RU",{month:"long"}), color:"#2563eb",bg:"#ffffff",border:"#e5e7eb"},
-            ].map(card=>(
-              <div key={card.id} onClick={()=>{ setScreen(card.id); }}
-                style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:8,padding:"24px",cursor:"pointer",transition:"background .1s,border-color .1s,box-shadow .1s",boxShadow:"0 1px 2px rgba(0,0,0,.04)"}}
-                onMouseEnter={e=>{e.currentTarget.style.backgroundColor="#f3f4f6";}}
-                onMouseLeave={e=>{e.currentTarget.style.boxShadow="none";e.currentTarget.style.borderColor="#e5e7eb";}}>
-                <div style={{fontSize:22,marginBottom:14,color:"#9ca3af",fontWeight:300,lineHeight:1}}>{card.icon}</div>
-                <div style={{fontWeight:700,fontSize:15,color:"#111827",marginBottom:5}}>{card.title}</div>
-                <div style={{fontSize:12,color:"#9ca3af",marginBottom:14}}>{card.desc}</div>
-                <div style={{display:"inline-block",background:"#e5e7eb",border:"1px solid #e5e7eb",color:"#9ca3af",borderRadius:4,padding:"3px 10px",fontSize:11,fontWeight:600}}>{card.stat}</div>
+          {/* Требуют внимания */}
+          {staleObjs.length>0&&(
+            <div style={{background:"linear-gradient(135deg,#fffbeb,#fef3c7)",border:"1px solid rgba(217,119,6,.25)",borderRadius:12,padding:"16px 20px",marginBottom:24,boxShadow:"0 1px 4px rgba(217,119,6,.1)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+                <span style={{fontSize:16}}>⚠️</span>
+                <span style={{fontWeight:700,fontSize:14,color:"#92400e"}}>Требуют внимания — {staleObjs.length} объект{staleObjs.length===1?"":"ов"} без движения 14+ дней</span>
               </div>
-            ))}
-          </div>
-
-          {/* Воронка по статусам объектов */}
-          {objects.length > 0 && (()=>{
-            const maxCount = Math.max(1, ...DEAL_STATUSES.map(s=>objects.filter(o=>(o.status||"new")===s.key).length));
-            const signedCount = objects.filter(o=>o.status==="signed").length;
-            const nonArchive = objects.filter(o=>o.status!=="archive").length;
-            const convToSigned = nonArchive>0 ? Math.round(signedCount/nonArchive*100) : 0;
-            return (
-              <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"20px 22px",marginBottom:36,boxShadow:"0 1px 2px rgba(0,0,0,.04)"}}>
-                <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:16}}>
-                  <span style={{fontWeight:700,fontSize:15,color:"#111827"}}>Статусы объектов</span>
-                  <span style={{fontSize:12,color:"#6b7280"}}>
-                    Договоров подписано: <b style={{color:"#059669"}}>{convToSigned}%</b>
-                    <span style={{color:"#9ca3af"}}> · {objects.length} объектов всего</span>
-                  </span>
-                </div>
-                <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                  {DEAL_STATUSES.map(s=>{
-                    const list = objects.filter(o=>(o.status||"new")===s.key);
-                    const sum = list.reduce((acc,o)=>acc+(_estByObjId[o.id]||[]).reduce((ss,e)=>ss+(e.total||0),0),0);
-                    const w = Math.round((list.length/maxCount)*100);
-                    return (
-                      <div key={s.key} style={{display:"flex",alignItems:"center",gap:12}}>
-                        <span className="an-bar-label" style={{fontSize:12,fontWeight:600,color:s.color,width:160,flexShrink:0}}>{s.label}</span>
-                        <div style={{flex:1,minWidth:60,background:"rgba(0,0,0,.04)",borderRadius:6,height:24,position:"relative",overflow:"hidden"}}>
-                          <div style={{width:`${w}%`,minWidth:list.length>0?28:0,height:"100%",background:s.bg,borderLeft:`3px solid ${s.color}`,transition:"width .3s"}}/>
-                          <span style={{position:"absolute",left:8,top:0,height:"100%",display:"flex",alignItems:"center",fontSize:12,fontWeight:700,color:s.color}}>{list.length}</span>
-                        </div>
-                        <span className="an-bar-right" style={{fontSize:12,color:"#6b7280",width:130,textAlign:"right",flexShrink:0}}>{sum>0?fmt(Math.round(sum))+" ₸":"—"}</span>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {staleObjs.slice(0,4).map(o=>{
+                  const days = Math.floor((now-(o.updatedAt||o.createdAt||0))/864e5);
+                  const val = _objVal(o);
+                  return (
+                    <div key={o.id} onClick={()=>{ setCurrentObject(o); setObjectTab("info"); setScreen("objects"); }}
+                      style={{display:"flex",alignItems:"center",gap:10,background:"rgba(255,255,255,.7)",borderRadius:8,padding:"8px 12px",cursor:"pointer",transition:"background .1s"}}
+                      onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,.95)"}
+                      onMouseLeave={e=>e.currentTarget.style.background="rgba(255,255,255,.7)"}>
+                      <div style={{width:8,height:8,borderRadius:"50%",background:"#f59e0b",flexShrink:0}}/>
+                      <div style={{flex:1,minWidth:0}}>
+                        <span style={{fontWeight:600,fontSize:13,color:"#111827"}}>{o.clientName||"Без клиента"}</span>
+                        {o.address&&<span style={{fontSize:12,color:"#6b7280",marginLeft:6}}>{o.address}</span>}
                       </div>
-                    );
-                  })}
-                </div>
+                      <span style={{fontSize:11,color:"#b45309",fontWeight:600,flexShrink:0}}>{days} дн.</span>
+                      {val>0&&<span style={{fontSize:12,fontWeight:700,color:"#111827",flexShrink:0}}>{fmt(Math.round(val))} ₸</span>}
+                    </div>
+                  );
+                })}
+                {staleObjs.length>4&&<div style={{fontSize:12,color:"#b45309",paddingLeft:4}}>+{staleObjs.length-4} ещё — <span style={{cursor:"pointer",textDecoration:"underline"}} onClick={()=>setScreen("objects")}>смотреть все</span></div>}
               </div>
-            );
-          })()}
+            </div>
+          )}
 
-          {/* Лента активности */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:16}}>
-            {/* Последние сметы */}
-            {recentEstimates.length>0 && (
-              <div>
-                <div style={{fontSize:13,color:"#111827",fontWeight:700,marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span>Последние сметы</span>
-                  <span onClick={()=>setScreen("objects")} style={{color:"#2563eb",cursor:"pointer",textTransform:"none",fontSize:11,letterSpacing:0}}>все →</span>
-                </div>
-                <div style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:6,overflow:"hidden"}}>
-                  {recentEstimates.map((est,i,arr)=>{
-                    const total = est.total || 0;
-                    return (
-                      <div key={est.id} onClick={()=>openEstimate(est)}
-                        style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<arr.length-1?"1px solid #e5e7eb":"none",cursor:"pointer",transition:"background .1s"}}
-                        onMouseEnter={e=>e.currentTarget.style.background="#ffffff"}
-                        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                        <div style={{width:3,height:3,borderRadius:"50%",background:"#d1d5db",flexShrink:0,marginTop:5}}/>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:13,color:"#111827",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{est.proj?.name||"Без названия"}</div>
-                          <div style={{fontSize:12,color:"#9ca3af",marginTop:1}}>{est.updatedAt?new Date(est.updatedAt).toLocaleDateString("ru-RU"):""}</div>
+          {/* Воронка + Последние объекты */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:16,marginBottom:24}}>
+
+            {/* Воронка по статусам */}
+            {objects.length>0&&(()=>{
+              const maxCount = Math.max(1,...DEAL_STATUSES.map(s=>objects.filter(o=>(o.status||"new")===s.key).length));
+              const signedCount = objects.filter(o=>o.status==="signed").length;
+              const nonArchive = objects.filter(o=>o.status!=="archive").length;
+              const convToSigned = nonArchive>0?Math.round(signedCount/nonArchive*100):0;
+              return (
+                <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:"20px 22px",boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+                  <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:16}}>
+                    <span style={{fontWeight:700,fontSize:14,color:"#111827"}}>📊 Воронка объектов</span>
+                    <span style={{fontSize:12,color:"#6b7280"}}>
+                      <b style={{color:"#059669"}}>{convToSigned}%</b> подписано
+                    </span>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                    {DEAL_STATUSES.map(s=>{
+                      const list = objects.filter(o=>(o.status||"new")===s.key);
+                      const sum = list.reduce((acc,o)=>acc+(_estByObjId[o.id]||[]).reduce((ss,e)=>ss+(e.total||0),0),0);
+                      const w = Math.round((list.length/maxCount)*100);
+                      return (
+                        <div key={s.key} onClick={()=>{ setObjectFilterStatus(s.key); setScreen("objects"); }}
+                          style={{cursor:"pointer"}}
+                          title={"Показать: "+s.label}>
+                          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
+                            <span style={{fontSize:11,fontWeight:700,color:s.color,width:130,flexShrink:0}}>{s.label}</span>
+                            <span style={{fontSize:11,color:"#9ca3af",flex:1,textAlign:"right"}}>{sum>0?fmt(Math.round(sum))+" ₸":"—"}</span>
+                          </div>
+                          <div style={{background:"#f3f4f6",borderRadius:6,height:22,position:"relative",overflow:"hidden"}}>
+                            <div style={{width:`${w}%`,minWidth:list.length>0?32:0,height:"100%",background:s.bg,borderLeft:`3px solid ${s.color}`,transition:"width .3s",borderRadius:"0 4px 4px 0"}}/>
+                            <span style={{position:"absolute",left:10,top:0,height:"100%",display:"flex",alignItems:"center",fontSize:12,fontWeight:800,color:s.color}}>{list.length}</span>
+                          </div>
                         </div>
-                        {total>0 && <div style={{fontSize:13,fontWeight:700,color:"#111827",flexShrink:0}}>{fmt(total)} ₸</div>}
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
-            {/* Последние договора */}
-            {recentContracts.length>0 && (
-              <div>
-                <div style={{fontSize:13,color:"#111827",fontWeight:700,marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span>Последние договора</span>
-                  <span onClick={()=>setScreen("contracts")} style={{color:"#2563eb",cursor:"pointer",textTransform:"none",fontSize:11,letterSpacing:0}}>все →</span>
+              );
+            })()}
+
+            {/* Последние объекты */}
+            {recentObjects.length>0&&(
+              <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:"20px 22px",boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+                  <span style={{fontWeight:700,fontSize:14,color:"#111827"}}>🕐 Последние объекты</span>
+                  <span onClick={()=>setScreen("objects")} style={{color:"#2563eb",cursor:"pointer",fontSize:11,fontWeight:600}}>все →</span>
                 </div>
-                <div style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:6,overflow:"hidden"}}>
-                  {recentContracts.map((c,i,arr)=>{
-                    const cl = contractClients.find(x=>x.id===c.clientId);
-                    const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
-                    const TYPE_L = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Дизайн",design_add:"Доп. дизайн",reservation:"Бронь"};
+                <div style={{display:"flex",flexDirection:"column",gap:1}}>
+                  {recentObjects.map((o,i,arr)=>{
+                    const st = DEAL_STATUSES.find(s=>s.key===(o.status||"new"))||DEAL_STATUSES[0];
+                    const val = _objVal(o);
                     return (
-                      <div key={c.id} onClick={()=>{ setCurrentContract({...c}); setContractTab("editor"); setScreen("contracts"); }}
-                        style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:i<arr.length-1?"1px solid #e5e7eb":"none",cursor:"pointer",transition:"background .1s"}}
-                        onMouseEnter={e=>e.currentTarget.style.background="#ffffff"}
+                      <div key={o.id} onClick={()=>{ setCurrentObject(o); setObjectTab("info"); setScreen("objects"); }}
+                        style={{display:"flex",alignItems:"center",gap:10,padding:"9px 10px",borderRadius:8,cursor:"pointer",transition:"background .1s",borderBottom:i<arr.length-1?"1px solid #f3f4f6":"none"}}
+                        onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"}
                         onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                        <div style={{width:7,height:7,borderRadius:"50%",background:"#d1d5db",flexShrink:0}}/>
+                        <div style={{width:6,height:6,borderRadius:"50%",background:st.color,flexShrink:0}}/>
                         <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:13,color:"#111827",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{TYPE_L[c.type||"repair_fiz"]||"Договор"} №{c.number||"—"}</div>
-                          <div style={{fontSize:12,color:"#9ca3af",marginTop:1}}>{cl?.name||c.estClient||"Клиент не выбран"}</div>
+                          <div style={{fontWeight:600,fontSize:13,color:"#111827",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{o.clientName||"Без клиента"}</div>
+                          <div style={{fontSize:11,color:"#9ca3af",display:"flex",gap:6,alignItems:"center",marginTop:1}}>
+                            <span style={{color:st.color,fontWeight:600}}>{st.label}</span>
+                            {o.address&&<span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.address}</span>}
+                          </div>
                         </div>
-                        {total>0 && <div style={{fontSize:13,fontWeight:700,color:"#111827",flexShrink:0}}>{fmt(total)} ₸</div>}
+                        {val>0&&<div style={{fontSize:12,fontWeight:700,color:"#111827",flexShrink:0}}>{fmt(Math.round(val))} ₸</div>}
                       </div>
                     );
                   })}
@@ -5293,6 +5340,33 @@ export default function App() {
               </div>
             )}
           </div>
+
+          {/* Последние договора */}
+          {recentContracts.length>0&&(
+            <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:"20px 22px",boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+                <span style={{fontWeight:700,fontSize:14,color:"#111827"}}>📄 Прочие договора</span>
+                <span onClick={()=>setScreen("contracts")} style={{color:"#2563eb",cursor:"pointer",fontSize:11,fontWeight:600}}>все →</span>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:8}}>
+                {recentContracts.map((c)=>{
+                  const cl = contractClients.find(x=>x.id===c.clientId);
+                  const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
+                  const TYPE_L = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Дизайн",design_add:"Доп. дизайн",reservation:"Бронь"};
+                  return (
+                    <div key={c.id} onClick={()=>{ setCurrentContract({...c}); setContractTab("editor"); setScreen("contracts"); }}
+                      style={{background:"#f8fafc",border:"1px solid #e5e7eb",borderRadius:8,padding:"12px 14px",cursor:"pointer",transition:"background .1s,box-shadow .1s"}}
+                      onMouseEnter={e=>{e.currentTarget.style.background="#eff6ff";e.currentTarget.style.borderColor="rgba(37,99,235,.3)";}}
+                      onMouseLeave={e=>{e.currentTarget.style.background="#f8fafc";e.currentTarget.style.borderColor="#e5e7eb";}}>
+                      <div style={{fontWeight:600,fontSize:13,color:"#111827",marginBottom:3}}>{TYPE_L[c.type||"repair_fiz"]||"Договор"} №{c.number||"—"}</div>
+                      <div style={{fontSize:11,color:"#9ca3af",marginBottom:6}}>{cl?.name||c.estClient||"Клиент не выбран"}</div>
+                      {total>0&&<div style={{fontSize:13,fontWeight:800,color:"#059669"}}>{fmt(total)} ₸</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
         );
       })()}
@@ -6325,7 +6399,8 @@ export default function App() {
       {/* ЭКРАН: АНАЛИТИКА */}
       {effScreen === "analytics" && (()=>{
         const { baseEst, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType, TYPE_L2,
-          wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin, funnel, winRateOverall, winRateSent, agreedB, sentB, catProfit, monthly, staleSent } = analyticsData;
+          wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin, funnel, winRateOverall, winRateSent, agreedB, sentB, catProfit, monthly, staleSent,
+          avgDealDays, signedObjsCount, convByType, topObjects, objVal } = analyticsData;
         const PERIOD_BTNS = [["all","Всё время"],["month","Месяц"],["3month","3 месяца"],["week","Неделя"],["custom","Вручную"]];
         return (
           <div className="page">
@@ -6361,7 +6436,7 @@ export default function App() {
               </div>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:20}}>
-              {[["Объектов",totalEst,"в периоде","#2563eb"],["Объём",fmt(totalSumEst)+" ₸","сумма смет","#2563eb"],["Ср. чек",fmt(avgEst)+" ₸","на объект","#059669"],["Договоров",totalCon,"в периоде","#2563eb"],["Объём дог.",fmt(totalSumCon)+" ₸","сумма","#2563eb"],["Ср. дог.",fmt(avgCon)+" ₸","по договорам","#059669"]].map(([l,v,s,c],i)=>(
+              {[["Объектов",totalEst,"в периоде","#2563eb"],["Объём объектов",fmt(totalSumEst)+" ₸","сумма смет","#2563eb"],["Ср. чек",fmt(avgEst)+" ₸","на объект","#059669"],["Договоров",totalCon,"прочих (вне объектов)","#2563eb"],["Объём договоров",fmt(totalSumCon)+" ₸","прочие договора","#2563eb"],["Средний договор",fmt(avgCon)+" ₸","прочие договора","#059669"]].map(([l,v,s,c],i)=>(
                 <div key={i} style={{background:"#f3f4f6",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px 14px 12px",position:"relative",overflow:"hidden"}}>
                   <div style={{position:"absolute",top:0,left:0,width:3,height:"100%",background:c,borderRadius:"3px 0 0 3px"}}/>
                   <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase",letterSpacing:.8,marginBottom:6}}>{l}</div>
@@ -6513,6 +6588,69 @@ export default function App() {
                   ))}
                 </div>
                 <div style={{fontSize:10,color:"#9ca3af",marginTop:8}}>Оборот/прибыль — в тыс. ₸. Конверсия = согласовано / (отправлено + согласовано).</div>
+              </div>
+            )}
+
+            {/* ── G+H. Цикл сделки + Конверсия по типу ── */}
+            {(avgDealDays!==null || Object.keys(convByType).length>0) && (
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:16,marginBottom:16}}>
+                {avgDealDays!==null && (
+                  <div style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:10,padding:"18px 20px",boxShadow:"0 1px 2px rgba(0,0,0,.04)"}}>
+                    <div style={{fontSize:11,color:"#7c3aed",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>⏱ Средний цикл сделки</div>
+                    <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
+                      <span style={{fontSize:36,fontWeight:900,color:"#111827"}}>{avgDealDays}</span>
+                      <span style={{fontSize:14,color:"#6b7280"}}>дней</span>
+                    </div>
+                    <div style={{fontSize:12,color:"#9ca3af"}}>от создания объекта до подписания договора</div>
+                    <div style={{fontSize:12,color:"#9ca3af",marginTop:4}}>по {signedObjsCount} подписанным договорам в периоде</div>
+                  </div>
+                )}
+                {Object.keys(convByType).length>0 && (
+                  <div style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:10,padding:"18px 20px",boxShadow:"0 1px 2px rgba(0,0,0,.04)"}}>
+                    <div style={{fontSize:11,color:"#059669",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>🏠 Конверсия по типу объекта</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                      {Object.entries(convByType).sort((a,b)=>b[1].total-a[1].total).map(([t,d])=>{
+                        const conv = d.total>0 ? Math.round(d.signed/d.total*100) : 0;
+                        return (
+                          <div key={t} style={{display:"flex",alignItems:"center",gap:10}}>
+                            <span style={{fontSize:12,color:"#374151",width:100,flexShrink:0}}>{t}</span>
+                            <div style={{flex:1,background:"rgba(0,0,0,.04)",borderRadius:4,height:20,position:"relative",overflow:"hidden"}}>
+                              <div style={{width:conv+"%",height:"100%",background:"rgba(5,150,105,.15)",borderLeft:"3px solid #059669"}}/>
+                              <span style={{position:"absolute",left:8,top:0,height:"100%",display:"flex",alignItems:"center",fontSize:11,fontWeight:700,color:"#059669"}}>{d.signed}/{d.total}</span>
+                            </div>
+                            <span style={{fontSize:12,fontWeight:700,color:conv>=50?"#059669":conv>=25?"#d97706":"#6b7280",width:36,textAlign:"right"}}>{conv}%</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{fontSize:10,color:"#9ca3af",marginTop:8}}>подписано / всего объектов</div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── I. Топ объектов по сумме ── */}
+            {topObjects.length>0 && (
+              <div style={{background:"#ffffff",border:"1px solid #e5e7eb",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 2px rgba(0,0,0,.04)"}}>
+                <div style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>🏆 Топ объектов периода по сумме</div>
+                <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                  {topObjects.map((o,i)=>{
+                    const v = objVal(o);
+                    const st = DEAL_STATUSES.find(s=>s.key===(o.status||"new"))||DEAL_STATUSES[0];
+                    return (
+                      <div key={o.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",background:"#f9fafb",borderRadius:8,cursor:"pointer"}}
+                        onClick={()=>{setCurrentObject({...o});setObjectTab("workspace");setScreen("objects");}}>
+                        <span style={{fontSize:11,color:"#9ca3af",minWidth:18,fontWeight:700}}>#{i+1}</span>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13,color:"#111827",fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{o.clientName||"Без клиента"}</div>
+                          <div style={{fontSize:11,color:"#9ca3af"}}>{o.objType||"Вторичка"}{o.address?` · ${o.address}`:""}</div>
+                        </div>
+                        <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:3,padding:"1px 6px",flexShrink:0}}>{st.label}</span>
+                        <span style={{fontSize:13,fontWeight:800,color:"#111827",flexShrink:0}}>{fmt(v)} ₸</span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
