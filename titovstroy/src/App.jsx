@@ -1474,7 +1474,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
 
   return (
     <div className="page">
-      <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"24px 28px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
+      <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"24px 28px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
         <div style={{position:"absolute",top:-30,right:-30,width:160,height:160,borderRadius:"50%",background:"rgba(59,130,246,.08)"}}/>
         <div style={{position:"relative",zIndex:1}}>
           <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#fff"}}>⚙️ Администрирование</h1>
@@ -5089,6 +5089,16 @@ export default function App() {
           .an-mtable-num{width:auto!important;min-width:48px!important}
           .user-row{flex-wrap:wrap!important}
           .user-row-btns{width:100%!important;justify-content:flex-end!important;margin-top:8px!important}
+          /* Hero-баннеры: меньше отступов, скругление, без обрезки текста */
+          .hero{padding:18px 18px!important;border-radius:14px!important;margin-bottom:16px!important}
+          .hero h1{font-size:18px!important}
+          /* KPI: ровно 2 колонки на телефоне */
+          .kpi-grid{grid-template-columns:1fr 1fr!important;gap:10px!important}
+          .kpi-grid>div{padding:14px 13px!important;border-radius:14px!important;min-width:0!important}
+          .kpi-val{font-size:18px!important;overflow-wrap:anywhere!important}
+        }
+        @media(max-width:380px){
+          .kpi-grid{grid-template-columns:1fr!important}
         }
         .mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:#ffffff;border-top:1px solid #e2e8f0;z-index:50;box-shadow:0 -4px 16px rgba(15,23,42,.06)}
         .mob-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;gap:3px;border-top:2px solid transparent;transition:all .15s}
@@ -5182,7 +5192,7 @@ export default function App() {
         <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40}}>
 
           {/* Заголовок — Hero Banner */}
-          <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"28px 32px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
+          <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"28px 32px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
             <div style={{position:"absolute",top:-30,right:-30,width:180,height:180,borderRadius:"50%",background:"rgba(59,130,246,.08)"}}/>
             <div style={{position:"absolute",bottom:-50,right:60,width:120,height:120,borderRadius:"50%",background:"rgba(59,130,246,.05)"}}/>
             <div style={{position:"relative",zIndex:1,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
@@ -5218,7 +5228,7 @@ export default function App() {
           </div>
 
           {/* KPI карточки */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14,marginBottom:24}}>
+          <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14,marginBottom:24}}>
             {[
               {label:"Объектов за "+monthName, value:objectsThisMonth.length, sub:"активность месяца", icon:"📋", accent:"#2563eb"},
               {label:"Объём за "+monthName, value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма смет", icon:"💰", accent:"#059669"},
@@ -5235,7 +5245,7 @@ export default function App() {
                   <div style={{fontSize:12,color:"#64748b",fontWeight:600,lineHeight:1.3,flex:1,paddingRight:8}}>{s.label}</div>
                   <span style={{width:38,height:38,borderRadius:11,background:s.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{s.icon}</span>
                 </div>
-                <div style={{fontSize:26,fontWeight:800,color:"#0f172a",lineHeight:1,marginBottom:6,letterSpacing:-.5}}>{s.value}</div>
+                <div className="kpi-val" style={{fontSize:26,fontWeight:800,color:"#0f172a",lineHeight:1,marginBottom:6,letterSpacing:-.5}}>{s.value}</div>
                 <div style={{fontSize:11.5,color:"#94a3b8",fontWeight:500}}>{s.sub}</div>
               </div>
             ))}
@@ -6410,7 +6420,7 @@ export default function App() {
         const PERIOD_BTNS = [["all","Всё время"],["month","Месяц"],["3month","3 месяца"],["week","Неделя"],["custom","Вручную"]];
         return (
           <div className="page">
-            <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"24px 28px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
+            <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"24px 28px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
               <div style={{position:"absolute",top:-30,right:-30,width:160,height:160,borderRadius:"50%",background:"rgba(59,130,246,.08)"}}/>
               <div style={{position:"relative",zIndex:1}}>
                 <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#fff"}}>📊 Аналитика</h1>
@@ -6444,7 +6454,7 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14,marginBottom:20}}>
+            <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14,marginBottom:20}}>
               {[["Объектов",totalEst,"в периоде","#2563eb","📋"],["Объём объектов",fmt(totalSumEst)+" ₸","сумма смет","#2563eb","💰"],["Ср. чек",fmt(avgEst)+" ₸","на объект","#059669","🎯"],["Договоров",totalCon,"прочих (вне объектов)","#2563eb","📄"],["Объём договоров",fmt(totalSumCon)+" ₸","прочие договора","#2563eb","🧾"],["Средний договор",fmt(avgCon)+" ₸","прочие договора","#059669","📊"]].map(([l,v,s,c,ic],i)=>(
                 <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"16px 18px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",position:"relative",overflow:"hidden",transition:"transform .18s ease,box-shadow .18s ease"}}
                   onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
@@ -6454,7 +6464,7 @@ export default function App() {
                     <div style={{fontSize:11.5,color:"#64748b",fontWeight:600,lineHeight:1.3,flex:1,paddingRight:8}}>{l}</div>
                     <span style={{width:34,height:34,borderRadius:10,background:c+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{ic}</span>
                   </div>
-                  <div style={{fontSize:21,fontWeight:800,color:"#0f172a",lineHeight:1,marginBottom:5,letterSpacing:-.5}}>{v}</div>
+                  <div className="kpi-val" style={{fontSize:21,fontWeight:800,color:"#0f172a",lineHeight:1,marginBottom:5,letterSpacing:-.5}}>{v}</div>
                   <div style={{fontSize:11,color:"#94a3b8",fontWeight:500}}>{s}</div>
                 </div>
               ))}
@@ -6840,7 +6850,7 @@ export default function App() {
         return (
         <div className="page" style={{maxWidth:960,minHeight:"100vh"}}>
           {/* Шапка */}
-          <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"22px 26px",marginBottom:20,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
+          <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"22px 26px",marginBottom:20,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
             <div style={{position:"absolute",top:-30,right:-30,width:160,height:160,borderRadius:"50%",background:"rgba(59,130,246,.08)"}}/>
             <div style={{position:"relative",zIndex:1,display:"flex",alignItems:"center",gap:13,flexWrap:"wrap"}}>
               {objectTab==="workspace" && (
@@ -7242,7 +7252,7 @@ export default function App() {
         <div className="page" style={{maxWidth:960,minHeight:"100vh"}}>
           {/* Шапка + табы — скрываем в режиме редактора договора (у него своя шапка) */}
           {contractTab !== "editor" && (<>
-          <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"22px 26px",marginBottom:20,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
+          <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"22px 26px",marginBottom:20,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
             <div style={{position:"absolute",top:-30,right:-30,width:160,height:160,borderRadius:"50%",background:"rgba(59,130,246,.08)"}}/>
             <div style={{position:"relative",zIndex:1,display:"flex",alignItems:"center",gap:13,flexWrap:"wrap"}}>
               <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:22,lineHeight:1,padding:"0 4px"}}>←</button>
