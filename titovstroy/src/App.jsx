@@ -2687,6 +2687,8 @@ export default function App() {
   const [objectFilterStatus, setObjectFilterStatus] = useState("");
   const [objectFilterType, setObjectFilterType] = useState("");
   const [objectFilterManager, setObjectFilterManager] = useState("");
+  const [objectFilterDateFrom, setObjectFilterDateFrom] = useState("");
+  const [objectFilterDateTo, setObjectFilterDateTo] = useState("");
   const [objectSearch, setObjectSearch] = useState("");
   const debouncedObjectSearch = useDebounce(objectSearch, 200);
   const [objectReturnId, setObjectReturnId] = useState(null); // id объекта, куда вернуться из редактора сметы/договора
@@ -2731,11 +2733,13 @@ export default function App() {
         if(objectFilterStatus && (o.status||"new")!==objectFilterStatus) return false;
         if(objectFilterType && (o.objType||"Вторичка")!==objectFilterType) return false;
         if(objectFilterManager && (o.manager||"")!==objectFilterManager) return false;
+        if(objectFilterDateFrom){ const from=new Date(objectFilterDateFrom).setHours(0,0,0,0); if((o.createdAt||0)<from) return false; }
+        if(objectFilterDateTo){ const to=new Date(objectFilterDateTo).setHours(23,59,59,999); if((o.createdAt||0)>to) return false; }
         if(q && !((o.clientName||"").toLowerCase().includes(q)||(o.address||"").toLowerCase().includes(q)||(o.clientPhone||"").toLowerCase().includes(q))) return false;
         return true;
       })
       .sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0));
-  }, [objects, objectFilterStatus, objectFilterType, objectFilterManager, debouncedObjectSearch]);
+  }, [objects, objectFilterStatus, objectFilterType, objectFilterManager, objectFilterDateFrom, objectFilterDateTo, debouncedObjectSearch]);
 
   // Мемоизированный фильтрованный/сортированный список смет
   const filteredEstimates = useMemo(() => {
@@ -6954,6 +6958,19 @@ export default function App() {
                   ))}
                 </div>
               )}
+              {/* Фильтр по дате создания */}
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                <span style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>📅 Дата создания:</span>
+                <input type="date" value={objectFilterDateFrom} onChange={e=>setObjectFilterDateFrom(e.target.value)}
+                  style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"4px 8px",fontSize:11,fontFamily:"inherit",color:"#334155",outline:"none"}}/>
+                <span style={{fontSize:11,color:"#94a3b8"}}>—</span>
+                <input type="date" value={objectFilterDateTo} onChange={e=>setObjectFilterDateTo(e.target.value)}
+                  style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"4px 8px",fontSize:11,fontFamily:"inherit",color:"#334155",outline:"none"}}/>
+                {(objectFilterDateFrom||objectFilterDateTo)&&(
+                  <button onClick={()=>{setObjectFilterDateFrom("");setObjectFilterDateTo("");}}
+                    style={{background:"rgba(0,0,0,.03)",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>✕ Сбросить</button>
+                )}
+              </div>
 
               {objects.length===0 && (
                 <div style={{textAlign:"center",padding:"60px 0",color:"#94a3b8"}}>
@@ -6983,7 +7000,8 @@ export default function App() {
                           {obj.objType||"Вторичка"}{obj.address?` · 📍 ${obj.address}`:""}
                           {obj.area?` · ${obj.area} м²`:""}
                         </div>
-                        <div style={{fontSize:11,color:"#94a3b8",marginTop:3,display:"flex",gap:10}}>
+                        <div style={{fontSize:11,color:"#94a3b8",marginTop:3,display:"flex",gap:10,flexWrap:"wrap"}}>
+                          {obj.createdAt&&<span>📅 {fmtDate(obj.createdAt)}</span>}
                           <span>📋 {objEsts.length} смет</span>
                           <span>📄 {objCons.length} договоров</span>
                           {obj.manager&&<span>👤 {obj.manager}</span>}
