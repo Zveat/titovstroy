@@ -5056,16 +5056,20 @@ export default function App() {
         .est-card{background:#ffffff;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(15,23,42,.06);border-radius:12px;padding:16px 18px;cursor:pointer;transition:all .15s;position:relative}
         .est-card:hover{border-color:#93c5fd;background:#ffffff;box-shadow:0 6px 20px rgba(37,99,235,.1);transform:translateY(-2px)}
         .est-card:active{transform:scale(.99);box-shadow:0 1px 3px rgba(15,23,42,.06)}
-        .sidebar{width:240px;background:#ffffff;border-right:1px solid #e2e8f0;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:50;transition:width .2s ease}
-        .sidebar.collapsed{width:60px}
-        .nav-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;margin:1px 8px;transition:all .15s}
-        .nav-item:hover{background:#f1f5f9}
-        .nav-item.active{background:#eff6ff}
-        .nav-label{font-size:13px;font-weight:400;white-space:nowrap;overflow:hidden;transition:opacity .1s,width .1s;color:#64748b}
-        .nav-item.active .nav-label{color:#2563eb;font-weight:600}
+        .sidebar{width:248px;background:#1e293b;border-right:1px solid #0f172a;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:50;transition:width .2s ease}
+        .sidebar.collapsed{width:64px}
+        .nav-item{display:flex;align-items:center;gap:11px;padding:9px 13px;border-radius:9px;cursor:pointer;margin:2px 10px;transition:all .15s;position:relative}
+        .nav-item:hover{background:rgba(148,163,184,.12)}
+        .nav-item.active{background:linear-gradient(90deg,rgba(37,99,235,.25),rgba(37,99,235,.1))}
+        .nav-item.active::before{content:"";position:absolute;left:-10px;top:7px;bottom:7px;width:3px;border-radius:0 3px 3px 0;background:#3b82f6}
+        .nav-item .nav-ico{color:#94a3b8;transition:color .15s}
+        .nav-item.active .nav-ico{color:#60a5fa}
+        .nav-label{font-size:13.5px;font-weight:500;white-space:nowrap;overflow:hidden;transition:opacity .1s,width .1s;color:#94a3b8}
+        .nav-item:hover .nav-label{color:#e2e8f0}
+        .nav-item.active .nav-label{color:#f1f5f9;font-weight:600}
         .sidebar.collapsed .nav-label{opacity:0;width:0;pointer-events:none}
-        .sidebar-content{margin-left:240px;transition:margin-left .22s cubic-bezier(.4,0,.2,1);min-height:100vh;background:#f8fafc}
-        .sidebar-content.collapsed{margin-left:60px}
+        .sidebar-content{margin-left:248px;transition:margin-left .22s cubic-bezier(.4,0,.2,1);min-height:100vh;background:#f8fafc}
+        .sidebar-content.collapsed{margin-left:64px}
         @media(max-width:700px){
           .sidebar{display:none!important}
           .sidebar-content{margin-left:0!important;padding-bottom:68px!important}
@@ -5091,15 +5095,15 @@ export default function App() {
       {/* ── SIDEBAR (десктоп) ── */}
       <div className={"sidebar"+(sideCollapsed?" collapsed":"")}>
         {/* Лого */}
-        <div style={{padding:"16px 14px",display:"flex",alignItems:"center",gap:10,borderBottom:"1px solid #e2e8f0",minHeight:60}}>
-          <div style={{width:32,height:32,borderRadius:8,background:"linear-gradient(135deg,#2563eb,#1d4ed8)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:14,color:"#ffffff",flexShrink:0,boxShadow:"0 2px 8px rgba(37,99,235,.3)"}}>T</div>
-          <div className="nav-label" style={{lineHeight:1.2}}>
-            <div style={{fontWeight:700,fontSize:14,color:"#0f172a",fontFamily:"'Poppins',sans-serif"}}>TitovStroy</div>
-            <div style={{fontSize:11,color:"#94a3b8"}}>{currentUser.name}</div>
+        <div style={{padding:"18px 16px",display:"flex",alignItems:"center",gap:11,borderBottom:"1px solid rgba(148,163,184,.12)",minHeight:64}}>
+          <div style={{width:34,height:34,borderRadius:9,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:15,color:"#ffffff",flexShrink:0,boxShadow:"0 3px 10px rgba(37,99,235,.5)"}}>T</div>
+          <div className="nav-label" style={{lineHeight:1.25}}>
+            <div style={{fontWeight:700,fontSize:15,color:"#f8fafc",fontFamily:"'Poppins',sans-serif"}}>TitovStroy</div>
+            <div style={{fontSize:11,color:"#64748b"}}>{currentUser.name}</div>
           </div>
         </div>
         {/* Nav */}
-        <nav style={{flex:1,padding:"10px 0",overflowY:"auto"}}>
+        <nav style={{flex:1,padding:"12px 0",overflowY:"auto"}}>
           {NAV_ITEMS.map(item=>{
             const isActiveEst = effScreen==="editor" && !objectReturnId && item.id==="list";
             const isActiveObjEst = effScreen==="editor" && !!objectReturnId && item.id==="objects";
@@ -5107,20 +5111,20 @@ export default function App() {
             return (
             <div key={item.id} className={"nav-item"+(isActive?" active":"")}
               onClick={()=>{ setDealReturnId(null); setObjectReturnId(null); setScreen(item.id); }}>
-              <span style={{fontSize:18,flexShrink:0,lineHeight:1}}>{item.icon}</span>
+              <span className="nav-ico" style={{fontSize:18,flexShrink:0,lineHeight:1}}>{item.icon}</span>
               <span className="nav-label">{item.label}</span>
             </div>
             );
           })}
         </nav>
         {/* Collapse + Выйти */}
-        <div style={{borderTop:"1px solid #e2e8f0",padding:"8px 0"}}>
+        <div style={{borderTop:"1px solid rgba(148,163,184,.12)",padding:"10px 0"}}>
           <div className="nav-item" onClick={()=>{ try{localStorage.removeItem(SESSION_KEY);}catch(e){} setCurrentUser(null); }}>
-            <span style={{fontSize:16,flexShrink:0}}>🚪</span>
-            <span className="nav-label" style={{fontSize:13,color:"#94a3b8"}}>Выйти</span>
+            <span className="nav-ico" style={{fontSize:16,flexShrink:0}}>🚪</span>
+            <span className="nav-label" style={{fontSize:13}}>Выйти</span>
           </div>
           <div className="nav-item" onClick={()=>setSideCollapsed(p=>!p)} style={{justifyContent:"center",marginTop:4}}>
-            <span style={{fontSize:13,color:"#94a3b8"}}>{sideCollapsed?"▶":"◀"}</span>
+            <span style={{fontSize:13,color:"#64748b"}}>{sideCollapsed?"▶":"◀"}</span>
           </div>
         </div>
       </div>
@@ -5385,7 +5389,7 @@ export default function App() {
           {/* Шапка */}
           <div className="list-header" style={{background:"#ffffff",borderBottom:"1px solid #e2e8f0",padding:"12px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
             <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
-              <div style={{width:28,height:28,borderRadius:8,background:"#2563eb",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,color:"#ffffff",flexShrink:0}}>T</div>
+              <div style={{width:28,height:28,borderRadius:8,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,color:"#ffffff",flexShrink:0,boxShadow:"0 2px 8px rgba(37,99,235,.35)"}}>T</div>
               <div style={{minWidth:0}}>
                 <div style={{fontWeight:800,fontSize:13,whiteSpace:"nowrap",color:"#0f172a"}}>TitovStroy</div>
                 <div style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>
@@ -6408,9 +6412,12 @@ export default function App() {
         const PERIOD_BTNS = [["all","Всё время"],["month","Месяц"],["3month","3 месяца"],["week","Неделя"],["custom","Вручную"]];
         return (
           <div className="page">
-            <div style={{marginBottom:24}}>
-              <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#0f172a"}}>📊 Аналитика</h1>
-              <div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>Статистика по объектам и договорам</div>
+            <div style={{background:"linear-gradient(135deg,#1e3a8a 0%,#2563eb 60%,#3b82f6 100%)",borderRadius:16,padding:"24px 28px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(37,99,235,.3)"}}>
+              <div style={{position:"absolute",top:-30,right:-30,width:160,height:160,borderRadius:"50%",background:"rgba(255,255,255,.06)"}}/>
+              <div style={{position:"relative",zIndex:1}}>
+                <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#fff"}}>📊 Аналитика</h1>
+                <div style={{fontSize:13,color:"rgba(255,255,255,.75)",marginTop:4}}>Статистика по объектам и договорам</div>
+              </div>
             </div>
             <div className="an-filters" style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"16px 18px",marginBottom:20,display:"flex",flexWrap:"wrap",gap:16}}>
               <div style={{flex:"1 1 300px"}}>
@@ -6440,10 +6447,12 @@ export default function App() {
               </div>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:20}}>
-              {[["Объектов",totalEst,"в периоде","#2563eb"],["Объём объектов",fmt(totalSumEst)+" ₸","сумма смет","#2563eb"],["Ср. чек",fmt(avgEst)+" ₸","на объект","#059669"],["Договоров",totalCon,"прочих (вне объектов)","#2563eb"],["Объём договоров",fmt(totalSumCon)+" ₸","прочие договора","#2563eb"],["Средний договор",fmt(avgCon)+" ₸","прочие договора","#059669"]].map(([l,v,s,c],i)=>(
-                <div key={i} style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:"14px 14px 12px",position:"relative",overflow:"hidden"}}>
-                  <div style={{position:"absolute",top:0,left:0,width:3,height:"100%",background:c,borderRadius:"3px 0 0 3px"}}/>
-                  <div style={{fontSize:9,color:"#94a3b8",textTransform:"uppercase",letterSpacing:.8,marginBottom:6}}>{l}</div>
+              {[["Объектов",totalEst,"в периоде","#2563eb","📋","linear-gradient(135deg,#eff6ff,#dbeafe)","rgba(37,99,235,.18)"],["Объём объектов",fmt(totalSumEst)+" ₸","сумма смет","#2563eb","💰","linear-gradient(135deg,#eff6ff,#dbeafe)","rgba(37,99,235,.18)"],["Ср. чек",fmt(avgEst)+" ₸","на объект","#059669","🎯","linear-gradient(135deg,#f0fdf4,#dcfce7)","rgba(5,150,105,.18)"],["Договоров",totalCon,"прочих (вне объектов)","#2563eb","📄","linear-gradient(135deg,#eff6ff,#dbeafe)","rgba(37,99,235,.18)"],["Объём договоров",fmt(totalSumCon)+" ₸","прочие договора","#2563eb","🧾","linear-gradient(135deg,#eff6ff,#dbeafe)","rgba(37,99,235,.18)"],["Средний договор",fmt(avgCon)+" ₸","прочие договора","#059669","📊","linear-gradient(135deg,#f0fdf4,#dcfce7)","rgba(5,150,105,.18)"]].map(([l,v,s,c,ic,grad,bd],i)=>(
+                <div key={i} style={{background:grad,border:`1px solid ${bd}`,borderRadius:12,padding:"15px 15px 13px",boxShadow:"0 1px 4px rgba(15,23,42,.05)"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                    <div style={{fontSize:10,color:"#64748b",fontWeight:600,letterSpacing:.3,lineHeight:1.3}}>{l}</div>
+                    <span style={{fontSize:16,marginLeft:6}}>{ic}</span>
+                  </div>
                   <div style={{fontSize:20,fontWeight:900,color:c,lineHeight:1,marginBottom:4}}>{v}</div>
                   <div style={{fontSize:10,color:"#94a3b8"}}>{s}</div>
                 </div>
@@ -6834,7 +6843,7 @@ export default function App() {
             {objectTab==="workspace" && (
               <button onClick={()=>{ setObjectTab("list"); setCurrentObject(null); }} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
             )}
-            <div style={{width:28,height:28,borderRadius:8,background:"#2563eb",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#fff"}}>📦</div>
+            <div style={{width:28,height:28,borderRadius:8,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#fff",boxShadow:"0 2px 8px rgba(37,99,235,.35)"}}>📦</div>
             <div style={{fontWeight:800,fontSize:14,color:"#0f172a"}}>{objectTab==="workspace" && currentObject ? (currentObject.clientName||"Новый объект") : "Объекты"}</div>
             <div style={{flex:1}}/>
             {objectTab==="list" && currentUser.role!=="viewer" && (
@@ -7228,7 +7237,7 @@ export default function App() {
           {contractTab !== "editor" && (<>
           <div className="contracts-header" style={{background:"#ffffff",borderBottom:"1px solid #e2e8f0",padding:"12px 24px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
             <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:20,lineHeight:1,padding:"0 4px"}}>←</button>
-            <div style={{width:28,height:28,borderRadius:8,background:"#2563eb",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#f3f4f6"}}>T</div>
+            <div style={{width:28,height:28,borderRadius:8,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#fff",boxShadow:"0 2px 8px rgba(37,99,235,.35)"}}>📄</div>
             <div style={{fontWeight:800,fontSize:14,color:"#0f172a"}}>Прочие договора</div>
             <div style={{flex:1}}/>
             {["list","clients","contragents"].includes(contractTab) && currentUser.role === "admin" && (
