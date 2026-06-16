@@ -2687,8 +2687,7 @@ export default function App() {
   const [objectFilterStatus, setObjectFilterStatus] = useState("");
   const [objectFilterType, setObjectFilterType] = useState("");
   const [objectFilterManager, setObjectFilterManager] = useState("");
-  const [objectFilterDateFrom, setObjectFilterDateFrom] = useState("");
-  const [objectFilterDateTo, setObjectFilterDateTo] = useState("");
+  const [objectDateSort, setObjectDateSort] = useState("new"); // new = сначала новые, old = сначала старые
   const [objectSearch, setObjectSearch] = useState("");
   const debouncedObjectSearch = useDebounce(objectSearch, 200);
   const [objectReturnId, setObjectReturnId] = useState(null); // id объекта, куда вернуться из редактора сметы/договора
@@ -2733,13 +2732,11 @@ export default function App() {
         if(objectFilterStatus && (o.status||"new")!==objectFilterStatus) return false;
         if(objectFilterType && (o.objType||"Вторичка")!==objectFilterType) return false;
         if(objectFilterManager && (o.manager||"")!==objectFilterManager) return false;
-        if(objectFilterDateFrom){ const from=new Date(objectFilterDateFrom).setHours(0,0,0,0); if((o.createdAt||0)<from) return false; }
-        if(objectFilterDateTo){ const to=new Date(objectFilterDateTo).setHours(23,59,59,999); if((o.createdAt||0)>to) return false; }
         if(q && !((o.clientName||"").toLowerCase().includes(q)||(o.address||"").toLowerCase().includes(q)||(o.clientPhone||"").toLowerCase().includes(q))) return false;
         return true;
       })
-      .sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0));
-  }, [objects, objectFilterStatus, objectFilterType, objectFilterManager, objectFilterDateFrom, objectFilterDateTo, debouncedObjectSearch]);
+      .sort((a,b)=>{ const da=a.createdAt||0, db=b.createdAt||0; return objectDateSort==="old" ? da-db : db-da; });
+  }, [objects, objectFilterStatus, objectFilterType, objectFilterManager, objectDateSort, debouncedObjectSearch]);
 
   // Мемоизированный фильтрованный/сортированный список смет
   const filteredEstimates = useMemo(() => {
@@ -5367,32 +5364,6 @@ export default function App() {
             )}
           </div>
 
-          {/* Последние договора */}
-          {recentContracts.length>0&&(
-            <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:"20px 22px",boxShadow:"0 1px 3px rgba(15,23,42,.07),0 4px 12px rgba(15,23,42,.04)"}}>
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-                <span style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>📄 Прочие договора</span>
-                <span onClick={()=>setScreen("contracts")} style={{color:"#2563eb",cursor:"pointer",fontSize:11,fontWeight:600}}>все →</span>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:8}}>
-                {recentContracts.map((c)=>{
-                  const cl = contractClients.find(x=>x.id===c.clientId);
-                  const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
-                  const TYPE_L = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Дизайн",design_add:"Доп. дизайн",reservation:"Бронь"};
-                  return (
-                    <div key={c.id} onClick={()=>{ setCurrentContract({...c}); setContractTab("editor"); setScreen("contracts"); }}
-                      style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 14px",cursor:"pointer",transition:"background .1s,box-shadow .1s"}}
-                      onMouseEnter={e=>{e.currentTarget.style.background="#eff6ff";e.currentTarget.style.borderColor="rgba(37,99,235,.3)";}}
-                      onMouseLeave={e=>{e.currentTarget.style.background="#f8fafc";e.currentTarget.style.borderColor="#e2e8f0";}}>
-                      <div style={{fontWeight:600,fontSize:13,color:"#0f172a",marginBottom:3}}>{TYPE_L[c.type||"repair_fiz"]||"Договор"} №{c.number||"—"}</div>
-                      <div style={{fontSize:11,color:"#94a3b8",marginBottom:6}}>{cl?.name||c.estClient||"Клиент не выбран"}</div>
-                      {total>0&&<div style={{fontSize:13,fontWeight:800,color:"#059669"}}>{fmt(total)} ₸</div>}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
         </div>
         );
       })()}
@@ -6495,7 +6466,7 @@ export default function App() {
               </div>
             </div>
             <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14,marginBottom:20}}>
-              {[["Объектов",totalEst,"в периоде","#2563eb","📋"],["Объём объектов",fmt(totalSumEst)+" ₸","сумма смет","#2563eb","💰"],["Ср. чек",fmt(avgEst)+" ₸","на объект","#059669","🎯"],["Договоров",totalCon,"прочих (вне объектов)","#2563eb","📄"],["Объём договоров",fmt(totalSumCon)+" ₸","прочие договора","#2563eb","🧾"],["Средний договор",fmt(avgCon)+" ₸","прочие договора","#059669","📊"]].map(([l,v,s,c,ic],i)=>(
+              {[["Объектов",totalEst,"в периоде","#2563eb","📋"],["Объём объектов",fmt(totalSumEst)+" ₸","сумма смет","#2563eb","💰"],["Ср. чек",fmt(avgEst)+" ₸","на объект","#059669","🎯"]].map(([l,v,s,c,ic],i)=>(
                 <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"16px 18px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",position:"relative",overflow:"hidden",transition:"transform .18s ease,box-shadow .18s ease"}}
                   onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
                   onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)";}}>
@@ -6622,12 +6593,6 @@ export default function App() {
                 </div>
                 {Object.keys(byType).length>0 && <><div style={{fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типу объекта</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(<span key={t} style={{fontSize:11,padding:"3px 10px",borderRadius:4,background:"rgba(0,0,0,.04)",color:"#94a3b8"}}>{t}: <strong style={{color:"#0f172a"}}>{n}</strong></span>))}</div></>}
               </div>
-              <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"18px"}}>
-                <div style={{fontSize:11,color:"#d97706",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>Договора</div>
-                {Object.keys(byConType).length>0 && <><div style={{fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типам</div><div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:14}}>{Object.entries(byConType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(<div key={t} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(0,0,0,.02)",borderRadius:8}}><span style={{fontSize:12,color:"#94a3b8"}}>{t}</span><span style={{fontSize:13,fontWeight:700,color:"#2563eb"}}>{n}</span></div>))}</div></>}
-                {baseCon.length>0 && <><div style={{fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>Договора в периоде</div><div style={{display:"flex",flexDirection:"column",gap:3}}>{[...baseCon].sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,6).map(c=>{const cl=contractClients.find(x=>x.id===c.clientId);const sum=(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);return(<div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(0,0,0,.02)",borderRadius:8,cursor:"pointer"}} onClick={()=>{setCurrentContract({...c});setContractTab("editor");setScreen("contracts");}}><div style={{minWidth:0}}><div style={{fontSize:12,color:"#0f172a",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{TYPE_L2[c.type||"repair_fiz"]} #{c.number||"--"}</div><div style={{fontSize:10,color:"#94a3b8"}}>{cl?.name||c.estClient||"--"}</div></div><span style={{fontSize:12,fontWeight:700,color:"#2563eb",flexShrink:0,marginLeft:8}}>{fmt(sum)} </span></div>);})}</div></>}
-                {totalCon===0 && <div style={{textAlign:"center",color:"#334155",fontSize:13,padding:"30px 0"}}>Нет договоров за период</div>}
-              </div>
             </div>
             {/* ── C. Менеджеры по прибыли ── */}
             {!statsManager && managerStats.length>0 && (
@@ -6738,7 +6703,7 @@ export default function App() {
                 <div style={{fontSize:10,color:"#94a3b8",marginTop:8}}>По ценам позиций до скидки. Суммы в тыс. ₸.</div>
               </div>
             )}
-            {totalEst===0&&totalCon===0&&<div style={{textAlign:"center",color:"#334155",fontSize:13,padding:"60px 0"}}><div style={{fontSize:32,marginBottom:12}}>📊</div>Нет данных за выбранный период</div>}
+            {totalEst===0&&<div style={{textAlign:"center",color:"#334155",fontSize:13,padding:"60px 0"}}><div style={{fontSize:32,marginBottom:12}}>📊</div>Нет данных за выбранный период</div>}
           </div>
         );
       })()}
@@ -6958,18 +6923,13 @@ export default function App() {
                   ))}
                 </div>
               )}
-              {/* Фильтр по дате создания */}
-              <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                <span style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>📅 Дата создания:</span>
-                <input type="date" value={objectFilterDateFrom} onChange={e=>setObjectFilterDateFrom(e.target.value)}
-                  style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"4px 8px",fontSize:11,fontFamily:"inherit",color:"#334155",outline:"none"}}/>
-                <span style={{fontSize:11,color:"#94a3b8"}}>—</span>
-                <input type="date" value={objectFilterDateTo} onChange={e=>setObjectFilterDateTo(e.target.value)}
-                  style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"4px 8px",fontSize:11,fontFamily:"inherit",color:"#334155",outline:"none"}}/>
-                {(objectFilterDateFrom||objectFilterDateTo)&&(
-                  <button onClick={()=>{setObjectFilterDateFrom("");setObjectFilterDateTo("");}}
-                    style={{background:"rgba(0,0,0,.03)",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>✕ Сбросить</button>
-                )}
+              {/* Сортировка по дате создания */}
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                <span style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>📅 Сортировка:</span>
+                {[["new","Сначала новые"],["old","Сначала старые"]].map(([k,l])=>(
+                  <button key={k} onClick={()=>setObjectDateSort(k)}
+                    style={{background:objectDateSort===k?"#eff6ff":"rgba(0,0,0,.03)",color:objectDateSort===k?"#2563eb":"#94a3b8",border:`1px solid ${objectDateSort===k?"rgba(37,99,235,.4)":"#e2e8f0"}`,borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
+                ))}
               </div>
 
               {objects.length===0 && (
