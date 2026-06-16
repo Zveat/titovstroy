@@ -309,11 +309,14 @@ const CONTRAGENTS_KEY= "titovstroy-contragents";
 
 let _catalogOverrides = { renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[] };
 let _onCatalogChange = null;
+let _catalogCache = null;
 function setCatalogOverrides(o) {
   _catalogOverrides = { renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], ...(o||{}) };
+  _catalogCache = null;
   if (_onCatalogChange) _onCatalogChange();
 }
 function getEffectiveCatalog() {
+  if (_catalogCache) return _catalogCache;
   const hc = _catalogOverrides.hiddenCats||[];
   const hs = _catalogOverrides.hiddenSubs||[];
   const base = WORKS_DATA
@@ -334,7 +337,8 @@ function getEffectiveCatalog() {
       if (_catalogOverrides.renames[r.code]) r = {...r, name: _catalogOverrides.renames[r.code]};
       return r;
     });
-  return [...base, ...custom];
+  _catalogCache = [...base, ...custom];
+  return _catalogCache;
 }
 
 // Дефолтные пользователи
@@ -2679,6 +2683,7 @@ export default function App() {
   const [objectFilterType, setObjectFilterType] = useState("");
   const [objectFilterManager, setObjectFilterManager] = useState("");
   const [objectSearch, setObjectSearch] = useState("");
+  const debouncedObjectSearch = useDebounce(objectSearch, 200);
   const [objectReturnId, setObjectReturnId] = useState(null); // id объекта, куда вернуться из редактора сметы/договора
   // legacy deals ref (не используется, но нужен для saveDeals ниже)
   const [deals, setDeals] = useState([]);
@@ -2713,6 +2718,19 @@ export default function App() {
   const [contractFilterStatus, setContractFilterStatus] = useState(""); // "" = все статусы договоров
   const [listSort, setListSort] = useState("date"); // "date" | "sum" | "name"
   const debouncedListSearch = useDebounce(listSearch, 200);
+
+  const filteredObjects = useMemo(() => {
+    const q = debouncedObjectSearch.toLowerCase().trim();
+    return [...objects]
+      .filter(o=>{
+        if(objectFilterStatus && (o.status||"new")!==objectFilterStatus) return false;
+        if(objectFilterType && (o.objType||"Вторичка")!==objectFilterType) return false;
+        if(objectFilterManager && (o.manager||"")!==objectFilterManager) return false;
+        if(q && !((o.clientName||"").toLowerCase().includes(q)||(o.address||"").toLowerCase().includes(q)||(o.clientPhone||"").toLowerCase().includes(q))) return false;
+        return true;
+      })
+      .sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0));
+  }, [objects, objectFilterStatus, objectFilterType, objectFilterManager, debouncedObjectSearch]);
 
   // Мемоизированный фильтрованный/сортированный список смет
   const filteredEstimates = useMemo(() => {
@@ -3149,7 +3167,7 @@ export default function App() {
         arr = [snap, ...arr].slice(0, 20);
         await storage.set(WORKSPACE_BACKUPS_KEY, JSON.stringify(arr));
       } catch (e) { console.warn("ws snapshot err", e); }
-    }, 4000);
+    }, 8000);
     return () => { if (_wsSnapTimer.current) clearTimeout(_wsSnapTimer.current); };
   }, [objects, estimates, contracts]);
 
@@ -6702,7 +6720,7 @@ export default function App() {
           {objectTab==="list" && (
             <div className="contracts-pad" style={{padding:"20px 24px",display:"flex",flexDirection:"column",gap:10}}>
               {/* Поиск */}
-              <input value={objectSearch} onChange={e=>setObjectSearch(e.target.value)} placeholder="🔍 Поиск по клиенту, адресу..."
+              <input value={objectSearch} onChange={e=>setObjectSearch(e.target.value)} placeholder="🔍 Поиск по клиенту, телефону, адресу..."
                 style={{border:"1px solid #e5e7eb",borderRadius:7,padding:"7px 12px",fontSize:13,width:"100%",boxSizing:"border-box",outline:"none",fontFamily:"inherit"}}/>
               {/* Фильтр по статусу */}
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
@@ -6750,19 +6768,7 @@ export default function App() {
                 </div>
               )}
 
-              {[...objects]
-                .filter(o=>{
-                  if(objectFilterStatus && (o.status||"new")!==objectFilterStatus) return false;
-                  if(objectFilterType && (o.objType||"Вторичка")!==objectFilterType) return false;
-                  if(objectFilterManager && (o.manager||"")!==objectFilterManager) return false;
-                  if(objectSearch){
-                    const q=objectSearch.toLowerCase();
-                    if(!((o.clientName||"").toLowerCase().includes(q)||(o.address||"").toLowerCase().includes(q)||(o.phone||"").toLowerCase().includes(q))) return false;
-                  }
-                  return true;
-                })
-                .sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0))
-                .map(obj=>{
+              {filteredObjects.map(obj=>{
                 const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"new"))||DEAL_STATUSES[0];
                 const objEsts = estimates.filter(e=>e.objectId===obj.id);
                 const objCons = contracts.filter(c=>c.objectId===obj.id);
@@ -6775,6 +6781,7 @@ export default function App() {
                       <div style={{minWidth:0,flex:1}}>
                         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                           <span style={{fontWeight:700,fontSize:14,color:"#111827"}}>{obj.clientName||<span style={{color:"#9ca3af",fontStyle:"italic",fontWeight:400}}>Без клиента</span>}</span>
+                          {obj.clientPhone&&<span style={{fontSize:12,color:"#6b7280",fontWeight:500}}>📞 {obj.clientPhone}</span>}
                           <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:4,padding:"1px 7px",whiteSpace:"nowrap"}}>{st.label}</span>
                         </div>
                         <div style={{fontSize:12,color:"#9ca3af",marginTop:3}}>
