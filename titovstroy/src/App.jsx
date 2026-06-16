@@ -5218,30 +5218,25 @@ export default function App() {
           </div>
 
           {/* KPI карточки */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(175px,1fr))",gap:12,marginBottom:24}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14,marginBottom:24}}>
             {[
-              {label:"Объектов за "+monthName, value:objectsThisMonth.length, sub:"активность месяца",
-               icon:"📋", grad:"linear-gradient(135deg,#eff6ff,#dbeafe)", accent:"#2563eb", border:"rgba(37,99,235,.2)"},
-              {label:"Объём за "+monthName, value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма смет",
-               icon:"💰", grad:"linear-gradient(135deg,#f0fdf4,#dcfce7)", accent:"#059669", border:"rgba(5,150,105,.2)"},
-              {label:"Прибыль за "+monthName, value:fmt(Math.round(profitMonth))+" ₸", sub:"по подписанным",
-               icon:"📈", grad:"linear-gradient(135deg,#f0fdf4,#dcfce7)", accent:profitMonth>0?"#059669":"#ef4444", border:profitMonth>0?"rgba(5,150,105,.2)":"rgba(239,68,68,.2)"},
-              {label:"Маржа за "+monthName, value:marginMonth+"%", sub:"рентабельность",
-               icon:"🎯", grad:"linear-gradient(135deg,"+(marginMonth>=35?"#f0fdf4,#dcfce7":marginMonth>=20?"#fffbeb,#fef3c7":"#fef2f2,#fee2e2")+")", accent:marginMonth>=35?"#059669":marginMonth>=20?"#d97706":"#ef4444", border:marginMonth>=35?"rgba(5,150,105,.2)":marginMonth>=20?"rgba(217,119,6,.2)":"rgba(239,68,68,.2)"},
-              {label:"Пайплайн (согласование)", value:fmt(Math.round(pipelineSum))+" ₸", sub:approvalObjs.length+" объектов",
-               icon:"🔄", grad:"linear-gradient(135deg,#fffbeb,#fef3c7)", accent:"#d97706", border:"rgba(217,119,6,.2)"},
-              {label:"Договоров подписано", value:signedObjs.length, sub:"из "+objects.length+" всего",
-               icon:"✅", grad:"linear-gradient(135deg,#f0fdf4,#dcfce7)", accent:"#059669", border:"rgba(5,150,105,.2)"},
+              {label:"Объектов за "+monthName, value:objectsThisMonth.length, sub:"активность месяца", icon:"📋", accent:"#2563eb"},
+              {label:"Объём за "+monthName, value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма смет", icon:"💰", accent:"#059669"},
+              {label:"Прибыль за "+monthName, value:fmt(Math.round(profitMonth))+" ₸", sub:"по подписанным", icon:"📈", accent:profitMonth>0?"#059669":"#ef4444"},
+              {label:"Маржа за "+monthName, value:marginMonth+"%", sub:"рентабельность", icon:"🎯", accent:marginMonth>=35?"#059669":marginMonth>=20?"#d97706":"#ef4444"},
+              {label:"Пайплайн (согласование)", value:fmt(Math.round(pipelineSum))+" ₸", sub:approvalObjs.length+" объектов", icon:"🔄", accent:"#d97706"},
+              {label:"Договоров подписано", value:signedObjs.length, sub:"из "+objects.length+" всего", icon:"✅", accent:"#059669"},
             ].map((s,i)=>(
-              <div key={i} style={{background:s.grad,border:`1px solid ${s.border}`,borderRadius:12,padding:"18px 16px",boxShadow:"0 1px 3px rgba(15,23,42,.07),0 4px 12px rgba(15,23,42,.04)",transition:"transform .15s,box-shadow .15s"}}
-                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 6px 16px rgba(0,0,0,.1)";}}
-                onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 4px rgba(0,0,0,.06)";}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
-                  <div style={{fontSize:11,color:"#64748b",fontWeight:600,lineHeight:1.3,flex:1}}>{s.label}</div>
-                  <span style={{fontSize:18,marginLeft:6}}>{s.icon}</span>
+              <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden"}}
+                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
+                onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)";}}>
+                <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:s.accent,opacity:.85}}/>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                  <div style={{fontSize:12,color:"#64748b",fontWeight:600,lineHeight:1.3,flex:1,paddingRight:8}}>{s.label}</div>
+                  <span style={{width:38,height:38,borderRadius:11,background:s.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{s.icon}</span>
                 </div>
-                <div style={{fontSize:22,fontWeight:900,color:s.accent,lineHeight:1,marginBottom:5}}>{s.value}</div>
-                <div style={{fontSize:11,color:"#94a3b8"}}>{s.sub}</div>
+                <div style={{fontSize:26,fontWeight:800,color:"#0f172a",lineHeight:1,marginBottom:6,letterSpacing:-.5}}>{s.value}</div>
+                <div style={{fontSize:11.5,color:"#94a3b8",fontWeight:500}}>{s.sub}</div>
               </div>
             ))}
           </div>
@@ -6449,15 +6444,18 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:20}}>
-              {[["Объектов",totalEst,"в периоде","#2563eb","📋","linear-gradient(135deg,#eff6ff,#dbeafe)","rgba(37,99,235,.18)"],["Объём объектов",fmt(totalSumEst)+" ₸","сумма смет","#2563eb","💰","linear-gradient(135deg,#eff6ff,#dbeafe)","rgba(37,99,235,.18)"],["Ср. чек",fmt(avgEst)+" ₸","на объект","#059669","🎯","linear-gradient(135deg,#f0fdf4,#dcfce7)","rgba(5,150,105,.18)"],["Договоров",totalCon,"прочих (вне объектов)","#2563eb","📄","linear-gradient(135deg,#eff6ff,#dbeafe)","rgba(37,99,235,.18)"],["Объём договоров",fmt(totalSumCon)+" ₸","прочие договора","#2563eb","🧾","linear-gradient(135deg,#eff6ff,#dbeafe)","rgba(37,99,235,.18)"],["Средний договор",fmt(avgCon)+" ₸","прочие договора","#059669","📊","linear-gradient(135deg,#f0fdf4,#dcfce7)","rgba(5,150,105,.18)"]].map(([l,v,s,c,ic,grad,bd],i)=>(
-                <div key={i} style={{background:grad,border:`1px solid ${bd}`,borderRadius:12,padding:"15px 15px 13px",boxShadow:"0 1px 4px rgba(15,23,42,.05)"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-                    <div style={{fontSize:10,color:"#64748b",fontWeight:600,letterSpacing:.3,lineHeight:1.3}}>{l}</div>
-                    <span style={{fontSize:16,marginLeft:6}}>{ic}</span>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14,marginBottom:20}}>
+              {[["Объектов",totalEst,"в периоде","#2563eb","📋"],["Объём объектов",fmt(totalSumEst)+" ₸","сумма смет","#2563eb","💰"],["Ср. чек",fmt(avgEst)+" ₸","на объект","#059669","🎯"],["Договоров",totalCon,"прочих (вне объектов)","#2563eb","📄"],["Объём договоров",fmt(totalSumCon)+" ₸","прочие договора","#2563eb","🧾"],["Средний договор",fmt(avgCon)+" ₸","прочие договора","#059669","📊"]].map(([l,v,s,c,ic],i)=>(
+                <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"16px 18px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",position:"relative",overflow:"hidden",transition:"transform .18s ease,box-shadow .18s ease"}}
+                  onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
+                  onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)";}}>
+                  <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:c,opacity:.85}}/>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <div style={{fontSize:11.5,color:"#64748b",fontWeight:600,lineHeight:1.3,flex:1,paddingRight:8}}>{l}</div>
+                    <span style={{width:34,height:34,borderRadius:10,background:c+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{ic}</span>
                   </div>
-                  <div style={{fontSize:20,fontWeight:900,color:c,lineHeight:1,marginBottom:4}}>{v}</div>
-                  <div style={{fontSize:10,color:"#94a3b8"}}>{s}</div>
+                  <div style={{fontSize:21,fontWeight:800,color:"#0f172a",lineHeight:1,marginBottom:5,letterSpacing:-.5}}>{v}</div>
+                  <div style={{fontSize:11,color:"#94a3b8",fontWeight:500}}>{s}</div>
                 </div>
               ))}
             </div>
