@@ -454,7 +454,7 @@ function LoginScreen({ onLogin }) {
 
   return (
     <div style={{minHeight:"100vh",background:"#f3f4f6",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'Inter','Segoe UI',sans-serif"}}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Inter','Segoe UI',sans-serif;-webkit-font-smoothing:antialiased;color:#111827}h1,h2,h3{letter-spacing:-.02em}button{font-family:'Inter','Segoe UI',sans-serif}`}</style>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@600;700;800;900&display=swap');*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Inter','Segoe UI',sans-serif;-webkit-font-smoothing:antialiased;color:#111827}h1,h2,h3{font-family:'Poppins','Inter',sans-serif;letter-spacing:-.02em}button{font-family:'Inter','Segoe UI',sans-serif}`}</style>
       <div style={{width:"100%",maxWidth:380}}>
         {/* Лого */}
         <div style={{textAlign:"center",marginBottom:32}}>
@@ -4994,9 +4994,10 @@ export default function App() {
       {/* Панель администратора */}
 
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@600;700;800;900&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
-        html,body{background:#f3f4f6;overflow-x:hidden;width:100%}
+        html,body{background:#f1f5f9;overflow-x:hidden;width:100%;font-family:'Inter','Segoe UI',sans-serif}
+        h1,h2,h3,.heading{font-family:'Poppins','Inter',sans-serif}
         input,select,textarea{outline:none}
         ::-webkit-scrollbar{width:4px}
         ::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:2px}
@@ -5049,15 +5050,16 @@ export default function App() {
           .kp-no-print{display:none!important}
           @page{margin:10mm;size:A4 portrait}
         }
-        .est-card{background:#ffffff;border:1px solid #e5e7eb;box-shadow:0 1px 4px rgba(26,31,54,.06);border-radius:6px;padding:16px 18px;cursor:pointer;transition:all .15s;position:relative}
-        .est-card:hover{border-color:#9ca3af;background:#f7f8fa}
+        .est-card{background:#ffffff;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(15,23,42,.07);border-radius:10px;padding:16px 18px;cursor:pointer;transition:all .15s;position:relative}
+        .est-card:hover{border-color:#94a3b8;background:#f8fafc;box-shadow:0 4px 12px rgba(15,23,42,.1);transform:translateY(-1px)}
         .est-card:active{transform:scale(.99)}
-        .sidebar{width:240px;background:#f7f8fa;border-right:1px solid #e5e7eb;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:50;transition:width .2s ease}
+        .sidebar{width:240px;background:#0f172a;border-right:none;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:50;transition:width .2s ease;box-shadow:2px 0 12px rgba(0,0,0,.15)}
         .sidebar.collapsed{width:60px}
-        .nav-item{display:flex;align-items:center;gap:10px;padding:7px 12px;border-radius:6px;cursor:pointer;margin:1px 6px;transition:background .1s;font-size:13.5px}
-        .nav-item:hover{background:#e5e7eb}
-        .nav-item.active{background:#e5e7eb}
-        .nav-label{font-size:13px;font-weight:400;white-space:nowrap;overflow:hidden;transition:opacity .1s,width .1s;color:#374151}
+        .nav-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;margin:1px 8px;transition:background .15s;font-size:13.5px}
+        .nav-item:hover{background:rgba(255,255,255,.08)}
+        .nav-item.active{background:rgba(37,99,235,.35);box-shadow:0 0 0 1px rgba(37,99,235,.4) inset}
+        .nav-label{font-size:13px;font-weight:400;white-space:nowrap;overflow:hidden;transition:opacity .1s,width .1s;color:#94a3b8}
+        .nav-item.active .nav-label{color:#e2e8f0;font-weight:600}
         .sidebar.collapsed .nav-label{opacity:0;width:0;pointer-events:none}
         .sidebar-content{margin-left:240px;transition:margin-left .22s cubic-bezier(.4,0,.2,1);min-height:100vh}
         .sidebar-content.collapsed{margin-left:60px}
@@ -5079,19 +5081,19 @@ export default function App() {
           .user-row{flex-wrap:wrap!important}
           .user-row-btns{width:100%!important;justify-content:flex-end!important;margin-top:8px!important}
         }
-        .mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:#ffffff;border-top:1px solid #e5e7eb;z-index:50}
+        .mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:#0f172a;border-top:1px solid rgba(255,255,255,.07);z-index:50;box-shadow:0 -4px 16px rgba(0,0,0,.2)}
         .mob-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;gap:3px;border-top:2px solid transparent;transition:all .15s}
-        .mob-nav-item.active{border-top-color:#ffffff;background:rgba(0,0,0,.04)}
+        .mob-nav-item.active{border-top-color:#3b82f6;background:rgba(37,99,235,.15)}
       `}</style>
 
       {/* ── SIDEBAR (десктоп) ── */}
       <div className={"sidebar"+(sideCollapsed?" collapsed":"")}>
         {/* Лого */}
-        <div style={{padding:"16px 14px",display:"flex",alignItems:"center",gap:10,borderBottom:"1px solid #e5e7eb",minHeight:60}}>
-          <div style={{width:32,height:32,borderRadius:6,background:"#2563eb",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:14,color:"#ffffff",flexShrink:0}}>T</div>
+        <div style={{padding:"16px 14px",display:"flex",alignItems:"center",gap:10,borderBottom:"1px solid rgba(255,255,255,.07)",minHeight:60}}>
+          <div style={{width:32,height:32,borderRadius:8,background:"linear-gradient(135deg,#2563eb,#3b82f6)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:14,color:"#ffffff",flexShrink:0,boxShadow:"0 2px 8px rgba(37,99,235,.4)"}}>T</div>
           <div className="nav-label" style={{lineHeight:1.2}}>
-            <div style={{fontWeight:700,fontSize:14,color:"#111827"}}>TitovStroy</div>
-            <div style={{fontSize:12,color:"#6b7280"}}>{currentUser.name}</div>
+            <div style={{fontWeight:700,fontSize:14,color:"#f1f5f9",fontFamily:"'Poppins',sans-serif"}}>TitovStroy</div>
+            <div style={{fontSize:11,color:"#64748b"}}>{currentUser.name}</div>
           </div>
         </div>
         {/* Nav */}
@@ -5104,19 +5106,19 @@ export default function App() {
             <div key={item.id} className={"nav-item"+(isActive?" active":"")}
               onClick={()=>{ setDealReturnId(null); setObjectReturnId(null); setScreen(item.id); }}>
               <span style={{fontSize:18,flexShrink:0,lineHeight:1}}>{item.icon}</span>
-              <span className="nav-label" style={{color:isActive?"#2563eb":"#9ca3af",fontWeight:isActive?600:400}}>{item.label}</span>
+              <span className="nav-label">{item.label}</span>
             </div>
             );
           })}
         </nav>
         {/* Collapse + Выйти */}
-        <div style={{borderTop:"1px solid #e5e7eb",padding:"8px 0"}}>
+        <div style={{borderTop:"1px solid rgba(255,255,255,.07)",padding:"8px 0"}}>
           <div className="nav-item" onClick={()=>{ try{localStorage.removeItem(SESSION_KEY);}catch(e){} setCurrentUser(null); }}>
             <span style={{fontSize:16,flexShrink:0}}>🚪</span>
-            <span className="nav-label" style={{color:"#6b7280",fontSize:13}}>Выйти</span>
+            <span className="nav-label" style={{fontSize:13}}>Выйти</span>
           </div>
           <div className="nav-item" onClick={()=>setSideCollapsed(p=>!p)} style={{justifyContent:"center",marginTop:4}}>
-            <span style={{fontSize:13,color:"#374151"}}>{sideCollapsed?"▶":"◀"}</span>
+            <span style={{fontSize:13,color:"#64748b"}}>{sideCollapsed?"▶":"◀"}</span>
           </div>
         </div>
       </div>
@@ -5131,7 +5133,7 @@ export default function App() {
           <div key={item.id} className={"mob-nav-item"+(isActive?" active":"")}
             onClick={()=>{ setDealReturnId(null); setObjectReturnId(null); setScreen(item.id); }}>
             <span style={{fontSize:20}}>{item.icon}</span>
-            <span style={{fontSize:9,color:isActive?"#2563eb":"#9ca3af",fontWeight:600}}>{item.label}</span>
+            <span style={{fontSize:9,color:isActive?"#60a5fa":"#64748b",fontWeight:600}}>{item.label}</span>
           </div>
           );
         })}
@@ -5168,7 +5170,7 @@ export default function App() {
         const recentContracts = [...contracts].filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,5);
         const monthName = new Date().toLocaleDateString("ru-RU",{month:"long"});
         return (
-        <div className="page" style={{background:"#f8fafc",minHeight:"100vh",paddingBottom:40}}>
+        <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40}}>
 
           {/* Заголовок — Hero Banner */}
           <div style={{background:"linear-gradient(135deg,#1e3a8a 0%,#2563eb 60%,#3b82f6 100%)",borderRadius:16,padding:"28px 32px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(37,99,235,.35)"}}>
@@ -5176,8 +5178,8 @@ export default function App() {
             <div style={{position:"absolute",bottom:-50,right:60,width:120,height:120,borderRadius:"50%",background:"rgba(255,255,255,.04)"}}/>
             <div style={{position:"relative",zIndex:1,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
               <div>
-                <div style={{fontSize:22,fontWeight:900,color:"#fff",letterSpacing:-.5,marginBottom:4}}>
-                  TitovStroy <span style={{opacity:.75}}>CRM</span>
+                <div style={{fontSize:22,fontWeight:900,color:"#fff",letterSpacing:-.5,marginBottom:4,fontFamily:"'Poppins',sans-serif"}}>
+                  TitovStroy <span style={{opacity:.6,fontWeight:600}}>CRM</span>
                 </div>
                 <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>
                   {new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
