@@ -249,6 +249,34 @@ function groupData(works) {
 const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
 // Себестоимость за единицу с учётом разового ручного переопределения в строке сметы
 const rowCostPerUnit = (r, w) => (r && r.manualCost !== undefined && r.manualCost !== "" && !isNaN(Number(r.manualCost))) ? Number(r.manualCost) : (Number(w?.cost) || 0);
+// Открыть/распечатать готовый HTML-документ. В обычном браузере открываем новую вкладку,
+// в PWA (standalone) на iOS новые окна не открываются — печатаем через скрытый iframe.
+const openOrPrintHtml = (html, revokeMs = 30000) => {
+  const isStandalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
+  if (!isStandalone) {
+    const blob = new Blob([html], {type:"text/html"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.target = "_blank"; a.rel = "noopener";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), revokeMs);
+    return;
+  }
+  // PWA: печать через скрытый iframe
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden","true");
+  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none";
+  document.body.appendChild(iframe);
+  const doc = iframe.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
+  const triggerPrint = () => {
+    try { iframe.contentWindow.focus(); iframe.contentWindow.print(); }
+    catch(e) { /* ignore */ }
+    setTimeout(()=>{ try{ document.body.removeChild(iframe);}catch(e){} }, 60000);
+  };
+  // Дать времени отрисоваться картинкам (печать/штамп) перед вызовом печати
+  setTimeout(triggerPrint, 600);
+};
 const fmtDate = (ts) => {
   const d = new Date(ts);
   const today = new Date();
@@ -4209,11 +4237,7 @@ export default function App() {
     const stampFile = ca?.stampFile || "stamp.jpg";
     const stamp = withStamp ? (stampsBase64[stampFile] || stampBase64) : "";
     const html = buildContractHtml(c, client, ca, false, stamp);
-    const blob = new Blob([html],{type:"text/html"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href=url; a.target="_blank"; a.rel="noopener";
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(()=>URL.revokeObjectURL(url),20000);
+    openOrPrintHtml(html, 20000);
   };
 
   // ТЕСТ: смета сделки = настоящая смета (estId). Работы для договора/печати берём из неё.
@@ -4293,11 +4317,7 @@ export default function App() {
     </div>
     <div class="no-print"><button onclick="window.print()" style="padding:12px 32px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:inherit">🖨 Сохранить PDF</button></div>
     </body></html>`;
-    const blob = new Blob([html],{type:"text/html"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href=url; a.target="_blank"; a.rel="noopener";
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(()=>URL.revokeObjectURL(url),30000);
+    openOrPrintHtml(html, 30000);
   };
 
   const generateContractDocx = async (c, client, ca) => {
@@ -6432,12 +6452,7 @@ export default function App() {
                 const docParts = [proj.name, proj.phone, proj.address, today()].filter(Boolean);
                 const docTitle = docParts.length ? "КП " + docParts.join(" — ") : "КП TitovStroy";
                 const html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>" + docTitle + "</title><style>" + css + "</style></head><body>" + innerHTML + "<div class=\"no-print\" style=\"margin-top:24px;text-align:center\"><button onclick=\"window.print()\" style=\"padding:12px 32px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:inherit\">🖨 Сохранить PDF</button></div></body></html>";
-                const blob = new Blob([html], {type:"text/html"});
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url; a.target = "_blank"; a.rel = "noopener";
-                document.body.appendChild(a); a.click(); document.body.removeChild(a);
-                setTimeout(()=>URL.revokeObjectURL(url), 30000);
+                openOrPrintHtml(html, 30000);
               }}>Печать / PDF</button>
               </div>
             </div>
