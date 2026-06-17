@@ -7134,13 +7134,16 @@ export default function App() {
               const totProfit=income.tot-expTotalA.tot;
               // ── метрики P&L по международным стандартам ──
               const C_COGS="Прямые расходы (COGS / себестоимость)", C_OPEX="Косвенные расходы (OPEX / операционные)", C_FIN="Финансовые расходы";
+              const S_DIV="Дивиденды учредителям"; // распределение прибыли, не расход
               const cogs=agg(t=>t.type==="expense"&&t.category===C_COGS);
               const opex=agg(t=>t.type==="expense"&&t.category===C_OPEX);
-              const finc=agg(t=>t.type==="expense"&&t.category===C_FIN);
+              const finc=agg(t=>t.type==="expense"&&t.category===C_FIN&&t.subcategory!==S_DIV); // фин.расходы без дивидендов
+              const div=agg(t=>t.type==="expense"&&t.category===C_FIN&&t.subcategory===S_DIV);  // дивиденды
               const sub=(a,b)=>{ const byM={}; months.forEach(m=>byM[m]=(a.byM[m]||0)-(b.byM[m]||0)); return {byM,tot:a.tot-b.tot}; };
               const gross=sub(income,cogs);          // Валовая прибыль = Выручка − COGS
               const ebitda=sub(gross,opex);          // EBITDA / Операционная прибыль = ВП − OPEX
               const net=sub(ebitda,finc);            // Чистая прибыль = EBITDA − Фин.расходы
+              const retained=sub(net,div);           // Нераспределённая прибыль = Чистая − Дивиденды
               const pctRow=(num)=>{ const byM={}; months.forEach(m=>byM[m]=income.byM[m]>0?Math.round(num.byM[m]/income.byM[m]*100):null); return {byM,tot:income.tot>0?Math.round(num.tot/income.tot*100):null}; };
               const grossM=pctRow(gross), ebitdaM=pctRow(ebitda), netM=pctRow(net);
               const fmt=v=>v?fM(v):"—";
@@ -7149,7 +7152,7 @@ export default function App() {
               // строка-метрика (subtotal) и строка-процент
               const MetricRow=({label,ser,color,bg})=>(<tr style={{borderTop:"2px solid #e2e8f0",background:bg}}><td style={{padding:"9px 9px",fontWeight:900,color}}>{label}</td>{months.map(m=><td key={m} style={{padding:"9px 9px",textAlign:"right",fontWeight:800,color:(ser.byM[m]||0)>=0?color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(ser.byM[m])}</td>)}<td style={{padding:"9px 9px",textAlign:"right",fontWeight:900,color:ser.tot>=0?color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(ser.tot)}</td></tr>);
               const PctRow=({label,ser,color})=>(<tr><td style={{padding:"3px 9px 6px 22px",color,fontSize:11,fontStyle:"italic"}}>{label}</td>{months.map(m=><td key={m} style={{padding:"3px 9px 6px",textAlign:"right",color,fontSize:11,fontStyle:"italic",whiteSpace:"nowrap"}}>{fpct(ser.byM[m])}</td>)}<td style={{padding:"3px 9px 6px",textAlign:"right",color,fontSize:11,fontStyle:"italic",fontWeight:700,whiteSpace:"nowrap"}}>{fpct(ser.tot)}</td></tr>);
-              const ExpGroupRows=({cat})=>{ const g=expGroups.find(x=>x.cat===cat); if(!g||g.tot===0)return null; return (<Fragment><tr style={{borderBottom:"1px solid #f8fafc"}}><td style={{padding:"6px 9px",fontWeight:700,color:"#334155"}}>{g.cat}</td>{months.map(m=><td key={m} style={{padding:"6px 9px",textAlign:"right",color:"#dc2626",fontWeight:600,whiteSpace:"nowrap"}}>{fmt(g.byM[m])}</td>)}<td style={{padding:"6px 9px",textAlign:"right",fontWeight:800,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(g.tot)}</td></tr>{g.subs.map(s2=>{ const s=agg(t=>t.type==="expense"&&t.category===g.cat&&t.subcategory===s2); if(s.tot===0)return null; return (<tr key={s2}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{s2}</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>);})}</Fragment>); };
+              const ExpGroupRows=({cat,exclude=[]})=>{ const meta=(financeMeta.expense||[]).find(c=>c.cat===cat); if(!meta)return null; const gt=agg(t=>t.type==="expense"&&t.category===cat&&!exclude.includes(t.subcategory)); if(gt.tot===0)return null; return (<Fragment><tr style={{borderBottom:"1px solid #f8fafc"}}><td style={{padding:"6px 9px",fontWeight:700,color:"#334155"}}>{cat}</td>{months.map(m=><td key={m} style={{padding:"6px 9px",textAlign:"right",color:"#dc2626",fontWeight:600,whiteSpace:"nowrap"}}>{fmt(gt.byM[m])}</td>)}<td style={{padding:"6px 9px",textAlign:"right",fontWeight:800,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(gt.tot)}</td></tr>{(meta.subs||[]).filter(s2=>!exclude.includes(s2)).map(s2=>{ const s=agg(t=>t.type==="expense"&&t.category===cat&&t.subcategory===s2); if(s.tot===0)return null; return (<tr key={s2}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{s2}</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>);})}</Fragment>); };
               return (
                 <div className="card" style={{padding:"18px 20px",overflowX:"auto"}}>
                   <div style={{fontSize:14,fontWeight:800,color:"#0f172a",marginBottom:4}}>📈 Отчёт о прибылях и убытках (ОПУ / P&L)</div>
@@ -7182,9 +7185,14 @@ export default function App() {
                       <PctRow label="Операционная рентабельность" ser={ebitdaM} color="#7c3aed"/>
                       {/* Финансовые → Чистая прибыль */}
                       <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#dc2626"}}>▼ ФИНАНСОВЫЕ РАСХОДЫ (налоги, комиссии, %)</td></tr>
-                      <ExpGroupRows cat={C_FIN}/>
+                      <ExpGroupRows cat={C_FIN} exclude={[S_DIV]}/>
                       <MetricRow label="ЧИСТАЯ ПРИБЫЛЬ" ser={net} color="#2563eb" bg="#eff6ff"/>
                       <PctRow label="Рентабельность по чистой прибыли" ser={netM} color="#2563eb"/>
+                      {div.tot!==0 && (<>
+                        <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#94a3b8"}}>▼ РАСПРЕДЕЛЕНИЕ ПРИБЫЛИ</td></tr>
+                        <tr><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>− Дивиденды учредителям</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(div.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(div.tot)}</td></tr>
+                        <MetricRow label="НЕРАСПРЕДЕЛЁННАЯ ПРИБЫЛЬ" ser={retained} color="#0f172a" bg="#f1f5f9"/>
+                      </>)}
                     </tbody>
                   </table>
                   <div style={{marginTop:16,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
