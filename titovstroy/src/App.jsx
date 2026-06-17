@@ -4211,7 +4211,8 @@ export default function App() {
     const html = buildContractHtml(c, client, ca, false, stamp);
     const blob = new Blob([html],{type:"text/html"});
     const url = URL.createObjectURL(blob);
-    window.open(url,"_blank");
+    const a = document.createElement("a"); a.href=url; a.target="_blank"; a.rel="noopener";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(()=>URL.revokeObjectURL(url),20000);
   };
 
@@ -4294,7 +4295,8 @@ export default function App() {
     </body></html>`;
     const blob = new Blob([html],{type:"text/html"});
     const url = URL.createObjectURL(blob);
-    window.open(url,"_blank");
+    const a = document.createElement("a"); a.href=url; a.target="_blank"; a.rel="noopener";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(()=>URL.revokeObjectURL(url),30000);
   };
 
@@ -5207,7 +5209,7 @@ export default function App() {
             <div style={{position:"relative",zIndex:1,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
               <div>
                 <div style={{fontSize:22,fontWeight:900,color:"#fff",letterSpacing:-.5,marginBottom:4,fontFamily:"'Poppins',sans-serif"}}>
-                  TitovStroy <span style={{opacity:.6,fontWeight:600}}>ERP</span>
+                  TitovStroy <span style={{opacity:.6,fontWeight:600}}>CRM</span>
                 </div>
                 <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>
                   {new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
@@ -5755,7 +5757,7 @@ export default function App() {
                         const displayName = r.manualName !== undefined ? r.manualName : work.name;
                         const displayUnit = r.manualUnit !== undefined ? r.manualUnit : (work.unit||"м²");
                         return (
-                          <div key={work.name} style={{display:"grid",gridTemplateColumns:"1fr 50px 120px 76px 90px",gap:4,padding:"8px 16px",borderBottom:"1px solid #f3f4f6",alignItems:"center"}}>
+                          <div key={work.name} className="wrow" style={{display:"grid",gridTemplateColumns:"1fr 50px 120px 76px 90px",gap:4,padding:"8px 16px",borderBottom:"1px solid #f3f4f6",alignItems:"center"}}>
                             <div style={{minWidth:0}}>
                               {r.editingName ? (
                                 <div style={{display:"flex",alignItems:"center",gap:4}}>
@@ -5793,25 +5795,45 @@ export default function App() {
                                   </div>
                                 );
                               })()}
+                              {/* Mobile: qty + price + total */}
+                              <div className="wrow-mob-extra" style={{flexDirection:"column",alignItems:"flex-start",gap:3,display:"none",marginTop:4}}>
+                                <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                                  <span style={{fontSize:11,color:"#94a3b8"}}>Цена:</span>
+                                  <input type="number" min="0"
+                                    value={r.manualPrice !== undefined ? r.manualPrice : (price||"")}
+                                    onChange={e=>setRow(work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}
+                                    style={{width:80,border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 5px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
+                                  <span style={{fontSize:11,color:"#94a3b8"}}>Объём:</span>
+                                  <input type="number" min="0"
+                                    value={r.qty||""}
+                                    onChange={e=>setRow(work.name,"qty",e.target.value)}
+                                    style={{width:60,border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 5px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
+                                </div>
+                                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%"}}>
+                                  <span style={{fontSize:13,fontWeight:700,color:total>0?"#2563eb":"#94a3b8"}}>{total>0?fmt(total)+" ₸":"—"}</span>
+                                  <button onClick={()=>setRow(work.name,"qty","")} title="Убрать из сметы"
+                                    style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:14,padding:0,lineHeight:1}}>✕</button>
+                                </div>
+                              </div>
                             </div>
-                            <div style={{textAlign:"center"}}>
+                            <div className="wrow-desk" style={{textAlign:"center"}}>
                               <input value={displayUnit}
                                 onChange={e=>setRow(work.name,"manualUnit",e.target.value===(work.unit||"м²")?undefined:e.target.value)}
                                 style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:4,padding:"3px 4px",fontSize:11,textAlign:"center",fontFamily:"inherit",background:"#fff"}}/>
                             </div>
-                            <div style={{textAlign:"right"}}>
+                            <div className="wrow-desk" style={{textAlign:"right"}}>
                               <input type="number" min="0"
                                 value={r.manualPrice !== undefined ? r.manualPrice : (price||"")}
                                 onChange={e=>setRow(work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}
                                 style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:4,padding:"3px 6px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
                             </div>
-                            <div style={{textAlign:"right"}}>
+                            <div className="wrow-desk" style={{textAlign:"right"}}>
                               <input type="number" min="0"
                                 value={r.qty||""}
                                 onChange={e=>setRow(work.name,"qty",e.target.value)}
                                 style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:4,padding:"3px 6px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
                             </div>
-                            <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:6}}>
+                            <div className="wrow-desk" style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:6}}>
                               <span style={{fontSize:13,fontWeight:700,color:total>0?"#2563eb":"#94a3b8"}}>{total>0?fmt(total):"—"}</span>
                               <button onClick={()=>setRow(work.name,"qty","")} title="Убрать из сметы"
                                 style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:14,padding:0,lineHeight:1}}>✕</button>
@@ -6412,7 +6434,9 @@ export default function App() {
                 const html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>" + docTitle + "</title><style>" + css + "</style></head><body>" + innerHTML + "<div class=\"no-print\" style=\"margin-top:24px;text-align:center\"><button onclick=\"window.print()\" style=\"padding:12px 32px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:inherit\">🖨 Сохранить PDF</button></div></body></html>";
                 const blob = new Blob([html], {type:"text/html"});
                 const url = URL.createObjectURL(blob);
-                window.open(url, "_blank");
+                const a = document.createElement("a");
+                a.href = url; a.target = "_blank"; a.rel = "noopener";
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
                 setTimeout(()=>URL.revokeObjectURL(url), 30000);
               }}>Печать / PDF</button>
               </div>
