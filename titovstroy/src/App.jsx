@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef, Fragment } from "react";
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, get, set } from "firebase/database";
 
@@ -6942,7 +6942,7 @@ export default function App() {
             </div>
 
             {/* Фильтр периода (для дашборда и операций) */}
-            {financeTab!=="ref" && financeTab!=="projects" && financeTab!=="dds" && financeTab!=="opu" && (
+            {financeTab!=="ref" && financeTab!=="projects" && (
               <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap",alignItems:"center"}}>
                 {PERIODS.map(([k,l])=>(
                   <button key={k} onClick={()=>setFinPeriod(k)} style={{fontSize:12,fontWeight:600,padding:"6px 13px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(finPeriod===k?"#2563eb":"#e2e8f0"),background:finPeriod===k?"#eff6ff":"#fff",color:finPeriod===k?"#2563eb":"#94a3b8"}}>{l}</button>
@@ -7029,134 +7029,135 @@ export default function App() {
               </div>
             </>)}
 
-            {/* ───── ДДС МЕСЯЦ (движение денег по месяцам) ───── */}
+            {/* ───── ДДС: ОТЧЁТ О ДВИЖЕНИИ ДЕНЕЖНЫХ СРЕДСТВ ───── */}
             {financeTab==="dds" && (()=>{
-              // Все месяцы из данных
-              const mset = {};
-              financeTx.forEach(t=>{
-                const d=new Date(t.date||t.createdAt||0);
-                const key=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
-                mset[key]=true;
-              });
-              const allMonths = Object.keys(mset).sort();
               const MN=["Янв","Фев","Мар","Апр","Май","Июн","Июл","Авг","Сен","Окт","Ноя","Дек"];
+              const tsKey = ts => { const d=new Date(ts); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); };
               const mLabel = k => { const [y,m]=k.split("-"); return MN[parseInt(m)-1]+" "+y.slice(2); };
-              // Притоки/оттоки по месяцам (доход = приток, расход = отток; переводы не влияют на сумму компании)
-              const col = k => {
-                let inc=0,exp=0;
-                financeTx.forEach(t=>{
-                  const d=new Date(t.date||t.createdAt||0);
-                  const key=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
-                  if(key!==k) return;
-                  if(t.type==="income") inc+=Number(t.amount)||0;
-                  else if(t.type==="expense") exp+=Number(t.amount)||0;
-                });
-                return {inc,exp,net:inc-exp};
+              // месяцы внутри выбранного периода
+              const monthsSet={};
+              financeTx.forEach(t=>{ const ts=t.date||t.createdAt||0; if(inPeriod(ts)) monthsSet[tsKey(ts)]=true; });
+              const months=Object.keys(monthsSet).sort();
+              // САЛЬДО НАЧАЛЬНОЕ на старте периода = opening + чистый поток всех операций до первого месяца
+              const startBal0 = accounts.reduce((s,a)=>s+(Number(a.opening)||0),0);
+              const firstMonth = months[0];
+              let saldoStart = startBal0;
+              if(firstMonth){
+                financeTx.forEach(t=>{ const ts=t.date||t.createdAt||0; if(tsKey(ts) < firstMonth){ if(t.type==="income") saldoStart+=Number(t.amount)||0; else if(t.type==="expense") saldoStart-=Number(t.amount)||0; } });
+              }
+              // агрегатор: по типу/категории/подкатегории и по месяцам
+              const agg = (pred) => { const byM={}; let tot=0; months.forEach(m=>byM[m]=0);
+                financeTx.forEach(t=>{ const ts=t.date||t.createdAt||0; if(!inPeriod(ts)||!pred(t))return; const m=tsKey(ts); if(m in byM){byM[m]+=Number(t.amount)||0; tot+=Number(t.amount)||0;} });
+                return {byM,tot};
               };
-              const cols = allMonths.map(k=>({k,...col(k)}));
-              // нарастающий остаток (старт = сумма opening)
-              const startBal = accounts.reduce((s,a)=>s+(Number(a.opening)||0),0);
-              let run=startBal;
-              const withRun = cols.map(c=>{ run+=c.net; return {...c,run}; });
-              const totInc=cols.reduce((s,c)=>s+c.inc,0), totExp=cols.reduce((s,c)=>s+c.exp,0);
+              const incTotal = agg(t=>t.type==="income");
+              const expTotal = agg(t=>t.type==="expense");
+              const incGroups = (financeMeta.income||[]).map(c=>({cat:c.cat,subs:c.subs||[],...agg(t=>t.type==="income"&&t.category===c.cat)}));
+              const expGroups = (financeMeta.expense||[]).map(c=>({cat:c.cat,subs:c.subs||[],...agg(t=>t.type==="expense"&&t.category===c.cat)}));
+              // нарастающее сальдо конечное
+              const saldoEnd={}; let run=saldoStart;
+              months.forEach(m=>{ run+=(incTotal.byM[m]||0)-(expTotal.byM[m]||0); saldoEnd[m]=run; });
+              const fmt = v => v ? fM(v) : "—";
+              const HCell={padding:"7px 9px",textAlign:"right",color:"#64748b",fontWeight:700,whiteSpace:"nowrap",fontSize:11.5};
+              const sumStyle=(v)=>({padding:"7px 9px",textAlign:"right",fontWeight:700,whiteSpace:"nowrap",color:v>=0?"#0f172a":"#dc2626"});
               return (
                 <div className="card" style={{padding:"18px 20px",overflowX:"auto"}}>
                   <div style={{fontSize:14,fontWeight:800,color:"#0f172a",marginBottom:4}}>💸 Отчёт о движении денежных средств (ДДС)</div>
-                  <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>Притоки и оттоки денег по месяцам. Остаток на старте: {fM(startBal)} ₸</div>
-                  <table style={{borderCollapse:"collapse",width:"100%",fontSize:13,minWidth:520}}>
-                    <thead>
-                      <tr style={{borderBottom:"2px solid #e2e8f0"}}>
-                        <th style={{textAlign:"left",padding:"8px 10px",color:"#64748b",fontWeight:700}}>Месяц</th>
-                        <th style={{textAlign:"right",padding:"8px 10px",color:"#059669",fontWeight:700}}>Приток</th>
-                        <th style={{textAlign:"right",padding:"8px 10px",color:"#dc2626",fontWeight:700}}>Отток</th>
-                        <th style={{textAlign:"right",padding:"8px 10px",color:"#2563eb",fontWeight:700}}>Чистый поток</th>
-                        <th style={{textAlign:"right",padding:"8px 10px",color:"#0f172a",fontWeight:700}}>Остаток</th>
-                      </tr>
-                    </thead>
+                  <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>По дате платежа · {months.length} мес. в периоде</div>
+                  {months.length===0 ? <div style={{color:"#94a3b8",textAlign:"center",padding:30}}>Нет данных за период</div> : (
+                  <table style={{borderCollapse:"collapse",fontSize:12.5,minWidth:560}}>
+                    <thead><tr style={{borderBottom:"2px solid #e2e8f0"}}>
+                      <th style={{textAlign:"left",padding:"7px 9px",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>Статья</th>
+                      {months.map(m=><th key={m} style={HCell}>{mLabel(m)}</th>)}
+                      <th style={{...HCell,color:"#0f172a"}}>Итого</th>
+                    </tr></thead>
                     <tbody>
-                      {withRun.map(c=>(
-                        <tr key={c.k} style={{borderBottom:"1px solid #f1f5f9"}}>
-                          <td style={{padding:"8px 10px",fontWeight:600,color:"#334155"}}>{mLabel(c.k)}</td>
-                          <td style={{padding:"8px 10px",textAlign:"right",color:"#059669"}}>{fM(c.inc)}</td>
-                          <td style={{padding:"8px 10px",textAlign:"right",color:"#dc2626"}}>{fM(c.exp)}</td>
-                          <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:c.net>=0?"#2563eb":"#dc2626"}}>{c.net>=0?"+":""}{fM(c.net)}</td>
-                          <td style={{padding:"8px 10px",textAlign:"right",fontWeight:800,color:c.run>=0?"#0f172a":"#dc2626"}}>{fM(c.run)}</td>
-                        </tr>
-                      ))}
-                      {withRun.length===0 && <tr><td colSpan={5} style={{padding:30,textAlign:"center",color:"#94a3b8"}}>Нет данных</td></tr>}
+                      <tr style={{background:"#f8fafc"}}><td style={{padding:"7px 9px",fontWeight:700,color:"#475569"}}>Сальдо начальное</td>{months.map((m,i)=><td key={m} style={sumStyle(i===0?saldoStart:saldoEnd[months[i-1]])}>{fM(i===0?saldoStart:saldoEnd[months[i-1]])}</td>)}<td style={sumStyle(saldoStart)}>{fM(saldoStart)}</td></tr>
+                      <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#059669"}}>▼ ДОХОДЫ</td></tr>
+                      {incGroups.filter(g=>g.tot!==0).map(g=>(<Fragment key={g.cat}>
+                        <tr style={{borderBottom:"1px solid #f8fafc"}}><td style={{padding:"6px 9px",fontWeight:700,color:"#334155"}}>{g.cat}</td>{months.map(m=><td key={m} style={{padding:"6px 9px",textAlign:"right",color:"#059669",fontWeight:600,whiteSpace:"nowrap"}}>{fmt(g.byM[m])}</td>)}<td style={{padding:"6px 9px",textAlign:"right",fontWeight:800,color:"#059669",whiteSpace:"nowrap"}}>{fmt(g.tot)}</td></tr>
+                        {g.subs.map(sub=>{ const s=agg(t=>t.type==="income"&&t.category===g.cat&&t.subcategory===sub); if(s.tot===0)return null; return (
+                          <tr key={sub}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{sub}</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>
+                        );})}
+                      </Fragment>))}
+                      <tr style={{borderTop:"1px solid #e2e8f0"}}><td style={{padding:"7px 9px",fontWeight:800,color:"#059669"}}>Доходы всего</td>{months.map(m=><td key={m} style={{padding:"7px 9px",textAlign:"right",fontWeight:800,color:"#059669",whiteSpace:"nowrap"}}>{fmt(incTotal.byM[m])}</td>)}<td style={{padding:"7px 9px",textAlign:"right",fontWeight:900,color:"#059669",whiteSpace:"nowrap"}}>{fmt(incTotal.tot)}</td></tr>
+                      <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#dc2626"}}>▼ РАСХОДЫ</td></tr>
+                      {expGroups.filter(g=>g.tot!==0).map(g=>(<Fragment key={g.cat}>
+                        <tr style={{borderBottom:"1px solid #f8fafc"}}><td style={{padding:"6px 9px",fontWeight:700,color:"#334155"}}>{g.cat}</td>{months.map(m=><td key={m} style={{padding:"6px 9px",textAlign:"right",color:"#dc2626",fontWeight:600,whiteSpace:"nowrap"}}>{fmt(g.byM[m])}</td>)}<td style={{padding:"6px 9px",textAlign:"right",fontWeight:800,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(g.tot)}</td></tr>
+                        {g.subs.map(sub=>{ const s=agg(t=>t.type==="expense"&&t.category===g.cat&&t.subcategory===sub); if(s.tot===0)return null; return (
+                          <tr key={sub}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{sub}</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>
+                        );})}
+                      </Fragment>))}
+                      <tr style={{borderTop:"1px solid #e2e8f0"}}><td style={{padding:"7px 9px",fontWeight:800,color:"#dc2626"}}>Расходы всего</td>{months.map(m=><td key={m} style={{padding:"7px 9px",textAlign:"right",fontWeight:800,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(expTotal.byM[m])}</td>)}<td style={{padding:"7px 9px",textAlign:"right",fontWeight:900,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(expTotal.tot)}</td></tr>
+                      <tr style={{borderTop:"2px solid #e2e8f0",background:"#eff6ff"}}><td style={{padding:"8px 9px",fontWeight:900,color:"#2563eb"}}>Чистый поток</td>{months.map(m=>{const v=(incTotal.byM[m]||0)-(expTotal.byM[m]||0);return <td key={m} style={{padding:"8px 9px",textAlign:"right",fontWeight:800,color:v>=0?"#2563eb":"#dc2626",whiteSpace:"nowrap"}}>{v>=0?"+":""}{fmt(v)}</td>;})}<td style={{padding:"8px 9px",textAlign:"right",fontWeight:900,color:(incTotal.tot-expTotal.tot)>=0?"#2563eb":"#dc2626",whiteSpace:"nowrap"}}>{fmt(incTotal.tot-expTotal.tot)}</td></tr>
+                      <tr style={{background:"#f8fafc"}}><td style={{padding:"8px 9px",fontWeight:900,color:"#0f172a"}}>Сальдо конечное</td>{months.map(m=><td key={m} style={{...sumStyle(saldoEnd[m]),fontWeight:900}}>{fM(saldoEnd[m])}</td>)}<td style={{...sumStyle(run),fontWeight:900}}>{fM(run)}</td></tr>
                     </tbody>
-                    {withRun.length>0 && <tfoot>
-                      <tr style={{borderTop:"2px solid #e2e8f0",fontWeight:800}}>
-                        <td style={{padding:"10px"}}>ИТОГО</td>
-                        <td style={{padding:"10px",textAlign:"right",color:"#059669"}}>{fM(totInc)}</td>
-                        <td style={{padding:"10px",textAlign:"right",color:"#dc2626"}}>{fM(totExp)}</td>
-                        <td style={{padding:"10px",textAlign:"right",color:(totInc-totExp)>=0?"#2563eb":"#dc2626"}}>{fM(totInc-totExp)}</td>
-                        <td style={{padding:"10px",textAlign:"right"}}>{fM(run)}</td>
-                      </tr>
-                    </tfoot>}
-                  </table>
+                  </table>)}
                 </div>
               );
             })()}
 
-            {/* ───── ОПУ МЕСЯЦ (отчёт о прибылях и убытках) ───── */}
+            {/* ───── ОПУ: ОТЧЁТ О ПРИБЫЛЯХ И УБЫТКАХ ───── */}
             {financeTab==="opu" && (()=>{
-              const mset={};
-              financeTx.forEach(t=>{ if(t.type==="transfer")return; const d=new Date(t.date||t.createdAt||0); mset[d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")]=true; });
-              const allMonths=Object.keys(mset).sort();
               const MN=["Янв","Фев","Мар","Апр","Май","Июн","Июл","Авг","Сен","Окт","Ноя","Дек"];
               const mLabel=k=>{const[y,m]=k.split("-");return MN[parseInt(m)-1]+" "+y.slice(2);};
-              // Структура ОПУ: доходы всего, расходы по группам COGS/OPEX/Финансовые
-              const sumBy = (pred) => { const r={}; allMonths.forEach(k=>r[k]=0); let tot=0;
-                financeTx.forEach(t=>{ if(!pred(t))return; const d=new Date(t.date||t.createdAt||0); const k=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); r[k]=(r[k]||0)+(Number(t.amount)||0); tot+=Number(t.amount)||0; });
-                return {r,tot};
+              // ОПУ группирует по месяцу закрытия (opuMonth), фолбэк — месяц платежа
+              const opuKey = t => t.opuMonth || (()=>{ const d=new Date(t.date||t.createdAt||0); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); })();
+              // фильтр периода: по дате месяца ОПУ (первое число)
+              const inP = t => { const k=opuKey(t); const ts=new Date(k+"-01").getTime(); return inPeriod(ts); };
+              const monthsSet={};
+              financeTx.forEach(t=>{ if(t.type==="transfer")return; if(inP(t)) monthsSet[opuKey(t)]=true; });
+              const months=Object.keys(monthsSet).sort();
+              const agg=(pred)=>{ const byM={}; let tot=0; months.forEach(m=>byM[m]=0);
+                financeTx.forEach(t=>{ if(t.type==="transfer"||!inP(t)||!pred(t))return; const m=opuKey(t); if(m in byM){byM[m]+=Number(t.amount)||0; tot+=Number(t.amount)||0;} });
+                return {byM,tot};
               };
-              const income = sumBy(t=>t.type==="income");
-              // группы расходов по ключевым словам в категории
-              const expGroups = (financeMeta.expense||[]).map(c=>c.cat);
-              const expData = expGroups.map(cat=>({cat,...sumBy(t=>t.type==="expense"&&t.category===cat)}));
-              const expOther = sumBy(t=>t.type==="expense"&&!expGroups.includes(t.category));
-              if(expOther.tot>0) expData.push({cat:"Прочие расходы",...expOther});
-              const profitByMonth = {}; allMonths.forEach(k=>{ let e=0; expData.forEach(g=>e+=g.r[k]||0); profitByMonth[k]=(income.r[k]||0)-e; });
-              const totExp = expData.reduce((s,g)=>s+g.tot,0);
-              const totProfit = income.tot-totExp;
-              const Row = ({label,data,tot,color,bold,indent})=>(
-                <tr style={{borderBottom:"1px solid #f1f5f9"}}>
-                  <td style={{padding:"7px 10px",fontWeight:bold?800:600,color:color||"#334155",paddingLeft:indent?24:10,whiteSpace:"nowrap"}}>{label}</td>
-                  {allMonths.map(k=><td key={k} style={{padding:"7px 10px",textAlign:"right",color:color||"#334155",fontWeight:bold?700:400,whiteSpace:"nowrap"}}>{data[k]?fM(data[k]):"—"}</td>)}
-                  <td style={{padding:"7px 10px",textAlign:"right",fontWeight:800,color:color||"#0f172a",whiteSpace:"nowrap"}}>{fM(tot)}</td>
-                </tr>
-              );
+              const income=agg(t=>t.type==="income");
+              const expTotalA=agg(t=>t.type==="expense");
+              const incGroups=(financeMeta.income||[]).map(c=>({cat:c.cat,subs:c.subs||[],...agg(t=>t.type==="income"&&t.category===c.cat)}));
+              const expGroups=(financeMeta.expense||[]).map(c=>({cat:c.cat,subs:c.subs||[],...agg(t=>t.type==="expense"&&t.category===c.cat)}));
+              const profitByM={}; months.forEach(m=>profitByM[m]=(income.byM[m]||0)-(expTotalA.byM[m]||0));
+              const totProfit=income.tot-expTotalA.tot;
+              const fmt=v=>v?fM(v):"—";
+              const HCell={padding:"7px 9px",textAlign:"right",color:"#64748b",fontWeight:700,whiteSpace:"nowrap",fontSize:11.5};
               return (
                 <div className="card" style={{padding:"18px 20px",overflowX:"auto"}}>
                   <div style={{fontSize:14,fontWeight:800,color:"#0f172a",marginBottom:4}}>📈 Отчёт о прибылях и убытках (ОПУ / P&L)</div>
-                  <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>Доходы и расходы по месяцам, итоговая прибыль</div>
-                  <table style={{borderCollapse:"collapse",fontSize:12.5,minWidth:600}}>
-                    <thead>
-                      <tr style={{borderBottom:"2px solid #e2e8f0"}}>
-                        <th style={{textAlign:"left",padding:"8px 10px",color:"#64748b"}}>Статья</th>
-                        {allMonths.map(k=><th key={k} style={{textAlign:"right",padding:"8px 10px",color:"#64748b",whiteSpace:"nowrap"}}>{mLabel(k)}</th>)}
-                        <th style={{textAlign:"right",padding:"8px 10px",color:"#0f172a"}}>Итого</th>
-                      </tr>
-                    </thead>
+                  <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>По месяцу закрытия проекта (метод начисления) · {months.length} мес. в периоде</div>
+                  {months.length===0 ? <div style={{color:"#94a3b8",textAlign:"center",padding:30}}>Нет данных за период</div> : (<>
+                  <table style={{borderCollapse:"collapse",fontSize:12.5,minWidth:560}}>
+                    <thead><tr style={{borderBottom:"2px solid #e2e8f0"}}>
+                      <th style={{textAlign:"left",padding:"7px 9px",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>Статья</th>
+                      {months.map(m=><th key={m} style={HCell}>{mLabel(m)}</th>)}
+                      <th style={{...HCell,color:"#0f172a"}}>Итого</th>
+                    </tr></thead>
                     <tbody>
-                      <Row label="Доходы" data={income.r} tot={income.tot} color="#059669" bold/>
-                      <tr><td colSpan={allMonths.length+2} style={{padding:"6px 10px",fontWeight:800,color:"#dc2626",fontSize:12}}>Расходы</td></tr>
-                      {expData.map(g=><Row key={g.cat} label={g.cat} data={g.r} tot={g.tot} color="#dc2626" indent/>)}
-                      <Row label="Всего расходов" data={Object.fromEntries(allMonths.map(k=>[k,expData.reduce((s,g)=>s+(g.r[k]||0),0)]))} tot={totExp} color="#dc2626" bold/>
-                      <tr style={{borderTop:"2px solid #e2e8f0",background:"#f8fafc"}}>
-                        <td style={{padding:"9px 10px",fontWeight:900,color:"#0f172a"}}>ПРИБЫЛЬ</td>
-                        {allMonths.map(k=><td key={k} style={{padding:"9px 10px",textAlign:"right",fontWeight:800,color:profitByMonth[k]>=0?"#2563eb":"#dc2626",whiteSpace:"nowrap"}}>{fM(profitByMonth[k])}</td>)}
-                        <td style={{padding:"9px 10px",textAlign:"right",fontWeight:900,color:totProfit>=0?"#2563eb":"#dc2626"}}>{fM(totProfit)}</td>
-                      </tr>
+                      <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#059669"}}>▼ ДОХОДЫ</td></tr>
+                      {incGroups.filter(g=>g.tot!==0).map(g=>(<Fragment key={g.cat}>
+                        <tr style={{borderBottom:"1px solid #f8fafc"}}><td style={{padding:"6px 9px",fontWeight:700,color:"#334155"}}>{g.cat}</td>{months.map(m=><td key={m} style={{padding:"6px 9px",textAlign:"right",color:"#059669",fontWeight:600,whiteSpace:"nowrap"}}>{fmt(g.byM[m])}</td>)}<td style={{padding:"6px 9px",textAlign:"right",fontWeight:800,color:"#059669",whiteSpace:"nowrap"}}>{fmt(g.tot)}</td></tr>
+                        {g.subs.map(sub=>{ const s=agg(t=>t.type==="income"&&t.category===g.cat&&t.subcategory===sub); if(s.tot===0)return null; return (
+                          <tr key={sub}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{sub}</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>
+                        );})}
+                      </Fragment>))}
+                      <tr style={{borderTop:"1px solid #e2e8f0"}}><td style={{padding:"7px 9px",fontWeight:800,color:"#059669"}}>Доходы всего</td>{months.map(m=><td key={m} style={{padding:"7px 9px",textAlign:"right",fontWeight:800,color:"#059669",whiteSpace:"nowrap"}}>{fmt(income.byM[m])}</td>)}<td style={{padding:"7px 9px",textAlign:"right",fontWeight:900,color:"#059669",whiteSpace:"nowrap"}}>{fmt(income.tot)}</td></tr>
+                      <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#dc2626"}}>▼ РАСХОДЫ</td></tr>
+                      {expGroups.filter(g=>g.tot!==0).map(g=>(<Fragment key={g.cat}>
+                        <tr style={{borderBottom:"1px solid #f8fafc"}}><td style={{padding:"6px 9px",fontWeight:700,color:"#334155"}}>{g.cat}</td>{months.map(m=><td key={m} style={{padding:"6px 9px",textAlign:"right",color:"#dc2626",fontWeight:600,whiteSpace:"nowrap"}}>{fmt(g.byM[m])}</td>)}<td style={{padding:"6px 9px",textAlign:"right",fontWeight:800,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(g.tot)}</td></tr>
+                        {g.subs.map(sub=>{ const s=agg(t=>t.type==="expense"&&t.category===g.cat&&t.subcategory===sub); if(s.tot===0)return null; return (
+                          <tr key={sub}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{sub}</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>
+                        );})}
+                      </Fragment>))}
+                      <tr style={{borderTop:"1px solid #e2e8f0"}}><td style={{padding:"7px 9px",fontWeight:800,color:"#dc2626"}}>Расходы всего</td>{months.map(m=><td key={m} style={{padding:"7px 9px",textAlign:"right",fontWeight:800,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(expTotalA.byM[m])}</td>)}<td style={{padding:"7px 9px",textAlign:"right",fontWeight:900,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(expTotalA.tot)}</td></tr>
+                      <tr style={{borderTop:"2px solid #e2e8f0",background:"#eff6ff"}}><td style={{padding:"9px 9px",fontWeight:900,color:"#2563eb"}}>ПРИБЫЛЬ</td>{months.map(m=><td key={m} style={{padding:"9px 9px",textAlign:"right",fontWeight:800,color:profitByM[m]>=0?"#2563eb":"#dc2626",whiteSpace:"nowrap"}}>{fmt(profitByM[m])}</td>)}<td style={{padding:"9px 9px",textAlign:"right",fontWeight:900,color:totProfit>=0?"#2563eb":"#dc2626",whiteSpace:"nowrap"}}>{fmt(totProfit)}</td></tr>
                     </tbody>
                   </table>
                   <div style={{marginTop:14,display:"flex",gap:24,flexWrap:"wrap",fontSize:13}}>
                     <div><span style={{color:"#94a3b8"}}>Доходы: </span><b style={{color:"#059669"}}>{fM(income.tot)} ₸</b></div>
-                    <div><span style={{color:"#94a3b8"}}>Расходы: </span><b style={{color:"#dc2626"}}>{fM(totExp)} ₸</b></div>
+                    <div><span style={{color:"#94a3b8"}}>Расходы: </span><b style={{color:"#dc2626"}}>{fM(expTotalA.tot)} ₸</b></div>
                     <div><span style={{color:"#94a3b8"}}>Прибыль: </span><b style={{color:totProfit>=0?"#2563eb":"#dc2626"}}>{fM(totProfit)} ₸</b></div>
                     <div><span style={{color:"#94a3b8"}}>Рентабельность: </span><b style={{color:"#7c3aed"}}>{income.tot>0?Math.round(totProfit/income.tot*100):0}%</b></div>
                   </div>
+                  </>)}
                 </div>
               );
             })()}
