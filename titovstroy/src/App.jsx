@@ -7104,15 +7104,26 @@ export default function App() {
             {financeTab==="opu" && (()=>{
               const MN=["Янв","Фев","Мар","Апр","Май","Июн","Июл","Авг","Сен","Окт","Ноя","Дек"];
               const mLabel=k=>{const[y,m]=k.split("-");return MN[parseInt(m)-1]+" "+y.slice(2);};
-              // ОПУ группирует по месяцу закрытия (opuMonth), фолбэк — месяц платежа
-              const opuKey = t => t.opuMonth || (()=>{ const d=new Date(t.date||t.createdAt||0); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); })();
-              // фильтр периода: по дате месяца ОПУ (первое число)
-              const inP = t => { const k=opuKey(t); const ts=new Date(k+"-01").getTime(); return inPeriod(ts); };
+              const ymOf = d => { if(!d) return null; const dt=new Date(d); if(isNaN(dt)) return null; return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0"); };
+              // ── ДОХОД (метод начисления): стоимость ЗАКРЫТЫХ проектов в месяце закрытия ──
+              const catToSub={"Вторичка":"Оплата по договору (вторичка)","Коммерческие объекты":"Оплата по договору  (коммерция)","Коммерция":"Оплата по договору  (коммерция)","Новостройки":"Оплата по договору (новостройки)","Частичные работы, услуги":"Частичные работы, услуги"};
+              const projIncome = finProjects
+                .filter(p=>(p.rawStatus==="выполнен"||p.status==="выполнен") && p.closedAt && Number(p.budget)>0)
+                .map(p=>({ month:ymOf(p.closedAt), category:"Основные доходы", subcategory:catToSub[p.category]||"Частичные работы, услуги", amount:Number(p.budget)||0 }))
+                .filter(r=>r.month);
+              // ── РАСХОД: по дате оплаты (кассовый метод) ──
+              const expMonth = t => { const d=new Date(t.date||t.createdAt||0); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); };
+              const inPM = m => m && inPeriod(new Date(m+"-01").getTime());
+              // единый список строк ОПУ: доходы из закрытых проектов + расходы по дате оплаты
+              const opuRows=[
+                ...projIncome.map(r=>({type:"income",category:r.category,subcategory:r.subcategory,amount:r.amount,month:r.month})),
+                ...financeTx.filter(t=>t.included!==false&&t.type==="expense").map(t=>({type:"expense",category:t.category,subcategory:t.subcategory,amount:Number(t.amount)||0,month:expMonth(t)})),
+              ];
               const monthsSet={};
-              financeTx.forEach(t=>{ if(t.included===false||t.type==="transfer")return; if(inP(t)) monthsSet[opuKey(t)]=true; });
+              opuRows.forEach(r=>{ if(inPM(r.month)) monthsSet[r.month]=true; });
               const months=Object.keys(monthsSet).sort();
               const agg=(pred)=>{ const byM={}; let tot=0; months.forEach(m=>byM[m]=0);
-                financeTx.forEach(t=>{ if(t.included===false||t.type==="transfer"||!inP(t)||!pred(t))return; const m=opuKey(t); if(m in byM){byM[m]+=Number(t.amount)||0; tot+=Number(t.amount)||0;} });
+                opuRows.forEach(r=>{ if(!inPM(r.month)||!pred(r))return; if(r.month in byM){byM[r.month]+=r.amount; tot+=r.amount;} });
                 return {byM,tot};
               };
               const income=agg(t=>t.type==="income");
@@ -7121,12 +7132,28 @@ export default function App() {
               const expGroups=(financeMeta.expense||[]).map(c=>({cat:c.cat,subs:c.subs||[],...agg(t=>t.type==="expense"&&t.category===c.cat)}));
               const profitByM={}; months.forEach(m=>profitByM[m]=(income.byM[m]||0)-(expTotalA.byM[m]||0));
               const totProfit=income.tot-expTotalA.tot;
+              // ── метрики P&L по международным стандартам ──
+              const C_COGS="Прямые расходы (COGS / себестоимость)", C_OPEX="Косвенные расходы (OPEX / операционные)", C_FIN="Финансовые расходы";
+              const cogs=agg(t=>t.type==="expense"&&t.category===C_COGS);
+              const opex=agg(t=>t.type==="expense"&&t.category===C_OPEX);
+              const finc=agg(t=>t.type==="expense"&&t.category===C_FIN);
+              const sub=(a,b)=>{ const byM={}; months.forEach(m=>byM[m]=(a.byM[m]||0)-(b.byM[m]||0)); return {byM,tot:a.tot-b.tot}; };
+              const gross=sub(income,cogs);          // Валовая прибыль = Выручка − COGS
+              const ebitda=sub(gross,opex);          // EBITDA / Операционная прибыль = ВП − OPEX
+              const net=sub(ebitda,finc);            // Чистая прибыль = EBITDA − Фин.расходы
+              const pctRow=(num)=>{ const byM={}; months.forEach(m=>byM[m]=income.byM[m]>0?Math.round(num.byM[m]/income.byM[m]*100):null); return {byM,tot:income.tot>0?Math.round(num.tot/income.tot*100):null}; };
+              const grossM=pctRow(gross), ebitdaM=pctRow(ebitda), netM=pctRow(net);
               const fmt=v=>v?fM(v):"—";
+              const fpct=v=>v===null?"—":v+"%";
               const HCell={padding:"7px 9px",textAlign:"right",color:"#64748b",fontWeight:700,whiteSpace:"nowrap",fontSize:11.5};
+              // строка-метрика (subtotal) и строка-процент
+              const MetricRow=({label,ser,color,bg})=>(<tr style={{borderTop:"2px solid #e2e8f0",background:bg}}><td style={{padding:"9px 9px",fontWeight:900,color}}>{label}</td>{months.map(m=><td key={m} style={{padding:"9px 9px",textAlign:"right",fontWeight:800,color:(ser.byM[m]||0)>=0?color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(ser.byM[m])}</td>)}<td style={{padding:"9px 9px",textAlign:"right",fontWeight:900,color:ser.tot>=0?color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(ser.tot)}</td></tr>);
+              const PctRow=({label,ser,color})=>(<tr><td style={{padding:"3px 9px 6px 22px",color,fontSize:11,fontStyle:"italic"}}>{label}</td>{months.map(m=><td key={m} style={{padding:"3px 9px 6px",textAlign:"right",color,fontSize:11,fontStyle:"italic",whiteSpace:"nowrap"}}>{fpct(ser.byM[m])}</td>)}<td style={{padding:"3px 9px 6px",textAlign:"right",color,fontSize:11,fontStyle:"italic",fontWeight:700,whiteSpace:"nowrap"}}>{fpct(ser.tot)}</td></tr>);
+              const ExpGroupRows=({cat})=>{ const g=expGroups.find(x=>x.cat===cat); if(!g||g.tot===0)return null; return (<Fragment><tr style={{borderBottom:"1px solid #f8fafc"}}><td style={{padding:"6px 9px",fontWeight:700,color:"#334155"}}>{g.cat}</td>{months.map(m=><td key={m} style={{padding:"6px 9px",textAlign:"right",color:"#dc2626",fontWeight:600,whiteSpace:"nowrap"}}>{fmt(g.byM[m])}</td>)}<td style={{padding:"6px 9px",textAlign:"right",fontWeight:800,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(g.tot)}</td></tr>{g.subs.map(s2=>{ const s=agg(t=>t.type==="expense"&&t.category===g.cat&&t.subcategory===s2); if(s.tot===0)return null; return (<tr key={s2}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{s2}</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>);})}</Fragment>); };
               return (
                 <div className="card" style={{padding:"18px 20px",overflowX:"auto"}}>
                   <div style={{fontSize:14,fontWeight:800,color:"#0f172a",marginBottom:4}}>📈 Отчёт о прибылях и убытках (ОПУ / P&L)</div>
-                  <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>Метод начисления: доход и прямые расходы признаются в месяце <b>закрытия проекта</b>, а не оплаты · {months.length} мес.</div>
+                  <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>Метод начисления: доход = <b>стоимость закрытых проектов</b> в месяце закрытия (заработанная выручка), расходы — по дате оплаты · {months.length} мес.</div>
                   {months.length===0 ? <div style={{color:"#94a3b8",textAlign:"center",padding:30}}>Нет данных за период</div> : (<>
                   <table style={{borderCollapse:"collapse",fontSize:12.5,minWidth:560}}>
                     <thead><tr style={{borderBottom:"2px solid #e2e8f0"}}>
@@ -7142,23 +7169,37 @@ export default function App() {
                           <tr key={sub}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{sub}</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>
                         );})}
                       </Fragment>))}
-                      <tr style={{borderTop:"1px solid #e2e8f0"}}><td style={{padding:"7px 9px",fontWeight:800,color:"#059669"}}>Доходы всего</td>{months.map(m=><td key={m} style={{padding:"7px 9px",textAlign:"right",fontWeight:800,color:"#059669",whiteSpace:"nowrap"}}>{fmt(income.byM[m])}</td>)}<td style={{padding:"7px 9px",textAlign:"right",fontWeight:900,color:"#059669",whiteSpace:"nowrap"}}>{fmt(income.tot)}</td></tr>
-                      <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#dc2626"}}>▼ РАСХОДЫ</td></tr>
-                      {expGroups.filter(g=>g.tot!==0).map(g=>(<Fragment key={g.cat}>
-                        <tr style={{borderBottom:"1px solid #f8fafc"}}><td style={{padding:"6px 9px",fontWeight:700,color:"#334155"}}>{g.cat}</td>{months.map(m=><td key={m} style={{padding:"6px 9px",textAlign:"right",color:"#dc2626",fontWeight:600,whiteSpace:"nowrap"}}>{fmt(g.byM[m])}</td>)}<td style={{padding:"6px 9px",textAlign:"right",fontWeight:800,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(g.tot)}</td></tr>
-                        {g.subs.map(sub=>{ const s=agg(t=>t.type==="expense"&&t.category===g.cat&&t.subcategory===sub); if(s.tot===0)return null; return (
-                          <tr key={sub}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{sub}</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>
-                        );})}
-                      </Fragment>))}
-                      <tr style={{borderTop:"1px solid #e2e8f0"}}><td style={{padding:"7px 9px",fontWeight:800,color:"#dc2626"}}>Расходы всего</td>{months.map(m=><td key={m} style={{padding:"7px 9px",textAlign:"right",fontWeight:800,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(expTotalA.byM[m])}</td>)}<td style={{padding:"7px 9px",textAlign:"right",fontWeight:900,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(expTotalA.tot)}</td></tr>
-                      <tr style={{borderTop:"2px solid #e2e8f0",background:"#eff6ff"}}><td style={{padding:"9px 9px",fontWeight:900,color:"#2563eb"}}>ПРИБЫЛЬ</td>{months.map(m=><td key={m} style={{padding:"9px 9px",textAlign:"right",fontWeight:800,color:profitByM[m]>=0?"#2563eb":"#dc2626",whiteSpace:"nowrap"}}>{fmt(profitByM[m])}</td>)}<td style={{padding:"9px 9px",textAlign:"right",fontWeight:900,color:totProfit>=0?"#2563eb":"#dc2626",whiteSpace:"nowrap"}}>{fmt(totProfit)}</td></tr>
+                      <tr style={{borderTop:"1px solid #e2e8f0"}}><td style={{padding:"7px 9px",fontWeight:800,color:"#059669"}}>Выручка (Revenue)</td>{months.map(m=><td key={m} style={{padding:"7px 9px",textAlign:"right",fontWeight:800,color:"#059669",whiteSpace:"nowrap"}}>{fmt(income.byM[m])}</td>)}<td style={{padding:"7px 9px",textAlign:"right",fontWeight:900,color:"#059669",whiteSpace:"nowrap"}}>{fmt(income.tot)}</td></tr>
+                      {/* Себестоимость → Валовая прибыль */}
+                      <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#dc2626"}}>▼ СЕБЕСТОИМОСТЬ (COGS / прямые расходы)</td></tr>
+                      <ExpGroupRows cat={C_COGS}/>
+                      <MetricRow label="ВАЛОВАЯ ПРИБЫЛЬ" ser={gross} color="#0891b2" bg="#ecfeff"/>
+                      <PctRow label="Валовая маржинальность" ser={grossM} color="#0891b2"/>
+                      {/* OPEX → EBITDA */}
+                      <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#dc2626"}}>▼ ОПЕРАЦИОННЫЕ РАСХОДЫ (OPEX)</td></tr>
+                      <ExpGroupRows cat={C_OPEX}/>
+                      <MetricRow label="EBITDA / Операционная прибыль" ser={ebitda} color="#7c3aed" bg="#f5f3ff"/>
+                      <PctRow label="Операционная рентабельность" ser={ebitdaM} color="#7c3aed"/>
+                      {/* Финансовые → Чистая прибыль */}
+                      <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#dc2626"}}>▼ ФИНАНСОВЫЕ РАСХОДЫ (налоги, комиссии, %)</td></tr>
+                      <ExpGroupRows cat={C_FIN}/>
+                      <MetricRow label="ЧИСТАЯ ПРИБЫЛЬ" ser={net} color="#2563eb" bg="#eff6ff"/>
+                      <PctRow label="Рентабельность по чистой прибыли" ser={netM} color="#2563eb"/>
                     </tbody>
                   </table>
-                  <div style={{marginTop:14,display:"flex",gap:24,flexWrap:"wrap",fontSize:13}}>
-                    <div><span style={{color:"#94a3b8"}}>Доходы: </span><b style={{color:"#059669"}}>{fM(income.tot)} ₸</b></div>
-                    <div><span style={{color:"#94a3b8"}}>Расходы: </span><b style={{color:"#dc2626"}}>{fM(expTotalA.tot)} ₸</b></div>
-                    <div><span style={{color:"#94a3b8"}}>Прибыль: </span><b style={{color:totProfit>=0?"#2563eb":"#dc2626"}}>{fM(totProfit)} ₸</b></div>
-                    <div><span style={{color:"#94a3b8"}}>Рентабельность: </span><b style={{color:"#7c3aed"}}>{income.tot>0?Math.round(totProfit/income.tot*100):0}%</b></div>
+                  <div style={{marginTop:16,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
+                    {[
+                      ["Выручка",fM(income.tot)+" ₸",null,"#059669","#f0fdf4"],
+                      ["Валовая прибыль",fM(gross.tot)+" ₸",grossM.tot,"#0891b2","#ecfeff"],
+                      ["EBITDA",fM(ebitda.tot)+" ₸",ebitdaM.tot,"#7c3aed","#f5f3ff"],
+                      ["Чистая прибыль",fM(net.tot)+" ₸",netM.tot,"#2563eb","#eff6ff"],
+                    ].map(([l,v,pc,c,bg])=>(
+                      <div key={l} style={{background:bg,borderRadius:12,padding:"12px 14px",border:"1px solid "+c+"22"}}>
+                        <div style={{fontSize:11,color:"#64748b",fontWeight:600,marginBottom:3}}>{l}</div>
+                        <div style={{fontSize:16,fontWeight:800,color:c}}>{v}</div>
+                        {pc!==null&&<div style={{fontSize:11,color:c,marginTop:2,fontWeight:600}}>{pc}% от выручки</div>}
+                      </div>
+                    ))}
                   </div>
                   </>)}
                 </div>
