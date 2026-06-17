@@ -7105,19 +7105,14 @@ export default function App() {
               const MN=["Янв","Фев","Мар","Апр","Май","Июн","Июл","Авг","Сен","Окт","Ноя","Дек"];
               const mLabel=k=>{const[y,m]=k.split("-");return MN[parseInt(m)-1]+" "+y.slice(2);};
               const ymOf = d => { if(!d) return null; const dt=new Date(d); if(isNaN(dt)) return null; return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0"); };
-              // ── ДОХОД (метод начисления): стоимость ЗАКРЫТЫХ проектов в месяце закрытия ──
-              const catToSub={"Вторичка":"Оплата по договору (вторичка)","Коммерческие объекты":"Оплата по договору  (коммерция)","Коммерция":"Оплата по договору  (коммерция)","Новостройки":"Оплата по договору (новостройки)","Частичные работы, услуги":"Частичные работы, услуги"};
-              const projIncome = finProjects
-                .filter(p=>(p.rawStatus==="выполнен"||p.status==="выполнен") && p.closedAt && Number(p.budget)>0)
-                .map(p=>({ month:ymOf(p.closedAt), category:"Основные доходы", subcategory:catToSub[p.category]||"Частичные работы, услуги", amount:Number(p.budget)||0 }))
-                .filter(r=>r.month);
-              // ── РАСХОД: по дате оплаты (кассовый метод) ──
-              const expMonth = t => { const d=new Date(t.date||t.createdAt||0); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); };
+              // ── ДОХОД (признание по этапам): оплата клиента = сдача этапа, в месяце оплаты ──
+              const opMonth = t => { const d=new Date(t.date||t.createdAt||0); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); };
               const inPM = m => m && inPeriod(new Date(m+"-01").getTime());
-              // единый список строк ОПУ: доходы из закрытых проектов + расходы по дате оплаты
+              // единый список строк ОПУ: доходы и расходы по дате операции (этап сдан / расход понесён)
               const opuRows=[
-                ...projIncome.map(r=>({type:"income",category:r.category,subcategory:r.subcategory,amount:r.amount,month:r.month})),
-                ...financeTx.filter(t=>t.included!==false&&t.type==="expense").map(t=>({type:"expense",category:t.category,subcategory:t.subcategory,amount:Number(t.amount)||0,month:expMonth(t)})),
+                ...financeTx.filter(t=>t.included!==false&&t.type==="income"&&!t.isAdvance).map(t=>({type:"income",category:t.category,subcategory:t.subcategory,amount:Number(t.amount)||0,month:opMonth(t)})),
+                ...financeTx.filter(t=>t.included!==false&&t.type==="income"&&t.isAdvance).map(t=>({type:"advance",category:t.category,subcategory:t.subcategory,amount:Number(t.amount)||0,month:opMonth(t)})),
+                ...financeTx.filter(t=>t.included!==false&&t.type==="expense").map(t=>({type:"expense",category:t.category,subcategory:t.subcategory,amount:Number(t.amount)||0,month:opMonth(t)})),
               ];
               const monthsSet={};
               opuRows.forEach(r=>{ if(inPM(r.month)) monthsSet[r.month]=true; });
@@ -7127,6 +7122,7 @@ export default function App() {
                 return {byM,tot};
               };
               const income=agg(t=>t.type==="income");
+              const adv=agg(t=>t.type==="advance");
               const expTotalA=agg(t=>t.type==="expense");
               const incGroups=(financeMeta.income||[]).map(c=>({cat:c.cat,subs:c.subs||[],...agg(t=>t.type==="income"&&t.category===c.cat)}));
               const expGroups=(financeMeta.expense||[]).map(c=>({cat:c.cat,subs:c.subs||[],...agg(t=>t.type==="expense"&&t.category===c.cat)}));
@@ -7156,7 +7152,7 @@ export default function App() {
               return (
                 <div className="card" style={{padding:"18px 24px",overflowX:"auto",width:"100%",boxSizing:"border-box"}}>
                   <div style={{fontSize:14,fontWeight:800,color:"#0f172a",marginBottom:4}}>📈 Отчёт о прибылях и убытках (ОПУ / P&L)</div>
-                  <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>Метод начисления: доход = <b>стоимость закрытых проектов</b> в месяце закрытия (заработанная выручка), расходы — по дате оплаты · {months.length} мес.</div>
+                  <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>Признание по этапам: выручка = <b>оплата сданного этапа</b> в месяце сдачи (= дата оплаты клиентом), расходы — по дате операции · {months.length} мес.</div>
                   {months.length===0 ? <div style={{color:"#94a3b8",textAlign:"center",padding:30}}>Нет данных за период</div> : (<>
                   <table style={{borderCollapse:"collapse",fontSize:12.5,width:"100%",minWidth:700}}>
                     <thead><tr style={{borderBottom:"2px solid #e2e8f0"}}>
@@ -7173,6 +7169,7 @@ export default function App() {
                         );})}
                       </Fragment>))}
                       <tr style={{borderTop:"1px solid #e2e8f0"}}><td style={{padding:"7px 9px",fontWeight:800,color:"#059669"}}>Выручка (Revenue)</td>{months.map(m=><td key={m} style={{padding:"7px 9px",textAlign:"right",fontWeight:800,color:"#059669",whiteSpace:"nowrap"}}>{fmt(income.byM[m])}</td>)}<td style={{padding:"7px 9px",textAlign:"right",fontWeight:900,color:"#059669",whiteSpace:"nowrap"}}>{fmt(income.tot)}</td></tr>
+                      {adv.tot!==0 && (<tr style={{background:"#fffbeb"}}><td style={{padding:"4px 9px 4px 22px",color:"#b45309",fontSize:11.5,fontStyle:"italic"}} title="Авансы — обязательство, не входят в выручку и прибыль">Справочно: авансы полученные (обязательство)</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#d97706",fontSize:11.5,fontStyle:"italic",whiteSpace:"nowrap"}}>{fmt(adv.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#b45309",fontSize:11.5,fontStyle:"italic",fontWeight:700,whiteSpace:"nowrap"}}>{fmt(adv.tot)}</td></tr>)}
                       {/* Себестоимость → Валовая прибыль */}
                       <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#dc2626"}}>▼ СЕБЕСТОИМОСТЬ (COGS / прямые расходы)</td></tr>
                       <ExpGroupRows cat={C_COGS}/>
@@ -7594,6 +7591,7 @@ export default function App() {
                 const ts=m.date?new Date(m.date).getTime():Date.now();
                 const tx={ id:m.id||genId(), type:m.type, date:ts, amount:amt, account:m.account, accountTo:m.type==="transfer"?m.accountTo:undefined,
                   category:m.type==="transfer"?"Перевод":m.category, subcategory:m.type==="transfer"?"":m.subcategory, note:m.note||"", contractNo:m.contractNo||"",
+                  isAdvance:m.type==="income"?!!m.isAdvance:false,
                   included:m.included!==false, opuMonth:m.opuMonth, createdAt:m.createdAt||ts, updatedAt:Date.now() };
                 const cur=financeTxRef.current;
                 const list = m.id ? cur.map(x=>x.id===m.id?tx:x) : [tx,...cur];
@@ -7638,6 +7636,12 @@ export default function App() {
                         </select>
                       </div>
                       <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Комментарий</div><input className="fi" value={m.note} onChange={e=>set("note",e.target.value)} placeholder="комментарий"/></div>
+                      {m.type==="income" && (
+                        <label style={{display:"flex",alignItems:"flex-start",gap:8,fontSize:12,color:"#475569",cursor:"pointer",fontWeight:600,background:"#fffbeb",border:"1px solid #fde68a",borderRadius:9,padding:"9px 11px"}}>
+                          <input type="checkbox" checked={!!m.isAdvance} onChange={e=>set("isAdvance",e.target.checked)} style={{width:16,height:16,cursor:"pointer",marginTop:1}}/>
+                          <span>Аванс (предоплата) — <b>обязательство, не выручка</b>. Учтётся в ДДС как приход, но в ОПиУ не попадёт в доход. Снимите галочку, когда работа сдана.</span>
+                        </label>
+                      )}
                       <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#475569",cursor:"pointer",fontWeight:600}}>
                         <input type="checkbox" checked={m.included!==false} onChange={e=>set("included",e.target.checked)} style={{width:16,height:16,cursor:"pointer"}}/>
                         Учитывать в балансе и отчётах
