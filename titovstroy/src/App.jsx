@@ -6952,7 +6952,7 @@ export default function App() {
 
             {/* Табы */}
             <div style={{display:"flex",gap:6,marginBottom:18,flexWrap:"wrap"}}>
-              {[["dashboard","📊 Дашборд"],["dds","💸 ДДС месяц"],["opu","📈 ОПУ месяц"],["ops","📋 Операции"],["projects","🏗 Проекты"],["ref","⚙️ Справочник"]].map(([k,l])=>(
+              {[["dashboard","📊 Дашборд"],["dds","💸 ДДС месяц"],["opu","📈 ОПУ месяц"],["balance","⚖️ Баланс"],["ops","📋 Операции"],["projects","🏗 Проекты"],["ref","⚙️ Справочник"]].map(([k,l])=>(
                 <button key={k} onClick={()=>setFinanceTab(k)} style={{fontSize:13,fontWeight:700,padding:"9px 16px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(financeTab===k?"#2563eb":"#e2e8f0"),background:financeTab===k?"#2563eb":"#fff",color:financeTab===k?"#fff":"#64748b"}}>{l}</button>
               ))}
             </div>
@@ -7189,7 +7189,7 @@ export default function App() {
               const fpct=v=>v===null?"—":v+"%";
               const HCell={padding:"7px 9px",textAlign:"right",color:"#64748b",fontWeight:700,whiteSpace:"nowrap",fontSize:11.5};
               // строка-метрика (subtotal) и строка-процент
-              const MetricRow=({label,ser,color,bg})=>(<tr style={{borderTop:"2px solid #e2e8f0",background:bg}}><td style={{padding:"9px 9px",fontWeight:900,color}}>{label}</td>{months.map(m=><td key={m} style={{padding:"9px 9px",textAlign:"right",fontWeight:800,color:(ser.byM[m]||0)>=0?color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(ser.byM[m])}</td>)}<td style={{padding:"9px 9px",textAlign:"right",fontWeight:900,color:ser.tot>=0?color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(ser.tot)}</td></tr>);
+              const MetricRow=({label,ser,color,bg})=>(<tr style={{borderTop:"2px solid #e2e8f0",background:bg}}><td style={{padding:"9px 9px",fontWeight:900,color,background:bg}}>{label}</td>{months.map(m=><td key={m} style={{padding:"9px 9px",textAlign:"right",fontWeight:800,color:(ser.byM[m]||0)>=0?color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(ser.byM[m])}</td>)}<td style={{padding:"9px 9px",textAlign:"right",fontWeight:900,color:ser.tot>=0?color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(ser.tot)}</td></tr>);
               const PctRow=({label,ser,color})=>(<tr><td style={{padding:"3px 9px 6px 22px",color,fontSize:11,fontStyle:"italic"}}>{label}</td>{months.map(m=><td key={m} style={{padding:"3px 9px 6px",textAlign:"right",color,fontSize:11,fontStyle:"italic",whiteSpace:"nowrap"}}>{fpct(ser.byM[m])}</td>)}<td style={{padding:"3px 9px 6px",textAlign:"right",color,fontSize:11,fontStyle:"italic",fontWeight:700,whiteSpace:"nowrap"}}>{fpct(ser.tot)}</td></tr>);
               const ExpGroupRows=({cat,exclude=[]})=>{ const meta=(financeMeta.expense||[]).find(c=>c.cat===cat); if(!meta)return null; const gt=agg(t=>t.type==="expense"&&t.category===cat&&!exclude.includes(t.subcategory)); if(gt.tot===0)return null; return (<Fragment><tr style={{borderBottom:"1px solid #f8fafc"}}><td style={{padding:"6px 9px",fontWeight:700,color:"#334155"}}>{cat}</td>{months.map(m=><td key={m} style={{padding:"6px 9px",textAlign:"right",color:"#dc2626",fontWeight:600,whiteSpace:"nowrap"}}>{fmt(gt.byM[m])}</td>)}<td style={{padding:"6px 9px",textAlign:"right",fontWeight:800,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(gt.tot)}</td></tr>{(meta.subs||[]).filter(s2=>!exclude.includes(s2)).map(s2=>{ const s=agg(t=>t.type==="expense"&&t.category===cat&&t.subcategory===s2); if(s.tot===0)return null; return (<tr key={s2}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{s2}</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>);})}</Fragment>); };
               return (
@@ -7198,7 +7198,7 @@ export default function App() {
                   <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>Признание по этапам: выручка = <b>оплата сданного этапа</b> в месяце сдачи (= дата оплаты клиентом), расходы — по дате операции · {months.length} мес.</div>
                   {months.length===0 ? <div style={{color:"#94a3b8",textAlign:"center",padding:30}}>Нет данных за период</div> : (<>
                   <div className="rep-wrap">
-                  <table className="rep-table nostick">
+                  <table className="rep-table">
                     <thead><tr>
                       <th>Статья</th>
                       {months.map(m=><th key={m} style={{textAlign:"right"}}>{mLabel(m)}</th>)}
@@ -7213,7 +7213,7 @@ export default function App() {
                         );})}
                       </Fragment>))}
                       <tr style={{borderTop:"1px solid #e2e8f0"}}><td style={{padding:"7px 9px",fontWeight:800,color:"#059669"}}>Выручка (Revenue)</td>{months.map(m=><td key={m} style={{padding:"7px 9px",textAlign:"right",fontWeight:800,color:"#059669",whiteSpace:"nowrap"}}>{fmt(income.byM[m])}</td>)}<td style={{padding:"7px 9px",textAlign:"right",fontWeight:900,color:"#059669",whiteSpace:"nowrap"}}>{fmt(income.tot)}</td></tr>
-                      {adv.tot!==0 && (<tr style={{background:"#fffbeb"}}><td style={{padding:"4px 9px 4px 22px",color:"#b45309",fontSize:11.5,fontStyle:"italic"}} title="Авансы — обязательство, не входят в выручку и прибыль">Справочно: авансы полученные (обязательство)</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#d97706",fontSize:11.5,fontStyle:"italic",whiteSpace:"nowrap"}}>{fmt(adv.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#b45309",fontSize:11.5,fontStyle:"italic",fontWeight:700,whiteSpace:"nowrap"}}>{fmt(adv.tot)}</td></tr>)}
+                      {adv.tot!==0 && (<tr style={{background:"#fffbeb"}}><td style={{padding:"4px 9px 4px 22px",color:"#b45309",fontSize:11.5,fontStyle:"italic",background:"#fffbeb"}} title="Авансы — обязательство, не входят в выручку и прибыль">Справочно: авансы полученные (обязательство)</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#d97706",fontSize:11.5,fontStyle:"italic",whiteSpace:"nowrap"}}>{fmt(adv.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#b45309",fontSize:11.5,fontStyle:"italic",fontWeight:700,whiteSpace:"nowrap"}}>{fmt(adv.tot)}</td></tr>)}
                       {/* Себестоимость → Валовая прибыль */}
                       <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#dc2626"}}>▼ СЕБЕСТОИМОСТЬ (COGS / прямые расходы)</td></tr>
                       <ExpGroupRows cat={C_COGS}/>
@@ -7252,6 +7252,67 @@ export default function App() {
                     ))}
                   </div>
                   </>)}
+                </div>
+              );
+            })()}
+
+            {/* ───── БАЛАНС (IFRS / Statement of Financial Position) ───── */}
+            {financeTab==="balance" && (()=>{
+              // приход по проектам (для дебиторки)
+              const projInc={};
+              for(const t of financeTx){ if(t.included===false)continue; const cn=(t.contractNo||"").trim(); if(!cn)continue; if(t.type==="income") projInc[cn]=(projInc[cn]||0)+(Number(t.amount)||0); }
+              // АКТИВЫ
+              const cash = totalBalance;
+              const receivables = finProjects
+                .filter(p=>(p.rawStatus||p.status)!=="отменен")
+                .reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projInc[p.contractNo]||0)),0);
+              const assets = cash + receivables;
+              // ОБЯЗАТЕЛЬСТВА
+              const advances = financeTx.filter(t=>t.included!==false&&t.type==="income"&&t.isAdvance).reduce((s,t)=>s+(Number(t.amount)||0),0);
+              const liabilities = advances;
+              // КАПИТАЛ (нетто-активы; нераспределённая прибыль — балансирующая статья)
+              const capital0 = accounts.reduce((s,a)=>s+(Number(a.opening)||0),0);
+              const equity = assets - liabilities;
+              const retained = equity - capital0;
+              const Row=({label,val,color,bold,indent,note})=>(
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:12,padding:bold?"9px 0":"5px 0",borderBottom:"1px solid #f1f5f9"}}>
+                  <span style={{fontSize:bold?13.5:12.5,fontWeight:bold?800:500,color:color||(bold?"#0f172a":"#475569"),paddingLeft:indent?16:0}}>{label}{note&&<span style={{display:"block",fontSize:10.5,color:"#94a3b8",fontWeight:400,paddingLeft:indent?16:0}}>{note}</span>}</span>
+                  <span style={{fontSize:bold?14:13,fontWeight:bold?800:600,color:color||"#0f172a",whiteSpace:"nowrap"}}>{fM(val)} ₸</span>
+                </div>
+              );
+              return (
+                <div className="card" style={{padding:"20px 22px",width:"100%",boxSizing:"border-box"}}>
+                  <div style={{fontSize:15,fontWeight:800,color:"#0f172a",marginBottom:4}}>⚖️ Бухгалтерский баланс (Statement of Financial Position)</div>
+                  <div style={{fontSize:12,color:"#94a3b8",marginBottom:18}}>Управленческий баланс по структуре IFRS на текущую дату · Активы = Обязательства + Капитал</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:18}}>
+                    {/* АКТИВЫ */}
+                    <div style={{border:"1px solid #e2e8f0",borderRadius:12,padding:"14px 16px"}}>
+                      <div style={{fontSize:13,fontWeight:900,color:"#0891b2",marginBottom:8,letterSpacing:.3}}>АКТИВЫ</div>
+                      <div style={{fontSize:11,fontWeight:700,color:"#64748b",margin:"8px 0 2px"}}>Оборотные активы</div>
+                      <Row label="Денежные средства на счетах" val={cash} indent note="остаток по всем счетам"/>
+                      <Row label="Дебиторская задолженность" val={receivables} indent note="клиенты должны по проектам (стоимость − оплачено)"/>
+                      <div style={{marginTop:8}}><Row label="ИТОГО АКТИВЫ" val={assets} color="#0891b2" bold/></div>
+                    </div>
+                    {/* ПАССИВЫ */}
+                    <div style={{border:"1px solid #e2e8f0",borderRadius:12,padding:"14px 16px"}}>
+                      <div style={{fontSize:13,fontWeight:900,color:"#d97706",marginBottom:8,letterSpacing:.3}}>ПАССИВЫ (Обязательства + Капитал)</div>
+                      <div style={{fontSize:11,fontWeight:700,color:"#64748b",margin:"8px 0 2px"}}>Обязательства</div>
+                      <Row label="Авансы полученные от клиентов" val={advances} indent note="предоплата за невыполненные работы"/>
+                      <Row label="Итого обязательства" val={liabilities} color="#d97706" bold/>
+                      <div style={{fontSize:11,fontWeight:700,color:"#64748b",margin:"12px 0 2px"}}>Капитал</div>
+                      <Row label="Начальный капитал" val={capital0} indent note="вклад учредителей (остатки на старте)"/>
+                      <Row label="Нераспределённая прибыль" val={retained} indent note="накопленная прибыль за всё время"/>
+                      <Row label="Итого капитал" val={equity} color="#2563eb" bold/>
+                      <div style={{marginTop:8}}><Row label="ИТОГО ПАССИВЫ" val={liabilities+equity} color="#d97706" bold/></div>
+                    </div>
+                  </div>
+                  {/* Проверка баланса */}
+                  <div style={{marginTop:16,padding:"12px 16px",borderRadius:10,background:Math.abs(assets-(liabilities+equity))<1?"#f0fdf4":"#fef2f2",border:"1px solid "+(Math.abs(assets-(liabilities+equity))<1?"#bbf7d0":"#fecaca"),display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+                    <span style={{fontSize:12.5,fontWeight:700,color:Math.abs(assets-(liabilities+equity))<1?"#059669":"#dc2626"}}>{Math.abs(assets-(liabilities+equity))<1?"✓ Баланс сходится":"⚠ Баланс не сходится"}: Активы {fM(assets)} = Пассивы {fM(liabilities+equity)}</span>
+                  </div>
+                  <div style={{marginTop:12,fontSize:11,color:"#94a3b8",lineHeight:1.6}}>
+                    Нераспределённая прибыль рассчитана как балансирующая статья (Капитал = Активы − Обязательства). Это упрощённый управленческий баланс: не учитывает кредиторскую задолженность перед поставщиками и основные средства, если они не заведены в учёт.
+                  </div>
                 </div>
               );
             })()}
