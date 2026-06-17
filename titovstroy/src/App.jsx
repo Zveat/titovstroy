@@ -6996,124 +6996,139 @@ export default function App() {
               });
               const expSlices=Object.entries(expBySub).sort((a,b)=>b[1]-a[1]);
 
-              // ── Рисование SVG-пирога ──
-              const PIE_COLORS=["#2563eb","#059669","#f59e0b","#dc2626","#7c3aed","#0891b2","#d97706","#e11d48","#84cc16","#8b5cf6","#06b6d4","#f43f5e"];
-              const Pie=({slices,total,size=130})=>{
-                if(!total||slices.length===0) return <div style={{width:size,height:size,borderRadius:"50%",background:"#f1f5f9",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:"#94a3b8"}}>Нет</div>;
-                let acc=0;
-                const paths=slices.slice(0,10).map(([label,v],i)=>{
-                  const pct=v/total; const start=acc; acc+=pct;
-                  const a1=start*2*Math.PI-Math.PI/2, a2=acc*2*Math.PI-Math.PI/2;
-                  const r=size/2, cx=r, cy=r;
-                  const x1=cx+r*Math.cos(a1),y1=cy+r*Math.sin(a1);
-                  const x2=cx+r*Math.cos(a2),y2=cy+r*Math.sin(a2);
-                  const large=pct>0.5?1:0;
-                  return <path key={label} d={`M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${large},1 ${x2},${y2} Z`} fill={PIE_COLORS[i%PIE_COLORS.length]} stroke="#fff" strokeWidth={1.5}/>;
-                });
-                return <svg width={size} height={size} style={{flexShrink:0}}>{paths}</svg>;
+              // ── Кольцевая диаграмма (donut) ──
+              const PIE_COLORS=["#2563eb","#059669","#f59e0b","#8b5cf6","#dc2626","#0891b2","#d97706","#e11d48","#84cc16","#06b6d4","#ec4899","#14b8a6"];
+              const Donut=({slices,total,size=170,thickness=24,centerLabel})=>{
+                const r=(size-thickness)/2, cx=size/2, circ=2*Math.PI*r;
+                if(!total||slices.length===0) return <div style={{width:size,height:size,borderRadius:"50%",border:"24px solid #f1f5f9",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:"#cbd5e1",boxSizing:"border-box"}}>нет данных</div>;
+                let offset=0;
+                return (
+                  <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{flexShrink:0}}>
+                    <circle cx={cx} cy={cx} r={r} fill="none" stroke="#f1f5f9" strokeWidth={thickness}/>
+                    <g transform={`rotate(-90 ${cx} ${cx})`}>
+                      {slices.slice(0,12).map(([label,v],i)=>{
+                        const len=(v/total)*circ;
+                        const el=<circle key={label} cx={cx} cy={cx} r={r} fill="none" stroke={PIE_COLORS[i%PIE_COLORS.length]} strokeWidth={thickness} strokeDasharray={`${len} ${circ-len}`} strokeDashoffset={-offset} strokeLinecap="butt"><title>{label}: {fM(v)} ₸</title></circle>;
+                        offset+=len; return el;
+                      })}
+                    </g>
+                    <text x={cx} y={cx-2} textAnchor="middle" fontSize={size>150?16:13} fontWeight="800" fill="#0f172a">{fM(total)}</text>
+                    <text x={cx} y={cx+15} textAnchor="middle" fontSize={10} fill="#94a3b8">{centerLabel||"₸ всего"}</text>
+                  </svg>
+                );
               };
 
-              const CardSection=({title,children})=>(
-                <div className="card" style={{padding:"16px 18px"}}>
-                  <div style={{fontSize:13,fontWeight:800,color:"#0f172a",marginBottom:12,letterSpacing:-.1}}>{title}</div>
-                  {children}
+              const cardSt={background:"#fff",border:"1px solid #eef2f7",borderRadius:18,boxShadow:"0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.14)"};
+              const CardSection=({title,accent,children,full})=>(
+                <div style={{...cardSt,overflow:"hidden",gridColumn:full?"1 / -1":"auto"}}>
+                  <div style={{height:4,background:accent||"#2563eb"}}/>
+                  <div style={{padding:"16px 20px"}}>
+                    <div style={{fontSize:13.5,fontWeight:800,color:"#0f172a",marginBottom:14,letterSpacing:-.2}}>{title}</div>
+                    {children}
+                  </div>
                 </div>
               );
-              const KpiRow=({label,val,color,bold,pct})=>(
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"5px 0",borderBottom:"1px solid #f8fafc",gap:8}}>
-                  <span style={{fontSize:12.5,color:"#475569",fontWeight:bold?700:500}}>{label}</span>
-                  <span style={{fontSize:bold?15:13.5,fontWeight:bold?800:600,color:color||"#0f172a",whiteSpace:"nowrap"}}>
-                    {typeof val==="number"?fM(val)+" ₸":val}{pct!=null&&<span style={{fontSize:11,fontWeight:600,color,marginLeft:4}}>({pct}%)</span>}
+              const KpiRow=({label,val,color,bold,big})=>(
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:bold?"9px 0":"6px 0",borderBottom:"1px solid #f5f7fa",gap:8}}>
+                  <span style={{fontSize:bold?13:12.5,color:bold?"#0f172a":"#64748b",fontWeight:bold?700:500}}>{label}</span>
+                  <span style={{fontSize:big?20:(bold?15:13.5),fontWeight:bold?800:600,color:color||"#0f172a",whiteSpace:"nowrap"}}>
+                    {typeof val==="number"?fM(val)+" ₸":val}
                   </span>
                 </div>
               );
               const LegendItem=({label,val,total,color})=>{ const p=total>0?Math.round(val/total*100):0; return (
-                <div style={{marginBottom:6}}>
-                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,marginBottom:2}}>
-                    <span style={{display:"flex",alignItems:"center",gap:5,color:"#334155"}}><span style={{width:8,height:8,borderRadius:2,background:color,flexShrink:0}}/>  {label}</span>
-                    <span style={{fontWeight:700,color}}>{fM(val)} ₸ · {p}%</span>
+                <div style={{marginBottom:9}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3,gap:8}}>
+                    <span style={{display:"flex",alignItems:"center",gap:7,color:"#334155",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}><span style={{width:9,height:9,borderRadius:3,background:color,flexShrink:0}}/>{label}</span>
+                    <span style={{fontWeight:700,color:"#0f172a",whiteSpace:"nowrap"}}>{fM(val)} <span style={{color,fontSize:11}}>· {p}%</span></span>
                   </div>
-                  <div style={{height:4,background:"#f1f5f9",borderRadius:4}}><div style={{height:"100%",width:p+"%",background:color,borderRadius:4,transition:"width .3s"}}/></div>
+                  <div style={{height:5,background:"#f1f5f9",borderRadius:5}}><div style={{height:"100%",width:p+"%",background:color,borderRadius:5,transition:"width .4s"}}/></div>
                 </div>
               );};
 
               return (
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(340px,1fr))",gap:16,marginBottom:20}}>
-                  {/* ── Прибыль ── */}
-                  <CardSection title="💎 Прибыль, ₸">
-                    <KpiRow label="Доходы" val={incomeSum} color="#059669"/>
-                    <KpiRow label="Расходы (все)" val={expenseSum} color="#dc2626"/>
-                    <KpiRow label="Дивиденды" val={divSum} color="#d97706"/>
-                    <KpiRow label="Чистая прибыль" val={netP} color={netP>=0?"#2563eb":"#dc2626"} bold/>
-                    <KpiRow label="Рентабельность, %" val={rentab+"%"} color={rentab>=0?"#7c3aed":"#dc2626"} bold/>
-                  </CardSection>
+                <div style={{marginBottom:20}}>
+                  {/* ── Верхний ряд: 3 сводных карточки ── */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:16,marginBottom:16}}>
+                    {/* Прибыль */}
+                    <CardSection title="💎 Прибыль, ₸" accent="#2563eb">
+                      <KpiRow label="Доходы" val={incomeSum} color="#059669"/>
+                      <KpiRow label="Расходы (все)" val={expenseSum} color="#dc2626"/>
+                      <KpiRow label="Дивиденды" val={divSum} color="#d97706"/>
+                      <KpiRow label="Чистая прибыль" val={netP} color={netP>=0?"#2563eb":"#dc2626"} bold big/>
+                      <KpiRow label="Рентабельность" val={rentab+"%"} color={rentab>=0?"#7c3aed":"#dc2626"} bold/>
+                    </CardSection>
 
-                  {/* ── Денежный поток ── */}
-                  <CardSection title="💸 Денежный поток, ₸">
-                    <KpiRow label="Поступления (вкл. авансы)" val={incomeSum} color="#059669"/>
-                    <KpiRow label="Выплаты" val={expenseSum} color="#dc2626"/>
-                    <KpiRow label="Разница" val={incomeSum-expenseSum} color={(incomeSum-expenseSum)>=0?"#2563eb":"#dc2626"} bold/>
-                    <div style={{marginTop:10,fontSize:11,color:"#94a3b8"}}>
-                      Сальдо по всем счетам: <b style={{color:"#0f172a"}}>{fM(totalBalance)} ₸</b>
-                    </div>
-                  </CardSection>
-
-                  {/* ── Остатки на счетах ── */}
-                  <CardSection title="💳 Остатки на счетах, ₸">
-                    {accounts.map(a=>(
-                      <div key={a.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #f8fafc"}}>
-                        <span style={{fontSize:12.5,color:"#475569"}}>{a.name}</span>
-                        <span style={{fontSize:13.5,fontWeight:700,color:(balances[a.name]||0)>=0?"#0f172a":"#dc2626"}}>{fM(balances[a.name]||0)} ₸</span>
+                    {/* Денежный поток */}
+                    <CardSection title="💸 Денежный поток, ₸" accent="#0891b2">
+                      <KpiRow label="Поступления (вкл. авансы)" val={incomeSum} color="#059669"/>
+                      <KpiRow label="Выплаты" val={expenseSum} color="#dc2626"/>
+                      <KpiRow label="Разница" val={incomeSum-expenseSum} color={(incomeSum-expenseSum)>=0?"#0891b2":"#dc2626"} bold big/>
+                      <div style={{marginTop:12,padding:"10px 12px",background:"#f8fafc",borderRadius:10,fontSize:11.5,color:"#64748b",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <span>Сальдо по всем счетам</span><b style={{color:"#0f172a",fontSize:13}}>{fM(totalBalance)} ₸</b>
                       </div>
-                    ))}
-                    <div style={{display:"flex",justifyContent:"space-between",paddingTop:8,marginTop:2}}>
-                      <span style={{fontSize:13,fontWeight:700,color:"#475569"}}>ИТОГО</span>
-                      <span style={{fontSize:15,fontWeight:800,color:totalBalance>=0?"#2563eb":"#dc2626"}}>{fM(totalBalance)} ₸</span>
-                    </div>
-                  </CardSection>
+                    </CardSection>
 
-                  {/* ── Структура платежей: Доходы ── */}
-                  <CardSection title="📊 Структура платежей — Доходы, ₸">
-                    <div style={{display:"flex",gap:14,alignItems:"flex-start",flexWrap:"wrap"}}>
-                      <Pie slices={incSlices} total={incomeSum} size={120}/>
-                      <div style={{flex:1,minWidth:160}}>
-                        {incSlices.slice(0,8).map(([k,v],i)=><LegendItem key={k} label={k} val={v} total={incomeSum} color={PIE_COLORS[i%PIE_COLORS.length]}/>)}
+                    {/* Остатки */}
+                    <CardSection title="💳 Остатки на счетах, ₸" accent="#7c3aed">
+                      {accounts.map(a=>(
+                        <div key={a.id} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f5f7fa"}}>
+                          <span style={{fontSize:12.5,color:"#64748b"}}>{a.name}</span>
+                          <span style={{fontSize:13.5,fontWeight:700,color:(balances[a.name]||0)>=0?"#0f172a":"#dc2626"}}>{fM(balances[a.name]||0)} ₸</span>
+                        </div>
+                      ))}
+                      <div style={{display:"flex",justifyContent:"space-between",paddingTop:10}}>
+                        <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>ИТОГО</span>
+                        <span style={{fontSize:20,fontWeight:800,color:totalBalance>=0?"#7c3aed":"#dc2626"}}>{fM(totalBalance)} ₸</span>
                       </div>
-                    </div>
-                  </CardSection>
+                    </CardSection>
+                  </div>
 
-                  {/* ── Структура платежей: Расходы ── */}
-                  <CardSection title="📊 Структура платежей — Расходы, ₸">
-                    <div style={{display:"flex",gap:14,alignItems:"flex-start",flexWrap:"wrap"}}>
-                      <Pie slices={expSlices} total={expenseSum} size={120}/>
-                      <div style={{flex:1,minWidth:160}}>
-                        {expSlices.slice(0,8).map(([k,v],i)=><LegendItem key={k} label={k} val={v} total={expenseSum} color={PIE_COLORS[i%PIE_COLORS.length]}/>)}
+                  {/* ── Структура платежей: Доходы (отдельный ряд) ── */}
+                  <div style={{marginBottom:16}}>
+                    <CardSection title="📊 Структура платежей — Доходы, ₸" accent="#059669" full>
+                      <div style={{display:"flex",gap:28,alignItems:"center",flexWrap:"wrap"}}>
+                        <Donut slices={incSlices} total={incomeSum} centerLabel="доходы"/>
+                        <div style={{flex:1,minWidth:280,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:"0 28px"}}>
+                          {incSlices.slice(0,12).map(([k,v],i)=><LegendItem key={k} label={k} val={v} total={incomeSum} color={PIE_COLORS[i%PIE_COLORS.length]}/>)}
+                        </div>
                       </div>
-                    </div>
-                  </CardSection>
+                    </CardSection>
+                  </div>
 
-                  {/* ── Динамика по месяцам (полная ширина) ── */}
-                  <div className="card" style={{padding:"16px 18px",gridColumn:"1 / -1"}}>
-                    <div style={{fontSize:13,fontWeight:800,color:"#0f172a",marginBottom:14}}>📅 Динамика по месяцам</div>
+                  {/* ── Структура платежей: Расходы (отдельный ряд) ── */}
+                  <div style={{marginBottom:16}}>
+                    <CardSection title="📊 Структура платежей — Расходы, ₸" accent="#dc2626" full>
+                      <div style={{display:"flex",gap:28,alignItems:"center",flexWrap:"wrap"}}>
+                        <Donut slices={expSlices} total={expenseSum} centerLabel="расходы"/>
+                        <div style={{flex:1,minWidth:280,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:"0 28px"}}>
+                          {expSlices.slice(0,12).map(([k,v],i)=><LegendItem key={k} label={k} val={v} total={expenseSum} color={PIE_COLORS[i%PIE_COLORS.length]}/>)}
+                        </div>
+                      </div>
+                    </CardSection>
+                  </div>
+
+                  {/* ── Динамика по месяцам ── */}
+                  <CardSection title="📅 Динамика по месяцам" accent="#0f172a" full>
                     {months.length===0 && <div style={{color:"#94a3b8",fontSize:13}}>Нет данных за период</div>}
-                    <div style={{display:"flex",gap:8,alignItems:"flex-end",overflowX:"auto",paddingBottom:8}}>
-                      {months.map(m=>{ const d=monthMap[m]; const [y,mo]=m.split("-"); const profit=d.inc-d.exp; return (
-                        <div key={m} style={{flex:"1 0 54px",textAlign:"center"}}>
-                          <div style={{display:"flex",gap:3,alignItems:"flex-end",justifyContent:"center",height:120}}>
-                            <div title={"Доход: "+fM(d.inc)} style={{width:14,height:Math.max(2,d.inc/maxMonth*120),background:"#10b981",borderRadius:"3px 3px 0 0"}}/>
-                            <div title={"Расход: "+fM(d.exp)} style={{width:14,height:Math.max(2,d.exp/maxMonth*120),background:"#f43f5e",borderRadius:"3px 3px 0 0"}}/>
+                    <div style={{display:"flex",gap:10,alignItems:"flex-end",overflowX:"auto",paddingBottom:8}}>
+                      {months.map(m=>{ const d=monthMap[m]; const [y,mo]=m.split("-"); const pr=d.inc-d.exp; return (
+                        <div key={m} style={{flex:"1 0 56px",textAlign:"center"}}>
+                          <div style={{display:"flex",gap:4,alignItems:"flex-end",justifyContent:"center",height:130}}>
+                            <div title={"Доход: "+fM(d.inc)} style={{width:16,height:Math.max(2,d.inc/maxMonth*130),background:"linear-gradient(180deg,#34d399,#10b981)",borderRadius:"4px 4px 0 0"}}/>
+                            <div title={"Расход: "+fM(d.exp)} style={{width:16,height:Math.max(2,d.exp/maxMonth*130),background:"linear-gradient(180deg,#fb7185,#f43f5e)",borderRadius:"4px 4px 0 0"}}/>
                           </div>
-                          <div style={{fontSize:10,color:"#64748b",marginTop:5}}>{MNAMES[parseInt(mo)-1]}</div>
+                          <div style={{fontSize:10.5,color:"#475569",marginTop:6,fontWeight:600}}>{MNAMES[parseInt(mo)-1]}</div>
                           <div style={{fontSize:9,color:"#94a3b8"}}>{y.slice(2)}</div>
-                          <div style={{fontSize:9,fontWeight:700,color:profit>=0?"#059669":"#dc2626",marginTop:1}}>{profit>=0?"+":""}{Math.round(profit/1000)}k</div>
+                          <div style={{fontSize:9.5,fontWeight:700,color:pr>=0?"#059669":"#dc2626",marginTop:2}}>{pr>=0?"+":""}{Math.round(pr/1000)}k</div>
                         </div>
                       );})}
                     </div>
-                    <div style={{display:"flex",gap:16,marginTop:8,fontSize:11,color:"#64748b"}}>
-                      <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:10,height:10,background:"#10b981",borderRadius:2,display:"inline-block"}}/>Доход</span>
-                      <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:10,height:10,background:"#f43f5e",borderRadius:2,display:"inline-block"}}/>Расход</span>
+                    <div style={{display:"flex",gap:16,marginTop:10,fontSize:11.5,color:"#64748b"}}>
+                      <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:11,height:11,background:"#10b981",borderRadius:3,display:"inline-block"}}/>Доход</span>
+                      <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:11,height:11,background:"#f43f5e",borderRadius:3,display:"inline-block"}}/>Расход</span>
                     </div>
-                  </div>
+                  </CardSection>
                 </div>
               );
             })()}
