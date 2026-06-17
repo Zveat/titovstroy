@@ -2755,8 +2755,10 @@ export default function App() {
   const [finProjects, setFinProjects] = useState([]);
   const finProjectsRef = useRef([]);
   useEffect(() => { finProjectsRef.current = finProjects; }, [finProjects]);
-  const [finProjModal, setFinProjModal] = useState(null); // редактируемый/новый проект
+  const [finProjModal, setFinProjModal] = useState(null);
   const [finProjSearch, setFinProjSearch] = useState("");
+  const [finProjStatusFilter, setFinProjStatusFilter] = useState("");
+  const [finProjCatFilter, setFinProjCatFilter] = useState("");
   const [objectTab, setObjectTab] = useState("list"); // list | workspace
   const [objInfoCollapsed, setObjInfoCollapsed] = useState(false); // свёрнут ли блок инфо клиента/объекта
   const [currentObject, setCurrentObject] = useState(null);
@@ -7202,10 +7204,8 @@ export default function App() {
 
             {/* ───── ПРОЕКТЫ ───── */}
             {financeTab==="projects" && (()=>{
-              const allTx = financeTx;
-              // compute per-project income/expense from transactions
               const projStats = {};
-              for (const t of allTx) {
+              for (const t of financeTx) {
                 if (t.included===false) continue;
                 const cn = (t.contractNo||"").trim();
                 if (!cn) continue;
@@ -7213,79 +7213,136 @@ export default function App() {
                 if (t.type==="income") projStats[cn].income += t.amount||0;
                 else if (t.type==="expense") projStats[cn].expense += t.amount||0;
               }
-              const sorted = [...finProjects].sort((a,b)=>{
-                const da = a.createdAt||""; const db = b.createdAt||"";
-                return db.localeCompare(da);
-              });
+              const sorted = [...finProjects].sort((a,b)=>(a.createdAt||"").localeCompare(b.createdAt||""));
+              const allStatuses = [...new Set(sorted.map(p=>p.rawStatus||p.status).filter(Boolean))];
+              const allCats = [...new Set(sorted.map(p=>p.category).filter(Boolean))];
               const q = finProjSearch.toLowerCase();
-              const filtered = q ? sorted.filter(p=>(p.contractNo||"").toLowerCase().includes(q)||(p.description||"").toLowerCase().includes(q)||(p.client||"").toLowerCase().includes(q)||(p.comment||"").toLowerCase().includes(q)) : sorted;
-              const STATUS_COL = { активен:"#2563eb", выполнен:"#059669", отменен:"#94a3b8", приостановлен:"#f59e0b" };
+              const filtered = sorted
+                .filter(p=>!finProjStatusFilter || (p.rawStatus||p.status)===finProjStatusFilter)
+                .filter(p=>!finProjCatFilter || p.category===finProjCatFilter)
+                .filter(p=>!q || (p.contractNo||"").toLowerCase().includes(q)||(p.description||"").toLowerCase().includes(q)||(p.client||"").toLowerCase().includes(q)||(p.comment||"").toLowerCase().includes(q));
+              const STATUS_COL = { активен:"#2563eb", выполнен:"#059669", отменен:"#94a3b8", приостановлен:"#f59e0b", новый:"#7c3aed" };
+              const days = (a,b) => { if(!a||!b) return null; const d=Math.round((new Date(b)-new Date(a))/86400000); return d>=0?d:null; };
+              const yesno = v => v==="да"||v==="yes"||v===true||v==="1"||v==="Да"||v==="ДА";
+              const yn = v => <span style={{color:yesno(v)?"#059669":"#dc2626",fontWeight:700}}>{yesno(v)?"✓":"✗"}</span>;
+              const thS = {padding:"8px 10px",fontWeight:700,fontSize:11,color:"#64748b",background:"#f8fafc",whiteSpace:"nowrap",textAlign:"right",borderBottom:"1px solid #e2e8f0"};
+              const thSL = {...thS,textAlign:"left"};
+              const tdS = {padding:"8px 10px",fontSize:12,whiteSpace:"nowrap",borderBottom:"1px solid #f1f5f9",textAlign:"right",color:"#0f172a"};
+              const tdSL = {...tdS,textAlign:"left"};
+              // totals
+              const totBudget = filtered.reduce((s,p)=>s+(Number(p.budget)||0),0);
+              const totIncome = filtered.reduce((s,p)=>s+(projStats[p.contractNo]?.income||0),0);
+              const totExpense = filtered.reduce((s,p)=>s+(projStats[p.contractNo]?.expense||0),0);
+              const totDebt = filtered.reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projStats[p.contractNo]?.income||0)),0);
+              const totMargin = totIncome>0 ? Math.round((totIncome-totExpense)/totIncome*100) : 0;
               return (
                 <div>
-                  <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
-                    <input className="fi" style={{flex:"1 1 220px",maxWidth:340}} value={finProjSearch} onChange={e=>setFinProjSearch(e.target.value)} placeholder="Поиск по договору, клиенту..."/>
-                    <button onClick={()=>setFinProjModal({id:"",contractNo:"",client:"",category:"",description:"",budget:0,status:"активен",createdAt:"",closedAt:"",paidFact:0,expenses:0,comment:""})}
-                      style={{background:"#059669",color:"#fff",border:"none",borderRadius:9,padding:"9px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Проект</button>
-                    <span style={{fontSize:12,color:"#94a3b8"}}>{filtered.length} проектов</span>
+                  <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+                    <input className="fi" style={{flex:"1 1 180px",maxWidth:260}} value={finProjSearch} onChange={e=>setFinProjSearch(e.target.value)} placeholder="Поиск..."/>
+                    {/* фильтр по статусу */}
+                    {[["","Все статусы"],...allStatuses.map(s=>[s,s])].map(([v,l])=>{
+                      const col=STATUS_COL[v]||"#64748b";
+                      const on=finProjStatusFilter===v;
+                      return <button key={v} onClick={()=>setFinProjStatusFilter(v)} style={{fontSize:12,fontWeight:700,padding:"6px 12px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(on?(v?col:"#2563eb"):"#e2e8f0"),background:on?(v?col+"18":"#eff6ff"):"#fff",color:on?(v?col:"#2563eb"):"#94a3b8"}}>{l}</button>;
+                    })}
+                    {/* фильтр по категории */}
+                    {allCats.length>1 && <select className="fi" style={{width:"auto",minWidth:130}} value={finProjCatFilter} onChange={e=>setFinProjCatFilter(e.target.value)}>
+                      <option value="">Все типы</option>
+                      {allCats.map(c=><option key={c} value={c}>{c}</option>)}
+                    </select>}
+                    <button onClick={()=>setFinProjModal({id:"",contractNo:"",client:"Физ лицо",category:"Вторичка",description:"",budget:0,status:"активен",createdAt:"",closedAt:"",b24:"нет",contractSigned:"нет",avr:"нет",comment:""})}
+                      style={{background:"#059669",color:"#fff",border:"none",borderRadius:9,padding:"9px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginLeft:"auto"}}>+ Проект</button>
+                    <span style={{fontSize:12,color:"#94a3b8"}}>{filtered.length} / {finProjects.length}</span>
                   </div>
-                  <div style={{display:"grid",gap:10}}>
+                  {/* Итого-шапка */}
+                  {filtered.length>0 && <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:12,padding:"12px 16px",marginBottom:14,display:"flex",gap:20,flexWrap:"wrap",alignItems:"center"}}>
+                    <span style={{fontSize:12,fontWeight:700,color:"#15803d"}}>ИТОГО {filtered.length} проектов</span>
+                    <span style={{fontSize:12,color:"#64748b"}}>Бюджет: <b style={{color:"#0f172a"}}>{fM(totBudget)} ₸</b></span>
+                    <span style={{fontSize:12,color:"#64748b"}}>Оплачено: <b style={{color:"#059669"}}>{fM(totIncome)} ₸</b></span>
+                    {totDebt>0&&<span style={{fontSize:12,color:"#64748b"}}>Долг: <b style={{color:"#dc2626"}}>{fM(totDebt)} ₸</b></span>}
+                    <span style={{fontSize:12,color:"#64748b"}}>Расходы: <b style={{color:"#dc2626"}}>{fM(totExpense)} ₸</b></span>
+                    <span style={{fontSize:12,color:"#64748b"}}>Маржа: <b style={{color:totMargin>=30?"#059669":totMargin>=0?"#f59e0b":"#dc2626"}}>{fM(totIncome-totExpense)} ₸ / {totMargin}%</b></span>
+                  </div>}
+                  {/* Карточки проектов */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(340px,1fr))",gap:12}}>
                     {filtered.map(p=>{
                       const st = projStats[p.contractNo]||{income:0,expense:0};
-                      const margin = st.income>0 ? Math.round((st.income-st.expense)/st.income*100) : null;
-                      const col = STATUS_COL[p.status]||"#64748b";
+                      const income = st.income;
+                      const expense = st.expense;
+                      const debt = Math.max(0,(Number(p.budget)||0)-income);
+                      const marginVal = income-expense;
+                      const marginPct = income>0 ? Math.round(marginVal/income*100) : null;
+                      const col = STATUS_COL[p.rawStatus||p.status]||"#64748b";
+                      const dur = days(p.createdAt, p.closedAt);
+                      const budgetFill = p.budget>0 ? Math.min(100,Math.round(income/p.budget*100)) : 0;
                       return (
                         <div key={p.id||p.contractNo} onClick={()=>setFinProjModal({...p})}
-                          style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,padding:"14px 18px",cursor:"pointer",transition:"box-shadow .15s",boxShadow:"0 1px 3px rgba(15,23,42,.05)"}}>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,flexWrap:"wrap"}}>
+                          style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,padding:"16px 18px",cursor:"pointer",boxShadow:"0 1px 4px rgba(15,23,42,.06)",transition:"box-shadow .15s"}}
+                          className="fin-row">
+                          {/* Шапка */}
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6,gap:8}}>
                             <div style={{flex:1,minWidth:0}}>
-                              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,flexWrap:"wrap"}}>
-                                <span style={{fontSize:13,fontWeight:800,color:"#0f172a"}}>{p.contractNo}</span>
-                                <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:20,background:col+"18",color:col}}>{p.status}</span>
-                                {p.category && <span style={{fontSize:11,color:"#94a3b8"}}>{p.category}</span>}
-                              </div>
-                              {p.description && <div style={{fontSize:12,color:"#475569",marginBottom:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.description}</div>}
-                              {p.comment && <div style={{fontSize:11,color:"#94a3b8"}}>{p.comment}</div>}
+                              <div style={{fontSize:13,fontWeight:800,color:"#0f172a",marginBottom:1}}>{p.contractNo}</div>
+                              <div style={{fontSize:11,color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.description||p.comment||"—"}</div>
                             </div>
-                            <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"center"}}>
-                              <div style={{textAlign:"right"}}>
-                                <div style={{fontSize:10,color:"#94a3b8",marginBottom:1}}>Доходы (факт)</div>
-                                <div style={{fontSize:14,fontWeight:700,color:"#059669"}}>{fM(st.income)} ₸</div>
-                              </div>
-                              <div style={{textAlign:"right"}}>
-                                <div style={{fontSize:10,color:"#94a3b8",marginBottom:1}}>Расходы (факт)</div>
-                                <div style={{fontSize:14,fontWeight:700,color:"#dc2626"}}>{fM(st.expense)} ₸</div>
-                              </div>
-                              <div style={{textAlign:"right"}}>
-                                <div style={{fontSize:10,color:"#94a3b8",marginBottom:1}}>Маржа</div>
-                                <div style={{fontSize:14,fontWeight:800,color:margin===null?"#94a3b8":margin>=30?"#059669":margin>=0?"#f59e0b":"#dc2626"}}>{margin===null?"—":margin+"%"}</div>
-                              </div>
-                              {p.budget>0 && <div style={{textAlign:"right"}}>
-                                <div style={{fontSize:10,color:"#94a3b8",marginBottom:1}}>Бюджет</div>
-                                <div style={{fontSize:13,fontWeight:600,color:"#475569"}}>{fM(p.budget)} ₸</div>
-                              </div>}
+                            <span style={{fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:20,background:col+"18",color:col,whiteSpace:"nowrap",flexShrink:0}}>{p.rawStatus||p.status}</span>
+                          </div>
+                          {/* Мета */}
+                          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10,fontSize:11,color:"#94a3b8"}}>
+                            <span>{p.client||"—"}</span>
+                            {p.category&&<span>· {p.category}</span>}
+                            {p.createdAt&&<span>· {p.createdAt}</span>}
+                            {p.closedAt&&<span>→ {p.closedAt}</span>}
+                            {dur!==null&&<span>· {dur} дн.</span>}
+                          </div>
+                          {/* Прогресс оплаты */}
+                          {p.budget>0&&<div style={{marginBottom:10}}>
+                            <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"#94a3b8",marginBottom:3}}>
+                              <span>Оплачено {budgetFill}% от бюджета {fM(p.budget)} ₸</span>
                             </div>
+                            <div style={{height:4,background:"#f1f5f9",borderRadius:3,overflow:"hidden"}}>
+                              <div style={{height:"100%",width:budgetFill+"%",background:budgetFill>=100?"#059669":"#2563eb",borderRadius:3}}/>
+                            </div>
+                          </div>}
+                          {/* Цифры 2x3 */}
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:10}}>
+                            <div style={{background:"#f0fdf4",borderRadius:8,padding:"6px 8px"}}>
+                              <div style={{fontSize:9,color:"#94a3b8",marginBottom:1}}>ОПЛАЧЕНО ФАКТ</div>
+                              <div style={{fontSize:13,fontWeight:800,color:"#059669"}}>{income>0?fM(income)+" ₸":"—"}</div>
+                            </div>
+                            <div style={{background:debt>0?"#fef2f2":"#f8fafc",borderRadius:8,padding:"6px 8px"}}>
+                              <div style={{fontSize:9,color:"#94a3b8",marginBottom:1}}>ДОЛГ</div>
+                              <div style={{fontSize:13,fontWeight:800,color:debt>0?"#dc2626":"#94a3b8"}}>{debt>0?fM(debt)+" ₸":"—"}</div>
+                            </div>
+                            <div style={{background:"#fef2f2",borderRadius:8,padding:"6px 8px"}}>
+                              <div style={{fontSize:9,color:"#94a3b8",marginBottom:1}}>РАСХОДЫ</div>
+                              <div style={{fontSize:13,fontWeight:800,color:"#dc2626"}}>{expense>0?fM(expense)+" ₸":"—"}</div>
+                            </div>
+                            <div style={{background:"#f8fafc",borderRadius:8,padding:"6px 8px"}}>
+                              <div style={{fontSize:9,color:"#94a3b8",marginBottom:1}}>СТОИМОСТЬ</div>
+                              <div style={{fontSize:13,fontWeight:700,color:"#475569"}}>{p.budget>0?fM(p.budget)+" ₸":"—"}</div>
+                            </div>
+                            <div style={{background:marginPct===null?"#f8fafc":marginPct>=30?"#f0fdf4":"#fffbeb",borderRadius:8,padding:"6px 8px"}}>
+                              <div style={{fontSize:9,color:"#94a3b8",marginBottom:1}}>МАРЖА ₸</div>
+                              <div style={{fontSize:13,fontWeight:800,color:marginPct===null?"#94a3b8":marginPct>=30?"#059669":marginPct>=0?"#f59e0b":"#dc2626"}}>{income>0?fM(marginVal)+" ₸":"—"}</div>
+                            </div>
+                            <div style={{background:marginPct===null?"#f8fafc":marginPct>=30?"#f0fdf4":"#fffbeb",borderRadius:8,padding:"6px 8px"}}>
+                              <div style={{fontSize:9,color:"#94a3b8",marginBottom:1}}>МАРЖА %</div>
+                              <div style={{fontSize:13,fontWeight:800,color:marginPct===null?"#94a3b8":marginPct>=30?"#059669":marginPct>=0?"#f59e0b":"#dc2626"}}>{marginPct===null?"—":marginPct+"%"}</div>
+                            </div>
+                          </div>
+                          {/* Флаги Б24 / Договор / АВР */}
+                          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                            {[["Б24",p.b24],["Договор",p.contractSigned],["АВР",p.avr]].map(([l,v])=>(
+                              <span key={l} style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:6,background:yesno(v)?"#f0fdf4":"#fef2f2",color:yesno(v)?"#059669":"#dc2626"}}>{l} {yesno(v)?"✓":"✗"}</span>
+                            ))}
+                            {p.comment&&<span style={{fontSize:10,color:"#94a3b8",marginLeft:4,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.comment}</span>}
                           </div>
                         </div>
                       );
                     })}
-                    {filtered.length===0 && <div style={{color:"#94a3b8",textAlign:"center",padding:40,fontSize:14}}>Проекты не найдены</div>}
+                    {filtered.length===0 && <div style={{color:"#94a3b8",textAlign:"center",padding:40,fontSize:14,gridColumn:"1/-1"}}>Проекты не найдены</div>}
                   </div>
-                  {/* Итого по всем */}
-                  {filtered.length>0 && (()=>{
-                    const tot = filtered.reduce((acc,p)=>{
-                      const st=projStats[p.contractNo]||{income:0,expense:0};
-                      return {income:acc.income+st.income, expense:acc.expense+st.expense};
-                    },{income:0,expense:0});
-                    const marg = tot.income>0 ? Math.round((tot.income-tot.expense)/tot.income*100) : 0;
-                    return (
-                      <div style={{marginTop:14,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:14,padding:"14px 18px",display:"flex",gap:24,flexWrap:"wrap"}}>
-                        <div><span style={{fontSize:12,color:"#94a3b8"}}>Итого доходы: </span><span style={{fontWeight:800,color:"#059669"}}>{fM(tot.income)} ₸</span></div>
-                        <div><span style={{fontSize:12,color:"#94a3b8"}}>Расходы: </span><span style={{fontWeight:800,color:"#dc2626"}}>{fM(tot.expense)} ₸</span></div>
-                        <div><span style={{fontSize:12,color:"#94a3b8"}}>Прибыль: </span><span style={{fontWeight:800,color:(tot.income-tot.expense)>=0?"#2563eb":"#dc2626"}}>{fM(tot.income-tot.expense)} ₸</span></div>
-                        <div><span style={{fontSize:12,color:"#94a3b8"}}>Маржа: </span><span style={{fontWeight:800,color:marg>=30?"#059669":marg>=0?"#f59e0b":"#dc2626"}}>{marg}%</span></div>
-                      </div>
-                    );
-                  })()}
                   {/* Модалка проекта */}
                   {finProjModal !== null && (()=>{
                     const mp = finProjModal;
@@ -7309,26 +7366,52 @@ export default function App() {
                             <h3 style={{margin:0,fontSize:17,fontWeight:800,color:"#0f172a"}}>{mp.id?"Редактировать":"Новый"} проект</h3>
                             <button onClick={()=>setFinProjModal(null)} style={{background:"none",border:"none",fontSize:20,color:"#94a3b8",cursor:"pointer"}}>✕</button>
                           </div>
-                          <div style={{display:"grid",gap:12}}>
-                            <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>№ договора *</div><input className="fi" value={mp.contractNo} onChange={e=>setp("contractNo",e.target.value)} placeholder="0918#1002"/></div>
-                            <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Заказчик</div><input className="fi" value={mp.client||""} onChange={e=>setp("client",e.target.value)}/></div>
-                            <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Категория</div>
-                              <select className="fi" value={mp.category||""} onChange={e=>setp("category",e.target.value)}>
-                                <option value="">— не указана —</option>
-                                {["Вторичка","Новостройки","Коммерция","Частичные работы, услуги","Другое"].map(c=><option key={c} value={c}>{c}</option>)}
-                              </select>
-                            </div>
-                            <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Описание работ</div><input className="fi" value={mp.description||""} onChange={e=>setp("description",e.target.value)}/></div>
-                            <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Статус</div>
-                              <select className="fi" value={mp.status||"активен"} onChange={e=>setp("status",e.target.value)}>
-                                {["активен","выполнен","отменен","приостановлен"].map(s=><option key={s} value={s}>{s}</option>)}
-                              </select>
+                          {/* показываем расчётные цифры если проект существует */}
+                          {mp.id && (()=>{ const st=projStats[mp.contractNo]||{income:0,expense:0}; const debt=Math.max(0,(Number(mp.budget)||0)-st.income); const mrg=st.income>0?Math.round((st.income-st.expense)/st.income*100):null;
+                            return <div style={{background:"#f8fafc",borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",gap:20,flexWrap:"wrap"}}>
+                              <div><div style={{fontSize:10,color:"#94a3b8"}}>ОПЛАЧЕНО ФАКТ</div><div style={{fontWeight:800,color:"#059669"}}>{fM(st.income)} ₸</div></div>
+                              <div><div style={{fontSize:10,color:"#94a3b8"}}>ДОЛГ</div><div style={{fontWeight:800,color:debt>0?"#dc2626":"#94a3b8"}}>{debt>0?fM(debt)+" ₸":"—"}</div></div>
+                              <div><div style={{fontSize:10,color:"#94a3b8"}}>РАСХОДЫ</div><div style={{fontWeight:800,color:"#dc2626"}}>{fM(st.expense)} ₸</div></div>
+                              <div><div style={{fontSize:10,color:"#94a3b8"}}>МАРЖА</div><div style={{fontWeight:800,color:mrg===null?"#94a3b8":mrg>=30?"#059669":mrg>=0?"#f59e0b":"#dc2626"}}>{mrg===null?"—":fM(st.income-st.expense)+" ₸ / "+mrg+"%"}</div></div>
+                            </div>;
+                          })()}
+                          <div style={{display:"grid",gap:11}}>
+                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                              <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>№ договора *</div><input className="fi" value={mp.contractNo} onChange={e=>setp("contractNo",e.target.value)} placeholder="0918#1002"/></div>
+                              <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Заказчик</div>
+                                <select className="fi" value={mp.client||"Физ лицо"} onChange={e=>setp("client",e.target.value)}>
+                                  {["Физ лицо","Юр лицо"].map(c=><option key={c} value={c}>{c}</option>)}
+                                </select>
+                              </div>
                             </div>
                             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                              <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Дата начала</div><input type="date" className="fi" value={mp.createdAt||""} onChange={e=>setp("createdAt",e.target.value)}/></div>
+                              <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Категория</div>
+                                <select className="fi" value={mp.category||""} onChange={e=>setp("category",e.target.value)}>
+                                  <option value="">— не указана —</option>
+                                  {["Вторичка","Коммерческие объекты","Частичные работы, услуги","Новостройки","Другое"].map(c=><option key={c} value={c}>{c}</option>)}
+                                </select>
+                              </div>
+                              <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Статус</div>
+                                <select className="fi" value={mp.rawStatus||mp.status||"в работе"} onChange={e=>{ const raw=e.target.value; const mapped={выполнен:"выполнен",отменен:"отменен","в работе":"активен",новый:"активен"}; setp("rawStatus",raw); setp("status",mapped[raw]||"активен"); }}>
+                                  {["в работе","новый","выполнен","отменен"].map(s=><option key={s} value={s}>{s}</option>)}
+                                </select>
+                              </div>
+                            </div>
+                            <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Описание работ</div><input className="fi" value={mp.description||""} onChange={e=>setp("description",e.target.value)}/></div>
+                            <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Стоимость проекта, ₸</div><input type="number" className="fi" value={mp.budget||0} onChange={e=>setp("budget",e.target.value)}/></div>
+                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                              <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Дата заказа</div><input type="date" className="fi" value={mp.createdAt||""} onChange={e=>setp("createdAt",e.target.value)}/></div>
                               <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Дата закрытия</div><input type="date" className="fi" value={mp.closedAt||""} onChange={e=>setp("closedAt",e.target.value)}/></div>
                             </div>
-                            <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Стоимость проекта, ₸</div><input type="number" className="fi" value={mp.budget||0} onChange={e=>setp("budget",e.target.value)}/></div>
+                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                              {[["b24","B24 внесён?"],["contractSigned","Договор заключён?"],["avr","АВР?"]].map(([k,l])=>(
+                                <div key={k}><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>{l}</div>
+                                  <select className="fi" value={mp[k]||"нет"} onChange={e=>setp(k,e.target.value)}>
+                                    <option value="да">да</option><option value="нет">нет</option>
+                                  </select>
+                                </div>
+                              ))}
+                            </div>
                             <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Комментарий</div><input className="fi" value={mp.comment||""} onChange={e=>setp("comment",e.target.value)}/></div>
                           </div>
                           <div style={{display:"flex",gap:8,marginTop:18}}>
