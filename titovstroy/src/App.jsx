@@ -6934,7 +6934,7 @@ export default function App() {
         const openEditTx = (t) => setFinTxModal({ ...t, date:new Date(t.date||t.createdAt||Date.now()).toISOString().slice(0,10) });
 
         return (
-          <div className="page">
+          <div className="page" style={{maxWidth:1600}}>
             {/* Hero */}
             <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"24px 28px",marginBottom:20,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
               <div style={{position:"absolute",top:-30,right:-30,width:160,height:160,borderRadius:"50%",background:"rgba(16,185,129,.10)"}}/>
