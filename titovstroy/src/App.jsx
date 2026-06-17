@@ -7064,11 +7064,11 @@ export default function App() {
               const HCell={padding:"7px 9px",textAlign:"right",color:"#64748b",fontWeight:700,whiteSpace:"nowrap",fontSize:11.5};
               const sumStyle=(v)=>({padding:"7px 9px",textAlign:"right",fontWeight:700,whiteSpace:"nowrap",color:v>=0?"#0f172a":"#dc2626"});
               return (
-                <div className="card" style={{padding:"18px 20px",overflowX:"auto"}}>
+                <div className="card" style={{padding:"18px 24px",overflowX:"auto",width:"100%",boxSizing:"border-box"}}>
                   <div style={{fontSize:14,fontWeight:800,color:"#0f172a",marginBottom:4}}>💸 Отчёт о движении денежных средств (ДДС)</div>
                   <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>Кассовый метод: каждая операция учитывается в месяце <b>фактической оплаты</b> · {months.length} мес.</div>
                   {months.length===0 ? <div style={{color:"#94a3b8",textAlign:"center",padding:30}}>Нет данных за период</div> : (
-                  <table style={{borderCollapse:"collapse",fontSize:12.5,minWidth:560}}>
+                  <table style={{borderCollapse:"collapse",fontSize:12.5,width:"100%",minWidth:700}}>
                     <thead><tr style={{borderBottom:"2px solid #e2e8f0"}}>
                       <th style={{textAlign:"left",padding:"7px 9px",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>Статья</th>
                       {months.map(m=><th key={m} style={HCell}>{mLabel(m)}</th>)}
@@ -7154,11 +7154,11 @@ export default function App() {
               const PctRow=({label,ser,color})=>(<tr><td style={{padding:"3px 9px 6px 22px",color,fontSize:11,fontStyle:"italic"}}>{label}</td>{months.map(m=><td key={m} style={{padding:"3px 9px 6px",textAlign:"right",color,fontSize:11,fontStyle:"italic",whiteSpace:"nowrap"}}>{fpct(ser.byM[m])}</td>)}<td style={{padding:"3px 9px 6px",textAlign:"right",color,fontSize:11,fontStyle:"italic",fontWeight:700,whiteSpace:"nowrap"}}>{fpct(ser.tot)}</td></tr>);
               const ExpGroupRows=({cat,exclude=[]})=>{ const meta=(financeMeta.expense||[]).find(c=>c.cat===cat); if(!meta)return null; const gt=agg(t=>t.type==="expense"&&t.category===cat&&!exclude.includes(t.subcategory)); if(gt.tot===0)return null; return (<Fragment><tr style={{borderBottom:"1px solid #f8fafc"}}><td style={{padding:"6px 9px",fontWeight:700,color:"#334155"}}>{cat}</td>{months.map(m=><td key={m} style={{padding:"6px 9px",textAlign:"right",color:"#dc2626",fontWeight:600,whiteSpace:"nowrap"}}>{fmt(gt.byM[m])}</td>)}<td style={{padding:"6px 9px",textAlign:"right",fontWeight:800,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(gt.tot)}</td></tr>{(meta.subs||[]).filter(s2=>!exclude.includes(s2)).map(s2=>{ const s=agg(t=>t.type==="expense"&&t.category===cat&&t.subcategory===s2); if(s.tot===0)return null; return (<tr key={s2}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{s2}</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>);})}</Fragment>); };
               return (
-                <div className="card" style={{padding:"18px 20px",overflowX:"auto"}}>
+                <div className="card" style={{padding:"18px 24px",overflowX:"auto",width:"100%",boxSizing:"border-box"}}>
                   <div style={{fontSize:14,fontWeight:800,color:"#0f172a",marginBottom:4}}>📈 Отчёт о прибылях и убытках (ОПУ / P&L)</div>
                   <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>Метод начисления: доход = <b>стоимость закрытых проектов</b> в месяце закрытия (заработанная выручка), расходы — по дате оплаты · {months.length} мес.</div>
                   {months.length===0 ? <div style={{color:"#94a3b8",textAlign:"center",padding:30}}>Нет данных за период</div> : (<>
-                  <table style={{borderCollapse:"collapse",fontSize:12.5,minWidth:560}}>
+                  <table style={{borderCollapse:"collapse",fontSize:12.5,width:"100%",minWidth:700}}>
                     <thead><tr style={{borderBottom:"2px solid #e2e8f0"}}>
                       <th style={{textAlign:"left",padding:"7px 9px",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>Статья</th>
                       {months.map(m=><th key={m} style={HCell}>{mLabel(m)}</th>)}
