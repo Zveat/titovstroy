@@ -7066,7 +7066,7 @@ export default function App() {
               return (
                 <div className="card" style={{padding:"18px 20px",overflowX:"auto"}}>
                   <div style={{fontSize:14,fontWeight:800,color:"#0f172a",marginBottom:4}}>💸 Отчёт о движении денежных средств (ДДС)</div>
-                  <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>По дате платежа · {months.length} мес. в периоде</div>
+                  <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>Кассовый метод: каждая операция учитывается в месяце <b>фактической оплаты</b> · {months.length} мес.</div>
                   {months.length===0 ? <div style={{color:"#94a3b8",textAlign:"center",padding:30}}>Нет данных за период</div> : (
                   <table style={{borderCollapse:"collapse",fontSize:12.5,minWidth:560}}>
                     <thead><tr style={{borderBottom:"2px solid #e2e8f0"}}>
@@ -7126,7 +7126,7 @@ export default function App() {
               return (
                 <div className="card" style={{padding:"18px 20px",overflowX:"auto"}}>
                   <div style={{fontSize:14,fontWeight:800,color:"#0f172a",marginBottom:4}}>📈 Отчёт о прибылях и убытках (ОПУ / P&L)</div>
-                  <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>По месяцу закрытия проекта (метод начисления) · {months.length} мес. в периоде</div>
+                  <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>Метод начисления: доход и прямые расходы признаются в месяце <b>закрытия проекта</b>, а не оплаты · {months.length} мес.</div>
                   {months.length===0 ? <div style={{color:"#94a3b8",textAlign:"center",padding:30}}>Нет данных за период</div> : (<>
                   <table style={{borderCollapse:"collapse",fontSize:12.5,minWidth:560}}>
                     <thead><tr style={{borderBottom:"2px solid #e2e8f0"}}>
@@ -7237,32 +7237,47 @@ export default function App() {
               const totMargin = totIncome>0 ? Math.round((totIncome-totExpense)/totIncome*100) : 0;
               return (
                 <div>
-                  <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
-                    <input className="fi" style={{flex:"1 1 180px",maxWidth:260}} value={finProjSearch} onChange={e=>setFinProjSearch(e.target.value)} placeholder="Поиск..."/>
-                    {/* фильтр по статусу */}
+                  {/* Заголовок + кнопка */}
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,gap:10,flexWrap:"wrap"}}>
+                    <div style={{display:"flex",alignItems:"baseline",gap:10}}>
+                      <h2 style={{margin:0,fontSize:18,fontWeight:800,color:"#0f172a"}}>🏗 Проекты</h2>
+                      <span style={{fontSize:13,color:"#94a3b8",fontWeight:600}}>{filtered.length} из {finProjects.length}</span>
+                    </div>
+                    <button onClick={()=>setFinProjModal({id:"",contractNo:"",client:"Физ лицо",category:"Вторичка",description:"",budget:0,status:"активен",createdAt:"",closedAt:"",b24:"нет",contractSigned:"нет",avr:"нет",comment:""})}
+                      style={{background:"#059669",color:"#fff",border:"none",borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 2px 8px rgba(5,150,105,.3)"}}>+ Проект</button>
+                  </div>
+                  {/* Фильтры */}
+                  <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+                    <input className="fi" style={{flex:"1 1 180px",maxWidth:260}} value={finProjSearch} onChange={e=>setFinProjSearch(e.target.value)} placeholder="🔍 Поиск..."/>
                     {[["","Все статусы"],...allStatuses.map(s=>[s,s])].map(([v,l])=>{
                       const col=STATUS_COL[v]||"#64748b";
                       const on=finProjStatusFilter===v;
                       return <button key={v} onClick={()=>setFinProjStatusFilter(v)} style={{fontSize:12,fontWeight:700,padding:"6px 12px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(on?(v?col:"#2563eb"):"#e2e8f0"),background:on?(v?col+"18":"#eff6ff"):"#fff",color:on?(v?col:"#2563eb"):"#94a3b8"}}>{l}</button>;
                     })}
-                    {/* фильтр по категории */}
                     {allCats.length>1 && <select className="fi" style={{width:"auto",minWidth:130}} value={finProjCatFilter} onChange={e=>setFinProjCatFilter(e.target.value)}>
                       <option value="">Все типы</option>
                       {allCats.map(c=><option key={c} value={c}>{c}</option>)}
                     </select>}
-                    <button onClick={()=>setFinProjModal({id:"",contractNo:"",client:"Физ лицо",category:"Вторичка",description:"",budget:0,status:"активен",createdAt:"",closedAt:"",b24:"нет",contractSigned:"нет",avr:"нет",comment:""})}
-                      style={{background:"#059669",color:"#fff",border:"none",borderRadius:9,padding:"9px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginLeft:"auto"}}>+ Проект</button>
-                    <span style={{fontSize:12,color:"#94a3b8"}}>{filtered.length} / {finProjects.length}</span>
                   </div>
-                  {/* Итого-шапка */}
-                  {filtered.length>0 && <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:12,padding:"12px 16px",marginBottom:14,display:"flex",gap:20,flexWrap:"wrap",alignItems:"center"}}>
-                    <span style={{fontSize:12,fontWeight:700,color:"#15803d"}}>ИТОГО {filtered.length} проектов</span>
-                    <span style={{fontSize:12,color:"#64748b"}}>Бюджет: <b style={{color:"#0f172a"}}>{fM(totBudget)} ₸</b></span>
-                    <span style={{fontSize:12,color:"#64748b"}}>Оплачено: <b style={{color:"#059669"}}>{fM(totIncome)} ₸</b></span>
-                    {totDebt>0&&<span style={{fontSize:12,color:"#64748b"}}>Долг: <b style={{color:"#dc2626"}}>{fM(totDebt)} ₸</b></span>}
-                    <span style={{fontSize:12,color:"#64748b"}}>Расходы: <b style={{color:"#dc2626"}}>{fM(totExpense)} ₸</b></span>
-                    <span style={{fontSize:12,color:"#64748b"}}>Маржа: <b style={{color:totMargin>=30?"#059669":totMargin>=0?"#f59e0b":"#dc2626"}}>{fM(totIncome-totExpense)} ₸ / {totMargin}%</b></span>
-                  </div>}
+                  {/* Итого-плитки */}
+                  {filtered.length>0 && (()=>{
+                    const tiles=[
+                      ["Бюджет",fM(totBudget)+" ₸","#0f172a","#f1f5f9"],
+                      ["Оплачено факт",fM(totIncome)+" ₸","#059669","#f0fdf4"],
+                      ["Долг",totDebt>0?fM(totDebt)+" ₸":"—",totDebt>0?"#dc2626":"#94a3b8","#fef2f2"],
+                      ["Расходы",fM(totExpense)+" ₸","#dc2626","#fef2f2"],
+                      ["Прибыль",fM(totIncome-totExpense)+" ₸",(totIncome-totExpense)>=0?"#059669":"#dc2626","#f0fdf4"],
+                      ["Маржа",totMargin+"%",totMargin>=30?"#059669":totMargin>=0?"#f59e0b":"#dc2626","#fffbeb"],
+                    ];
+                    return <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:16}}>
+                      {tiles.map(([l,v,c,bg])=>(
+                        <div key={l} style={{background:bg,borderRadius:12,padding:"12px 14px",border:"1px solid "+c+"22"}}>
+                          <div style={{fontSize:11,color:"#64748b",fontWeight:600,marginBottom:3}}>{l}</div>
+                          <div style={{fontSize:17,fontWeight:800,color:c}}>{v}</div>
+                        </div>
+                      ))}
+                    </div>;
+                  })()}
                   {/* Карточки проектов */}
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(340px,1fr))",gap:12}}>
                     {filtered.map(p=>{
@@ -7306,6 +7321,10 @@ export default function App() {
                           </div>}
                           {/* Цифры 2x3 */}
                           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:10}}>
+                            <div style={{background:"#f8fafc",borderRadius:8,padding:"6px 8px"}}>
+                              <div style={{fontSize:9,color:"#94a3b8",marginBottom:1}}>СТОИМОСТЬ</div>
+                              <div style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>{p.budget>0?fM(p.budget)+" ₸":"—"}</div>
+                            </div>
                             <div style={{background:"#f0fdf4",borderRadius:8,padding:"6px 8px"}}>
                               <div style={{fontSize:9,color:"#94a3b8",marginBottom:1}}>ОПЛАЧЕНО ФАКТ</div>
                               <div style={{fontSize:13,fontWeight:800,color:"#059669"}}>{income>0?fM(income)+" ₸":"—"}</div>
@@ -7317,10 +7336,6 @@ export default function App() {
                             <div style={{background:"#fef2f2",borderRadius:8,padding:"6px 8px"}}>
                               <div style={{fontSize:9,color:"#94a3b8",marginBottom:1}}>РАСХОДЫ</div>
                               <div style={{fontSize:13,fontWeight:800,color:"#dc2626"}}>{expense>0?fM(expense)+" ₸":"—"}</div>
-                            </div>
-                            <div style={{background:"#f8fafc",borderRadius:8,padding:"6px 8px"}}>
-                              <div style={{fontSize:9,color:"#94a3b8",marginBottom:1}}>СТОИМОСТЬ</div>
-                              <div style={{fontSize:13,fontWeight:700,color:"#475569"}}>{p.budget>0?fM(p.budget)+" ₸":"—"}</div>
                             </div>
                             <div style={{background:marginPct===null?"#f8fafc":marginPct>=30?"#f0fdf4":"#fffbeb",borderRadius:8,padding:"6px 8px"}}>
                               <div style={{fontSize:9,color:"#94a3b8",marginBottom:1}}>МАРЖА ₸</div>
