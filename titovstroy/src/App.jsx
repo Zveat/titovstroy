@@ -6867,6 +6867,7 @@ export default function App() {
         const balances = {};
         accounts.forEach(a=>{ balances[a.name] = Number(a.opening)||0; });
         for (const t of financeTx) {
+          if (t.included===false) continue;
           const amt = Number(t.amount)||0;
           if (t.type==="income") balances[t.account] = (balances[t.account]||0)+amt;
           else if (t.type==="expense") balances[t.account] = (balances[t.account]||0)-amt;
@@ -6875,7 +6876,7 @@ export default function App() {
         const totalBalance = Object.values(balances).reduce((s,v)=>s+v,0);
 
         // Показатели за период (без переводов)
-        const periodTx = financeTx.filter(t=>inPeriod(t.date||t.createdAt||0));
+        const periodTx = financeTx.filter(t=>t.included!==false && inPeriod(t.date||t.createdAt||0));
         const incomeSum = periodTx.filter(t=>t.type==="income").reduce((s,t)=>s+(Number(t.amount)||0),0);
         const expenseSum = periodTx.filter(t=>t.type==="expense").reduce((s,t)=>s+(Number(t.amount)||0),0);
         const profit = incomeSum-expenseSum;
@@ -7036,18 +7037,18 @@ export default function App() {
               const mLabel = k => { const [y,m]=k.split("-"); return MN[parseInt(m)-1]+" "+y.slice(2); };
               // месяцы внутри выбранного периода
               const monthsSet={};
-              financeTx.forEach(t=>{ const ts=t.date||t.createdAt||0; if(inPeriod(ts)) monthsSet[tsKey(ts)]=true; });
+              financeTx.forEach(t=>{ if(t.included===false)return; const ts=t.date||t.createdAt||0; if(inPeriod(ts)) monthsSet[tsKey(ts)]=true; });
               const months=Object.keys(monthsSet).sort();
               // САЛЬДО НАЧАЛЬНОЕ на старте периода = opening + чистый поток всех операций до первого месяца
               const startBal0 = accounts.reduce((s,a)=>s+(Number(a.opening)||0),0);
               const firstMonth = months[0];
               let saldoStart = startBal0;
               if(firstMonth){
-                financeTx.forEach(t=>{ const ts=t.date||t.createdAt||0; if(tsKey(ts) < firstMonth){ if(t.type==="income") saldoStart+=Number(t.amount)||0; else if(t.type==="expense") saldoStart-=Number(t.amount)||0; } });
+                financeTx.forEach(t=>{ if(t.included===false)return; const ts=t.date||t.createdAt||0; if(tsKey(ts) < firstMonth){ if(t.type==="income") saldoStart+=Number(t.amount)||0; else if(t.type==="expense") saldoStart-=Number(t.amount)||0; } });
               }
               // агрегатор: по типу/категории/подкатегории и по месяцам
               const agg = (pred) => { const byM={}; let tot=0; months.forEach(m=>byM[m]=0);
-                financeTx.forEach(t=>{ const ts=t.date||t.createdAt||0; if(!inPeriod(ts)||!pred(t))return; const m=tsKey(ts); if(m in byM){byM[m]+=Number(t.amount)||0; tot+=Number(t.amount)||0;} });
+                financeTx.forEach(t=>{ if(t.included===false)return; const ts=t.date||t.createdAt||0; if(!inPeriod(ts)||!pred(t))return; const m=tsKey(ts); if(m in byM){byM[m]+=Number(t.amount)||0; tot+=Number(t.amount)||0;} });
                 return {byM,tot};
               };
               const incTotal = agg(t=>t.type==="income");
@@ -7106,10 +7107,10 @@ export default function App() {
               // фильтр периода: по дате месяца ОПУ (первое число)
               const inP = t => { const k=opuKey(t); const ts=new Date(k+"-01").getTime(); return inPeriod(ts); };
               const monthsSet={};
-              financeTx.forEach(t=>{ if(t.type==="transfer")return; if(inP(t)) monthsSet[opuKey(t)]=true; });
+              financeTx.forEach(t=>{ if(t.included===false||t.type==="transfer")return; if(inP(t)) monthsSet[opuKey(t)]=true; });
               const months=Object.keys(monthsSet).sort();
               const agg=(pred)=>{ const byM={}; let tot=0; months.forEach(m=>byM[m]=0);
-                financeTx.forEach(t=>{ if(t.type==="transfer"||!inP(t)||!pred(t))return; const m=opuKey(t); if(m in byM){byM[m]+=Number(t.amount)||0; tot+=Number(t.amount)||0;} });
+                financeTx.forEach(t=>{ if(t.included===false||t.type==="transfer"||!inP(t)||!pred(t))return; const m=opuKey(t); if(m in byM){byM[m]+=Number(t.amount)||0; tot+=Number(t.amount)||0;} });
                 return {byM,tot};
               };
               const income=agg(t=>t.type==="income");
@@ -7183,11 +7184,11 @@ export default function App() {
               <div className="card" style={{overflow:"hidden"}}>
                 {opsList.length===0 && <div style={{textAlign:"center",color:"#94a3b8",fontSize:13,padding:"40px 0"}}>Нет операций</div>}
                 {opsList.map(t=>(
-                  <div key={t.id} onClick={()=>openEditTx(t)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:"1px solid #f1f5f9",cursor:"pointer"}} className="fin-row">
+                  <div key={t.id} onClick={()=>openEditTx(t)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:"1px solid #f1f5f9",cursor:"pointer",opacity:t.included===false?0.5:1}} className="fin-row">
                     <span style={{width:8,height:8,borderRadius:"50%",background:TYPE_COLOR[t.type],flexShrink:0}}/>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:13,color:"#0f172a",fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-                        {t.type==="transfer" ? (t.account+" → "+t.accountTo) : (t.category||"—")}{t.subcategory?<span style={{color:"#94a3b8",fontWeight:400}}> · {t.subcategory}</span>:null}
+                        {t.included===false?<span title="Не учитывается в балансе" style={{color:"#dc2626",fontWeight:700}}>⊘ </span>:null}{t.type==="transfer" ? (t.account+" → "+t.accountTo) : (t.category||"—")}{t.subcategory?<span style={{color:"#94a3b8",fontWeight:400}}> · {t.subcategory}</span>:null}
                       </div>
                       <div style={{fontSize:11,color:"#94a3b8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
                         {new Date(t.date||t.createdAt||0).toLocaleDateString("ru-RU")} · {t.account}{t.contractNo?" · "+t.contractNo:""}{t.note?" · "+t.note:""}
@@ -7205,6 +7206,7 @@ export default function App() {
               // compute per-project income/expense from transactions
               const projStats = {};
               for (const t of allTx) {
+                if (t.included===false) continue;
                 const cn = (t.contractNo||"").trim();
                 if (!cn) continue;
                 if (!projStats[cn]) projStats[cn] = { income:0, expense:0 };
@@ -7445,7 +7447,7 @@ export default function App() {
                 const ts=m.date?new Date(m.date).getTime():Date.now();
                 const tx={ id:m.id||genId(), type:m.type, date:ts, amount:amt, account:m.account, accountTo:m.type==="transfer"?m.accountTo:undefined,
                   category:m.type==="transfer"?"Перевод":m.category, subcategory:m.type==="transfer"?"":m.subcategory, note:m.note||"", contractNo:m.contractNo||"",
-                  createdAt:m.createdAt||ts, updatedAt:Date.now() };
+                  included:m.included!==false, opuMonth:m.opuMonth, createdAt:m.createdAt||ts, updatedAt:Date.now() };
                 const cur=financeTxRef.current;
                 const list = m.id ? cur.map(x=>x.id===m.id?tx:x) : [tx,...cur];
                 await saveFinanceTx(list,{replace:true});
@@ -7489,6 +7491,10 @@ export default function App() {
                         </select>
                       </div>
                       <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Комментарий</div><input className="fi" value={m.note} onChange={e=>set("note",e.target.value)} placeholder="комментарий"/></div>
+                      <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#475569",cursor:"pointer",fontWeight:600}}>
+                        <input type="checkbox" checked={m.included!==false} onChange={e=>set("included",e.target.checked)} style={{width:16,height:16,cursor:"pointer"}}/>
+                        Учитывать в балансе и отчётах
+                      </label>
                     </div>
                     <div style={{display:"flex",gap:8,marginTop:18}}>
                       {m.id && <button onClick={del} style={{background:"#fef2f2",color:"#dc2626",border:"1px solid #fecaca",borderRadius:9,padding:"10px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Удалить</button>}
