@@ -846,7 +846,7 @@ function AdminPanel({ currentUser, onClose }) {
     Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
 
-  const roleLabel = r => r==="admin" ? "👑 Админ" : r==="viewer" ? "👁 Наблюдатель" : "👤 Замерщик";
+  const roleLabel = r => r==="admin" ? "👑 Админ" : r==="viewer" ? "👁 Наблюдатель" : r==="manager" ? "🧑‍💼 Руководитель" : "👤 Замерщик";
 
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(17,24,39,.4)",backdropFilter:"blur(2px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:16,fontFamily:"'Inter','Segoe UI',sans-serif"}}>
@@ -948,6 +948,7 @@ function AdminPanel({ currentUser, onClose }) {
                 <input style={{background:"#ffffff",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none"}} placeholder="Пароль" value={newPass} onChange={e=>setNewPass(e.target.value)}/>
                 <select style={{background:"#ffffff",border:"1px solid #e2e8f0",color:"#94a3b8",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none",cursor:"pointer"}} value={newRole} onChange={e=>setNewRole(e.target.value)}>
                   <option value="user">👤 Замерщик</option>
+                  <option value="manager">🧑‍💼 Руководитель</option>
                   <option value="admin">👑 Администратор</option>
                   <option value="viewer">👁 Наблюдатель</option>
                 </select>
@@ -1548,7 +1549,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
     const curCat = (localCatalog?.catRenames||{})[origCatKey] || origCatKey; const curSub = (localCatalog?.subRenames||{})[key] || origSubKey;
     await saveCatalog({ ...(localCatalog||{}), hiddenSubs:hs, custom:((localCatalog||{}).custom||[]).filter(w => !(w.cat===curCat && w.sub===curSub)) }); Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
-  const roleLabel = r => r==="admin" ? "👑 Администратор" : r==="viewer" ? "👁 Наблюдатель" : "👤 Замерщик";
+  const roleLabel = r => r==="admin" ? "👑 Администратор" : r==="viewer" ? "👁 Наблюдатель" : r==="manager" ? "🧑‍💼 Руководитель" : "👤 Замерщик";
   const roleColor = r => r==="admin" ? "#ffffff" : r==="viewer" ? "#94a3b8" : "#94a3b8";
   const PRESENCE_ONLINE = 2 * 60 * 1000;
   const formatLastSeen = (ts) => {
@@ -1665,6 +1666,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
               <div><div style={{fontSize:10,color:"#94a3b8",marginBottom:4}}>Роль</div>
                 <select className="fi" value={newRole} onChange={e=>setNewRole(e.target.value)}>
                   <option value="user">👤 Замерщик</option>
+                  <option value="manager">🧑‍💼 Руководитель</option>
                   <option value="admin">👑 Администратор</option>
                   <option value="viewer">👁 Наблюдатель</option>
                 </select>
@@ -5254,15 +5256,17 @@ export default function App() {
     { id:"objects",   icon:"📦", label:"Объекты" },
     { id:"contracts", icon:"📄", label:"Прочие договора", short:"Договора" },
     ...(currentUser.role !== "viewer" ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
-    ...(currentUser.role==="admin" ? [{ id:"finance", icon:"💰", label:"Финансы" }] : []),
+    ...((currentUser.role==="admin"||currentUser.role==="manager") ? [{ id:"finance", icon:"💰", label:"Финансы" }] : []),
     ...(currentUser.role==="admin" ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
   ], [currentUser.role]);
 
   // Наблюдатель не имеет доступа к дашборду/аналитике/админке — показываем объекты.
   // Вычисляем эффективный экран без setState во время рендера (иначе нарушаются правила хуков).
   const effScreen = (currentUser.role === "viewer" && (screen === "dashboard" || screen === "analytics" || screen === "admin" || screen === "deals" || screen === "finance")) ? "objects"
-    : (currentUser.role !== "admin" && screen === "finance") ? "objects"
+    : (currentUser.role !== "admin" && currentUser.role !== "manager" && screen === "finance") ? "objects"
     : screen;
+  // Руководитель видит финансы только для чтения
+  const finReadonly = currentUser.role === "manager";
 
   return (
     <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#f8fafc",minHeight:"100vh",color:"#0f172a",display:"flex",flexDirection:"column"}}>
@@ -7155,7 +7159,7 @@ export default function App() {
 
             {/* Табы */}
             <div className="fin-tabs" style={{display:"flex",gap:6,marginBottom:18,flexWrap:"wrap"}}>
-              {[["dashboard","📊 Дашборд"],["dds","💸 ДДС месяц"],["opu","📈 ОПУ месяц"],["balance","⚖️ Баланс"],["ops","📋 Операции"],["projects","🏗 Проекты"],["ref","⚙️ Справочник"]].map(([k,l])=>(
+              {[["dashboard","📊 Дашборд"],["dds","💸 ДДС месяц"],["opu","📈 ОПУ месяц"],["balance","⚖️ Баланс"],["ops","📋 Операции"],["projects","🏗 Проекты"],...(finReadonly?[]:[ ["ref","⚙️ Справочник"] ])].map(([k,l])=>(
                 <button key={k} onClick={()=>setFinanceTab(k)} style={{fontSize:13,fontWeight:700,padding:"9px 16px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(financeTab===k?"#2563eb":"#e2e8f0"),background:financeTab===k?"#2563eb":"#fff",color:financeTab===k?"#fff":"#64748b"}}>{l}</button>
               ))}
             </div>
@@ -7716,9 +7720,9 @@ export default function App() {
             {/* ───── ОПЕРАЦИИ ───── */}
             {financeTab==="ops" && (<>
               <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
-                <button onClick={()=>openNewTx("income")} style={{background:"#059669",color:"#fff",border:"none",borderRadius:9,padding:"9px 15px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Доход</button>
-                <button onClick={()=>openNewTx("expense")} style={{background:"#dc2626",color:"#fff",border:"none",borderRadius:9,padding:"9px 15px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Расход</button>
-                <button onClick={()=>openNewTx("transfer")} style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:9,padding:"9px 15px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Перевод</button>
+                {!finReadonly && <button onClick={()=>openNewTx("income")} style={{background:"#059669",color:"#fff",border:"none",borderRadius:9,padding:"9px 15px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Доход</button>}
+                {!finReadonly && <button onClick={()=>openNewTx("expense")} style={{background:"#dc2626",color:"#fff",border:"none",borderRadius:9,padding:"9px 15px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Расход</button>}
+                {!finReadonly && <button onClick={()=>openNewTx("transfer")} style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:9,padding:"9px 15px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Перевод</button>}
                 <div style={{flex:1}}/>
                 <span style={{fontSize:12,color:"#94a3b8"}}>Операций: <b style={{color:"#334155"}}>{opsList.length}</b></span>
               </div>
@@ -7734,7 +7738,7 @@ export default function App() {
               <div className="card" style={{overflow:"hidden"}}>
                 {opsList.length===0 && <div style={{textAlign:"center",color:"#94a3b8",fontSize:13,padding:"40px 0"}}>Нет операций</div>}
                 {opsList.map(t=>(
-                  <div key={t.id} onClick={()=>openEditTx(t)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:"1px solid #f1f5f9",cursor:"pointer",opacity:t.included===false?0.5:1}} className="fin-row">
+                  <div key={t.id} onClick={()=>{ if(!finReadonly) openEditTx(t); }} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:"1px solid #f1f5f9",cursor:finReadonly?"default":"pointer",opacity:t.included===false?0.5:1}} className="fin-row">
                     <span style={{width:8,height:8,borderRadius:"50%",background:TYPE_COLOR[t.type],flexShrink:0}}/>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:13,color:"#0f172a",fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
@@ -7791,8 +7795,8 @@ export default function App() {
                       <h2 style={{margin:0,fontSize:18,fontWeight:800,color:"#0f172a"}}>🏗 Проекты</h2>
                       <span style={{fontSize:13,color:"#94a3b8",fontWeight:600}}>{filtered.length} из {finProjects.length}</span>
                     </div>
-                    <button onClick={()=>setFinProjModal({id:"",contractNo:"",client:"Физ лицо",category:"Вторичка",description:"",budget:0,status:"активен",createdAt:"",closedAt:"",b24:"нет",contractSigned:"нет",avr:"нет",comment:""})}
-                      style={{background:"#059669",color:"#fff",border:"none",borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 2px 8px rgba(5,150,105,.3)"}}>+ Проект</button>
+                    {!finReadonly && <button onClick={()=>setFinProjModal({id:"",contractNo:"",client:"Физ лицо",category:"Вторичка",description:"",budget:0,status:"активен",createdAt:"",closedAt:"",b24:"нет",contractSigned:"нет",avr:"нет",comment:""})}
+                      style={{background:"#059669",color:"#fff",border:"none",borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 2px 8px rgba(5,150,105,.3)"}}>+ Проект</button>}
                   </div>
                   {/* Фильтры */}
                   <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
@@ -7842,8 +7846,8 @@ export default function App() {
                       const mBg  = marginPct===null?"#f8fafc":marginPct>=30?"#f0fdf4":marginPct>=0?"#fffbeb":"#fef2f2";
                       const link = linkForContractNo(p.contractNo);
                       return (
-                        <div key={p.id||p.contractNo} onClick={()=>setFinProjModal({...p})}
-                          style={{background:"#fff",border:"1px solid #eef2f7",borderRadius:16,cursor:"pointer",boxShadow:"0 1px 3px rgba(15,23,42,.07)",transition:"box-shadow .15s,transform .15s",overflow:"hidden",display:"flex",flexDirection:"column"}}
+                        <div key={p.id||p.contractNo} onClick={()=>{ if(!finReadonly) setFinProjModal({...p}); }}
+                          style={{background:"#fff",border:"1px solid #eef2f7",borderRadius:16,cursor:finReadonly?"default":"pointer",boxShadow:"0 1px 3px rgba(15,23,42,.07)",transition:"box-shadow .15s,transform .15s",overflow:"hidden",display:"flex",flexDirection:"column"}}
                           className="fin-row">
                           {/* Цветная полоса статуса */}
                           <div style={{height:4,background:`linear-gradient(90deg,${col},${col}99)`}}/>
