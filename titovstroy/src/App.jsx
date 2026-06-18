@@ -360,13 +360,28 @@ const DEFAULT_FIN_META = {
     { cat:"Основные доходы", subs:["Оплата по договору (вторичка)","Оплата по договору (новостройки)","Оплата по договору  (коммерция)","Частичные работы, услуги"] },
     { cat:"Дополнительные доходы", subs:["Доп. работы по ходу ремонта","Закупка материалов (наценка)"] },
     { cat:"Скрытые/косвенные доходы", subs:["Кэшбэк и бонусы от поставщиков","Бонусы от субподрядчиков (наш %)","Услуги по доставке/подъёму"] },
+    { cat:"Финансирование (не выручка)", subs:["Полученный заём (до 1 года)","Полученный кредит (от 1 года)","Вклад учредителя"] },
+    { cat:"Возврат займов и активов", subs:["Возврат займа выданного (кратк.)","Возврат займа выданного (долг.)","Возврат залогового платежа","Продажа / реализация запасов","Возврат фин. вложений"] },
   ],
   expense: [
     { cat:"Прямые расходы (COGS / себестоимость)", subs:["Зарплаты рабочих / подрядчиков","Аренда инструмента, спецтехника","Вывоз мусора, уборка","Логистика, доставка"] },
     { cat:"Косвенные расходы (OPEX / операционные)", subs:["Аренда офиса","ФОТ Директор по производству","ФОТ Управляющий партнер","ФОТ Прораб","Софт (IT, CRM)","Рекрутинг","Телефония, связь","Маркетинг бюджет контекст","Маркетинг бюджет таргет"] },
-    { cat:"Финансовые расходы", subs:["КПН, ИПН","НДС 16%","Налог за сотрудников"] },
+    { cat:"Финансовые расходы", subs:["КПН, ИПН","НДС 16%","Налог за сотрудников","Дивиденды учредителям"] },
+    { cat:"Финансовая деятельность (не расход)", subs:["Возврат займа (до 1 года)","Погашение кредита (от 1 года)","Возврат вклада учредителю"] },
+    { cat:"Инвестиции (покупка активов)", subs:["Покупка: Техника","Покупка: Мебель","Покупка: Инвентарь","Покупка: Оборудование","Покупка: Транспорт"] },
+    { cat:"Выданные займы и прочие активы", subs:["Выдан займ (до 1 года)","Выдан займ (от 1 года)","Залоговый платёж","Закуп запасов / материалов","Финансовые вложения (долг.)","НМА (нематериальные активы)"] },
   ],
 };
+// Категории, которые НЕ являются P&L (не выручка / не расход) — финансовая и инвестиционная деятельность
+const C_FINANCING_INC = "Финансирование (не выручка)";        // доходы: займы/кредиты/вклады
+const C_ASSET_INC     = "Возврат займов и активов";            // доходы: возврат активов — не P&L, инвест. раздел ДДС
+const C_FINACT = "Финансовая деятельность (не расход)";        // расходы: возвраты займов/вкладов
+const C_INVEST = "Инвестиции (покупка активов)";               // расходы: капвложения в ОС (кассовый метод — расход)
+const C_ASSET_OUT     = "Выданные займы и прочие активы";      // расходы: займы выданные, залоги, запасы — не P&L
+const FA_SUB_MAP = { "Покупка: Техника":"faTechnika","Покупка: Мебель":"faMebel","Покупка: Инвентарь":"faInventar","Покупка: Оборудование":"faOborud","Покупка: Транспорт":"faTransport" };
+// Маппинг подкатегорий C_ASSET_OUT / C_ASSET_INC → ключ баланса
+const ASSET_OUT_KEYS = { "Выдан займ (до 1 года)":"loansGivenShort","Выдан займ (от 1 года)":"loansGivenLong","Залоговый платёж":"collateral","Закуп запасов / материалов":"inventory","Финансовые вложения (долг.)":"financialInvest","НМА (нематериальные активы)":"intangibles" };
+const ASSET_INC_KEYS = { "Возврат займа выданного (кратк.)":"loansGivenShort","Возврат займа выданного (долг.)":"loansGivenLong","Возврат залогового платежа":"collateral","Продажа / реализация запасов":"inventory","Возврат фин. вложений":"financialInvest" };
 // {renames:{code:name}, catRenames:{"Черновые":"Новое"}, subRenames:{"Черновые|Демонтаж":"Снос"},
 //  hiddenCodes:[], hiddenSubs:["Черновые|Демонтаж"], hiddenCats:["Черновые"],
 //  custom:[{code,cat,sub,name,unit,tiers,fixedPrice}]}
@@ -7147,10 +7162,10 @@ export default function App() {
               // ── P&L (совпадает с ОПУ) ──
               const S_DIV="Дивиденды учредителям";
               const divSum = periodTx.filter(t=>t.type==="expense"&&t.subcategory===S_DIV).reduce((s,t)=>s+(Number(t.amount)||0),0);
-              // Выручка без авансов (как в ОПУ)
-              const incSumNoAdv = periodTx.filter(t=>t.type==="income"&&!t.isAdvance).reduce((s,t)=>s+(Number(t.amount)||0),0);
-              // Расходы без дивидендов (как в ОПУ: net = income − cogs − opex − fin_no_div)
-              const expNoDivSum = periodTx.filter(t=>t.type==="expense"&&t.subcategory!==S_DIV).reduce((s,t)=>s+(Number(t.amount)||0),0);
+              // Выручка без авансов и без финансирования (займы/вклады/возврат активов — не выручка)
+              const incSumNoAdv = periodTx.filter(t=>t.type==="income"&&!t.isAdvance&&t.category!==C_FINANCING_INC&&t.category!==C_ASSET_INC).reduce((s,t)=>s+(Number(t.amount)||0),0);
+              // Расходы P&L: без дивидендов, без финансовой деятельности и выданных займов/активов (они не расход); CapEx — расход кассовым методом
+              const expNoDivSum = periodTx.filter(t=>t.type==="expense"&&t.subcategory!==S_DIV&&t.category!==C_FINACT&&t.category!==C_ASSET_OUT).reduce((s,t)=>s+(Number(t.amount)||0),0);
               const netP = incSumNoAdv - expNoDivSum;
               const rentab = incSumNoAdv>0?Math.round(netP/incSumNoAdv*100):0;
 
@@ -7334,8 +7349,16 @@ export default function App() {
               const S_DIV="Дивиденды учредителям";
               const actOf = t => {
                 const s=((t.subcategory||"")+" "+(t.category||""));
-                if(t.subcategory===S_DIV || /займ|кредит|ссуд|учредител|дивиденд|вклад/i.test(s)) return "fin";
-                if(/оборудован|основн\w* средств|покупка авто|автомобил|капитальн|станок/i.test(s)) return "inv";
+                // Инвестиционный поток: ОС, долгосрочные активы (НМА, долг займы, фин вложения)
+                if(t.category===C_INVEST || /оборудован|основн\w* средств|покупка авто|автомобил|капитальн|станок|техник|мебел|инвентар|транспорт/i.test(s)) return "inv";
+                if(t.category===C_ASSET_INC || t.category===C_ASSET_OUT) {
+                  // Долгосрочные вложения → инвест; краткосрочные и залоги → операц
+                  const sub=t.subcategory||"";
+                  if(/долг|от 1 года|фин.*влож|нма|нематериальн/i.test(sub)) return "inv";
+                  return "op";
+                }
+                // Финансовый поток: займы полученные/возвраты, кредиты, вклады учредителей, дивиденды
+                if(t.category===C_FINANCING_INC || t.category===C_FINACT || t.subcategory===S_DIV || /займ|кредит|ссуд|учредител|дивиденд|вклад/i.test(s)) return "fin";
                 return "op";
               };
               const incCats=(financeMeta.income||[]), expCats=(financeMeta.expense||[]);
@@ -7414,10 +7437,14 @@ export default function App() {
               const opMonth = t => { const d=new Date(t.date||t.createdAt||0); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); };
               const inPM = m => m && inPeriod(new Date(m+"-01").getTime());
               // единый список строк ОПУ: доходы и расходы по дате операции (этап сдан / расход понесён)
+              // финансирование (займы/вклады) и возвраты займов/активов — НЕ P&L, исключаем из ОПУ
+              // CapEx (покупка ОС) — кассовый метод: расход в ОПУ; выданные займы/залоги — актив, не расход
+              const isFinInc = t => t.category===C_FINANCING_INC || t.category===C_ASSET_INC;
+              const isNonPL = t => t.category===C_FINACT || t.category===C_ASSET_OUT;
               const opuRows=[
-                ...financeTx.filter(t=>t.included!==false&&t.type==="income"&&!t.isAdvance).map(t=>({type:"income",category:t.category,subcategory:t.subcategory,amount:Number(t.amount)||0,month:opMonth(t)})),
-                ...financeTx.filter(t=>t.included!==false&&t.type==="income"&&t.isAdvance).map(t=>({type:"advance",category:t.category,subcategory:t.subcategory,amount:Number(t.amount)||0,month:opMonth(t)})),
-                ...financeTx.filter(t=>t.included!==false&&t.type==="expense").map(t=>({type:"expense",category:t.category,subcategory:t.subcategory,amount:Number(t.amount)||0,month:opMonth(t)})),
+                ...financeTx.filter(t=>t.included!==false&&t.type==="income"&&!t.isAdvance&&!isFinInc(t)).map(t=>({type:"income",category:t.category,subcategory:t.subcategory,amount:Number(t.amount)||0,month:opMonth(t)})),
+                ...financeTx.filter(t=>t.included!==false&&t.type==="income"&&(t.isAdvance||isFinInc(t))).map(t=>({type:"advance",category:t.category,subcategory:t.subcategory,amount:Number(t.amount)||0,month:opMonth(t)})),
+                ...financeTx.filter(t=>t.included!==false&&t.type==="expense"&&!isNonPL(t)).map(t=>({type:"expense",category:t.category,subcategory:t.subcategory,amount:Number(t.amount)||0,month:opMonth(t)})),
               ];
               const monthsSet={};
               opuRows.forEach(r=>{ if(inPM(r.month)) monthsSet[r.month]=true; });
@@ -7529,90 +7556,111 @@ export default function App() {
               const byType = { cash:0, bank:0, card:0, ewallet:0 };
               accounts.forEach(a=>{ const tp=a.accType||"bank"; byType[tp]=(byType[tp]||0)+(balances[a.name]||0); });
               const cash = byType.cash+byType.bank+byType.card+byType.ewallet;
-              // Дебиторка (неденежная — клиенты должны по проектам)
-              const receivablesNonMoney = finProjects.filter(p=>(p.rawStatus||p.status)!=="отменен").reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projInc[p.contractNo]||0)),0);
+              // Дебиторка (денежная — клиенты должны оплатить деньгами по проектам)
+              const receivablesMoney = finProjects.filter(p=>(p.rawStatus||p.status)!=="отменен").reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projInc[p.contractNo]||0)),0);
               // Авансы клиентов (обязательство)
               const advances = financeTx.filter(t=>t.included!==false&&t.type==="income"&&t.isAdvance).reduce((s,t)=>s+(Number(t.amount)||0),0);
 
+              // ── Авто-расчёт из операций (все статьи баланса — только из транзакций) ──
+              const sumTx = pred => financeTx.filter(t=>t.included!==false&&pred(t)).reduce((s,t)=>s+(Number(t.amount)||0),0);
+              const subEq = (t,name) => t.subcategory===name;
+              // полученные займы (до года) = получено − возвращено
+              const autoLoanShort = sumTx(t=>t.type==="income"&&subEq(t,"Полученный заём (до 1 года)")) - sumTx(t=>t.type==="expense"&&subEq(t,"Возврат займа (до 1 года)"));
+              const autoCreditLong = sumTx(t=>t.type==="income"&&subEq(t,"Полученный кредит (от 1 года)")) - sumTx(t=>t.type==="expense"&&subEq(t,"Погашение кредита (от 1 года)"));
+              const autoFounders = sumTx(t=>t.type==="income"&&subEq(t,"Вклад учредителя")) - sumTx(t=>t.type==="expense"&&subEq(t,"Возврат вклада учредителю"));
+              // покупка основных средств по типам (накопленные капвложения)
+              const autoFA = {};
+              Object.entries(FA_SUB_MAP).forEach(([sub,key])=>{ autoFA[key]=sumTx(t=>t.type==="expense"&&subEq(t,sub)); });
+              // прочие активы из C_ASSET_OUT минус возвраты из C_ASSET_INC
+              const autoAsset = {};
+              financeTx.filter(t=>t.included!==false&&t.type==="expense"&&t.category===C_ASSET_OUT).forEach(t=>{ const k=ASSET_OUT_KEYS[t.subcategory]; if(k) autoAsset[k]=(autoAsset[k]||0)+(Number(t.amount)||0); });
+              financeTx.filter(t=>t.included!==false&&t.type==="income"&&t.category===C_ASSET_INC).forEach(t=>{ const k=ASSET_INC_KEYS[t.subcategory]; if(k) autoAsset[k]=(autoAsset[k]||0)-(Number(t.amount)||0); });
+              const ag = k => Math.max(0, autoAsset[k]||0);
+
               // ── АКТИВЫ ──
-              const recv = receivablesNonMoney;
-              const otherCurrent = n(bi.collateral)+n(bi.loansGivenShort)+n(bi.transfersInTransit);
-              const currentAssets = recv + cash + n(bi.inventory) + otherCurrent;
-              const fixedAssets = n(bi.faTechnika)+n(bi.faMebel)+n(bi.faInventar)+n(bi.faOborud)+n(bi.faTransport);
-              const otherNonCurrent = n(bi.loansGivenLong)+n(bi.financialInvest)+n(bi.intangibles);
+              const recv = receivablesMoney;
+              const collateral = ag("collateral");
+              const loansGivenShort = ag("loansGivenShort");
+              const inventory = ag("inventory");
+              const otherCurrent = collateral + loansGivenShort;
+              const currentAssets = recv + cash + inventory + otherCurrent;
+              const fa = { faTechnika:autoFA.faTechnika||0, faMebel:autoFA.faMebel||0, faInventar:autoFA.faInventar||0, faOborud:autoFA.faOborud||0, faTransport:autoFA.faTransport||0 };
+              const fixedAssets = fa.faTechnika+fa.faMebel+fa.faInventar+fa.faOborud+fa.faTransport;
+              const loansGivenLong = ag("loansGivenLong");
+              const financialInvest = ag("financialInvest");
+              const intangibles = ag("intangibles");
+              const otherNonCurrent = loansGivenLong + financialInvest + intangibles;
               const nonCurrentAssets = fixedAssets + otherNonCurrent;
               const totalAssets = currentAssets + nonCurrentAssets;
 
               // ── ОБЯЗАТЕЛЬСТВА ──
-              const payables = n(bi.payablesMoney)+n(bi.payablesNonMoney);
-              const otherShort = n(bi.paymentsThirdParty)+n(bi.loansTakenShort)+advances;
+              const payables = 0; // кредиторка — в кассовом учёте = 0 (все фактические оплаты уже в расходах)
+              const loansShort = autoLoanShort;
+              const otherShort = loansShort + advances;
               const shortLiab = payables + otherShort;
-              const longLiab = n(bi.creditsLong)+n(bi.loansTakenLong);
+              const creditsLong = autoCreditLong;
+              const loansLong = 0;
+              const longLiab = creditsLong + loansLong;
               const totalLiab = shortLiab + longLiab;
 
               // ── КАПИТАЛ ── (нераспределённая прибыль = балансирующая статья)
-              const founders = n(bi.foundersContribution) || accounts.reduce((s,a)=>s+(Number(a.opening)||0),0);
-              const otherCap = n(bi.otherCapital);
+              const founders = accounts.reduce((s,a)=>s+(Number(a.opening)||0),0) + autoFounders;
+              const otherCap = 0;
               const retained = totalAssets - totalLiab - founders - otherCap;
               const totalCapital = founders + otherCap + retained;
 
               const assetsSections = [
                 { key:"ca", label:"Оборотные активы", value:currentAssets, children:[
                   { key:"recv", label:"Дебиторская задолженность", value:recv, children:[
-                    { key:"recv-m", label:"Денежная", value:0 },
-                    { key:"recv-n", label:"Неденежная", value:recv },
+                    { key:"recv-m", label:"Денежная", value:recv },
+                    { key:"recv-n", label:"Неденежная", value:0 },
                   ]},
                   { key:"cash", label:"Денежные средства", value:cash, children:[
-                    { key:"cash-c", label:"Наличные счета", value:byType.cash },
-                    { key:"cash-b", label:"Безналичные счета", value:byType.bank },
-                    { key:"cash-k", label:"Карты физлиц", value:byType.card },
-                    { key:"cash-e", label:"Электронные счета", value:byType.ewallet },
+                    { key:"cash-c", label:"Наличные", value:byType.cash },
+                    { key:"cash-b", label:"Безналичные (банк)", value:byType.bank },
+                    { key:"cash-k", label:"Карты", value:byType.card },
+                    { key:"cash-e", label:"Электронные кошельки", value:byType.ewallet },
                   ]},
-                  { key:"inv", label:"Запасы", value:n(bi.inventory) },
+                  { key:"inv", label:"Запасы", value:inventory },
                   { key:"oc", label:"Другие оборотные", value:otherCurrent, children:[
-                    { key:"oc-col", label:"Залоговые платежи", value:n(bi.collateral) },
-                    { key:"oc-l", label:"Выданные займы (до 1 года)", value:n(bi.loansGivenShort) },
-                    { key:"oc-tr", label:"Отправленные платежи (перемещения)", value:n(bi.transfersInTransit) },
+                    { key:"oc-col", label:"Залоговые платежи", value:collateral },
+                    { key:"oc-l", label:"Выданные займы (до 1 года)", value:loansGivenShort },
                   ]},
                 ]},
                 { key:"nca", label:"Внеоборотные активы", value:nonCurrentAssets, children:[
                   { key:"fa", label:"Основные средства", value:fixedAssets, children:[
-                    { key:"fa-t", label:"Техника", value:n(bi.faTechnika) },
-                    { key:"fa-m", label:"Мебель", value:n(bi.faMebel) },
-                    { key:"fa-i", label:"Инвентарь", value:n(bi.faInventar) },
-                    { key:"fa-o", label:"Оборудование", value:n(bi.faOborud) },
-                    { key:"fa-tr", label:"Транспорт", value:n(bi.faTransport) },
+                    { key:"fa-t", label:"Техника", value:fa.faTechnika },
+                    { key:"fa-m", label:"Мебель", value:fa.faMebel },
+                    { key:"fa-i", label:"Инвентарь", value:fa.faInventar },
+                    { key:"fa-o", label:"Оборудование", value:fa.faOborud },
+                    { key:"fa-tr", label:"Транспорт", value:fa.faTransport },
                   ]},
                   { key:"onc", label:"Другие внеоборотные", value:otherNonCurrent, children:[
-                    { key:"onc-l", label:"Выданные займы (от 1 года)", value:n(bi.loansGivenLong) },
-                    { key:"onc-f", label:"Финансовые вложения", value:n(bi.financialInvest) },
-                    { key:"onc-i", label:"Нематериальные активы", value:n(bi.intangibles) },
+                    { key:"onc-l", label:"Выданные займы (от 1 года)", value:loansGivenLong },
+                    { key:"onc-f", label:"Финансовые вложения", value:financialInvest },
+                    { key:"onc-i", label:"Нематериальные активы", value:intangibles },
                   ]},
                 ]},
               ];
               const liabSections = [
                 { key:"sl", label:"Краткосрочные обязательства", value:shortLiab, children:[
                   { key:"pay", label:"Кредиторская задолженность", value:payables, children:[
-                    { key:"pay-m", label:"Денежная", value:n(bi.payablesMoney) },
-                    { key:"pay-n", label:"Неденежная", value:n(bi.payablesNonMoney) },
+                    { key:"pay-m", label:"Денежная", value:0 },
+                    { key:"pay-n", label:"Неденежная", value:0 },
                   ]},
                   { key:"os", label:"Другие краткосрочные", value:otherShort, children:[
                     { key:"os-adv", label:"Авансы клиентов (предоплата)", value:advances },
-                    { key:"os-3", label:"Платежи третьим лицам", value:n(bi.paymentsThirdParty) },
-                    { key:"os-l", label:"Полученные займы (до 1 года)", value:n(bi.loansTakenShort) },
+                    { key:"os-l", label:"Полученные займы (до 1 года)", value:loansShort },
                   ]},
                 ]},
                 { key:"ll", label:"Долгосрочные обязательства", value:longLiab, children:[
-                  { key:"ll-c", label:"Кредиты", value:n(bi.creditsLong) },
-                  { key:"ll-o", label:"Другие долгосрочные", value:n(bi.loansTakenLong), children:[
-                    { key:"ll-o-l", label:"Полученные займы (от 1 года)", value:n(bi.loansTakenLong) },
-                  ]},
+                  { key:"ll-c", label:"Кредиты (долгосрочные)", value:creditsLong },
+                  { key:"ll-o", label:"Другие долгосрочные", value:loansLong },
                 ]},
               ];
               const capitalSection = { key:"cap", label:"Капитал", value:totalCapital, children:[
                 { key:"cap-f", label:"Вложения учредителей", value:founders },
                 { key:"cap-r", label:"Нераспределённая прибыль", value:retained },
-                { key:"cap-o", label:"Другие статьи капитала", value:otherCap },
               ]};
 
               const diff = totalAssets - (totalLiab + totalCapital);
@@ -7987,33 +8035,17 @@ export default function App() {
                       </div>
                     ))}
                   </div>
-                  {/* Статьи баланса (вводятся вручную) */}
-                  <div className="card" style={{padding:"18px 20px"}}>
-                    <div style={{fontSize:14,fontWeight:800,color:"#0f172a",marginBottom:4}}>⚖️ Статьи баланса (ручной ввод)</div>
-                    <div style={{fontSize:11.5,color:"#94a3b8",marginBottom:14}}>Эти суммы попадают в Балансовый отчёт. Денежные средства и дебиторка считаются автоматически.</div>
-                    {(()=>{
-                      const bi = meta.balanceItems||{};
-                      const setBI = (k,v)=>upd({...meta,balanceItems:{...bi,[k]:Number(v)||0}});
-                      const groups=[
-                        ["Основные средства",[["faTechnika","Техника"],["faMebel","Мебель"],["faInventar","Инвентарь"],["faOborud","Оборудование"],["faTransport","Транспорт"]]],
-                        ["Прочие активы",[["inventory","Запасы"],["collateral","Залоговые платежи"],["loansGivenShort","Выданные займы (до 1 года)"],["loansGivenLong","Выданные займы (от 1 года)"],["financialInvest","Финансовые вложения"],["intangibles","Нематериальные активы"]]],
-                        ["Обязательства",[["payablesMoney","Кредиторская (денежная)"],["payablesNonMoney","Кредиторская (неденежная)"],["paymentsThirdParty","Платежи третьим лицам"],["loansTakenShort","Полученные займы (до 1 года)"],["creditsLong","Кредиты (долгосрочные)"],["loansTakenLong","Полученные займы (от 1 года)"]]],
-                        ["Капитал",[["foundersContribution","Вложения учредителей (0 = из остатков)"],["otherCapital","Другие статьи капитала"]]],
-                      ];
-                      return groups.map(([title,fields])=>(
-                        <div key={title} style={{marginBottom:14}}>
-                          <div style={{fontSize:12,fontWeight:700,color:"#475569",marginBottom:8}}>{title}</div>
-                          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8}}>
-                            {fields.map(([k,l])=>(
-                              <div key={k} style={{display:"flex",alignItems:"center",gap:8}}>
-                                <span style={{fontSize:11.5,color:"#64748b",flex:1,minWidth:0}}>{l}</span>
-                                <input className="fi" type="number" style={{width:120}} value={bi[k]||0} onChange={e=>setBI(k,e.target.value)}/>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ));
-                    })()}
+                  {/* Статьи баланса теперь полностью выводятся из операций — ручной ввод не нужен */}
+                  <div className="card" style={{padding:"16px 20px",background:"#f0fdf4",border:"1px solid #bbf7d0"}}>
+                    <div style={{fontSize:13,fontWeight:700,color:"#166534",marginBottom:6}}>✅ Баланс автоматически из операций</div>
+                    <div style={{fontSize:12,color:"#15803d",lineHeight:1.6}}>
+                      Все статьи баланса формируются из операций:<br/>
+                      • <b>Основные средства</b> — расходы категории «Инвестиции (покупка активов)»<br/>
+                      • <b>Займы выданные, залоги, запасы</b> — расходы категории «Выданные займы и прочие активы»<br/>
+                      • <b>Займы полученные, кредиты, вклады</b> — доходы/расходы категории «Финансирование»<br/>
+                      • <b>Денежные средства</b> — остатки по всем счетам<br/>
+                      • <b>Дебиторка</b> — разница бюджета проектов и полученных оплат
+                    </div>
                   </div>
                   {/* Категории доходов и расходов */}
                   {[["income","Доходы","#059669"],["expense","Расходы","#dc2626"]].map(([key,lbl,col])=>(
