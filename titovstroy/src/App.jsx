@@ -2759,6 +2759,51 @@ export default function App() {
   const [finProjSearch, setFinProjSearch] = useState("");
   const [finProjStatusFilter, setFinProjStatusFilter] = useState("");
   const [finProjCatFilter, setFinProjCatFilter] = useState("");
+
+  // ── Связь фин-проектов с объектами (по номеру договора) ──
+  const normCN = (s) => String(s||"").trim().toLowerCase().replace(/\s+/g,"");
+  // map: нормализованный № договора → { object, contract, planTotal }
+  const contractLinkMap = useMemo(() => {
+    const m = {};
+    // сумма смет по объекту (план)
+    const estByObj = {};
+    for (const e of estimates) { if (e.objectId) estByObj[e.objectId] = (estByObj[e.objectId]||0) + (Number(e.total)||0); }
+    for (const c of contracts) {
+      const num = normCN(c.number);
+      if (!num) continue;
+      const obj = c.objectId ? objects.find(o=>o.id===c.objectId) : null;
+      const conTotal = (c.works||[]).reduce((s,w)=>s+((Number(w.quantity)||0)*(Number(w.price)||0)),0);
+      const planTotal = conTotal>0 ? conTotal : (obj ? (estByObj[obj.id]||0) : 0);
+      if (!m[num]) m[num] = { object:obj, contract:c, planTotal };
+    }
+    return m;
+  }, [contracts, objects, estimates]);
+  const linkForContractNo = (cn) => contractLinkMap[normCN(cn)] || null;
+  // открыть объект из финансов
+  const openObjectFromFinance = (obj) => { if(!obj) return; setCurrentObject({...obj}); setObjectTab("workspace"); setScreen("objects"); };
+  // построить черновик фин-проекта из объекта+договора
+  const finProjDraftFromObject = (obj, contract) => {
+    const conTotal = (contract?.works||[]).reduce((s,w)=>s+((Number(w.quantity)||0)*(Number(w.price)||0)),0);
+    return {
+      id:"", contractNo: contract?.number||"",
+      client: obj?.clientType==="юр" ? "Юр лицо" : "Физ лицо",
+      category: obj?.objType || "Вторичка",
+      description: obj?.address || obj?.clientName || "",
+      budget: conTotal||0,
+      status:"активен", rawStatus:"в работе",
+      createdAt: contract?.date || new Date().toISOString().slice(0,10),
+      closedAt:"", b24:"нет",
+      contractSigned: contract ? "да" : "нет",
+      avr:"нет", comment:"", objectId: obj?.id||"",
+    };
+  };
+  // завести проект в финансах из объекта (или открыть существующий)
+  const startFinProjFromObject = (obj, contract) => {
+    const existing = contract ? finProjectsRef.current.find(p=>normCN(p.contractNo)===normCN(contract.number)) : null;
+    setScreen("finance"); setFinanceTab("projects");
+    setFinProjModal(existing ? {...existing} : finProjDraftFromObject(obj, contract));
+  };
+
   const [objectTab, setObjectTab] = useState("list"); // list | workspace
   const [objInfoCollapsed, setObjInfoCollapsed] = useState(false); // свёрнут ли блок инфо клиента/объекта
   const [currentObject, setCurrentObject] = useState(null);
@@ -7559,12 +7604,15 @@ export default function App() {
                             <span style={{fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:20,background:col+"18",color:col,whiteSpace:"nowrap",flexShrink:0}}>{p.rawStatus||p.status}</span>
                           </div>
                           {/* Мета */}
-                          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10,fontSize:11,color:"#94a3b8"}}>
+                          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10,fontSize:11,color:"#94a3b8",alignItems:"center"}}>
                             <span>{p.client||"—"}</span>
                             {p.category&&<span>· {p.category}</span>}
                             {p.createdAt&&<span>· {p.createdAt}</span>}
                             {p.closedAt&&<span>→ {p.closedAt}</span>}
                             {dur!==null&&<span>· {dur} дн.</span>}
+                            {(()=>{ const link=linkForContractNo(p.contractNo); if(!link?.object) return null;
+                              return <button onClick={e=>{ e.stopPropagation(); openObjectFromFinance(link.object); }} title="Открыть объект" style={{background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↗ объект</button>;
+                            })()}
                           </div>
                           {/* Прогресс оплаты */}
                           {p.budget>0&&<div style={{marginBottom:10}}>
@@ -7639,11 +7687,37 @@ export default function App() {
                           </div>
                           {/* показываем расчётные цифры если проект существует */}
                           {mp.id && (()=>{ const st=projStats[mp.contractNo]||{income:0,expense:0}; const debt=Math.max(0,(Number(mp.budget)||0)-st.income); const mrg=st.income>0?Math.round((st.income-st.expense)/st.income*100):null;
+                            const link=linkForContractNo(mp.contractNo); const plan=link?.planTotal||0; const dev=plan>0?(Number(mp.budget)||0)-plan:null;
                             return <div style={{background:"#f8fafc",borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",gap:20,flexWrap:"wrap"}}>
+                              {plan>0&&<div><div style={{fontSize:10,color:"#94a3b8"}}>СМЕТА (ПЛАН)</div><div style={{fontWeight:800,color:"#2563eb"}}>{fM(plan)} ₸</div></div>}
                               <div><div style={{fontSize:10,color:"#94a3b8"}}>ОПЛАЧЕНО ФАКТ</div><div style={{fontWeight:800,color:"#059669"}}>{fM(st.income)} ₸</div></div>
                               <div><div style={{fontSize:10,color:"#94a3b8"}}>ДОЛГ</div><div style={{fontWeight:800,color:debt>0?"#dc2626":"#94a3b8"}}>{debt>0?fM(debt)+" ₸":"—"}</div></div>
                               <div><div style={{fontSize:10,color:"#94a3b8"}}>РАСХОДЫ</div><div style={{fontWeight:800,color:"#dc2626"}}>{fM(st.expense)} ₸</div></div>
                               <div><div style={{fontSize:10,color:"#94a3b8"}}>МАРЖА</div><div style={{fontWeight:800,color:mrg===null?"#94a3b8":mrg>=30?"#059669":mrg>=0?"#f59e0b":"#dc2626"}}>{mrg===null?"—":fM(st.income-st.expense)+" ₸ / "+mrg+"%"}</div></div>
+                              {dev!==null&&dev!==0&&<div><div style={{fontSize:10,color:"#94a3b8"}}>ОТКЛ. ОТ СМЕТЫ</div><div style={{fontWeight:800,color:dev>0?"#059669":"#dc2626"}}>{dev>0?"+":""}{fM(dev)} ₸</div></div>}
+                            </div>;
+                          })()}
+                          {/* Связь с объектом / выбор объекта */}
+                          {(()=>{
+                            const link = linkForContractNo(mp.contractNo);
+                            const linkedObj = link?.object;
+                            const plan = link?.planTotal||0;
+                            // список объектов с договорами для выбора
+                            const objOpts = contracts.filter(c=>c.number&&c.objectId).map(c=>{
+                              const o=objects.find(x=>x.id===c.objectId);
+                              return {num:c.number, label:`${c.number} — ${o?.address||o?.clientName||"объект"}`};
+                            });
+                            const seen=new Set(); const uniqOpts=objOpts.filter(o=>{const k=normCN(o.num); if(seen.has(k))return false; seen.add(k); return true;});
+                            return <div style={{background:linkedObj?"#eff6ff":"#fafafa",border:"1px solid "+(linkedObj?"#bfdbfe":"#eee"),borderRadius:10,padding:"10px 14px",marginBottom:11}}>
+                              <div style={{fontSize:11,color:"#64748b",fontWeight:700,marginBottom:6}}>🔗 Связь с объектом</div>
+                              {!mp.id && <select className="fi" style={{marginBottom:linkedObj?8:0}} value="" onChange={e=>{ const opt=uniqOpts.find(o=>o.num===e.target.value); if(opt){ const c=contracts.find(x=>x.number===opt.num&&x.objectId); const o=objects.find(x=>x.id===c?.objectId); const d=finProjDraftFromObject(o,c); setFinProjModal(p=>({...p,...d,id:p.id})); } }}>
+                                <option value="">— выбрать объект (подтянет № / бюджет) —</option>
+                                {uniqOpts.map(o=><option key={o.num} value={o.num}>{o.label}</option>)}
+                              </select>}
+                              {linkedObj ? <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                                <div style={{fontSize:12,color:"#1e40af"}}>📍 {linkedObj.address||linkedObj.clientName||"объект"}{plan>0&&<span style={{color:"#64748b"}}> · смета (план): <b>{fM(plan)} ₸</b></span>}</div>
+                                <button onClick={()=>{ setFinProjModal(null); openObjectFromFinance(linkedObj); }} style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:7,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↗ Открыть объект</button>
+                              </div> : <div style={{fontSize:11,color:"#94a3b8"}}>Объект с таким № договора не найден. Введите № вручную или выберите выше.</div>}
                             </div>;
                           })()}
                           <div style={{display:"grid",gap:11}}>
@@ -8408,6 +8482,10 @@ export default function App() {
                                   style={{background:"#e2e8f0",color:"#334155",border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>
                                 <button onClick={()=>generateContractGDoc(c,cl2,ca2)}
                                   style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>
+                                {currentUser.role==="admin" && (()=>{ const exists=finProjectsRef.current.find(p=>normCN(p.contractNo)===normCN(c.number));
+                                  return <button onClick={()=>startFinProjFromObject(obj,c)} title={exists?"Открыть проект в финансах":"Завести проект в финансах"}
+                                    style={{background:exists?"#f0fdf4":"rgba(5,150,105,.1)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 {exists?"В финансах ✓":"В финансы"}</button>;
+                                })()}
                                 {(currentUser.role==="admin"||(currentUser.role==="user"&&c.createdBy===currentUser.name)) && (
                                   <button onClick={()=>{ if(window.confirm("Удалить договор?")) saveContracts(contractsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
                                     style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
