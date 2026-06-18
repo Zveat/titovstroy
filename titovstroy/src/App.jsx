@@ -2654,17 +2654,19 @@ function BalanceSheet({ assetsSections, liabSections, capitalSection, totalAsset
     const has = kids.length>0;
     const open = !collapsed.has(node.key);
     const isSection = depth===0;
+    const isInfo = !!node.info; // справочные строки — серые, курсив, не в итогах
     return (
       <>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,
           padding:isSection?"9px 0 5px":"4px 0",
-          borderBottom:isSection?"none":"1px solid #f4f6f9"}}>
+          borderBottom:isSection?"none":"1px solid #f4f6f9",
+          opacity:isInfo?0.55:1}}>
           <span style={{display:"flex",alignItems:"center",gap:7,paddingLeft:depth*18,minWidth:0}}>
             {has ? <button onClick={()=>toggle(node.key)} style={{flexShrink:0,width:15,height:15,lineHeight:"13px",textAlign:"center",border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",color:"#64748b",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>{open?"−":"+"}</button>
               : <span style={{width:15,flexShrink:0}}/>}
-            <span style={{fontSize:isSection?13.5:12.5,fontWeight:isSection?800:(depth===1?600:400),color:isSection?"#0f172a":(depth===1?"#334155":"#64748b"),overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{node.label}</span>
+            <span style={{fontSize:isSection?13.5:12.5,fontWeight:isSection?800:(depth===1?600:400),fontStyle:isInfo?"italic":"normal",color:isSection?"#0f172a":(depth===1?"#334155":"#64748b"),overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{node.label}</span>
           </span>
-          <span style={{fontSize:isSection?13.5:12.5,fontWeight:isSection?800:(depth===1?700:500),color:isSection?"#0f172a":"#475569",whiteSpace:"nowrap"}}>{bf(node.value)}</span>
+          <span style={{fontSize:isSection?13.5:12.5,fontWeight:isSection?800:(depth===1?700:500),fontStyle:isInfo?"italic":"normal",color:isInfo?"#94a3b8":isSection?"#0f172a":"#475569",whiteSpace:"nowrap"}}>{bf(node.value)}</span>
         </div>
         {has && open && kids.map(c=><Node key={c.key} node={c} depth={depth+1}/>)}
       </>
@@ -7593,12 +7595,13 @@ export default function App() {
               const ag = k => Math.max(0, autoAsset[k]||0);
 
               // ── АКТИВЫ ──
+              // recv (дебиторка) — только информационно, в кассовом учёте не актив (выручка не признана)
               const recv = receivablesMoney;
               const collateral = ag("collateral");
               const loansGivenShort = ag("loansGivenShort");
               const inventory = ag("inventory");
               const otherCurrent = collateral + loansGivenShort;
-              const currentAssets = recv + cash + inventory + otherCurrent;
+              const currentAssets = cash + inventory + otherCurrent; // recv НЕ включается — кассовый метод
               const fa = { faTechnika:autoFA.faTechnika||0, faMebel:autoFA.faMebel||0, faInventar:autoFA.faInventar||0, faOborud:autoFA.faOborud||0, faTransport:autoFA.faTransport||0 };
               const fixedAssets = fa.faTechnika+fa.faMebel+fa.faInventar+fa.faOborud+fa.faTransport;
               const loansGivenLong = ag("loansGivenLong");
@@ -7630,9 +7633,9 @@ export default function App() {
 
               const assetsSections = [
                 { key:"ca", label:"Оборотные активы", value:currentAssets, children:[
-                  { key:"recv", label:"Дебиторская задолженность", value:recv, children:[
+                  // recv — дебиторка показана справочно ниже, не включена в активы (кассовый метод)
+                  { key:"recv", label:"Дебиторка (справочно, не актив)", value:recv, info:true, children:[
                     { key:"recv-m", label:"Денежная", value:recv },
-                    { key:"recv-n", label:"Неденежная", value:0 },
                   ]},
                   { key:"cash", label:"Денежные средства", value:cash, children:[
                     { key:"cash-c", label:"Наличные", value:byType.cash },
