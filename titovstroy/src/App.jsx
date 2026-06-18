@@ -717,7 +717,7 @@ function AdminPanel({ currentUser, onClose }) {
     if (!editingUser?.name?.trim() || !editingUser?.login?.trim()) return;
     const conflict = users.find(u => u.id !== editingUser.id && u.login.toLowerCase() === editingUser.login.trim().toLowerCase());
     if (conflict) { setMsg("Логин уже занят"); setTimeout(()=>setMsg(""),2000); return; }
-    const updated = users.map(u => u.id === editingUser.id ? {...u, name: editingUser.name.trim(), login: editingUser.login.trim()} : u);
+    const updated = users.map(u => u.id === editingUser.id ? {...u, name: editingUser.name.trim(), login: editingUser.login.trim(), role: (editingUser.id===currentUser.id ? u.role : (editingUser.role||u.role||"user"))} : u);
     setUsers(updated);
     await saveUsers(updated);
     setEditingUser(null);
@@ -886,7 +886,7 @@ function AdminPanel({ currentUser, onClose }) {
                     </div>
                     <div style={{display:"flex",gap:6,alignItems:"center"}}>
                       <button
-                        onClick={()=>{setEditingUser(editingUser?.id===u.id?null:{id:u.id,name:u.name,login:u.login});setEditingPass(null);}}
+                        onClick={()=>{setEditingUser(editingUser?.id===u.id?null:{id:u.id,name:u.name,login:u.login,role:u.role||"user"});setEditingPass(null);}}
                         style={{background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:8,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
                         ✏ Изменить
                       </button>
@@ -914,6 +914,17 @@ function AdminPanel({ currentUser, onClose }) {
                           <input style={{width:"100%",background:"#f8fafc",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:8,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"}}
                             value={editingUser.login} onChange={e=>setEditingUser(p=>({...p,login:e.target.value}))}/>
                         </div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:10,color:"#94a3b8",marginBottom:3}}>Роль</div>
+                        <select style={{width:"100%",background:"#f8fafc",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:8,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none",cursor:"pointer"}}
+                          value={editingUser.role||"user"} onChange={e=>setEditingUser(p=>({...p,role:e.target.value}))} disabled={u.id===currentUser.id}>
+                          <option value="user">👤 Замерщик</option>
+                          <option value="manager">🧑‍💼 Руководитель</option>
+                          <option value="admin">👑 Администратор</option>
+                          <option value="viewer">👁 Наблюдатель</option>
+                        </select>
+                        {u.id===currentUser.id && <div style={{fontSize:10,color:"#94a3b8",marginTop:3}}>Нельзя менять свою роль</div>}
                       </div>
                       <button onClick={saveUser}
                         style={{background:"#2563eb",color:"#f3f4f6",border:"none",borderRadius:8,padding:"8px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
@@ -1451,7 +1462,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
     if (!editingUser?.name?.trim() || !editingUser?.login?.trim()) return;
     const conflict = users.find(u => u.id !== editingUser.id && u.login.toLowerCase() === editingUser.login.trim().toLowerCase());
     if (conflict) { setMsg("Логин уже занят"); setTimeout(()=>setMsg(""),2000); return; }
-    const updated = users.map(u => u.id === editingUser.id ? {...u, name: editingUser.name.trim(), login: editingUser.login.trim()} : u);
+    const updated = users.map(u => u.id === editingUser.id ? {...u, name: editingUser.name.trim(), login: editingUser.login.trim(), role: (editingUser.id===currentUser.id ? u.role : (editingUser.role||u.role||"user"))} : u);
     setUsers(updated); await saveUsers(updated); await onUsersChanged();
     setEditingUser(null); setMsg("✓ Сохранено"); setTimeout(() => setMsg(""), 2500);
   };
@@ -1601,7 +1612,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                 <div className="user-row" style={{display:"flex",alignItems:"center",gap:12}}>
                   {/* Аватар */}
                   <div style={{width:42,height:42,borderRadius:10,background:"#eff6ff",border:"1px solid #eff6ff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:18}}>
-                    {u.role==="admin"?"👑":u.role==="viewer"?"👁":"👤"}
+                    {u.role==="admin"?"👑":u.role==="viewer"?"👁":u.role==="manager"?"🧑‍💼":"👤"}
                   </div>
                   <div style={{flex:1,minWidth:120}}>
                     <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
@@ -1617,7 +1628,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                     <div style={{fontSize:12,color:"#94a3b8",marginTop:1}}>@{u.login}</div>
                   </div>
                   <div className="user-row-btns" style={{display:"flex",gap:6,flexShrink:0}}>
-                    <button onClick={()=>{setEditingUser(editingUser?.id===u.id?null:{id:u.id,name:u.name,login:u.login});setEditingPass(null);}}
+                    <button onClick={()=>{setEditingUser(editingUser?.id===u.id?null:{id:u.id,name:u.name,login:u.login,role:u.role||"user"});setEditingPass(null);}}
                       style={{background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:7,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
                       ✏ Изменить
                     </button>
@@ -1636,6 +1647,15 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                       <div><div style={{fontSize:10,color:"#94a3b8",marginBottom:4}}>Имя</div><input className="fi" value={editingUser.name} onChange={e=>setEditingUser(p=>({...p,name:e.target.value}))}/></div>
                       <div><div style={{fontSize:10,color:"#94a3b8",marginBottom:4}}>Логин</div><input className="fi" value={editingUser.login} onChange={e=>setEditingUser(p=>({...p,login:e.target.value}))}/></div>
+                    </div>
+                    <div><div style={{fontSize:10,color:"#94a3b8",marginBottom:4}}>Роль</div>
+                      <select className="fi" value={editingUser.role||"user"} onChange={e=>setEditingUser(p=>({...p,role:e.target.value}))} disabled={u.id===currentUser.id}>
+                        <option value="user">👤 Замерщик</option>
+                        <option value="manager">🧑‍💼 Руководитель</option>
+                        <option value="admin">👑 Администратор</option>
+                        <option value="viewer">👁 Наблюдатель</option>
+                      </select>
+                      {u.id===currentUser.id && <div style={{fontSize:10,color:"#94a3b8",marginTop:4}}>Нельзя менять свою роль</div>}
                     </div>
                     <button onClick={saveUser} style={{background:"#2563eb",color:"#f3f4f6",border:"none",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
                       💾 Сохранить изменения
