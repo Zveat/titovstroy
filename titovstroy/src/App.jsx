@@ -334,6 +334,7 @@ const CONTRACTS_KEY  = "titovstroy-contracts";
 const CLIENTS_KEY    = "titovstroy-clients";
 const CONTRAGENTS_KEY= "titovstroy-contragents";
 // ── ФИНАНСЫ (независимый учёт: ДДС + P&L) ──
+const AUDIT_KEY               = "titovstroy-audit";             // журнал действий
 const FINANCE_TX_KEY          = "titovstroy-finance-tx";        // массив транзакций
 const FINANCE_TX_BACKUPS_KEY  = "titovstroy-finance-tx-backups";
 const FINANCE_META_KEY        = "titovstroy-finance-meta";      // {accounts, income, expense}
@@ -442,6 +443,33 @@ const DEFAULT_USERS = [
 
 // Простой хэш
 const simpleHash = (s) => btoa(encodeURIComponent(s)).split("").reverse().join("");
+
+// Аудит: записываем событие {ts, userId, userName, action, entity, entityId, detail}
+// Хранится как массив, ограниченный 500 последними записями (ротация).
+const writeAudit = async (user, action, entity, entityId, detail="") => {
+  try {
+    const raw = await storage.get(AUDIT_KEY);
+    const prev = raw ? JSON.parse(raw.value) : [];
+    const entry = { ts:Date.now(), userId:user?.id||"?", by:user?.name||"?", action, entity, entityId:entityId||"", detail };
+    const next = [entry, ...prev].slice(0, 500);
+    await storage.set(AUDIT_KEY, JSON.stringify(next));
+  } catch(e) { console.warn("audit write failed", e); }
+};
+
+// Экспорт в CSV (Excel открывает напрямую; BOM + ; для русской локали)
+const downloadCSV = (filename, headers, rows) => {
+  const esc = (v) => {
+    const s = v===null||v===undefined ? "" : String(v);
+    return /[";\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+  };
+  const lines = [headers.map(esc).join(";"), ...rows.map(r=>r.map(esc).join(";"))];
+  const blob = new Blob(["﻿"+lines.join("\r\n")], { type:"text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+};
 
 // ─── ХРАНИЛИЩЕ: Firebase (общая) + localStorage (резерв) ───────────────────
 const _mem = {};
@@ -687,7 +715,7 @@ function AdminPanel({ currentUser, onClose }) {
   const addUser = async () => {
     if (!newLogin.trim() || !newPass.trim() || !newName.trim()) { setMsg("Заполните все поля"); return; }
     if (users.find(u => u.login.toLowerCase() === newLogin.trim().toLowerCase())) { setMsg("Логин уже занят"); return; }
-    const u = { id: genId(), login: newLogin.trim(), password: newPass.trim(), name: newName.trim(), role: newRole };
+    const u = { id: genId(), login: newLogin.trim(), password: simpleHash(newPass.trim()), name: newName.trim(), role: newRole };
     const updated = [...users, u];
     setUsers(updated);
     await saveUsers(updated);
@@ -705,7 +733,7 @@ function AdminPanel({ currentUser, onClose }) {
 
   const savePass = async (id) => {
     if (!editingPass?.val?.trim()) return;
-    const updated = users.map(u => u.id === id ? {...u, password: editingPass.val.trim()} : u);
+    const updated = users.map(u => u.id === id ? {...u, password: simpleHash(editingPass.val.trim())} : u);
     setUsers(updated);
     await saveUsers(updated);
     setEditingPass(null);
@@ -1441,9 +1469,10 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
   const addUser = async () => {
     if (!newLogin.trim() || !newPass.trim() || !newName.trim()) { setMsg("Заполните все поля"); return; }
     if (users.find(u => u.login.toLowerCase() === newLogin.trim().toLowerCase())) { setMsg("Логин уже занят"); return; }
-    const u = { id: genId(), login: newLogin.trim(), password: newPass.trim(), name: newName.trim(), role: newRole };
+    const u = { id: genId(), login: newLogin.trim(), password: simpleHash(newPass.trim()), name: newName.trim(), role: newRole };
     const updated = [...users, u];
     setUsers(updated); await saveUsers(updated); await onUsersChanged();
+    writeAudit(currentUser,"создал пользователя","user",u.id,`${u.name} (${u.role})`);
     setNewLogin(""); setNewName(""); setNewPass(""); setNewRole("user");
     setMsg("✓ Пользователь добавлен"); setTimeout(() => setMsg(""), 2500);
   };
@@ -1454,7 +1483,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
   };
   const savePass = async (id) => {
     if (!editingPass?.val?.trim()) return;
-    const updated = users.map(u => u.id === id ? {...u, password: editingPass.val.trim()} : u);
+    const updated = users.map(u => u.id === id ? {...u, password: simpleHash(editingPass.val.trim())} : u);
     setUsers(updated); await saveUsers(updated);
     setEditingPass(null); setMsg("✓ Пароль изменён"); setTimeout(() => setMsg(""), 2500);
   };
@@ -1589,7 +1618,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
 
       {/* Табы */}
       <div className="admin-tabs" style={{display:"flex",gap:3,marginBottom:24,background:"#f8fafc",borderRadius:10,padding:4,overflowX:"auto"}}>
-        {[["users","👥 Сотрудники"],["clients","👥 Клиенты"],["contragents","🏢 Реквизиты"],["prices","💰 Прайс-лист"],["backups","🗄 Бэкапы"]].map(([t,label])=>(
+        {[["users","👥 Сотрудники"],["clients","👥 Клиенты"],["contragents","🏢 Реквизиты"],["prices","💰 Прайс-лист"],["backups","🗄 Бэкапы"],["audit","📋 Журнал"]].map(([t,label])=>(
           <button key={t} onClick={()=>{ setTab(t); setAdminSubTab("list"); }} style={{
             flex:1,padding:"11px",borderRadius:8,border:"none",cursor:"pointer",
             fontFamily:"inherit",fontSize:12,fontWeight:700,whiteSpace:"nowrap",
@@ -2185,6 +2214,36 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
           </div>
         </div>
       )}
+
+      {tab === "audit" && (()=>{
+        const [auditLog, setAuditLog] = useState([]);
+        const [auditLoading, setAuditLoading] = useState(true);
+        useEffect(()=>{ (async()=>{ setAuditLoading(true); const r=await storage.get(AUDIT_KEY); if(r){try{setAuditLog(JSON.parse(r.value));}catch{}} setAuditLoading(false); })(); }, []);
+        const ACTION_ICONS = {"создал операцию":"➕","изменил операцию":"✏","удалил операцию":"🗑","создал объект":"🏗","удалил объект":"🗑","создал пользователя":"👤","изменил пользователя":"✏"};
+        return (
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>Журнал действий</div>
+              <div style={{fontSize:11,color:"#94a3b8"}}>Последние 500 событий</div>
+            </div>
+            {auditLoading && <div style={{color:"#94a3b8",textAlign:"center",padding:"30px 0"}}>Загрузка...</div>}
+            {!auditLoading && auditLog.length===0 && <div style={{color:"#94a3b8",textAlign:"center",padding:"30px 0"}}>Событий пока нет</div>}
+            {auditLog.map((e,i)=>(
+              <div key={i} style={{background:"#fff",border:"1px solid #f1f5f9",borderRadius:8,padding:"10px 14px",display:"flex",gap:12,alignItems:"flex-start"}}>
+                <span style={{fontSize:16,flexShrink:0,marginTop:1}}>{ACTION_ICONS[e.action]||"📝"}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:12.5,color:"#0f172a",fontWeight:600}}><b style={{color:"#2563eb"}}>{e.by}</b> — {e.action}</div>
+                  {e.detail&&<div style={{fontSize:11,color:"#64748b",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.detail}</div>}
+                </div>
+                <div style={{fontSize:11,color:"#94a3b8",whiteSpace:"nowrap",flexShrink:0}}>
+                  {new Date(e.ts).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+                </div>
+              </div>
+            ))}
+            {auditLog.length>0&&<button onClick={()=>downloadCSV("audit_"+new Date().toISOString().slice(0,10)+".csv",["Дата","Кто","Действие","Тип","ID","Детали"],auditLog.map(e=>[new Date(e.ts).toLocaleString("ru-RU"),e.by,e.action,e.entity||"",e.entityId||"",e.detail||""]))} style={{alignSelf:"flex-start",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⬇ Экспорт журнала</button>}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -2767,7 +2826,8 @@ export default function App() {
   const [listBackups, setListBackups] = useState(null); // {label, items, onRestore}
 
   // Экраны: "list" | "editor" | "contracts"
-  const [screen, setScreen] = useState("dashboard");
+  // Руководитель по умолчанию попадает на финансы
+  const [screen, setScreen] = useState(currentUser?.role==="manager" ? "finance" : "dashboard");
 
   // Пользователи для выпадающего списка менеджеров
   const [allUsers, setAllUsers] = useState(DEFAULT_USERS);
@@ -2881,7 +2941,10 @@ export default function App() {
   const [finFilterType, setFinFilterType] = useState(""); // "" | income | expense | transfer
   const [finFilterAccount, setFinFilterAccount] = useState("");
   const [finSearch, setFinSearch] = useState("");
+  const [finAmtMin, setFinAmtMin] = useState("");
+  const [finAmtMax, setFinAmtMax] = useState("");
   const [finTxModal, setFinTxModal] = useState(null); // редактируемая/новая транзакция
+  const [finTxTrash, setFinTxTrash] = useState(false); // корзина операций
   const [finImportBusy, setFinImportBusy] = useState(false);
   const [finProjects, setFinProjects] = useState([]);
   const finProjectsRef = useRef([]);
@@ -2954,6 +3017,8 @@ export default function App() {
   const [objectFilterType, setObjectFilterType] = useState("");
   const [objectFilterManager, setObjectFilterManager] = useState("");
   const [objectDateSort, setObjectDateSort] = useState("new"); // new = сначала новые, old = сначала старые
+  const [objectDateFrom, setObjectDateFrom] = useState("");
+  const [objectDateTo, setObjectDateTo] = useState("");
   const [objectSearch, setObjectSearch] = useState("");
   const debouncedObjectSearch = useDebounce(objectSearch, 200);
   const [objectReturnId, setObjectReturnId] = useState(null); // id объекта, куда вернуться из редактора сметы/договора
@@ -2994,15 +3059,18 @@ export default function App() {
   const filteredObjects = useMemo(() => {
     const q = debouncedObjectSearch.toLowerCase().trim();
     return [...objects]
+      .filter(o=>!o.deletedAt) // скрываем мягко-удалённые из основного списка
       .filter(o=>{
         if(objectFilterStatus && (o.status||"new")!==objectFilterStatus) return false;
         if(objectFilterType && (o.objType||"Вторичка")!==objectFilterType) return false;
         if(objectFilterManager && (o.manager||"")!==objectFilterManager) return false;
+        if(objectDateFrom && (o.createdAt||0) < new Date(objectDateFrom).getTime()) return false;
+        if(objectDateTo && (o.createdAt||0) > new Date(objectDateTo).getTime()+86399999) return false;
         if(q && !((o.clientName||"").toLowerCase().includes(q)||(o.address||"").toLowerCase().includes(q)||(o.clientPhone||"").toLowerCase().includes(q))) return false;
         return true;
       })
       .sort((a,b)=>{ const da=a.createdAt||0, db=b.createdAt||0; return objectDateSort==="old" ? da-db : db-da; });
-  }, [objects, objectFilterStatus, objectFilterType, objectFilterManager, objectDateSort, debouncedObjectSearch]);
+  }, [objects, objectFilterStatus, objectFilterType, objectFilterManager, objectDateSort, objectDateFrom, objectDateTo, debouncedObjectSearch]);
 
   // Мемоизированный фильтрованный/сортированный список смет
   const filteredEstimates = useMemo(() => {
@@ -5548,7 +5616,7 @@ export default function App() {
             <div style={{position:"relative",zIndex:1,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
               <div>
                 <div style={{fontSize:22,fontWeight:900,color:"#fff",letterSpacing:-.5,marginBottom:4,fontFamily:"'Poppins',sans-serif"}}>
-                  TitovStroy <span style={{opacity:.6,fontWeight:600}}>ERP</span>
+                  TitovStroy <span style={{opacity:.6,fontWeight:600}}>CRM</span>
                 </div>
                 <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>
                   {new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
@@ -7095,7 +7163,7 @@ export default function App() {
         const balances = {};
         accounts.forEach(a=>{ balances[a.name] = Number(a.opening)||0; });
         for (const t of financeTx) {
-          if (t.included===false) continue;
+          if (t.deletedAt || t.included===false) continue;
           const amt = Number(t.amount)||0;
           if (t.type==="income") balances[t.account] = (balances[t.account]||0)+amt;
           else if (t.type==="expense") balances[t.account] = (balances[t.account]||0)-amt;
@@ -7104,7 +7172,7 @@ export default function App() {
         const totalBalance = Object.values(balances).reduce((s,v)=>s+v,0);
 
         // Показатели за период (без переводов)
-        const periodTx = financeTx.filter(t=>t.included!==false && inPeriod(t.date||t.createdAt||0));
+        const periodTx = financeTx.filter(t=>!t.deletedAt && t.included!==false && inPeriod(t.date||t.createdAt||0));
         const incomeSum = periodTx.filter(t=>t.type==="income").reduce((s,t)=>s+(Number(t.amount)||0),0);
         const expenseSum = periodTx.filter(t=>t.type==="expense").reduce((s,t)=>s+(Number(t.amount)||0),0);
         const profit = incomeSum-expenseSum;
@@ -7133,9 +7201,12 @@ export default function App() {
         // Список операций (фильтры + поиск)
         const fq = finSearch.toLowerCase().trim();
         const opsList = financeTx
+          .filter(t=>!t.deletedAt) // скрываем мягко-удалённые
           .filter(t=>inPeriod(t.date||t.createdAt||0))
           .filter(t=>!finFilterType || t.type===finFilterType)
           .filter(t=>!finFilterAccount || t.account===finFilterAccount || t.accountTo===finFilterAccount)
+          .filter(t=>finAmtMin===""||(Number(t.amount)||0)>=Number(finAmtMin))
+          .filter(t=>finAmtMax===""||(Number(t.amount)||0)<=Number(finAmtMax))
           .filter(t=>!fq || [t.category,t.subcategory,t.note,t.contractNo,t.account].some(v=>v&&String(v).toLowerCase().includes(fq)))
           .sort((a,b)=>(b.date||b.createdAt||0)-(a.date||a.createdAt||0));
 
@@ -7155,6 +7226,7 @@ export default function App() {
                 <div>
                   <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#fff"}}>💰 Финансы</h1>
                   <div style={{fontSize:13,color:"rgba(255,255,255,.75)",marginTop:4}}>Учёт доходов, расходов и движения денег</div>
+                  {finReadonly && <div style={{display:"inline-block",marginTop:6,background:"rgba(251,191,36,.18)",border:"1px solid rgba(251,191,36,.4)",borderRadius:6,padding:"2px 10px",fontSize:11,fontWeight:700,color:"#fbbf24"}}>👁 Только просмотр</div>}
                 </div>
                 <div className="fin-hero-stats" style={{display:"flex",gap:24,alignItems:"flex-end",flexWrap:"wrap"}}>
                   {(()=>{
@@ -7744,6 +7816,18 @@ export default function App() {
                 {!finReadonly && <button onClick={()=>openNewTx("expense")} style={{background:"#dc2626",color:"#fff",border:"none",borderRadius:9,padding:"9px 15px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Расход</button>}
                 {!finReadonly && <button onClick={()=>openNewTx("transfer")} style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:9,padding:"9px 15px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Перевод</button>}
                 <div style={{flex:1}}/>
+                <button onClick={()=>downloadCSV(
+                  "operations_"+new Date().toISOString().slice(0,10)+".csv",
+                  ["Дата","Тип","Сумма","Счёт","Счёт (куда)","Категория","Подкатегория","Договор","Комментарий","Учитывается"],
+                  opsList.map(t=>[
+                    new Date(t.date||t.createdAt||0).toLocaleDateString("ru-RU"),
+                    TYPE_LABEL[t.type]||t.type,
+                    Math.round(Number(t.amount)||0),
+                    t.account||"", t.accountTo||"", t.category||"", t.subcategory||"",
+                    t.contractNo||"", t.note||"", t.included===false?"нет":"да",
+                  ])
+                )} style={{background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:9,padding:"9px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⬇ Excel (CSV)</button>
+                {!finReadonly && (()=>{const td=financeTx.filter(t=>t.deletedAt); return td.length>0&&(<button onClick={()=>setFinTxTrash(true)} style={{background:"rgba(220,38,38,.1)",color:"#dc2626",border:"1px solid rgba(220,38,38,.18)",borderRadius:9,padding:"9px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🗑 {td.length}</button>);})()}
                 <span style={{fontSize:12,color:"#94a3b8"}}>Операций: <b style={{color:"#334155"}}>{opsList.length}</b></span>
               </div>
               <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
@@ -7754,6 +7838,8 @@ export default function App() {
                 <select className="fi" style={{width:"auto"}} value={finFilterAccount} onChange={e=>setFinFilterAccount(e.target.value)}>
                   <option value="">Все счета</option>{accounts.map(a=><option key={a.id} value={a.name}>{a.name}</option>)}
                 </select>
+                <input className="fi" type="number" placeholder="Сумма от" value={finAmtMin} onChange={e=>setFinAmtMin(e.target.value)} style={{width:110}}/>
+                <input className="fi" type="number" placeholder="до" value={finAmtMax} onChange={e=>setFinAmtMax(e.target.value)} style={{width:90}}/>
               </div>
               <div className="card" style={{overflow:"hidden"}}>
                 {opsList.length===0 && <div style={{textAlign:"center",color:"#94a3b8",fontSize:13,padding:"40px 0"}}>Нет операций</div>}
@@ -8161,6 +8247,38 @@ export default function App() {
               );
             })()}
 
+            {/* ───── КОРЗИНА ОПЕРАЦИЙ ───── */}
+            {finTxTrash && (
+              <div onClick={()=>setFinTxTrash(false)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.55)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+                <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:16,padding:"22px 24px",width:"100%",maxWidth:520,maxHeight:"85vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                    <h3 style={{margin:0,fontSize:16,fontWeight:800,color:"#0f172a"}}>🗑 Корзина операций</h3>
+                    <button onClick={()=>setFinTxTrash(false)} style={{background:"none",border:"none",fontSize:20,color:"#94a3b8",cursor:"pointer"}}>✕</button>
+                  </div>
+                  {financeTx.filter(t=>t.deletedAt).sort((a,b)=>b.deletedAt-a.deletedAt).map(t=>{
+                    const TYPE_COLOR={income:"#059669",expense:"#dc2626",transfer:"#7c3aed"};
+                    const TYPE_LABEL={income:"Доход",expense:"Расход",transfer:"Перевод"};
+                    const daysLeft=Math.max(0,Math.ceil((30*864e5-(Date.now()-(t.deletedAt||0)))/864e5));
+                    return (
+                      <div key={t.id} style={{borderBottom:"1px solid #f1f5f9",padding:"12px 0",display:"flex",alignItems:"center",gap:12}}>
+                        <span style={{width:8,height:8,borderRadius:"50%",background:TYPE_COLOR[t.type]||"#94a3b8",flexShrink:0}}/>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:600,color:"#0f172a"}}>{TYPE_LABEL[t.type]} · {new Intl.NumberFormat("ru-RU").format(Math.round(Number(t.amount)||0))} ₸</div>
+                          <div style={{fontSize:11,color:"#94a3b8"}}>{t.category||""}{t.note?" · "+t.note:""} · {new Date(t.date||t.createdAt||0).toLocaleDateString("ru-RU")}</div>
+                          <div style={{fontSize:11,color:daysLeft<=3?"#dc2626":"#f59e0b",fontWeight:600}}>осталось {daysLeft} дн.</div>
+                        </div>
+                        <button onClick={async()=>{await saveFinanceTx(financeTxRef.current.map(x=>x.id===t.id?{...x,deletedAt:undefined}:x),{replace:true}); }}
+                          style={{background:"#f0fdf4",color:"#059669",border:"1px solid #bbf7d0",borderRadius:7,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↩</button>
+                        <button onClick={async()=>{if(confirm("Удалить безвозвратно?")) await saveFinanceTx(financeTxRef.current.filter(x=>x.id!==t.id),{replace:true,allowEmpty:true}); }}
+                          style={{background:"rgba(220,38,38,.1)",color:"#dc2626",border:"1px solid rgba(220,38,38,.2)",borderRadius:7,padding:"5px 10px",fontSize:12,cursor:"pointer"}}>✕</button>
+                      </div>
+                    );
+                  })}
+                  {financeTx.filter(t=>t.deletedAt).length===0 && <div style={{textAlign:"center",color:"#94a3b8",padding:"30px 0"}}>Корзина пуста</div>}
+                </div>
+              </div>
+            )}
+
             {/* ───── МОДАЛКА: операция ───── */}
             {finTxModal && (()=>{
               const m = finTxModal;
@@ -8177,14 +8295,17 @@ export default function App() {
                   isAdvance:m.type==="income"?!!m.isAdvance:false,
                   included:m.included!==false, opuMonth:m.opuMonth, createdAt:m.createdAt||ts, updatedAt:Date.now() };
                 const cur=financeTxRef.current;
-                const list = m.id ? cur.map(x=>x.id===m.id?tx:x) : [tx,...cur];
+                const isNew = !m.id;
+                const list = isNew ? [tx,...cur] : cur.map(x=>x.id===m.id?tx:x);
                 await saveFinanceTx(list,{replace:true});
+                writeAudit(currentUser, isNew?"создал операцию":"изменил операцию", "finance_tx", tx.id, `${tx.type} ${Math.round(tx.amount)} ₸ ${tx.category||""}`);
                 setFinTxModal(null);
               };
               const del = async ()=>{
-                if(!m.id) return; if(!confirm("Удалить операцию?")) return;
-                const list=financeTxRef.current.filter(x=>x.id!==m.id);
-                await saveFinanceTx(list,{replace:true,allowEmpty:true});
+                if(!m.id) return; if(!confirm("Переместить операцию в корзину?")) return;
+                const list=financeTxRef.current.map(x=>x.id===m.id?{...x,deletedAt:Date.now()}:x);
+                await saveFinanceTx(list,{replace:true});
+                writeAudit(currentUser,"удалил операцию","finance_tx",m.id,`${m.type} ${Math.round(Number(m.amount)||0)} ₸`);
                 setFinTxModal(null);
               };
               return (
@@ -8405,24 +8526,40 @@ export default function App() {
                 <div style={{fontSize:12,color:"rgba(255,255,255,.7)",marginTop:3}}>{objectTab==="workspace" ? "Карточка объекта · сметы и договора" : "Клиенты, сметы и договора"}</div>
               </div>
               <div style={{flex:1}}/>
-              {objectTab==="list" && currentUser.role!=="viewer" && (
+              {objectTab==="list" && currentUser.role!=="viewer" && (<>
+                {(()=>{const trashed=objectsRef.current.filter(o=>o.deletedAt); return trashed.length>0&&(<button onClick={()=>setObjectTab("trash")} style={{background:"rgba(220,38,38,.12)",color:"#dc2626",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"7px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginRight:4}}>🗑 Корзина ({trashed.length})</button>);})()}
                 <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={async ()=>{
                   const newObj = {id:genId(),clientId:"",clientName:"",clientPhone:"",clientType:"физ",clientIin:"",clientDoc:"",address:"",objType:"Вторичка",area:"",status:"new",note:"",manager:currentUser.name,createdBy:currentUser.name,createdById:currentUser.id,createdAt:Date.now(),updatedAt:Date.now()};
                   await saveObjects([newObj, ...objectsRef.current]);
                   setCurrentObject(newObj);
                   setObjectTab("workspace");
                 }}>+ Новый объект</button>
-              )}
+              </>)}
             </div>
           </div>
 
           {/* Список объектов */}
           {objectTab==="list" && (
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
-              {/* Поиск + сортировка */}
-              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              {/* Поиск + сортировка + экспорт */}
+              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                 <input value={objectSearch} onChange={e=>setObjectSearch(e.target.value)} placeholder="🔍 Поиск по клиенту, телефону, адресу..."
-                  style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:13,flex:1,minWidth:0,boxSizing:"border-box",outline:"none",fontFamily:"inherit"}}/>
+                  style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:13,flex:1,minWidth:200,boxSizing:"border-box",outline:"none",fontFamily:"inherit"}}/>
+                <input type="date" value={objectDateFrom} onChange={e=>setObjectDateFrom(e.target.value)} title="Дата от"
+                  style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 10px",fontSize:12,outline:"none",fontFamily:"inherit",color:objectDateFrom?"#0f172a":"#94a3b8"}}/>
+                <input type="date" value={objectDateTo} onChange={e=>setObjectDateTo(e.target.value)} title="Дата до"
+                  style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 10px",fontSize:12,outline:"none",fontFamily:"inherit",color:objectDateTo?"#0f172a":"#94a3b8"}}/>
+                {(objectDateFrom||objectDateTo) && <button onClick={()=>{setObjectDateFrom("");setObjectDateTo("");}} style={{background:"none",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 10px",fontSize:12,cursor:"pointer",color:"#94a3b8",fontFamily:"inherit"}}>✕ дата</button>}
+                <button onClick={()=>downloadCSV(
+                  "objects_"+new Date().toISOString().slice(0,10)+".csv",
+                  ["Статус","Клиент","Телефон","Адрес","Тип","Площадь","Менеджер","Дата создания","Смет (шт)","Сумма смет","Договоров"],
+                  filteredObjects.map(o=>{
+                    const ests=estimates.filter(e=>e.objectId===o.id);
+                    const cons=contracts.filter(c=>c.objectId===o.id);
+                    const st=DEAL_STATUSES.find(s=>s.key===(o.status||"new"))||DEAL_STATUSES[0];
+                    return [st.label,o.clientName||"",o.clientPhone||"",o.address||"",o.objType||"",o.area||"",o.manager||"",o.createdAt?new Date(o.createdAt).toLocaleDateString("ru-RU"):"",ests.length,Math.round(ests.reduce((s,e)=>s+(e.total||0),0)),cons.length];
+                  })
+                )} title="Экспорт в Excel" style={{background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:8,padding:"8px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>⬇ Excel</button>
                 <button onClick={()=>setObjectDateSort(v=>v==="new"?"old":"new")}
                   title={objectDateSort==="new"?"Сначала новые (нажмите для старых)":"Сначала старые (нажмите для новых)"}
                   style={{display:"flex",alignItems:"center",gap:5,border:"1px solid #e2e8f0",background:"#fff",borderRadius:8,padding:"8px 11px",fontSize:12,fontWeight:600,color:"#475569",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
@@ -8506,8 +8643,8 @@ export default function App() {
                       <div style={{textAlign:"right",flexShrink:0}}>
                         {total>0&&<div style={{fontWeight:800,fontSize:16,color:"#0f172a"}}>{fmt(total)} ₸</div>}
                         {(currentUser.role==="admin"||(currentUser.role==="user"&&obj.createdById===currentUser.id)) && (
-                          <button onClick={e=>{e.stopPropagation(); if(window.confirm("Удалить объект?")) saveObjects(objectsRef.current.filter(x=>x.id!==obj.id),{removedIds:[obj.id],allowEmpty:true});}}
-                            style={{marginTop:6,background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
+                          <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить объект в корзину?")){ saveObjects(objectsRef.current.map(x=>x.id===obj.id?{...x,deletedAt:Date.now()}:x)); writeAudit(currentUser,"удалил объект","object",obj.id,obj.clientName||obj.address||""); }}}
+                            title="В корзину (можно восстановить)" style={{marginTop:6,background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                         )}
                       </div>
                     </div>
@@ -8518,6 +8655,38 @@ export default function App() {
           )}
 
           {/* Workspace объекта */}
+          {objectTab==="trash" && (()=>{
+            const trashed = objectsRef.current.filter(o=>o.deletedAt).sort((a,b)=>b.deletedAt-a.deletedAt);
+            const KEEP_MS = 30*24*60*60*1000;
+            return (
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
+                  <button onClick={()=>setObjectTab("list")} style={{background:"none",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 14px",fontSize:13,cursor:"pointer",color:"#64748b",fontFamily:"inherit"}}>← Назад</button>
+                  <span style={{fontSize:13,color:"#94a3b8"}}>Объекты в корзине · хранятся 30 дней</span>
+                </div>
+                {trashed.length===0 && <div style={{textAlign:"center",color:"#94a3b8",padding:"60px 0",fontSize:14}}>Корзина пуста</div>}
+                {trashed.map(obj=>{
+                  const daysLeft = Math.max(0,Math.ceil((KEEP_MS-(Date.now()-(obj.deletedAt||0)))/86400000));
+                  return (
+                    <div key={obj.id} style={{background:"#fff",border:"1px solid #fecaca",borderRadius:10,padding:"14px 18px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                      <div style={{flex:1,minWidth:160}}>
+                        <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>{obj.clientName||"Без имени"}</div>
+                        <div style={{fontSize:12,color:"#94a3b8",marginTop:2}}>{obj.address||""} · удалён {new Date(obj.deletedAt||0).toLocaleDateString("ru-RU")}</div>
+                        <div style={{fontSize:11,color:daysLeft<=5?"#dc2626":"#f59e0b",marginTop:2,fontWeight:600}}>{daysLeft>0?`Осталось ${daysLeft} дн. до окончательного удаления`:"Истёк срок хранения"}</div>
+                      </div>
+                      <div style={{display:"flex",gap:8}}>
+                        <button onClick={()=>saveObjects(objectsRef.current.map(x=>x.id===obj.id?{...x,deletedAt:undefined}:x))}
+                          style={{background:"#f0fdf4",color:"#059669",border:"1px solid #bbf7d0",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↩ Восстановить</button>
+                        {currentUser.role==="admin" && <button onClick={()=>{if(confirm("Удалить безвозвратно?")) saveObjects(objectsRef.current.filter(x=>x.id!==obj.id),{removedIds:[obj.id],allowEmpty:true});}}
+                          style={{background:"rgba(220,38,38,.1)",color:"#dc2626",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"7px 12px",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>✕ Удалить</button>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
           {objectTab==="workspace" && currentObject && (()=>{
             const obj = currentObject;
             const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"new"))||DEAL_STATUSES[0];
