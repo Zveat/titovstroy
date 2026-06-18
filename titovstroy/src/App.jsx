@@ -547,7 +547,7 @@ function LoginScreen({ onLogin }) {
 
   return (
     <div style={{minHeight:"100vh",background:"#f8fafc",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'Inter','Segoe UI',sans-serif"}}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@600;700;800;900&display=swap');*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Inter','Segoe UI',sans-serif;-webkit-font-smoothing:antialiased;color:#111827}h1,h2,h3{font-family:'Poppins','Inter',sans-serif;letter-spacing:-.02em}button{font-family:'Inter','Segoe UI',sans-serif}`}</style>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@600;700;800;900&display=swap');*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Inter','Segoe UI',sans-serif;-webkit-font-smoothing:antialiased;color:#111827}h1,h2,h3{font-family:'Poppins','Inter',sans-serif;letter-spacing:-.02em}button{font-family:'Inter','Segoe UI',sans-serif}a[x-apple-data-detectors],a[href^="tel"]{color:inherit!important;text-decoration:none!important;pointer-events:none!important;-webkit-text-decoration-color:inherit!important}`}</style>
       <div style={{width:"100%",maxWidth:380}}>
         {/* Лого */}
         <div style={{textAlign:"center",marginBottom:32}}>
