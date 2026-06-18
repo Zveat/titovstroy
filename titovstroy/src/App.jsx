@@ -5283,9 +5283,16 @@ export default function App() {
           .fin-tabs{overflow-x:auto!important;flex-wrap:nowrap!important;-webkit-overflow-scrolling:touch;padding-bottom:4px}
           .fin-tabs button{flex:0 0 auto!important}
           .fin-hero-stats{width:100%!important;justify-content:space-between!important;gap:14px!important}
-          .rep-wrap{max-height:calc(100vh - 280px)!important}
-          .rep-table{font-size:11.5px!important}
-          .rep-table th,.rep-table td{padding:7px 9px!important}
+          /* ДДС/ОПУ: убираем overflow:hidden с карточки чтобы таблица скроллилась */
+          .card{overflow:visible!important}
+          .rep-wrap{
+            -webkit-overflow-scrolling:touch!important;
+            overflow-x:auto!important;
+            overflow-y:auto!important;
+            max-height:60vh!important;
+          }
+          .rep-table{font-size:11px!important;min-width:520px!important}
+          .rep-table th,.rep-table td{padding:6px 8px!important;white-space:nowrap!important}
         }
         @media(max-width:380px){
           .kpi-grid{grid-template-columns:1fr!important}
