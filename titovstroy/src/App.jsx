@@ -7618,10 +7618,14 @@ export default function App() {
               const longLiab = creditsLong + loansLong;
               const totalLiab = shortLiab + longLiab;
 
-              // ── КАПИТАЛ ── (нераспределённая прибыль = балансирующая статья)
-              const founders = accounts.reduce((s,a)=>s+(Number(a.opening)||0),0) + autoFounders;
-              const otherCap = 0;
-              const retained = totalAssets - totalLiab - founders - otherCap;
+              // ── КАПИТАЛ ── (нераспределённая прибыль = накопленная чистая прибыль из ОПУ за всё время)
+              const S_DIV_BAL = "Дивиденды учредителям";
+              const allTimeInc  = sumTx(t => t.type==="income"  && !t.isAdvance && t.category!==C_FINANCING_INC && t.category!==C_ASSET_INC);
+              const allTimeExp  = sumTx(t => t.type==="expense" && t.subcategory!==S_DIV_BAL && t.category!==C_FINACT && t.category!==C_ASSET_OUT);
+              const allTimeDivs = sumTx(t => t.type==="expense" && t.subcategory===S_DIV_BAL);
+              const retained    = allTimeInc - allTimeExp - allTimeDivs;
+              const founders    = accounts.reduce((s,a)=>s+(Number(a.opening)||0),0) + autoFounders;
+              const otherCap    = 0;
               const totalCapital = founders + otherCap + retained;
 
               const assetsSections = [
