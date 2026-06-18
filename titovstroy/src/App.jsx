@@ -5283,16 +5283,19 @@ export default function App() {
           .fin-tabs{overflow-x:auto!important;flex-wrap:nowrap!important;-webkit-overflow-scrolling:touch;padding-bottom:4px}
           .fin-tabs button{flex:0 0 auto!important}
           .fin-hero-stats{width:100%!important;justify-content:space-between!important;gap:14px!important}
-          /* ДДС/ОПУ: убираем overflow:hidden с карточки чтобы таблица скроллилась */
-          .card{overflow:visible!important}
+          /* ДДС/ОПУ: корректный скролл на мобиле со sticky первой колонкой */
           .rep-wrap{
             -webkit-overflow-scrolling:touch!important;
             overflow-x:auto!important;
             overflow-y:auto!important;
-            max-height:60vh!important;
+            max-height:62vh!important;
+            border-radius:10px!important;
           }
-          .rep-table{font-size:11px!important;min-width:520px!important}
-          .rep-table th,.rep-table td{padding:6px 8px!important;white-space:nowrap!important}
+          .rep-table{font-size:11px!important;min-width:480px!important}
+          .rep-table th,.rep-table td{padding:6px 7px!important;white-space:nowrap!important}
+          /* sticky первая колонка на мобиле — важно */
+          .rep-table tbody td:first-child,.rep-table tbody th:first-child{position:sticky!important;left:0!important;z-index:2!important;background:#fff!important;min-width:130px!important;max-width:160px!important;white-space:normal!important;word-break:break-word!important}
+          .rep-table thead th:first-child{position:sticky!important;left:0!important;z-index:6!important;min-width:130px!important}
         }
         @media(max-width:380px){
           .kpi-grid{grid-template-columns:1fr!important}
