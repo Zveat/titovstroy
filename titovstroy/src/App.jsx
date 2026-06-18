@@ -640,6 +640,44 @@ function PriceWorkCard({ w, initTiers, initFixed, onRename, onDelete }) {
 }
 
 
+
+function AuditTab() {
+  const [auditLog, setAuditLog] = useState([]);
+  const [auditLoading, setAuditLoading] = useState(true);
+  useEffect(()=>{
+    (async()=>{
+      setAuditLoading(true);
+      const r = await storage.get(AUDIT_KEY);
+      if(r){ try{ setAuditLog(JSON.parse(r.value)); }catch{} }
+      setAuditLoading(false);
+    })();
+  }, []);
+  const ACTION_ICONS = {"создал операцию":"➕","изменил операцию":"✏","удалил операцию":"🗑","создал объект":"🏗","удалил объект":"🗑","создал пользователя":"👤","изменил пользователя":"✏"};
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>Журнал действий</div>
+        <div style={{fontSize:11,color:"#94a3b8"}}>Последние 500 событий</div>
+      </div>
+      {auditLoading && <div style={{color:"#94a3b8",textAlign:"center",padding:"30px 0"}}>Загрузка...</div>}
+      {!auditLoading && auditLog.length===0 && <div style={{color:"#94a3b8",textAlign:"center",padding:"30px 0"}}>Событий пока нет</div>}
+      {auditLog.map((e,i)=>(
+        <div key={i} style={{background:"#fff",border:"1px solid #f1f5f9",borderRadius:8,padding:"10px 14px",display:"flex",gap:12,alignItems:"flex-start"}}>
+          <span style={{fontSize:16,flexShrink:0,marginTop:1}}>{ACTION_ICONS[e.action]||"📝"}</span>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:12.5,color:"#0f172a",fontWeight:600}}><b style={{color:"#2563eb"}}>{e.by}</b> — {e.action}</div>
+            {e.detail&&<div style={{fontSize:11,color:"#64748b",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.detail}</div>}
+          </div>
+          <div style={{fontSize:11,color:"#94a3b8",whiteSpace:"nowrap",flexShrink:0}}>
+            {new Date(e.ts).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+          </div>
+        </div>
+      ))}
+      {auditLog.length>0&&<button onClick={()=>downloadCSV("audit_"+new Date().toISOString().slice(0,10)+".csv",["Дата","Кто","Действие","Тип","ID","Детали"],auditLog.map(e=>[new Date(e.ts).toLocaleString("ru-RU"),e.by,e.action,e.entity||"",e.entityId||"",e.detail||""]))} style={{alignSelf:"flex-start",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⬇ Экспорт журнала</button>}
+    </div>
+  );
+}
+
 function AdminPanel({ currentUser, onClose }) {
   const [tab, setTab] = useState("users"); // "users" | "prices"
   const [users, setUsers]     = useState([]);
@@ -2215,35 +2253,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
         </div>
       )}
 
-      {tab === "audit" && (()=>{
-        const [auditLog, setAuditLog] = useState([]);
-        const [auditLoading, setAuditLoading] = useState(true);
-        useEffect(()=>{ (async()=>{ setAuditLoading(true); const r=await storage.get(AUDIT_KEY); if(r){try{setAuditLog(JSON.parse(r.value));}catch{}} setAuditLoading(false); })(); }, []);
-        const ACTION_ICONS = {"создал операцию":"➕","изменил операцию":"✏","удалил операцию":"🗑","создал объект":"🏗","удалил объект":"🗑","создал пользователя":"👤","изменил пользователя":"✏"};
-        return (
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-              <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>Журнал действий</div>
-              <div style={{fontSize:11,color:"#94a3b8"}}>Последние 500 событий</div>
-            </div>
-            {auditLoading && <div style={{color:"#94a3b8",textAlign:"center",padding:"30px 0"}}>Загрузка...</div>}
-            {!auditLoading && auditLog.length===0 && <div style={{color:"#94a3b8",textAlign:"center",padding:"30px 0"}}>Событий пока нет</div>}
-            {auditLog.map((e,i)=>(
-              <div key={i} style={{background:"#fff",border:"1px solid #f1f5f9",borderRadius:8,padding:"10px 14px",display:"flex",gap:12,alignItems:"flex-start"}}>
-                <span style={{fontSize:16,flexShrink:0,marginTop:1}}>{ACTION_ICONS[e.action]||"📝"}</span>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:12.5,color:"#0f172a",fontWeight:600}}><b style={{color:"#2563eb"}}>{e.by}</b> — {e.action}</div>
-                  {e.detail&&<div style={{fontSize:11,color:"#64748b",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.detail}</div>}
-                </div>
-                <div style={{fontSize:11,color:"#94a3b8",whiteSpace:"nowrap",flexShrink:0}}>
-                  {new Date(e.ts).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
-                </div>
-              </div>
-            ))}
-            {auditLog.length>0&&<button onClick={()=>downloadCSV("audit_"+new Date().toISOString().slice(0,10)+".csv",["Дата","Кто","Действие","Тип","ID","Детали"],auditLog.map(e=>[new Date(e.ts).toLocaleString("ru-RU"),e.by,e.action,e.entity||"",e.entityId||"",e.detail||""]))} style={{alignSelf:"flex-start",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⬇ Экспорт журнала</button>}
-          </div>
-        );
-      })()}
+      {tab === "audit" && <AuditTab />}
     </div>
   );
 }
@@ -5621,7 +5631,7 @@ export default function App() {
             <div style={{position:"relative",zIndex:1,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
               <div>
                 <div style={{fontSize:22,fontWeight:900,color:"#fff",letterSpacing:-.5,marginBottom:4,fontFamily:"'Poppins',sans-serif"}}>
-                  TitovStroy <span style={{opacity:.6,fontWeight:600}}>ERP</span>
+                  TitovStroy <span style={{opacity:.6,fontWeight:600}}>CRM</span>
                 </div>
                 <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>
                   {new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
@@ -7212,7 +7222,7 @@ export default function App() {
           .filter(t=>!finFilterAccount || t.account===finFilterAccount || t.accountTo===finFilterAccount)
           .filter(t=>finAmtMin===""||(Number(t.amount)||0)>=Number(finAmtMin))
           .filter(t=>finAmtMax===""||(Number(t.amount)||0)<=Number(finAmtMax))
-          .filter(t=>!finFilterCategory || t.category===finFilterCategory)
+          .filter(t=>!finFilterCategory || t.subcategory===finFilterCategory)
           .filter(t=>!fq || [t.category,t.subcategory,t.note,t.contractNo,t.account].some(v=>v&&String(v).toLowerCase().includes(fq)))
           .sort((a,b)=>(b.date||b.createdAt||0)-(a.date||a.createdAt||0));
 
@@ -7845,10 +7855,10 @@ export default function App() {
                   <option value="">Все счета</option>{accounts.map(a=><option key={a.id} value={a.name}>{a.name}</option>)}
                 </select>
                 {(()=>{
-                  const cats = [...new Set(financeTx.filter(t=>!t.deletedAt && t.category).map(t=>t.category))].sort();
+                  const cats = [...new Set(financeTx.filter(t=>!t.deletedAt && t.subcategory).map(t=>t.subcategory))].sort();
                   return cats.length>0 ? (
                     <select className="fi" style={{width:"auto"}} value={finFilterCategory} onChange={e=>setFinFilterCategory(e.target.value)}>
-                      <option value="">Все статьи</option>{cats.map(c=><option key={c} value={c}>{c}</option>)}
+                      <option value="">Все подкатегории</option>{cats.map(c=><option key={c} value={c}>{c}</option>)}
                     </select>
                   ) : null;
                 })()}
