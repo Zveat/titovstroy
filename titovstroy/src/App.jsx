@@ -2940,6 +2940,7 @@ export default function App() {
   const [finTo, setFinTo] = useState("");
   const [finFilterType, setFinFilterType] = useState(""); // "" | income | expense | transfer
   const [finFilterAccount, setFinFilterAccount] = useState("");
+  const [finFilterCategory, setFinFilterCategory] = useState("");
   const [finSearch, setFinSearch] = useState("");
   const [finAmtMin, setFinAmtMin] = useState("");
   const [finAmtMax, setFinAmtMax] = useState("");
@@ -3071,6 +3072,9 @@ export default function App() {
       })
       .sort((a,b)=>{ const da=a.createdAt||0, db=b.createdAt||0; return objectDateSort==="old" ? da-db : db-da; });
   }, [objects, objectFilterStatus, objectFilterType, objectFilterManager, objectDateSort, objectDateFrom, objectDateTo, debouncedObjectSearch]);
+
+  // Только «живые» (не удалённые) объекты — используется в дашборде, аналитике и всех расчётах
+  const liveObjects = useMemo(() => objects.filter(o=>!o.deletedAt), [objects]);
 
   // Мемоизированный фильтрованный/сортированный список смет
   const filteredEstimates = useMemo(() => {
@@ -3747,7 +3751,7 @@ export default function App() {
     const objCost = (o) => (estByObj[o.id]||[]).reduce((s,e)=>s+estCost(e),0);
     const objType = (o) => o.objType || "—";
 
-    const baseObjs = objects
+    const baseObjs = liveObjects
       .filter(o => inRange(o.updatedAt||o.createdAt||0))
       .filter(o => !statsManager || (o.manager||"")===statsManager);
     // сметы в периоде (для финансового блока «согласованные сметы», как было раньше)
@@ -3756,6 +3760,7 @@ export default function App() {
       .filter(e => !statsManager || (e.proj?.manager||"")===statsManager);
     // Договора, сформированные ВНУТРИ объектов (привязаны к объекту), без «Прочих договоров»
     const baseCon = contracts
+      .filter(c => !c.deletedAt)
       .filter(c => c.objectId)
       .filter(c => inRange(new Date(c.date||0).getTime()))
       .filter(c => (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0)
@@ -3819,7 +3824,7 @@ export default function App() {
 
     // ── C. Менеджеры: объекты, оборот, прибыль, маржа, % сдачи ──
     const validManagerNames = new Set(nonViewerUsers.map(u=>u.name));
-    const managers = [...new Set(objects.map(o=>o.manager||"").filter(m=>m&&validManagerNames.has(m)))];
+    const managers = [...new Set(liveObjects.map(o=>o.manager||"").filter(m=>m&&validManagerNames.has(m)))];
     const managerStats = managers.map(m=>{
       const mos = baseObjs.filter(o=>(o.manager||"")===m);
       const withSum = mos.filter(o=>objVal(o)>0);
@@ -5590,7 +5595,7 @@ export default function App() {
         const _estByObjId = {}; for(const e of estimates){ if(e.objectId){ (_estByObjId[e.objectId]||(_estByObjId[e.objectId]=[])).push(e); } }
         const _objVal = o => (_estByObjId[o.id]||[]).reduce((s,e)=>s+(e.total||0),0);
         const _objCost = o => { const cat = getEffectiveCatalog(); const lk = new Map(); for(const w of cat){ if(w?.name)lk.set(w.name,w); if(w?.code)lk.set(w.code,w); } let c=0; for(const e of (_estByObjId[o.id]||[])){ for(const [k,r] of Object.entries(e.rows||{})){ const q=Number(r?.qty||0); if(!q) continue; const w=lk.get(k); if(w)c+=rowCostPerUnit(r,w)*q; } } return c; };
-        const objectsThisMonth = objects.filter(o=>_inMonth(o.updatedAt||o.createdAt||0));
+        const objectsThisMonth = liveObjects.filter(o=>_inMonth(o.updatedAt||o.createdAt||0));
         const objectsWithSum = objectsThisMonth.filter(o=>_objVal(o)>0);
         const totalSumMonth = objectsWithSum.reduce((s,o)=>s+_objVal(o), 0);
         const signedMonth = objectsThisMonth.filter(o=>o.status==="signed"&&_objVal(o)>0);
@@ -5598,12 +5603,12 @@ export default function App() {
         const signedCostMonth = signedMonth.reduce((s,o)=>s+_objCost(o), 0);
         const profitMonth = signedRevMonth - signedCostMonth;
         const marginMonth = signedRevMonth>0 ? Math.round(profitMonth/signedRevMonth*100) : 0;
-        const approvalObjs = objects.filter(o=>o.status==="approval");
-        const signedObjs = objects.filter(o=>o.status==="signed");
+        const approvalObjs = liveObjects.filter(o=>o.status==="approval");
+        const signedObjs = liveObjects.filter(o=>o.status==="signed");
         const pipelineSum = approvalObjs.reduce((s,o)=>s+_objVal(o), 0);
         const now = Date.now();
         const staleObjs = approvalObjs.filter(o=>(now-(o.updatedAt||o.createdAt||0))>14*864e5);
-        const recentObjects = [...objects].sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0)).slice(0,6);
+        const recentObjects = [...liveObjects].sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0)).slice(0,6);
         const recentContracts = [...contracts].filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,5);
         const monthName = new Date().toLocaleDateString("ru-RU",{month:"long"});
         return (
@@ -5616,7 +5621,7 @@ export default function App() {
             <div style={{position:"relative",zIndex:1,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
               <div>
                 <div style={{fontSize:22,fontWeight:900,color:"#fff",letterSpacing:-.5,marginBottom:4,fontFamily:"'Poppins',sans-serif"}}>
-                  TitovStroy <span style={{opacity:.6,fontWeight:600}}>CRM</span>
+                  TitovStroy <span style={{opacity:.6,fontWeight:600}}>ERP</span>
                 </div>
                 <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>
                   {new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
@@ -5633,7 +5638,7 @@ export default function App() {
             {/* Мини-метрики в баннере */}
             <div style={{display:"flex",gap:24,marginTop:20,flexWrap:"wrap"}}>
               {[
-                {label:"Объектов всего",  val:objects.length},
+                {label:"Объектов всего",  val:liveObjects.length},
                 {label:"В согласовании", val:approvalObjs.length},
                 {label:"Договоров",       val:signedObjs.length},
               ].map((m,i)=>(
@@ -5653,7 +5658,7 @@ export default function App() {
               {label:"Прибыль за "+monthName, value:fmt(Math.round(profitMonth))+" ₸", sub:"по подписанным", icon:"📈", accent:profitMonth>0?"#059669":"#ef4444"},
               {label:"Маржа за "+monthName, value:marginMonth+"%", sub:"рентабельность", icon:"🎯", accent:marginMonth>=35?"#059669":marginMonth>=20?"#d97706":"#ef4444"},
               {label:"Пайплайн (согласование)", value:fmt(Math.round(pipelineSum))+" ₸", sub:approvalObjs.length+" объектов", icon:"🔄", accent:"#d97706"},
-              {label:"Договоров подписано", value:signedObjs.length, sub:"из "+objects.length+" всего", icon:"✅", accent:"#059669"},
+              {label:"Договоров подписано", value:signedObjs.length, sub:"из "+liveObjects.length+" всего", icon:"✅", accent:"#059669"},
             ].map((s,i)=>(
               <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden"}}
                 onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
@@ -5704,10 +5709,10 @@ export default function App() {
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:16,marginBottom:24}}>
 
             {/* Воронка по статусам */}
-            {objects.length>0&&(()=>{
-              const maxCount = Math.max(1,...DEAL_STATUSES.map(s=>objects.filter(o=>(o.status||"new")===s.key).length));
-              const signedCount = objects.filter(o=>o.status==="signed").length;
-              const nonArchive = objects.filter(o=>o.status!=="archive").length;
+            {liveObjects.length>0&&(()=>{
+              const maxCount = Math.max(1,...DEAL_STATUSES.map(s=>liveObjects.filter(o=>(o.status||"new")===s.key).length));
+              const signedCount = liveObjects.filter(o=>o.status==="signed").length;
+              const nonArchive = liveObjects.filter(o=>o.status!=="archive").length;
               const convToSigned = nonArchive>0?Math.round(signedCount/nonArchive*100):0;
               return (
                 <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:"20px 22px",boxShadow:"0 1px 3px rgba(15,23,42,.07),0 4px 12px rgba(15,23,42,.04)"}}>
@@ -5719,7 +5724,7 @@ export default function App() {
                   </div>
                   <div style={{display:"flex",flexDirection:"column",gap:10}}>
                     {DEAL_STATUSES.map(s=>{
-                      const list = objects.filter(o=>(o.status||"new")===s.key);
+                      const list = liveObjects.filter(o=>(o.status||"new")===s.key);
                       const sum = list.reduce((acc,o)=>acc+(_estByObjId[o.id]||[]).reduce((ss,e)=>ss+(e.total||0),0),0);
                       const w = Math.round((list.length/maxCount)*100);
                       return (
@@ -7207,6 +7212,7 @@ export default function App() {
           .filter(t=>!finFilterAccount || t.account===finFilterAccount || t.accountTo===finFilterAccount)
           .filter(t=>finAmtMin===""||(Number(t.amount)||0)>=Number(finAmtMin))
           .filter(t=>finAmtMax===""||(Number(t.amount)||0)<=Number(finAmtMax))
+          .filter(t=>!finFilterCategory || t.category===finFilterCategory)
           .filter(t=>!fq || [t.category,t.subcategory,t.note,t.contractNo,t.account].some(v=>v&&String(v).toLowerCase().includes(fq)))
           .sort((a,b)=>(b.date||b.createdAt||0)-(a.date||a.createdAt||0));
 
@@ -7838,6 +7844,14 @@ export default function App() {
                 <select className="fi" style={{width:"auto"}} value={finFilterAccount} onChange={e=>setFinFilterAccount(e.target.value)}>
                   <option value="">Все счета</option>{accounts.map(a=><option key={a.id} value={a.name}>{a.name}</option>)}
                 </select>
+                {(()=>{
+                  const cats = [...new Set(financeTx.filter(t=>!t.deletedAt && t.category).map(t=>t.category))].sort();
+                  return cats.length>0 ? (
+                    <select className="fi" style={{width:"auto"}} value={finFilterCategory} onChange={e=>setFinFilterCategory(e.target.value)}>
+                      <option value="">Все статьи</option>{cats.map(c=><option key={c} value={c}>{c}</option>)}
+                    </select>
+                  ) : null;
+                })()}
                 <input className="fi" type="number" placeholder="Сумма от" value={finAmtMin} onChange={e=>setFinAmtMin(e.target.value)} style={{width:110}}/>
                 <input className="fi" type="number" placeholder="до" value={finAmtMax} onChange={e=>setFinAmtMax(e.target.value)} style={{width:90}}/>
               </div>
@@ -8993,9 +9007,13 @@ export default function App() {
                   🕘 Бэкапы
                 </button>
               )}
-              {contractTab === "list" && currentUser.role !== "viewer" && (
-                <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:"",createdBy:currentUser.name,createdById:currentUser.id}); setContractTab("editor"); }}>+ Новый</button>
-              )}
+              {contractTab === "list" && (()=>{
+                const trashedCount = contracts.filter(c=>c.deletedAt).length;
+                return (<>
+                  {trashedCount>0 && <button onClick={()=>setContractTab("trash")} style={{background:"rgba(220,38,38,.12)",color:"#ef4444",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"8px 13px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>🗑 Корзина ({trashedCount})</button>}
+                  {currentUser.role !== "viewer" && <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:"",createdBy:currentUser.name,createdById:currentUser.id}); setContractTab("editor"); }}>+ Новый</button>}
+                </>);
+              })()}
             </div>
           </div>
 
@@ -9038,8 +9056,8 @@ export default function App() {
                   contracts.forEach(c=>{ if(isChildType(c) && c.mainNumber && numMap[c.mainNumber]){ const pid=numMap[c.mainNumber].id; (childMap[pid]||(childMap[pid]=[])).push(c); } });
                   const childIds = new Set(Object.values(childMap).flat().map(c=>c.id));
                   const _objIds = new Set(objects.map(o=>o.id));
-                  // показываем договоры без объекта ИЛИ привязанные к несуществующему объекту (сироты)
-                  const roots = contracts.filter(c=>!childIds.has(c.id) && (!c.objectId || !_objIds.has(c.objectId)) && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus));
+                  // показываем договоры без объекта ИЛИ привязанные к несуществующему объекту (сироты), без удалённых
+                  const roots = contracts.filter(c=>!c.deletedAt && !childIds.has(c.id) && (!c.objectId || !_objIds.has(c.objectId)) && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus));
 
                   const renderContractCard = (c, isChild=false) => {
                     const client = contractClients.find(x=>x.id===c.clientId);
@@ -9083,7 +9101,7 @@ export default function App() {
                                   generateContractGDoc(c, cl, ca2);
                                 }} style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>
                                 {(currentUser.role==="admin" || (currentUser.role==="user" && c.createdBy===currentUser.name)) && (
-                                  <button onClick={e=>{e.stopPropagation(); if(window.confirm("Удалить документ?")) saveContracts(contractsRef.current.filter(x=>x.id!==c.id), {removedIds:[c.id], allowEmpty:true});}}
+                                  <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить в корзину?")) saveContracts(contractsRef.current.map(x=>x.id===c.id?{...x,deletedAt:Date.now()}:x));}}
                                     style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                                 )}
                               </div>
@@ -9101,6 +9119,44 @@ export default function App() {
                     </div>
                   ));
                 })()}
+              </div>
+            )}
+
+            {/* ── КОРЗИНА ДОГОВОРОВ ── */}
+            {contractTab === "trash" && (
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
+                  <button onClick={()=>setContractTab("list")} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:18,lineHeight:1,padding:"0 4px"}}>←</button>
+                  <span style={{fontWeight:700,fontSize:15,color:"#0f172a"}}>🗑 Корзина договоров</span>
+                </div>
+                {contracts.filter(c=>c.deletedAt).length===0 ? (
+                  <div style={{textAlign:"center",padding:"60px 0",color:"#94a3b8"}}>
+                    <div style={{fontSize:40,marginBottom:12}}>🗑</div>
+                    <div style={{fontWeight:700}}>Корзина пуста</div>
+                  </div>
+                ) : contracts.filter(c=>c.deletedAt).sort((a,b)=>b.deletedAt-a.deletedAt).map(c=>{
+                  const client = contractClients.find(x=>x.id===c.clientId);
+                  const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
+                  const TLABEL2 = {repair_fiz:"Договор",annex:"Приложение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронь"};
+                  const title = c.number ? `${TLABEL2[c.type||"repair_fiz"]||"Договор"} №${c.number}` : (TLABEL2[c.type||"repair_fiz"]||"Договор")+" (без номера)";
+                  return (
+                    <div key={c.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"14px 18px",opacity:.7}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <div>
+                          <div style={{fontWeight:700,fontSize:13,color:"#0f172a",textDecoration:"line-through"}}>{title}</div>
+                          <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{client?`👤 ${client.name}`:""} · Удалён {new Date(c.deletedAt).toLocaleDateString("ru-RU")}</div>
+                        </div>
+                        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                          <span style={{fontWeight:700,fontSize:14,color:"#64748b"}}>{fmt(total)} ₸</span>
+                          <button onClick={()=>saveContracts(contractsRef.current.map(x=>x.id===c.id?{...x,deletedAt:undefined}:x))}
+                            style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:5,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>↩ Восстановить</button>
+                          {currentUser.role==="admin" && <button onClick={()=>{ if(window.confirm("Удалить навсегда?")) saveContracts(contractsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
+                            style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✕ Удалить</button>}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
 
