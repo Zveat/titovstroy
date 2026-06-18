@@ -3361,8 +3361,8 @@ export default function App() {
   }, []);
 
   useEffect(() => { loadEstimates(); loadContracts(); }, []);
-  // Финансы грузим только для админа (данные чувствительные)
-  useEffect(() => { if (currentUser?.role === "admin") loadFinance(); }, [currentUser?.role, loadFinance]);
+  // Финансы грузим для админа и руководителя
+  useEffect(() => { if (currentUser?.role === "admin" || currentUser?.role === "manager") loadFinance(); }, [currentUser?.role, loadFinance]);
 
   // ── Сохранение списка смет с защитой от рассинхрона ──
   // opts.replace=true — записать ровно `list` (восстановление из бэкапа)
