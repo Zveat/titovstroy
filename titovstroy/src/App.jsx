@@ -5276,6 +5276,16 @@ export default function App() {
           .an-catrow{flex-wrap:wrap!important;row-gap:4px!important}
           .an-catrow .an-cat-name{flex:1 1 100%!important;white-space:normal!important;order:-1}
           .an-catrow>span:not(.an-cat-name){width:auto!important;flex:1!important;text-align:left!important;font-size:11px!important}
+          /* Финансы: карточки и сетки в одну колонку */
+          .fin-cards{grid-template-columns:1fr!important}
+          .fin-dash-cards{grid-template-columns:1fr!important}
+          .fin-tiles{grid-template-columns:1fr 1fr!important}
+          .fin-tabs{overflow-x:auto!important;flex-wrap:nowrap!important;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+          .fin-tabs button{flex:0 0 auto!important}
+          .fin-hero-stats{width:100%!important;justify-content:space-between!important;gap:14px!important}
+          .rep-wrap{max-height:calc(100vh - 280px)!important}
+          .rep-table{font-size:11.5px!important}
+          .rep-table th,.rep-table td{padding:7px 9px!important}
         }
         @media(max-width:380px){
           .kpi-grid{grid-template-columns:1fr!important}
@@ -7001,7 +7011,7 @@ export default function App() {
                   <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#fff"}}>💰 Финансы</h1>
                   <div style={{fontSize:13,color:"rgba(255,255,255,.75)",marginTop:4}}>Учёт доходов, расходов и движения денег</div>
                 </div>
-                <div style={{display:"flex",gap:24,alignItems:"flex-end",flexWrap:"wrap"}}>
+                <div className="fin-hero-stats" style={{display:"flex",gap:24,alignItems:"flex-end",flexWrap:"wrap"}}>
                   {(()=>{
                     const projIncH={};
                     for(const t of financeTx){ if(t.included===false)continue; const cn=(t.contractNo||"").trim(); if(!cn)continue; if(t.type==="income") projIncH[cn]=(projIncH[cn]||0)+(Number(t.amount)||0); }
@@ -7023,7 +7033,7 @@ export default function App() {
             </div>
 
             {/* Табы */}
-            <div style={{display:"flex",gap:6,marginBottom:18,flexWrap:"wrap"}}>
+            <div className="fin-tabs" style={{display:"flex",gap:6,marginBottom:18,flexWrap:"wrap"}}>
               {[["dashboard","📊 Дашборд"],["dds","💸 ДДС месяц"],["opu","📈 ОПУ месяц"],["balance","⚖️ Баланс"],["ops","📋 Операции"],["projects","🏗 Проекты"],["ref","⚙️ Справочник"]].map(([k,l])=>(
                 <button key={k} onClick={()=>setFinanceTab(k)} style={{fontSize:13,fontWeight:700,padding:"9px 16px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(financeTab===k?"#2563eb":"#e2e8f0"),background:financeTab===k?"#2563eb":"#fff",color:financeTab===k?"#fff":"#64748b"}}>{l}</button>
               ))}
@@ -7123,7 +7133,7 @@ export default function App() {
               return (
                 <div style={{marginBottom:20}}>
                   {/* ── Верхний ряд: 3 сводных карточки ── */}
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:16,marginBottom:16}}>
+                  <div className="fin-dash-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:16,marginBottom:16}}>
                     {/* Прибыль */}
                     <CardSection title="💎 Прибыль, ₸" accent="#2563eb">
                       <KpiRow label="Выручка (без авансов)" val={incSumNoAdv} color="#059669"/>
@@ -7583,7 +7593,7 @@ export default function App() {
                       ["Валовая прибыль",fM(totIncome-totExpense)+" ₸",(totIncome-totExpense)>=0?"#059669":"#dc2626","#f0fdf4"],
                       ["Маржа",totMargin+"%",totMargin>=30?"#059669":totMargin>=0?"#f59e0b":"#dc2626","#fffbeb"],
                     ];
-                    return <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:16}}>
+                    return <div className="fin-tiles" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:16}}>
                       {tiles.map(([l,v,c,bg])=>(
                         <div key={l} style={{background:bg,borderRadius:12,padding:"12px 14px",border:"1px solid "+c+"22"}}>
                           <div style={{fontSize:11,color:"#64748b",fontWeight:600,marginBottom:3}}>{l}</div>
@@ -7593,7 +7603,7 @@ export default function App() {
                     </div>;
                   })()}
                   {/* Карточки проектов */}
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(340px,1fr))",gap:12}}>
+                  <div className="fin-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(340px,1fr))",gap:12}}>
                     {filtered.map(p=>{
                       const st = projStats[p.contractNo]||{income:0,expense:0};
                       const income = st.income;
