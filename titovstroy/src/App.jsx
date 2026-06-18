@@ -342,11 +342,20 @@ const FINANCE_PROJECTS_KEY    = "titovstroy-finance-projects";   // массив
 // Справочник финансов по умолчанию (из исходной таблицы)
 const DEFAULT_FIN_META = {
   accounts: [
-    { id:"acc0", name:"Наличные",    opening:0 },
-    { id:"acc1", name:"KASPI Pay",   opening:0 },
-    { id:"acc2", name:"Учет займов", opening:0 },
-    { id:"acc3", name:"Лч Звеат",    opening:0 },
+    { id:"acc0", name:"Наличные",    opening:0, accType:"cash" },
+    { id:"acc1", name:"KASPI Pay",   opening:0, accType:"bank" },
+    { id:"acc2", name:"Учет займов", opening:0, accType:"bank" },
+    { id:"acc3", name:"Лч Звеат",    opening:0, accType:"card" },
   ],
+  // Реестр статей баланса (вводятся вручную) — основные средства, запасы, займы, кредиторка, капитал
+  balanceItems: {
+    inventory:0, collateral:0, loansGivenShort:0, transfersInTransit:0,
+    faTechnika:0, faMebel:0, faInventar:0, faOborud:0, faTransport:0,
+    loansGivenLong:0, financialInvest:0, intangibles:0,
+    payablesMoney:0, payablesNonMoney:0, paymentsThirdParty:0, loansTakenShort:0,
+    creditsLong:0, loansTakenLong:0,
+    foundersContribution:0, otherCapital:0,
+  },
   income: [
     { cat:"Основные доходы", subs:["Оплата по договору (вторичка)","Оплата по договору (новостройки)","Оплата по договору  (коммерция)","Частичные работы, услуги"] },
     { cat:"Дополнительные доходы", subs:["Доп. работы по ходу ремонта","Закупка материалов (наценка)"] },
@@ -2601,6 +2610,75 @@ function DealEditor({ deal, clients, contragents, estimate, onUpdate, onBack, on
         </div>
       </div>
       <div style={{fontSize:10,color:"#94a3b8",textAlign:"center"}}>✓ Сохраняется автоматически</div>
+    </div>
+  );
+}
+
+// ── Балансовый отчёт (Statement of Financial Position) ──
+function BalanceSheet({ assetsSections, liabSections, capitalSection, totalAssets, totalLiab, totalCapital }) {
+  const bf = n => new Intl.NumberFormat("ru-RU").format(Math.round(n||0));
+  const [collapsed, setCollapsed] = useState(()=>new Set());
+  const toggle = k => setCollapsed(s=>{ const n=new Set(s); n.has(k)?n.delete(k):n.add(k); return n; });
+
+  const Node = ({ node, depth }) => {
+    const kids = node.children||[];
+    const has = kids.length>0;
+    const open = !collapsed.has(node.key);
+    const isSection = depth===0;
+    return (
+      <>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,
+          padding:isSection?"9px 0 5px":"4px 0",
+          borderBottom:isSection?"none":"1px solid #f4f6f9"}}>
+          <span style={{display:"flex",alignItems:"center",gap:7,paddingLeft:depth*18,minWidth:0}}>
+            {has ? <button onClick={()=>toggle(node.key)} style={{flexShrink:0,width:15,height:15,lineHeight:"13px",textAlign:"center",border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",color:"#64748b",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>{open?"−":"+"}</button>
+              : <span style={{width:15,flexShrink:0}}/>}
+            <span style={{fontSize:isSection?13.5:12.5,fontWeight:isSection?800:(depth===1?600:400),color:isSection?"#0f172a":(depth===1?"#334155":"#64748b"),overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{node.label}</span>
+          </span>
+          <span style={{fontSize:isSection?13.5:12.5,fontWeight:isSection?800:(depth===1?700:500),color:isSection?"#0f172a":"#475569",whiteSpace:"nowrap"}}>{bf(node.value)}</span>
+        </div>
+        {has && open && kids.map(c=><Node key={c.key} node={c} depth={depth+1}/>)}
+      </>
+    );
+  };
+
+  const Bar = ({ left, right, bg, color }) => (
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:bg,color,padding:"12px 16px",fontWeight:800,fontSize:14}}>
+      <span>{left}</span><span>{bf(right)}</span>
+    </div>
+  );
+
+  return (
+    <div style={{border:"1px solid #e2e8f0",borderRadius:14,overflow:"hidden",background:"#fff"}}>
+      <div style={{textAlign:"center",fontSize:12.5,fontWeight:700,color:"#64748b",padding:"12px 0 4px"}}>Активы = Обязательства + Капитал</div>
+      <div className="bal-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:0}}>
+        {/* Заголовки-бары */}
+        <div style={{borderRight:"1px solid #eef2f7"}}><Bar left="" right={totalAssets} bg="#5b9bb0" color="#fff"/></div>
+        <div style={{display:"flex"}}>
+          <div style={{flex:1}}><Bar left="" right={totalLiab} bg="#e08a7d" color="#fff"/></div>
+          <div style={{flex:1.6}}><Bar left="" right={totalCapital} bg="#3a4759" color="#fff"/></div>
+        </div>
+        {/* ЛЕВО: Активы */}
+        <div style={{padding:"14px 18px",borderRight:"1px solid #eef2f7",minWidth:0}}>
+          {assetsSections.map(s=><Node key={s.key} node={s} depth={0}/>)}
+          <div style={{marginTop:14,paddingTop:12,borderTop:"2px solid #5b9bb0",display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:15,color:"#0f766e"}}>
+            <span>Итого активы</span><span>{bf(totalAssets)}</span>
+          </div>
+        </div>
+        {/* ПРАВО: Обязательства + Капитал */}
+        <div style={{padding:"14px 18px",minWidth:0}}>
+          {liabSections.map(s=><Node key={s.key} node={s} depth={0}/>)}
+          <div style={{marginTop:14,paddingTop:12,borderTop:"2px solid #e08a7d",display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:15,color:"#dc2626"}}>
+            <span>Итого обязательства</span><span>{bf(totalLiab)}</span>
+          </div>
+          <div style={{marginTop:18}}>
+            <Node node={capitalSection} depth={0}/>
+          </div>
+          <div style={{marginTop:14,paddingTop:12,borderTop:"2px solid #3a4759",display:"flex",justifyContent:"space-between",fontWeight:900,fontSize:15,color:"#0f172a"}}>
+            <span>Обязательства + Капитал</span><span>{bf(totalLiab+totalCapital)}</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -5280,6 +5358,8 @@ export default function App() {
           .fin-cards{grid-template-columns:1fr!important}
           .fin-dash-cards{grid-template-columns:1fr!important}
           .fin-tiles{grid-template-columns:1fr 1fr!important}
+          .bal-grid{grid-template-columns:1fr!important}
+          .bal-grid>div{border-right:none!important}
           .fin-tabs{overflow-x:auto!important;flex-wrap:nowrap!important;-webkit-overflow-scrolling:touch;padding-bottom:4px}
           .fin-tabs button{flex:0 0 auto!important}
           .fin-hero-stats{width:100%!important;justify-content:space-between!important;gap:14px!important}
@@ -7440,60 +7520,122 @@ export default function App() {
 
             {/* ───── БАЛАНС (IFRS / Statement of Financial Position) ───── */}
             {financeTab==="balance" && (()=>{
+              const bi = financeMeta.balanceItems || {};
+              const n = v => Number(v)||0;
               // приход по проектам (для дебиторки)
               const projInc={};
               for(const t of financeTx){ if(t.included===false)continue; const cn=(t.contractNo||"").trim(); if(!cn)continue; if(t.type==="income") projInc[cn]=(projInc[cn]||0)+(Number(t.amount)||0); }
-              // АКТИВЫ
-              const cash = totalBalance;
-              const receivables = finProjects
-                .filter(p=>(p.rawStatus||p.status)!=="отменен")
-                .reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projInc[p.contractNo]||0)),0);
-              const assets = cash + receivables;
-              // ОБЯЗАТЕЛЬСТВА
+              // ── Денежные средства по типам счетов ──
+              const byType = { cash:0, bank:0, card:0, ewallet:0 };
+              accounts.forEach(a=>{ const tp=a.accType||"bank"; byType[tp]=(byType[tp]||0)+(balances[a.name]||0); });
+              const cash = byType.cash+byType.bank+byType.card+byType.ewallet;
+              // Дебиторка (неденежная — клиенты должны по проектам)
+              const receivablesNonMoney = finProjects.filter(p=>(p.rawStatus||p.status)!=="отменен").reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projInc[p.contractNo]||0)),0);
+              // Авансы клиентов (обязательство)
               const advances = financeTx.filter(t=>t.included!==false&&t.type==="income"&&t.isAdvance).reduce((s,t)=>s+(Number(t.amount)||0),0);
-              const liabilities = advances;
-              // КАПИТАЛ (нетто-активы; нераспределённая прибыль — балансирующая статья)
-              const capital0 = accounts.reduce((s,a)=>s+(Number(a.opening)||0),0);
-              const equity = assets - liabilities;
-              const retained = equity - capital0;
-              const Row=({label,val,color,bold,indent,note})=>(
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:12,padding:bold?"9px 0":"5px 0",borderBottom:"1px solid #f1f5f9"}}>
-                  <span style={{fontSize:bold?13.5:12.5,fontWeight:bold?800:500,color:color||(bold?"#0f172a":"#475569"),paddingLeft:indent?16:0}}>{label}{note&&<span style={{display:"block",fontSize:10.5,color:"#94a3b8",fontWeight:400,paddingLeft:indent?16:0}}>{note}</span>}</span>
-                  <span style={{fontSize:bold?14:13,fontWeight:bold?800:600,color:color||"#0f172a",whiteSpace:"nowrap"}}>{fM(val)} ₸</span>
-                </div>
-              );
+
+              // ── АКТИВЫ ──
+              const recv = receivablesNonMoney;
+              const otherCurrent = n(bi.collateral)+n(bi.loansGivenShort)+n(bi.transfersInTransit);
+              const currentAssets = recv + cash + n(bi.inventory) + otherCurrent;
+              const fixedAssets = n(bi.faTechnika)+n(bi.faMebel)+n(bi.faInventar)+n(bi.faOborud)+n(bi.faTransport);
+              const otherNonCurrent = n(bi.loansGivenLong)+n(bi.financialInvest)+n(bi.intangibles);
+              const nonCurrentAssets = fixedAssets + otherNonCurrent;
+              const totalAssets = currentAssets + nonCurrentAssets;
+
+              // ── ОБЯЗАТЕЛЬСТВА ──
+              const payables = n(bi.payablesMoney)+n(bi.payablesNonMoney);
+              const otherShort = n(bi.paymentsThirdParty)+n(bi.loansTakenShort)+advances;
+              const shortLiab = payables + otherShort;
+              const longLiab = n(bi.creditsLong)+n(bi.loansTakenLong);
+              const totalLiab = shortLiab + longLiab;
+
+              // ── КАПИТАЛ ── (нераспределённая прибыль = балансирующая статья)
+              const founders = n(bi.foundersContribution) || accounts.reduce((s,a)=>s+(Number(a.opening)||0),0);
+              const otherCap = n(bi.otherCapital);
+              const retained = totalAssets - totalLiab - founders - otherCap;
+              const totalCapital = founders + otherCap + retained;
+
+              const assetsSections = [
+                { key:"ca", label:"Оборотные активы", value:currentAssets, children:[
+                  { key:"recv", label:"Дебиторская задолженность", value:recv, children:[
+                    { key:"recv-m", label:"Денежная", value:0 },
+                    { key:"recv-n", label:"Неденежная", value:recv },
+                  ]},
+                  { key:"cash", label:"Денежные средства", value:cash, children:[
+                    { key:"cash-c", label:"Наличные счета", value:byType.cash },
+                    { key:"cash-b", label:"Безналичные счета", value:byType.bank },
+                    { key:"cash-k", label:"Карты физлиц", value:byType.card },
+                    { key:"cash-e", label:"Электронные счета", value:byType.ewallet },
+                  ]},
+                  { key:"inv", label:"Запасы", value:n(bi.inventory) },
+                  { key:"oc", label:"Другие оборотные", value:otherCurrent, children:[
+                    { key:"oc-col", label:"Залоговые платежи", value:n(bi.collateral) },
+                    { key:"oc-l", label:"Выданные займы (до 1 года)", value:n(bi.loansGivenShort) },
+                    { key:"oc-tr", label:"Отправленные платежи (перемещения)", value:n(bi.transfersInTransit) },
+                  ]},
+                ]},
+                { key:"nca", label:"Внеоборотные активы", value:nonCurrentAssets, children:[
+                  { key:"fa", label:"Основные средства", value:fixedAssets, children:[
+                    { key:"fa-t", label:"Техника", value:n(bi.faTechnika) },
+                    { key:"fa-m", label:"Мебель", value:n(bi.faMebel) },
+                    { key:"fa-i", label:"Инвентарь", value:n(bi.faInventar) },
+                    { key:"fa-o", label:"Оборудование", value:n(bi.faOborud) },
+                    { key:"fa-tr", label:"Транспорт", value:n(bi.faTransport) },
+                  ]},
+                  { key:"onc", label:"Другие внеоборотные", value:otherNonCurrent, children:[
+                    { key:"onc-l", label:"Выданные займы (от 1 года)", value:n(bi.loansGivenLong) },
+                    { key:"onc-f", label:"Финансовые вложения", value:n(bi.financialInvest) },
+                    { key:"onc-i", label:"Нематериальные активы", value:n(bi.intangibles) },
+                  ]},
+                ]},
+              ];
+              const liabSections = [
+                { key:"sl", label:"Краткосрочные обязательства", value:shortLiab, children:[
+                  { key:"pay", label:"Кредиторская задолженность", value:payables, children:[
+                    { key:"pay-m", label:"Денежная", value:n(bi.payablesMoney) },
+                    { key:"pay-n", label:"Неденежная", value:n(bi.payablesNonMoney) },
+                  ]},
+                  { key:"os", label:"Другие краткосрочные", value:otherShort, children:[
+                    { key:"os-adv", label:"Авансы клиентов (предоплата)", value:advances },
+                    { key:"os-3", label:"Платежи третьим лицам", value:n(bi.paymentsThirdParty) },
+                    { key:"os-l", label:"Полученные займы (до 1 года)", value:n(bi.loansTakenShort) },
+                  ]},
+                ]},
+                { key:"ll", label:"Долгосрочные обязательства", value:longLiab, children:[
+                  { key:"ll-c", label:"Кредиты", value:n(bi.creditsLong) },
+                  { key:"ll-o", label:"Другие долгосрочные", value:n(bi.loansTakenLong), children:[
+                    { key:"ll-o-l", label:"Полученные займы (от 1 года)", value:n(bi.loansTakenLong) },
+                  ]},
+                ]},
+              ];
+              const capitalSection = { key:"cap", label:"Капитал", value:totalCapital, children:[
+                { key:"cap-f", label:"Вложения учредителей", value:founders },
+                { key:"cap-r", label:"Нераспределённая прибыль", value:retained },
+                { key:"cap-o", label:"Другие статьи капитала", value:otherCap },
+              ]};
+
+              const diff = totalAssets - (totalLiab + totalCapital);
               return (
                 <div className="card" style={{padding:"20px 22px",width:"100%",boxSizing:"border-box"}}>
-                  <div style={{fontSize:15,fontWeight:800,color:"#0f172a",marginBottom:4}}>⚖️ Бухгалтерский баланс (Statement of Financial Position)</div>
-                  <div style={{fontSize:12,color:"#94a3b8",marginBottom:18}}>Управленческий баланс по структуре IFRS на текущую дату · Активы = Обязательства + Капитал</div>
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:18}}>
-                    {/* АКТИВЫ */}
-                    <div style={{border:"1px solid #e2e8f0",borderRadius:12,padding:"14px 16px"}}>
-                      <div style={{fontSize:13,fontWeight:900,color:"#0891b2",marginBottom:8,letterSpacing:.3}}>АКТИВЫ</div>
-                      <div style={{fontSize:11,fontWeight:700,color:"#64748b",margin:"8px 0 2px"}}>Оборотные активы</div>
-                      <Row label="Денежные средства на счетах" val={cash} indent note="остаток по всем счетам"/>
-                      <Row label="Дебиторская задолженность" val={receivables} indent note="клиенты должны по проектам (стоимость − оплачено)"/>
-                      <div style={{marginTop:8}}><Row label="ИТОГО АКТИВЫ" val={assets} color="#0891b2" bold/></div>
-                    </div>
-                    {/* ПАССИВЫ */}
-                    <div style={{border:"1px solid #e2e8f0",borderRadius:12,padding:"14px 16px"}}>
-                      <div style={{fontSize:13,fontWeight:900,color:"#d97706",marginBottom:8,letterSpacing:.3}}>ПАССИВЫ (Обязательства + Капитал)</div>
-                      <div style={{fontSize:11,fontWeight:700,color:"#64748b",margin:"8px 0 2px"}}>Обязательства</div>
-                      <Row label="Авансы полученные от клиентов" val={advances} indent note="предоплата за невыполненные работы"/>
-                      <Row label="Итого обязательства" val={liabilities} color="#d97706" bold/>
-                      <div style={{fontSize:11,fontWeight:700,color:"#64748b",margin:"12px 0 2px"}}>Капитал</div>
-                      <Row label="Начальный капитал" val={capital0} indent note="вклад учредителей (остатки на старте)"/>
-                      <Row label="Нераспределённая прибыль" val={retained} indent note="накопленная прибыль за всё время"/>
-                      <Row label="Итого капитал" val={equity} color="#2563eb" bold/>
-                      <div style={{marginTop:8}}><Row label="ИТОГО ПАССИВЫ" val={liabilities+equity} color="#d97706" bold/></div>
-                    </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+                    <div style={{fontSize:15,fontWeight:800,color:"#0f172a"}}>⚖️ Балансовый отчёт</div>
+                    <span style={{fontSize:10.5,fontWeight:700,color:"#64748b",background:"#f1f5f9",borderRadius:6,padding:"2px 8px"}}>KZT</span>
                   </div>
-                  {/* Проверка баланса */}
-                  <div style={{marginTop:16,padding:"12px 16px",borderRadius:10,background:Math.abs(assets-(liabilities+equity))<1?"#f0fdf4":"#fef2f2",border:"1px solid "+(Math.abs(assets-(liabilities+equity))<1?"#bbf7d0":"#fecaca"),display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
-                    <span style={{fontSize:12.5,fontWeight:700,color:Math.abs(assets-(liabilities+equity))<1?"#059669":"#dc2626"}}>{Math.abs(assets-(liabilities+equity))<1?"✓ Баланс сходится":"⚠ Баланс не сходится"}: Активы {fM(assets)} = Пассивы {fM(liabilities+equity)}</span>
+                  <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>Управленческий баланс (IFRS) на текущую дату · нераспределённая прибыль — балансирующая статья</div>
+                  <BalanceSheet
+                    assetsSections={assetsSections}
+                    liabSections={liabSections}
+                    capitalSection={capitalSection}
+                    totalAssets={totalAssets}
+                    totalLiab={totalLiab}
+                    totalCapital={totalCapital}
+                  />
+                  <div style={{marginTop:14,padding:"10px 14px",borderRadius:10,background:Math.abs(diff)<1?"#f0fdf4":"#fef2f2",border:"1px solid "+(Math.abs(diff)<1?"#bbf7d0":"#fecaca")}}>
+                    <span style={{fontSize:12.5,fontWeight:700,color:Math.abs(diff)<1?"#059669":"#dc2626"}}>{Math.abs(diff)<1?"✓ Баланс сходится":"⚠ Расхождение "+fM(diff)+" ₸"}: Активы {fM(totalAssets)} = Обязательства+Капитал {fM(totalLiab+totalCapital)}</span>
                   </div>
-                  <div style={{marginTop:12,fontSize:11,color:"#94a3b8",lineHeight:1.6}}>
-                    Нераспределённая прибыль рассчитана как балансирующая статья (Капитал = Активы − Обязательства). Это упрощённый управленческий баланс: не учитывает кредиторскую задолженность перед поставщиками и основные средства, если они не заведены в учёт.
+                  <div style={{marginTop:10,fontSize:11,color:"#94a3b8",lineHeight:1.6}}>
+                    Денежные средства разбиты по типам счетов (задаётся в Справочнике). Основные средства, запасы, займы и кредиторку вводите вручную в Справочнике → «Статьи баланса». Дебиторка — автоматически по проектам (стоимость − оплачено), авансы клиентов — из операций с флагом «Аванс».
                   </div>
                 </div>
               );
@@ -7829,18 +7971,49 @@ export default function App() {
                   <div className="card" style={{padding:"18px 20px"}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
                       <div style={{fontSize:14,fontWeight:800,color:"#0f172a"}}>💳 Счета</div>
-                      <button onClick={()=>upd({...meta,accounts:[...meta.accounts,{id:genId(),name:"Новый счёт",opening:0}]})} style={{background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Счёт</button>
+                      <button onClick={()=>upd({...meta,accounts:[...meta.accounts,{id:genId(),name:"Новый счёт",opening:0,accType:"bank"}]})} style={{background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Счёт</button>
                     </div>
                     {meta.accounts.map((a,i)=>(
                       <div key={a.id} style={{display:"flex",gap:8,alignItems:"center",marginBottom:8,flexWrap:"wrap"}}>
-                        <input className="fi" style={{flex:"1 1 160px"}} value={a.name} onChange={e=>{const acc=[...meta.accounts];acc[i]={...a,name:e.target.value};upd({...meta,accounts:acc});}}/>
+                        <input className="fi" style={{flex:"1 1 140px"}} value={a.name} onChange={e=>{const acc=[...meta.accounts];acc[i]={...a,name:e.target.value};upd({...meta,accounts:acc});}}/>
+                        <select className="fi" style={{width:"auto",minWidth:130}} value={a.accType||"bank"} onChange={e=>{const acc=[...meta.accounts];acc[i]={...a,accType:e.target.value};upd({...meta,accounts:acc});}}>
+                          {[["cash","Наличные"],["bank","Безналичные"],["card","Карта физлица"],["ewallet","Электронный"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                        </select>
                         <div style={{display:"flex",alignItems:"center",gap:6}}>
                           <span style={{fontSize:11,color:"#94a3b8"}}>остаток на начало</span>
-                          <input className="fi" type="number" style={{width:120}} value={a.opening} onChange={e=>{const acc=[...meta.accounts];acc[i]={...a,opening:Number(e.target.value)||0};upd({...meta,accounts:acc});}}/>
+                          <input className="fi" type="number" style={{width:110}} value={a.opening} onChange={e=>{const acc=[...meta.accounts];acc[i]={...a,opening:Number(e.target.value)||0};upd({...meta,accounts:acc});}}/>
                         </div>
                         <button onClick={()=>{if(confirm("Удалить счёт «"+a.name+"»?")){upd({...meta,accounts:meta.accounts.filter(x=>x.id!==a.id)});}}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:16}}>✕</button>
                       </div>
                     ))}
+                  </div>
+                  {/* Статьи баланса (вводятся вручную) */}
+                  <div className="card" style={{padding:"18px 20px"}}>
+                    <div style={{fontSize:14,fontWeight:800,color:"#0f172a",marginBottom:4}}>⚖️ Статьи баланса (ручной ввод)</div>
+                    <div style={{fontSize:11.5,color:"#94a3b8",marginBottom:14}}>Эти суммы попадают в Балансовый отчёт. Денежные средства и дебиторка считаются автоматически.</div>
+                    {(()=>{
+                      const bi = meta.balanceItems||{};
+                      const setBI = (k,v)=>upd({...meta,balanceItems:{...bi,[k]:Number(v)||0}});
+                      const groups=[
+                        ["Основные средства",[["faTechnika","Техника"],["faMebel","Мебель"],["faInventar","Инвентарь"],["faOborud","Оборудование"],["faTransport","Транспорт"]]],
+                        ["Прочие активы",[["inventory","Запасы"],["collateral","Залоговые платежи"],["loansGivenShort","Выданные займы (до 1 года)"],["loansGivenLong","Выданные займы (от 1 года)"],["financialInvest","Финансовые вложения"],["intangibles","Нематериальные активы"]]],
+                        ["Обязательства",[["payablesMoney","Кредиторская (денежная)"],["payablesNonMoney","Кредиторская (неденежная)"],["paymentsThirdParty","Платежи третьим лицам"],["loansTakenShort","Полученные займы (до 1 года)"],["creditsLong","Кредиты (долгосрочные)"],["loansTakenLong","Полученные займы (от 1 года)"]]],
+                        ["Капитал",[["foundersContribution","Вложения учредителей (0 = из остатков)"],["otherCapital","Другие статьи капитала"]]],
+                      ];
+                      return groups.map(([title,fields])=>(
+                        <div key={title} style={{marginBottom:14}}>
+                          <div style={{fontSize:12,fontWeight:700,color:"#475569",marginBottom:8}}>{title}</div>
+                          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8}}>
+                            {fields.map(([k,l])=>(
+                              <div key={k} style={{display:"flex",alignItems:"center",gap:8}}>
+                                <span style={{fontSize:11.5,color:"#64748b",flex:1,minWidth:0}}>{l}</span>
+                                <input className="fi" type="number" style={{width:120}} value={bi[k]||0} onChange={e=>setBI(k,e.target.value)}/>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ));
+                    })()}
                   </div>
                   {/* Категории доходов и расходов */}
                   {[["income","Доходы","#059669"],["expense","Расходы","#dc2626"]].map(([key,lbl,col])=>(
