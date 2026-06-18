@@ -360,14 +360,14 @@ const DEFAULT_FIN_META = {
     { cat:"Основные доходы", subs:["Оплата по договору (вторичка)","Оплата по договору (новостройки)","Оплата по договору  (коммерция)","Частичные работы, услуги"] },
     { cat:"Дополнительные доходы", subs:["Доп. работы по ходу ремонта","Закупка материалов (наценка)"] },
     { cat:"Скрытые/косвенные доходы", subs:["Кэшбэк и бонусы от поставщиков","Бонусы от субподрядчиков (наш %)","Услуги по доставке/подъёму"] },
-    { cat:"Финансирование (не выручка)", subs:["Полученный заём (до 1 года)","Полученный кредит (от 1 года)","Вклад учредителя"] },
+    { cat:"Финансирование (не выручка)", subs:["Полученный заём (до 1 года)","Полученный заём (от 1 года)","Полученный кредит (от 1 года)","Вклад учредителя"] },
     { cat:"Возврат займов и активов", subs:["Возврат займа выданного (кратк.)","Возврат займа выданного (долг.)","Возврат залогового платежа","Продажа / реализация запасов","Возврат фин. вложений"] },
   ],
   expense: [
     { cat:"Прямые расходы (COGS / себестоимость)", subs:["Зарплаты рабочих / подрядчиков","Аренда инструмента, спецтехника","Вывоз мусора, уборка","Логистика, доставка"] },
     { cat:"Косвенные расходы (OPEX / операционные)", subs:["Аренда офиса","ФОТ Директор по производству","ФОТ Управляющий партнер","ФОТ Прораб","Софт (IT, CRM)","Рекрутинг","Телефония, связь","Маркетинг бюджет контекст","Маркетинг бюджет таргет"] },
     { cat:"Финансовые расходы", subs:["КПН, ИПН","НДС 16%","Налог за сотрудников","Дивиденды учредителям"] },
-    { cat:"Финансовая деятельность (не расход)", subs:["Возврат займа (до 1 года)","Погашение кредита (от 1 года)","Возврат вклада учредителю"] },
+    { cat:"Финансовая деятельность (не расход)", subs:["Возврат займа (до 1 года)","Возврат займа (от 1 года)","Погашение кредита (от 1 года)","Возврат вклада учредителю"] },
     { cat:"Инвестиции (покупка активов)", subs:["Покупка: Техника","Покупка: Мебель","Покупка: Инвентарь","Покупка: Оборудование","Покупка: Транспорт"] },
     { cat:"Выданные займы и прочие активы", subs:["Выдан займ (до 1 года)","Выдан займ (от 1 года)","Залоговый платёж","Закуп запасов / материалов","Финансовые вложения (долг.)","НМА (нематериальные активы)"] },
   ],
@@ -382,6 +382,20 @@ const FA_SUB_MAP = { "Покупка: Техника":"faTechnika","Покупк
 // Маппинг подкатегорий C_ASSET_OUT / C_ASSET_INC → ключ баланса
 const ASSET_OUT_KEYS = { "Выдан займ (до 1 года)":"loansGivenShort","Выдан займ (от 1 года)":"loansGivenLong","Залоговый платёж":"collateral","Закуп запасов / материалов":"inventory","Финансовые вложения (долг.)":"financialInvest","НМА (нематериальные активы)":"intangibles" };
 const ASSET_INC_KEYS = { "Возврат займа выданного (кратк.)":"loansGivenShort","Возврат займа выданного (долг.)":"loansGivenLong","Возврат залогового платежа":"collateral","Продажа / реализация запасов":"inventory","Возврат фин. вложений":"financialInvest" };
+// Миграция: дописывает недостающие дефолтные категории/подкатегории в сохранённый meta (не трогая пользовательские)
+function mergeFinMeta(saved) {
+  const m = { ...saved };
+  ["income","expense"].forEach(key => {
+    const cur = Array.isArray(m[key]) ? [...m[key]] : [];
+    (DEFAULT_FIN_META[key]||[]).forEach(defCat => {
+      const ex = cur.find(c => c.cat === defCat.cat);
+      if (!ex) { cur.push({ cat: defCat.cat, subs: [...(defCat.subs||[])] }); }
+      else { const subs = Array.isArray(ex.subs) ? [...ex.subs] : []; (defCat.subs||[]).forEach(s => { if (!subs.includes(s)) subs.push(s); }); ex.subs = subs; }
+    });
+    m[key] = cur;
+  });
+  return m;
+}
 // {renames:{code:name}, catRenames:{"Черновые":"Новое"}, subRenames:{"Черновые|Демонтаж":"Снос"},
 //  hiddenCodes:[], hiddenSubs:["Черновые|Демонтаж"], hiddenCats:["Черновые"],
 //  custom:[{code,cat,sub,name,unit,tiers,fixedPrice}]}
@@ -3098,7 +3112,7 @@ export default function App() {
       if (tx.status === "found" && tx.value) { try { const p = JSON.parse(tx.value); if (Array.isArray(p)) { setFinanceTx(p); financeTxRef.current = p; } } catch {} }
       else if (tx.status === "empty") { setFinanceTx([]); financeTxRef.current = []; }
       else ok = false;
-      if (mt.status === "found" && mt.value) { try { const p = JSON.parse(mt.value); if (p && p.accounts) { setFinanceMeta(p); financeMetaRef.current = p; } } catch {} }
+      if (mt.status === "found" && mt.value) { try { const p = JSON.parse(mt.value); if (p && p.accounts) { const m = mergeFinMeta(p); setFinanceMeta(m); financeMetaRef.current = m; } } catch {} }
       if (pj.status === "found" && pj.value) { try { const p = JSON.parse(pj.value); if (Array.isArray(p)) { setFinProjects(p); finProjectsRef.current = p; } } catch {} }
       _financeLoaded.current = ok;
     } catch(e) { console.error(e); }
@@ -7566,6 +7580,7 @@ export default function App() {
               const subEq = (t,name) => t.subcategory===name;
               // полученные займы (до года) = получено − возвращено
               const autoLoanShort = sumTx(t=>t.type==="income"&&subEq(t,"Полученный заём (до 1 года)")) - sumTx(t=>t.type==="expense"&&subEq(t,"Возврат займа (до 1 года)"));
+              const autoLoanLong = sumTx(t=>t.type==="income"&&subEq(t,"Полученный заём (от 1 года)")) - sumTx(t=>t.type==="expense"&&subEq(t,"Возврат займа (от 1 года)"));
               const autoCreditLong = sumTx(t=>t.type==="income"&&subEq(t,"Полученный кредит (от 1 года)")) - sumTx(t=>t.type==="expense"&&subEq(t,"Погашение кредита (от 1 года)"));
               const autoFounders = sumTx(t=>t.type==="income"&&subEq(t,"Вклад учредителя")) - sumTx(t=>t.type==="expense"&&subEq(t,"Возврат вклада учредителю"));
               // покупка основных средств по типам (накопленные капвложения)
@@ -7599,7 +7614,7 @@ export default function App() {
               const otherShort = loansShort + advances;
               const shortLiab = payables + otherShort;
               const creditsLong = autoCreditLong;
-              const loansLong = 0;
+              const loansLong = autoLoanLong;
               const longLiab = creditsLong + loansLong;
               const totalLiab = shortLiab + longLiab;
 
@@ -7654,8 +7669,10 @@ export default function App() {
                   ]},
                 ]},
                 { key:"ll", label:"Долгосрочные обязательства", value:longLiab, children:[
-                  { key:"ll-c", label:"Кредиты (долгосрочные)", value:creditsLong },
-                  { key:"ll-o", label:"Другие долгосрочные", value:loansLong },
+                  { key:"ll-c", label:"Кредиты", value:creditsLong },
+                  { key:"ll-o", label:"Другие долгосрочные", value:loansLong, children:[
+                    { key:"ll-o-l", label:"Полученные займы (от 1 года)", value:loansLong },
+                  ]},
                 ]},
               ];
               const capitalSection = { key:"cap", label:"Капитал", value:totalCapital, children:[
