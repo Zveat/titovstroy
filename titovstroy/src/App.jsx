@@ -6943,9 +6943,23 @@ export default function App() {
                   <h1 style={{margin:0,fontSize:22,fontWeight:900,color:"#fff"}}>💰 Финансы</h1>
                   <div style={{fontSize:13,color:"rgba(255,255,255,.75)",marginTop:4}}>Учёт доходов, расходов и движения денег</div>
                 </div>
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:11,color:"rgba(255,255,255,.6)"}}>Всего на счетах</div>
-                  <div style={{fontSize:24,fontWeight:900,color:totalBalance>=0?"#34d399":"#f87171"}}>{fM(totalBalance)} ₸</div>
+                <div style={{display:"flex",gap:24,alignItems:"flex-end",flexWrap:"wrap"}}>
+                  {(()=>{
+                    const projIncH={};
+                    for(const t of financeTx){ if(t.included===false)continue; const cn=(t.contractNo||"").trim(); if(!cn)continue; if(t.type==="income") projIncH[cn]=(projIncH[cn]||0)+(Number(t.amount)||0); }
+                    const debtH = finProjects.filter(p=>(p.rawStatus||p.status)!=="отменен").reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projIncH[p.contractNo]||0)),0);
+                    return <>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:11,color:"rgba(255,255,255,.6)"}}>Дебиторка (по проектам)</div>
+                        <div style={{fontSize:20,fontWeight:900,color:"#fbbf24"}}>{fM(Math.round(debtH))} ₸</div>
+                      </div>
+                      <div style={{width:1,height:36,background:"rgba(255,255,255,.15)"}}/>
+                    </>;
+                  })()}
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:11,color:"rgba(255,255,255,.6)"}}>Всего на счетах</div>
+                    <div style={{fontSize:24,fontWeight:900,color:totalBalance>=0?"#34d399":"#f87171"}}>{fM(totalBalance)} ₸</div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -6972,13 +6986,15 @@ export default function App() {
 
             {/* ───── ДАШБОРД ───── */}
             {financeTab==="dashboard" && (()=>{
-              // ── Дивиденды ──
-              const divSum = periodTx.filter(t=>t.type==="expense"&&(t.subcategory||"").includes("Дивиденды")).reduce((s,t)=>s+(Number(t.amount)||0),0);
-              const netProfit = profit - 0; // profit уже = incomeSum − expenseSum; divs уже внутри expenseSum
+              // ── P&L (совпадает с ОПУ) ──
               const S_DIV="Дивиденды учредителям";
+              const divSum = periodTx.filter(t=>t.type==="expense"&&t.subcategory===S_DIV).reduce((s,t)=>s+(Number(t.amount)||0),0);
+              // Выручка без авансов (как в ОПУ)
+              const incSumNoAdv = periodTx.filter(t=>t.type==="income"&&!t.isAdvance).reduce((s,t)=>s+(Number(t.amount)||0),0);
+              // Расходы без дивидендов (как в ОПУ: net = income − cogs − opex − fin_no_div)
               const expNoDivSum = periodTx.filter(t=>t.type==="expense"&&t.subcategory!==S_DIV).reduce((s,t)=>s+(Number(t.amount)||0),0);
-              const netP = incomeSum - expNoDivSum - divSum; // чистая прибыль без дивидендов
-              const rentab = incomeSum>0?Math.round(netP/incomeSum*100):0;
+              const netP = incSumNoAdv - expNoDivSum;
+              const rentab = incSumNoAdv>0?Math.round(netP/incSumNoAdv*100):0;
 
               // ── Доходы по категориям объектов (для кругового) ──
               const incBySub = {};
@@ -7052,8 +7068,8 @@ export default function App() {
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:16,marginBottom:16}}>
                     {/* Прибыль */}
                     <CardSection title="💎 Прибыль, ₸" accent="#2563eb">
-                      <KpiRow label="Доходы" val={incomeSum} color="#059669"/>
-                      <KpiRow label="Расходы (все)" val={expenseSum} color="#dc2626"/>
+                      <KpiRow label="Выручка (без авансов)" val={incSumNoAdv} color="#059669"/>
+                      <KpiRow label="Расходы (без дивид.)" val={expNoDivSum} color="#dc2626"/>
                       <KpiRow label="Дивиденды" val={divSum} color="#d97706"/>
                       <KpiRow label="Чистая прибыль" val={netP} color={netP>=0?"#2563eb":"#dc2626"} bold big/>
                       <KpiRow label="Рентабельность" val={rentab+"%"} color={rentab>=0?"#7c3aed":"#dc2626"} bold/>
@@ -7502,11 +7518,11 @@ export default function App() {
                   {/* Итого-плитки */}
                   {filtered.length>0 && (()=>{
                     const tiles=[
-                      ["Бюджет",fM(totBudget)+" ₸","#0f172a","#f1f5f9"],
+                      ["Объём продаж",fM(totBudget)+" ₸","#0f172a","#f1f5f9"],
                       ["Оплачено факт",fM(totIncome)+" ₸","#059669","#f0fdf4"],
-                      ["Долг",totDebt>0?fM(totDebt)+" ₸":"—",totDebt>0?"#dc2626":"#94a3b8","#fef2f2"],
+                      ["Дебиторка",totDebt>0?fM(totDebt)+" ₸":"—",totDebt>0?"#dc2626":"#94a3b8","#fef2f2"],
                       ["Расходы",fM(totExpense)+" ₸","#dc2626","#fef2f2"],
-                      ["Прибыль",fM(totIncome-totExpense)+" ₸",(totIncome-totExpense)>=0?"#059669":"#dc2626","#f0fdf4"],
+                      ["Валовая прибыль",fM(totIncome-totExpense)+" ₸",(totIncome-totExpense)>=0?"#059669":"#dc2626","#f0fdf4"],
                       ["Маржа",totMargin+"%",totMargin>=30?"#059669":totMargin>=0?"#f59e0b":"#dc2626","#fffbeb"],
                     ];
                     return <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:16}}>
