@@ -2762,22 +2762,34 @@ export default function App() {
 
   // ── Связь фин-проектов с объектами (по номеру договора) ──
   const normCN = (s) => String(s||"").trim().toLowerCase().replace(/\s+/g,"");
-  // map: нормализованный № договора → { object, contract, planTotal }
+  // map: нормализованный № договора → { object, contract, planTotal, planCost, planMargin, planMarginPct }
   const contractLinkMap = useMemo(() => {
     const m = {};
-    // сумма смет по объекту (план)
-    const estByObj = {};
-    for (const e of estimates) { if (e.objectId) estByObj[e.objectId] = (estByObj[e.objectId]||0) + (Number(e.total)||0); }
+    // справочник для расчёта себестоимости сметы
+    const wl = new Map();
+    for (const w of getEffectiveCatalog()) { if(w?.name) wl.set(w.name,w); if(w?.code) wl.set(w.code,w); }
+    const estCostOf = (e) => {
+      let cost = 0;
+      for (const [key,r] of Object.entries(e.rows||{})) { const qty=Number(r?.qty||0); if(!qty) continue; const w=wl.get(key); if(w) cost+=rowCostPerUnit(r,w)*qty; }
+      return cost;
+    };
+    // агрегаты смет по объекту (план: выручка + себестоимость)
+    const estAgg = {}; // objectId -> {total, cost}
+    for (const e of estimates) { if(!e.objectId) continue; const a=estAgg[e.objectId]||(estAgg[e.objectId]={total:0,cost:0}); a.total+=Number(e.total)||0; a.cost+=estCostOf(e); }
     for (const c of contracts) {
       const num = normCN(c.number);
       if (!num) continue;
       const obj = c.objectId ? objects.find(o=>o.id===c.objectId) : null;
       const conTotal = (c.works||[]).reduce((s,w)=>s+((Number(w.quantity)||0)*(Number(w.price)||0)),0);
-      const planTotal = conTotal>0 ? conTotal : (obj ? (estByObj[obj.id]||0) : 0);
-      if (!m[num]) m[num] = { object:obj, contract:c, planTotal };
+      const agg = obj ? estAgg[obj.id] : null;
+      const planTotal = conTotal>0 ? conTotal : (agg ? agg.total : 0);
+      const planCost = agg ? agg.cost : 0;
+      const planMargin = planTotal>0 ? planTotal - planCost : 0;
+      const planMarginPct = planTotal>0 ? Math.round(planMargin/planTotal*100) : null;
+      if (!m[num]) m[num] = { object:obj, contract:c, planTotal, planCost, planMargin, planMarginPct };
     }
     return m;
-  }, [contracts, objects, estimates]);
+  }, [contracts, objects, estimates, catalogVersion]);
   const linkForContractNo = (cn) => contractLinkMap[normCN(cn)] || null;
   // открыть объект из финансов
   const openObjectFromFinance = (obj) => { if(!obj) return; setCurrentObject({...obj}); setObjectTab("workspace"); setScreen("objects"); };
@@ -2788,7 +2800,7 @@ export default function App() {
       id:"", contractNo: contract?.number||"",
       client: obj?.clientType==="юр" ? "Юр лицо" : "Физ лицо",
       category: obj?.objType || "Вторичка",
-      description: obj?.address || obj?.clientName || "",
+      description: [obj?.clientName, obj?.address, obj?.clientPhone].filter(Boolean).join(" | "),
       budget: conTotal||0,
       status:"активен", rawStatus:"в работе",
       createdAt: contract?.date || new Date().toISOString().slice(0,10),
@@ -7687,15 +7699,30 @@ export default function App() {
                           </div>
                           {/* показываем расчётные цифры если проект существует */}
                           {mp.id && (()=>{ const st=projStats[mp.contractNo]||{income:0,expense:0}; const debt=Math.max(0,(Number(mp.budget)||0)-st.income); const mrg=st.income>0?Math.round((st.income-st.expense)/st.income*100):null;
-                            const link=linkForContractNo(mp.contractNo); const plan=link?.planTotal||0; const dev=plan>0?(Number(mp.budget)||0)-plan:null;
-                            return <div style={{background:"#f8fafc",borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",gap:20,flexWrap:"wrap"}}>
-                              {plan>0&&<div><div style={{fontSize:10,color:"#94a3b8"}}>СМЕТА (ПЛАН)</div><div style={{fontWeight:800,color:"#2563eb"}}>{fM(plan)} ₸</div></div>}
-                              <div><div style={{fontSize:10,color:"#94a3b8"}}>ОПЛАЧЕНО ФАКТ</div><div style={{fontWeight:800,color:"#059669"}}>{fM(st.income)} ₸</div></div>
-                              <div><div style={{fontSize:10,color:"#94a3b8"}}>ДОЛГ</div><div style={{fontWeight:800,color:debt>0?"#dc2626":"#94a3b8"}}>{debt>0?fM(debt)+" ₸":"—"}</div></div>
-                              <div><div style={{fontSize:10,color:"#94a3b8"}}>РАСХОДЫ</div><div style={{fontWeight:800,color:"#dc2626"}}>{fM(st.expense)} ₸</div></div>
-                              <div><div style={{fontSize:10,color:"#94a3b8"}}>МАРЖА</div><div style={{fontWeight:800,color:mrg===null?"#94a3b8":mrg>=30?"#059669":mrg>=0?"#f59e0b":"#dc2626"}}>{mrg===null?"—":fM(st.income-st.expense)+" ₸ / "+mrg+"%"}</div></div>
-                              {dev!==null&&dev!==0&&<div><div style={{fontSize:10,color:"#94a3b8"}}>ОТКЛ. ОТ СМЕТЫ</div><div style={{fontWeight:800,color:dev>0?"#059669":"#dc2626"}}>{dev>0?"+":""}{fM(dev)} ₸</div></div>}
-                            </div>;
+                            const link=linkForContractNo(mp.contractNo); const plan=link?.planTotal||0; const pCost=link?.planCost||0; const pMrgPct=link?.planMarginPct;
+                            const Cell=({l,v,c})=><div><div style={{fontSize:10,color:"#94a3b8"}}>{l}</div><div style={{fontWeight:800,color:c}}>{v}</div></div>;
+                            return <>
+                              {/* ФАКТ (по ДДС) */}
+                              <div style={{background:"#f8fafc",borderRadius:10,padding:"10px 14px",marginBottom:plan>0?6:12}}>
+                                <div style={{fontSize:10,fontWeight:800,color:"#0f172a",marginBottom:6}}>📊 ФАКТ (по оплатам)</div>
+                                <div style={{display:"flex",gap:20,flexWrap:"wrap"}}>
+                                  <Cell l="ОПЛАЧЕНО" v={fM(st.income)+" ₸"} c="#059669"/>
+                                  <Cell l="ДОЛГ" v={debt>0?fM(debt)+" ₸":"—"} c={debt>0?"#dc2626":"#94a3b8"}/>
+                                  <Cell l="РАСХОДЫ" v={fM(st.expense)+" ₸"} c="#dc2626"/>
+                                  <Cell l="МАРЖА" v={mrg===null?"—":fM(st.income-st.expense)+" ₸ / "+mrg+"%"} c={mrg===null?"#94a3b8":mrg>=30?"#059669":mrg>=0?"#f59e0b":"#dc2626"}/>
+                                </div>
+                              </div>
+                              {/* ПЛАН (по смете) */}
+                              {plan>0 && <div style={{background:"#eff6ff",borderRadius:10,padding:"10px 14px",marginBottom:12,border:"1px solid #dbeafe"}}>
+                                <div style={{fontSize:10,fontWeight:800,color:"#1e40af",marginBottom:6}}>📐 ПЛАН (по смете объекта)</div>
+                                <div style={{display:"flex",gap:20,flexWrap:"wrap"}}>
+                                  <Cell l="ВЫРУЧКА" v={fM(plan)+" ₸"} c="#2563eb"/>
+                                  {pCost>0&&<Cell l="СЕБЕСТОИМОСТЬ" v={fM(pCost)+" ₸"} c="#dc2626"/>}
+                                  {pCost>0&&<Cell l="МАРЖА ПЛАН" v={fM(plan-pCost)+" ₸"+(pMrgPct!==null?" / "+pMrgPct+"%":"")} c={pMrgPct>=30?"#059669":pMrgPct>=0?"#f59e0b":"#dc2626"}/>}
+                                  <Cell l="ВЫПОЛНЕНО" v={plan>0?Math.round(st.income/plan*100)+"%":"—"} c="#7c3aed"/>
+                                </div>
+                              </div>}
+                            </>;
                           })()}
                           {/* Связь с объектом / выбор объекта */}
                           {(()=>{
