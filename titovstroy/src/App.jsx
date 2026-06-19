@@ -8336,7 +8336,7 @@ export default function App() {
               };
               return (
                 <div onClick={()=>{setFinCatOpen(false);setFinTxModal(null);}} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.55)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-                  <div onClick={e=>{e.stopPropagation();setFinCatOpen(false);}} style={{background:"#fff",borderRadius:16,padding:"22px 24px",width:"100%",maxWidth:440,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+                  <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:16,padding:"22px 24px",width:"100%",maxWidth:440,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
                       <h3 style={{margin:0,fontSize:17,fontWeight:800,color:"#0f172a"}}>{m.id?"Изменить":"Новая"} операция</h3>
                       <button onClick={()=>setFinTxModal(null)} style={{background:"none",border:"none",fontSize:20,color:"#94a3b8",cursor:"pointer"}}>✕</button>
@@ -8373,20 +8373,21 @@ export default function App() {
                           };
                           const displayVal = finCatSearch;
                           return (
-                            <div style={{position:"relative"}}>
+                            <div style={{position:"relative"}} onClick={e=>e.stopPropagation()}>
                               <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Статья</div>
                               <div style={{position:"relative",display:"flex",alignItems:"center"}}>
                                 <input className="fi" style={{paddingRight:28}} value={displayVal}
                                   onFocus={()=>setFinCatOpen(true)}
+                                  onBlur={()=>setTimeout(()=>setFinCatOpen(false),180)}
                                   onChange={e=>{ setFinCatSearch(e.target.value); setFinCatOpen(true); set("category",e.target.value); set("subcategory",""); }}
                                   placeholder="— начните вводить или выберите —"/>
-                                {displayVal && <span onClick={()=>{setFinCatSearch("");set("category","");set("subcategory","");setFinCatOpen(false);}} style={{position:"absolute",right:8,cursor:"pointer",color:"#94a3b8",fontSize:14,lineHeight:1}}>✕</span>}
+                                {displayVal && <span onMouseDown={e=>{e.preventDefault();setFinCatSearch("");set("category","");set("subcategory","");setFinCatOpen(false);}} style={{position:"absolute",right:8,cursor:"pointer",color:"#94a3b8",fontSize:14,lineHeight:1}}>✕</span>}
                               </div>
                               {finCatOpen && rows.length>0 && (
                                 <div style={{position:"absolute",zIndex:999,top:"100%",left:0,right:0,background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,.13)",maxHeight:260,overflowY:"auto",marginTop:2}}>
                                   {rows.map((r,i)=> r.kind==="header"
                                     ? <div key={i} style={{padding:"8px 14px 4px",fontSize:11,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:.5,background:"#f8fafc",borderBottom:"1px solid #f1f5f9",position:"sticky",top:0}}>{r.cat}</div>
-                                    : <div key={i} onClick={()=>selectItem(r.cat,r.sub)}
+                                    : <div key={i} onMouseDown={e=>{e.preventDefault();selectItem(r.cat,r.sub);}}
                                         style={{padding:"8px 14px 8px 24px",fontSize:13,color:"#0f172a",cursor:"pointer",transition:"background .1s",background: m.subcategory===r.sub&&m.category===r.cat ? "#eff6ff" : "transparent"}}
                                         onMouseEnter={e=>e.currentTarget.style.background="#f1f5f9"}
                                         onMouseLeave={e=>e.currentTarget.style.background=m.subcategory===r.sub&&m.category===r.cat?"#eff6ff":"transparent"}
