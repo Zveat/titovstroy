@@ -644,6 +644,7 @@ function PriceWorkCard({ w, initTiers, initFixed, onRename, onDelete }) {
 function AuditTab() {
   const [auditLog, setAuditLog] = useState([]);
   const [auditLoading, setAuditLoading] = useState(true);
+  const [filterSection, setFilterSection] = useState("");
   useEffect(()=>{
     (async()=>{
       setAuditLoading(true);
@@ -652,28 +653,67 @@ function AuditTab() {
       setAuditLoading(false);
     })();
   }, []);
-  const ACTION_ICONS = {"создал операцию":"➕","изменил операцию":"✏","удалил операцию":"🗑","создал объект":"🏗","удалил объект":"🗑","создал пользователя":"👤","изменил пользователя":"✏"};
+
+  const SECTION_META = {
+    finance_tx: { label:"Финансы",    color:"#059669", bg:"#d1fae5", icon:"💰" },
+    object:     { label:"Объекты",    color:"#2563eb", bg:"#dbeafe", icon:"🏗" },
+    contract:   { label:"Договора",   color:"#7c3aed", bg:"#ede9fe", icon:"📋" },
+    user:       { label:"Польз-ли",   color:"#d97706", bg:"#fef3c7", icon:"👤" },
+  };
+  const ACTION_META = {
+    "создал операцию":      { icon:"➕", color:"#059669" },
+    "изменил операцию":     { icon:"✏️", color:"#2563eb" },
+    "удалил операцию":      { icon:"🗑", color:"#dc2626" },
+    "создал объект":        { icon:"➕", color:"#059669" },
+    "изменил объект":       { icon:"✏️", color:"#2563eb" },
+    "удалил объект":        { icon:"🗑", color:"#dc2626" },
+    "восстановил объект":   { icon:"♻️", color:"#059669" },
+    "создал договор":       { icon:"➕", color:"#059669" },
+    "изменил договор":      { icon:"✏️", color:"#2563eb" },
+    "удалил договор":       { icon:"🗑", color:"#dc2626" },
+    "восстановил договор":  { icon:"♻️", color:"#059669" },
+    "создал пользователя":  { icon:"➕", color:"#059669" },
+    "изменил пользователя": { icon:"✏️", color:"#2563eb" },
+  };
+
+  const sections = [...new Set(auditLog.map(e=>e.entity).filter(Boolean))];
+  const filtered = filterSection ? auditLog.filter(e=>e.entity===filterSection) : auditLog;
+
   return (
     <div style={{display:"flex",flexDirection:"column",gap:6}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:8}}>
         <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>Журнал действий</div>
-        <div style={{fontSize:11,color:"#94a3b8"}}>Последние 500 событий</div>
+        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+          <button onClick={()=>setFilterSection("")} style={{fontSize:11,padding:"3px 10px",borderRadius:20,border:"1px solid #e2e8f0",background:filterSection===""?"#0f172a":"#f8fafc",color:filterSection===""?"#fff":"#64748b",cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Все</button>
+          {sections.map(s=>{ const m=SECTION_META[s]; if(!m) return null; return (
+            <button key={s} onClick={()=>setFilterSection(s===filterSection?"":s)} style={{fontSize:11,padding:"3px 10px",borderRadius:20,border:`1px solid ${m.color}40`,background:filterSection===s?m.color:m.bg,color:filterSection===s?"#fff":m.color,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>{m.icon} {m.label}</button>
+          );})}
+          <span style={{fontSize:11,color:"#94a3b8"}}>{filtered.length} событий</span>
+        </div>
       </div>
       {auditLoading && <div style={{color:"#94a3b8",textAlign:"center",padding:"30px 0"}}>Загрузка...</div>}
-      {!auditLoading && auditLog.length===0 && <div style={{color:"#94a3b8",textAlign:"center",padding:"30px 0"}}>Событий пока нет</div>}
-      {auditLog.map((e,i)=>(
-        <div key={i} style={{background:"#fff",border:"1px solid #f1f5f9",borderRadius:8,padding:"10px 14px",display:"flex",gap:12,alignItems:"flex-start"}}>
-          <span style={{fontSize:16,flexShrink:0,marginTop:1}}>{ACTION_ICONS[e.action]||"📝"}</span>
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{fontSize:12.5,color:"#0f172a",fontWeight:600}}><b style={{color:"#2563eb"}}>{e.by}</b> — {e.action}</div>
-            {e.detail&&<div style={{fontSize:11,color:"#64748b",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.detail}</div>}
+      {!auditLoading && filtered.length===0 && <div style={{color:"#94a3b8",textAlign:"center",padding:"30px 0"}}>Событий пока нет</div>}
+      {filtered.map((e,i)=>{
+        const sm = SECTION_META[e.entity]||{ label:e.entity||"—", color:"#64748b", bg:"#f1f5f9", icon:"📝" };
+        const am = ACTION_META[e.action]||{ icon:"📝", color:"#64748b" };
+        return (
+          <div key={i} style={{background:"#fff",border:"1px solid #f1f5f9",borderRadius:10,padding:"10px 14px",display:"flex",gap:10,alignItems:"flex-start"}}>
+            <div style={{width:34,height:34,borderRadius:8,background:sm.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{sm.icon}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:3}}>
+                <span style={{fontSize:10,fontWeight:700,color:sm.color,background:sm.bg,padding:"1px 7px",borderRadius:20,border:`1px solid ${sm.color}30`}}>{sm.label}</span>
+                <span style={{fontSize:12,fontWeight:700,color:am.color}}>{am.icon} {e.action}</span>
+              </div>
+              <div style={{fontSize:12,color:"#0f172a"}}><b style={{color:"#2563eb"}}>{e.by}</b>{e.detail ? <span style={{color:"#64748b",fontWeight:400}}> · {e.detail}</span> : null}</div>
+            </div>
+            <div style={{fontSize:11,color:"#94a3b8",whiteSpace:"nowrap",flexShrink:0,textAlign:"right"}}>
+              <div>{new Date(e.ts).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit"})}</div>
+              <div>{new Date(e.ts).toLocaleString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</div>
+            </div>
           </div>
-          <div style={{fontSize:11,color:"#94a3b8",whiteSpace:"nowrap",flexShrink:0}}>
-            {new Date(e.ts).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
-          </div>
-        </div>
-      ))}
-      {auditLog.length>0&&<button onClick={()=>downloadCSV("audit_"+new Date().toISOString().slice(0,10)+".csv",["Дата","Кто","Действие","Тип","ID","Детали"],auditLog.map(e=>[new Date(e.ts).toLocaleString("ru-RU"),e.by,e.action,e.entity||"",e.entityId||"",e.detail||""]))} style={{alignSelf:"flex-start",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⬇ Экспорт журнала</button>}
+        );
+      })}
+      {auditLog.length>0&&<button onClick={()=>downloadCSV("audit_"+new Date().toISOString().slice(0,10)+".csv",["Дата","Кто","Раздел","Действие","Детали"],auditLog.map(e=>[new Date(e.ts).toLocaleString("ru-RU"),e.by,SECTION_META[e.entity]?.label||e.entity||"",e.action,e.detail||""]))} style={{alignSelf:"flex-start",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⬇ Экспорт журнала</button>}
     </div>
   );
 }
@@ -2839,26 +2879,51 @@ export default function App() {
   // Руководитель по умолчанию попадает на финансы
   const [screen, setScreen] = useState(currentUser?.role==="manager" ? "finance" : "dashboard");
   const [navHistory, setNavHistory] = useState([]); // стек навигации для кнопки «Назад»
+
+  const _applyNavState = (s) => {
+    if (!s) return;
+    if (s.screen !== undefined) setScreen(s.screen);
+    if (s.financeTab !== undefined) setFinanceTab(s.financeTab);
+    setFinFilterCat(s.finFilterCat || "");
+    setFinFilterCategory(s.finFilterCategory || "");
+    setFinFilterContract(s.finFilterContract || "");
+  };
+
   const navigate = (newScreen, newFinTab, extraState = {}) => {
-    setNavHistory(h => [...h, { screen, financeTab, finFilterCat, finFilterCategory, finFilterContract }]);
+    const snapshot = { screen, financeTab, finFilterCat, finFilterCategory, finFilterContract };
+    setNavHistory(h => [...h, snapshot]);
+    // пушим в браузерную историю
+    try { window.history.pushState(snapshot, ""); } catch(e) {}
     if (newScreen !== undefined && newScreen !== screen) setScreen(newScreen);
     if (newFinTab !== undefined && newFinTab !== financeTab) setFinanceTab(newFinTab);
     if (extraState.finFilterCat !== undefined) setFinFilterCat(extraState.finFilterCat);
     if (extraState.finFilterCategory !== undefined) setFinFilterCategory(extraState.finFilterCategory);
     if (extraState.finFilterContract !== undefined) setFinFilterContract(extraState.finFilterContract);
   };
+
   const goBack = () => {
     setNavHistory(h => {
       if (!h.length) return h;
       const prev = h[h.length - 1];
-      setScreen(prev.screen);
-      setFinanceTab(prev.financeTab);
-      setFinFilterCat(prev.finFilterCat || "");
-      setFinFilterCategory(prev.finFilterCategory || "");
-      setFinFilterContract(prev.finFilterContract || "");
+      _applyNavState(prev);
       return h.slice(0, -1);
     });
   };
+
+  // Браузерная кнопка «Назад» — синхронизируем с нашим стеком
+  useEffect(() => {
+    const onPopState = (e) => {
+      if (e.state) {
+        _applyNavState(e.state);
+        setNavHistory(h => h.length > 0 ? h.slice(0, -1) : h);
+      } else {
+        goBack();
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Пользователи для выпадающего списка менеджеров
   const [allUsers, setAllUsers] = useState(DEFAULT_USERS);
@@ -8678,6 +8743,7 @@ export default function App() {
                 <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={async ()=>{
                   const newObj = {id:genId(),clientId:"",clientName:"",clientPhone:"",clientType:"физ",clientIin:"",clientDoc:"",address:"",objType:"Вторичка",area:"",status:"new",note:"",manager:currentUser.name,createdBy:currentUser.name,createdById:currentUser.id,createdAt:Date.now(),updatedAt:Date.now()};
                   await saveObjects([newObj, ...objectsRef.current]);
+                  writeAudit(currentUser,"создал объект","object",newObj.id,"Новый объект");
                   setCurrentObject(newObj);
                   setObjectTab("workspace");
                 }}>+ Новый объект</button>
@@ -8790,7 +8856,7 @@ export default function App() {
                       <div style={{textAlign:"right",flexShrink:0}}>
                         {total>0&&<div style={{fontWeight:800,fontSize:16,color:"#0f172a"}}>{fmt(total)} ₸</div>}
                         {(currentUser.role==="admin"||(currentUser.role==="user"&&obj.createdById===currentUser.id)) && (
-                          <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить объект в корзину?")){ saveObjects(objectsRef.current.map(x=>x.id===obj.id?{...x,deletedAt:Date.now()}:x)); writeAudit(currentUser,"удалил объект","object",obj.id,obj.clientName||obj.address||""); }}}
+                          <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить объект в корзину?")){ saveObjects(objectsRef.current.map(x=>x.id===obj.id?{...x,deletedAt:Date.now()}:x)); writeAudit(currentUser,"удалил объект","object",obj.id,obj.clientName||obj.address||obj.objType||""); }}}
                             title="В корзину (можно восстановить)" style={{marginTop:6,background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                         )}
                       </div>
@@ -9234,7 +9300,7 @@ export default function App() {
                                   generateContractGDoc(c, cl, ca2);
                                 }} style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>
                                 {(currentUser.role==="admin" || (currentUser.role==="user" && c.createdBy===currentUser.name)) && (
-                                  <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить в корзину?")) saveContracts(contractsRef.current.map(x=>x.id===c.id?{...x,deletedAt:Date.now()}:x));}}
+                                  <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить в корзину?")){ saveContracts(contractsRef.current.map(x=>x.id===c.id?{...x,deletedAt:Date.now()}:x)); writeAudit(currentUser,"удалил договор","contract",c.id,c.contractNo||c.objectName||""); }}}
                                     style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                                 )}
                               </div>
@@ -9309,8 +9375,10 @@ export default function App() {
                   setContractTab("list");
                 }}
                 onSave={async ()=>{
+                  const isNewContract = !contracts.find(x=>x.id===currentContract.id);
                   const list = contracts.filter(x=>x.id!==currentContract.id);
                   await saveContracts([...list, currentContract]);
+                  writeAudit(currentUser, isNewContract?"создал договор":"изменил договор", "contract", currentContract.id, currentContract.contractNo||currentContract.number||currentContract.objectName||"");
                   if (objectReturnId) {
                     const obj = objectsRef.current.find(x=>x.id===objectReturnId);
                     setObjectReturnId(null);
