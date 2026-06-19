@@ -2955,6 +2955,8 @@ export default function App() {
   const [finAmtMin, setFinAmtMin] = useState("");
   const [finAmtMax, setFinAmtMax] = useState("");
   const [finTxModal, setFinTxModal] = useState(null); // редактируемая/новая транзакция
+  const [finCatSearch, setFinCatSearch] = useState(""); // поиск в поле статьи
+  const [finCatOpen, setFinCatOpen] = useState(false);  // дропдаун статьи открыт
   const [finTxTrash, setFinTxTrash] = useState(false); // корзина операций
   const [finImportBusy, setFinImportBusy] = useState(false);
   const [finProjects, setFinProjects] = useState([]);
@@ -7230,8 +7232,8 @@ export default function App() {
         const TYPE_LABEL={income:"Доход",expense:"Расход",transfer:"Перевод"};
         const TYPE_COLOR={income:"#059669",expense:"#dc2626",transfer:"#7c3aed"};
 
-        const openNewTx = (type="income") => setFinTxModal({ id:null, type, date:new Date().toISOString().slice(0,10), amount:"", account:accounts[0]?.name||"", accountTo:accounts[1]?.name||"", category:"", subcategory:"", note:"", contractNo:"" });
-        const openEditTx = (t) => setFinTxModal({ ...t, date:new Date(t.date||t.createdAt||Date.now()).toISOString().slice(0,10) });
+        const openNewTx = (type="income") => { setFinCatSearch(""); setFinCatOpen(false); setFinTxModal({ id:null, type, date:new Date().toISOString().slice(0,10), amount:"", account:accounts[0]?.name||"", accountTo:accounts[1]?.name||"", category:"", subcategory:"", note:"", contractNo:"" }); };
+        const openEditTx = (t) => { setFinCatSearch(t.subcategory||t.category||""); setFinCatOpen(false); setFinTxModal({ ...t, date:new Date(t.date||t.createdAt||Date.now()).toISOString().slice(0,10) }); };
 
         return (
           <div className="page" style={{maxWidth:1600}}>
@@ -8333,8 +8335,8 @@ export default function App() {
                 setFinTxModal(null);
               };
               return (
-                <div onClick={()=>setFinTxModal(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.55)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-                  <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:16,padding:"22px 24px",width:"100%",maxWidth:440,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+                <div onClick={()=>{setFinCatOpen(false);setFinTxModal(null);}} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.55)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+                  <div onClick={e=>{e.stopPropagation();setFinCatOpen(false);}} style={{background:"#fff",borderRadius:16,padding:"22px 24px",width:"100%",maxWidth:440,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
                       <h3 style={{margin:0,fontSize:17,fontWeight:800,color:"#0f172a"}}>{m.id?"Изменить":"Новая"} операция</h3>
                       <button onClick={()=>setFinTxModal(null)} style={{background:"none",border:"none",fontSize:20,color:"#94a3b8",cursor:"pointer"}}>✕</button>
@@ -8353,14 +8355,48 @@ export default function App() {
                         <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>На счёт</div><select className="fi" value={m.accountTo} onChange={e=>set("accountTo",e.target.value)}>{financeMeta.accounts.map(a=><option key={a.id} value={a.name}>{a.name}</option>)}</select></div>
                       </>) : (<>
                         <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Счёт</div><select className="fi" value={m.account} onChange={e=>set("account",e.target.value)}>{financeMeta.accounts.map(a=><option key={a.id} value={a.name}>{a.name}</option>)}</select></div>
-                        <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Категория</div>
-                          <input className="fi" list="fin-cat-list" value={m.category} onChange={e=>{set("category",e.target.value);set("subcategory","");}} placeholder="— начните вводить —"/>
-                          <datalist id="fin-cat-list">{catSource.map((c,i)=><option key={i} value={c.cat}/>)}</datalist>
-                        </div>
-                        {subSource.length>0 && <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Подкатегория</div>
-                          <input className="fi" list="fin-sub-list" value={m.subcategory} onChange={e=>set("subcategory",e.target.value)} placeholder="— начните вводить —"/>
-                          <datalist id="fin-sub-list">{subSource.map((s,i)=><option key={i} value={s}/>)}</datalist>
-                        </div>}
+                        {(()=>{
+                          const q = finCatSearch.toLowerCase();
+                          // строим плоский список с заголовками категорий
+                          const rows = [];
+                          for (const grp of catSource) {
+                            const matchedSubs = grp.subs.filter(s => !q || s.toLowerCase().includes(q) || grp.cat.toLowerCase().includes(q));
+                            if (!matchedSubs.length && q && !grp.cat.toLowerCase().includes(q)) continue;
+                            rows.push({ kind:"header", cat:grp.cat });
+                            for (const s of matchedSubs) rows.push({ kind:"sub", cat:grp.cat, sub:s });
+                          }
+                          const selectItem = (cat, sub) => {
+                            set("category", cat);
+                            set("subcategory", sub||"");
+                            setFinCatSearch(sub||cat);
+                            setFinCatOpen(false);
+                          };
+                          const displayVal = finCatSearch;
+                          return (
+                            <div style={{position:"relative"}}>
+                              <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Статья</div>
+                              <div style={{position:"relative",display:"flex",alignItems:"center"}}>
+                                <input className="fi" style={{paddingRight:28}} value={displayVal}
+                                  onFocus={()=>setFinCatOpen(true)}
+                                  onChange={e=>{ setFinCatSearch(e.target.value); setFinCatOpen(true); set("category",e.target.value); set("subcategory",""); }}
+                                  placeholder="— начните вводить или выберите —"/>
+                                {displayVal && <span onClick={()=>{setFinCatSearch("");set("category","");set("subcategory","");setFinCatOpen(false);}} style={{position:"absolute",right:8,cursor:"pointer",color:"#94a3b8",fontSize:14,lineHeight:1}}>✕</span>}
+                              </div>
+                              {finCatOpen && rows.length>0 && (
+                                <div style={{position:"absolute",zIndex:999,top:"100%",left:0,right:0,background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,.13)",maxHeight:260,overflowY:"auto",marginTop:2}}>
+                                  {rows.map((r,i)=> r.kind==="header"
+                                    ? <div key={i} style={{padding:"8px 14px 4px",fontSize:11,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:.5,background:"#f8fafc",borderBottom:"1px solid #f1f5f9",position:"sticky",top:0}}>{r.cat}</div>
+                                    : <div key={i} onClick={()=>selectItem(r.cat,r.sub)}
+                                        style={{padding:"8px 14px 8px 24px",fontSize:13,color:"#0f172a",cursor:"pointer",transition:"background .1s",background: m.subcategory===r.sub&&m.category===r.cat ? "#eff6ff" : "transparent"}}
+                                        onMouseEnter={e=>e.currentTarget.style.background="#f1f5f9"}
+                                        onMouseLeave={e=>e.currentTarget.style.background=m.subcategory===r.sub&&m.category===r.cat?"#eff6ff":"transparent"}
+                                      >{r.sub}</div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </>)}
                       <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Проект / № договора</div>
                         <select className="fi" value={m.contractNo||""} onChange={e=>set("contractNo",e.target.value)}>
