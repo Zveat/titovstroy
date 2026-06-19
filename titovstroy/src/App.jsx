@@ -2913,7 +2913,7 @@ export default function App() {
   const [estComment, setEstComment] = useState("");
   const [showStats, setShowStats] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [statsPeriod, setStatsPeriod] = useState("all"); // all | month | week | 3month
+  const [statsPeriod, setStatsPeriod] = useState("month"); // all | month | week | 3month
   const [statsManager, setStatsManager] = useState(""); // "" = все
   const [statsDateFrom, setStatsDateFrom] = useState("");
   const [statsDateTo, setStatsDateTo] = useState("");
@@ -3034,8 +3034,8 @@ export default function App() {
   const [objectFilterType, setObjectFilterType] = useState("");
   const [objectFilterManager, setObjectFilterManager] = useState("");
   const [objectDateSort, setObjectDateSort] = useState("new"); // new = сначала новые, old = сначала старые
-  const [objectDateFrom, setObjectDateFrom] = useState("");
-  const [objectDateTo, setObjectDateTo] = useState("");
+  const [objectDateFrom, setObjectDateFrom] = useState(()=>{ const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01"; });
+  const [objectDateTo, setObjectDateTo] = useState(()=>new Date().toISOString().slice(0,10));
   const [objectSearch, setObjectSearch] = useState("");
   const debouncedObjectSearch = useDebounce(objectSearch, 200);
   const [objectReturnId, setObjectReturnId] = useState(null); // id объекта, куда вернуться из редактора сметы/договора
@@ -3734,14 +3734,20 @@ export default function App() {
   // Мемоизированные вычисления аналитики — пересчитываются только при изменении данных
   const analyticsData = useMemo(() => {
     const now = Date.now();
-    const periodMs = {all:Infinity, month:30*864e5, week:7*864e5, "3month":90*864e5};
     let fromTs = 0, toTs = now;
     if(statsPeriod==="custom"){
       fromTs = statsDateFrom ? new Date(statsDateFrom).getTime() : 0;
       toTs   = statsDateTo   ? new Date(statsDateTo).getTime()+86399999 : now;
+    } else if(statsPeriod==="all") {
+      fromTs = 0;
     } else {
-      const ms = periodMs[statsPeriod]||Infinity;
-      fromTs = ms===Infinity ? 0 : now - ms;
+      const nd = new Date();
+      if(statsPeriod==="week") { nd.setDate(nd.getDate()-6); fromTs = nd.getTime(); }
+      else { // month, 3month — считаем от 1-го числа
+        const d = new Date(nd.getFullYear(), nd.getMonth(), 1);
+        if(statsPeriod==="3month") d.setMonth(d.getMonth()-2);
+        fromTs = d.getTime();
+      }
     }
     const inRange = ts => (ts||0) >= fromTs && (ts||0) <= toTs;
     const catalogForStats = getEffectiveCatalog();
@@ -7170,10 +7176,10 @@ export default function App() {
         const periodStart = (()=>{
           if (finPeriod==="all") return 0;
           if (finPeriod==="custom") return finFrom ? new Date(finFrom).getTime() : 0;
-          const d = new Date();
-          if (finPeriod==="month") d.setMonth(d.getMonth()-1);
-          else if (finPeriod==="3month") d.setMonth(d.getMonth()-3);
-          else if (finPeriod==="year") d.setFullYear(d.getFullYear()-1);
+          const d = new Date(now.getFullYear(), now.getMonth(), 1); // 1-е число текущего месяца
+          if (finPeriod==="month") return d.getTime();
+          if (finPeriod==="3month") { d.setMonth(d.getMonth()-2); return d.getTime(); }
+          if (finPeriod==="year") { d.setMonth(d.getMonth()-11); return d.getTime(); }
           return d.getTime();
         })();
         const periodEnd = (finPeriod==="custom" && finTo) ? new Date(finTo).getTime()+86400000 : Infinity;
