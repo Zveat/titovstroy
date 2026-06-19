@@ -2838,6 +2838,27 @@ export default function App() {
   // Экраны: "list" | "editor" | "contracts"
   // Руководитель по умолчанию попадает на финансы
   const [screen, setScreen] = useState(currentUser?.role==="manager" ? "finance" : "dashboard");
+  const [navHistory, setNavHistory] = useState([]); // стек навигации для кнопки «Назад»
+  const navigate = (newScreen, newFinTab, extraState = {}) => {
+    setNavHistory(h => [...h, { screen, financeTab, finFilterCat, finFilterCategory, finFilterContract }]);
+    if (newScreen !== undefined && newScreen !== screen) setScreen(newScreen);
+    if (newFinTab !== undefined && newFinTab !== financeTab) setFinanceTab(newFinTab);
+    if (extraState.finFilterCat !== undefined) setFinFilterCat(extraState.finFilterCat);
+    if (extraState.finFilterCategory !== undefined) setFinFilterCategory(extraState.finFilterCategory);
+    if (extraState.finFilterContract !== undefined) setFinFilterContract(extraState.finFilterContract);
+  };
+  const goBack = () => {
+    setNavHistory(h => {
+      if (!h.length) return h;
+      const prev = h[h.length - 1];
+      setScreen(prev.screen);
+      setFinanceTab(prev.financeTab);
+      setFinFilterCat(prev.finFilterCat || "");
+      setFinFilterCategory(prev.finFilterCategory || "");
+      setFinFilterContract(prev.finFilterContract || "");
+      return h.slice(0, -1);
+    });
+  };
 
   // Пользователи для выпадающего списка менеджеров
   const [allUsers, setAllUsers] = useState(DEFAULT_USERS);
@@ -3034,8 +3055,8 @@ export default function App() {
   const [objectFilterType, setObjectFilterType] = useState("");
   const [objectFilterManager, setObjectFilterManager] = useState("");
   const [objectDateSort, setObjectDateSort] = useState("new"); // new = сначала новые, old = сначала старые
-  const [objectDateFrom, setObjectDateFrom] = useState(()=>{ const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-01"; });
-  const [objectDateTo, setObjectDateTo] = useState(()=>new Date().toISOString().slice(0,10));
+  const [objectDateFrom, setObjectDateFrom] = useState("");
+  const [objectDateTo, setObjectDateTo] = useState("");
   const [objectSearch, setObjectSearch] = useState("");
   const debouncedObjectSearch = useDebounce(objectSearch, 200);
   const [objectReturnId, setObjectReturnId] = useState(null); // id объекта, куда вернуться из редактора сметы/договора
@@ -5568,7 +5589,7 @@ export default function App() {
             const isActive = effScreen===item.id || isActiveEst || isActiveObjEst;
             return (
             <div key={item.id} className={"nav-item"+(isActive?" active":"")}
-              onClick={()=>{ setDealReturnId(null); setObjectReturnId(null); setScreen(item.id); }}>
+              onClick={()=>{ setDealReturnId(null); setObjectReturnId(null); navigate(item.id, undefined); }}>
               <span className="nav-ico" style={{fontSize:18,flexShrink:0,lineHeight:1}}>{item.icon}</span>
               <span className="nav-label">{item.label}</span>
             </div>
@@ -5595,7 +5616,7 @@ export default function App() {
           const isActive = effScreen===item.id || isActiveEst || isActiveObjEst;
           return (
           <div key={item.id} className={"mob-nav-item"+(isActive?" active":"")}
-            onClick={()=>{ setDealReturnId(null); setObjectReturnId(null); setScreen(item.id); }}>
+            onClick={()=>{ setDealReturnId(null); setObjectReturnId(null); navigate(item.id, undefined); }}>
             <span style={{fontSize:20}}>{item.icon}</span>
             <span style={{fontSize:9.5,color:isActive?"#2563eb":"#64748b",fontWeight:600,whiteSpace:"nowrap"}}>{item.short||item.label}</span>
           </div>
@@ -5651,6 +5672,7 @@ export default function App() {
                 </div>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                {navHistory.length > 0 && <button onClick={goBack} style={{background:"none",border:"1px solid #ccc",borderRadius:6,padding:"4px 12px",cursor:"pointer",marginRight:8,fontSize:14,color:"#fff",borderColor:"rgba(255,255,255,.4)"}}>← Назад</button>}
                 {staleObjs.length>0&&<span style={{background:"rgba(251,191,36,.2)",color:"#fde68a",border:"1px solid rgba(251,191,36,.3)",borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:700}}>⚠ {staleObjs.length} требуют внимания</span>}
                 <span style={{fontSize:11,fontWeight:600,display:"flex",alignItems:"center",gap:5,padding:"4px 12px",borderRadius:20,background:"rgba(255,255,255,.15)",color:"rgba(255,255,255,.9)",backdropFilter:"blur(4px)"}}>
                   {syncStatus==="saving"?"⏳ Сохраняю...":syncStatus==="saved"?"✓ Сохранено":syncStatus==="error"?"⚠ Ошибка":"☁ Синк"}
@@ -5825,6 +5847,7 @@ export default function App() {
               </div>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+              {navHistory.length > 0 && <button onClick={goBack} style={{background:"none",border:"1px solid rgba(255,255,255,.4)",borderRadius:6,padding:"4px 12px",cursor:"pointer",fontSize:14,color:"#fff"}}>← Назад</button>}
               {saving && <span style={{fontSize:11,color:"#94a3b8"}}>💾</span>}
               <button className="btn btn-o" style={{padding:"6px 9px",fontSize:14}} onClick={()=>setScreen("analytics")} title="Статистика">📊</button>
               {currentUser.role !== "viewer" && (
@@ -7259,6 +7282,7 @@ export default function App() {
                   {finReadonly && <div style={{display:"inline-block",marginTop:6,background:"rgba(251,191,36,.18)",border:"1px solid rgba(251,191,36,.4)",borderRadius:6,padding:"2px 10px",fontSize:11,fontWeight:700,color:"#fbbf24"}}>👁 Только просмотр</div>}
                 </div>
                 <div className="fin-hero-stats" style={{display:"flex",gap:24,alignItems:"flex-end",flexWrap:"wrap"}}>
+                  {navHistory.length > 0 && <button onClick={goBack} style={{background:"none",border:"1px solid rgba(255,255,255,.4)",borderRadius:6,padding:"4px 12px",cursor:"pointer",fontSize:14,color:"#fff",alignSelf:"center"}}>← Назад</button>}
                   {(()=>{
                     const projIncH={};
                     for(const t of financeTx){ if(t.included===false)continue; const cn=(t.contractNo||"").trim(); if(!cn)continue; if(t.type==="income") projIncH[cn]=(projIncH[cn]||0)+(Number(t.amount)||0); }
@@ -7282,7 +7306,7 @@ export default function App() {
             {/* Табы */}
             <div className="fin-tabs" style={{display:"flex",gap:6,marginBottom:18,flexWrap:"wrap"}}>
               {[["dashboard","📊 Дашборд"],["dds","💸 ДДС месяц"],["opu","📈 ОПУ месяц"],["balance","⚖️ Баланс"],["ops","📋 Операции"],["projects","🏗 Проекты"],...(finReadonly?[]:[ ["ref","⚙️ Справочник"] ])].map(([k,l])=>(
-                <button key={k} onClick={()=>setFinanceTab(k)} style={{fontSize:13,fontWeight:700,padding:"9px 16px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(financeTab===k?"#2563eb":"#e2e8f0"),background:financeTab===k?"#2563eb":"#fff",color:financeTab===k?"#fff":"#64748b"}}>{l}</button>
+                <button key={k} onClick={()=>navigate(undefined, k)} style={{fontSize:13,fontWeight:700,padding:"9px 16px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(financeTab===k?"#2563eb":"#e2e8f0"),background:financeTab===k?"#2563eb":"#fff",color:financeTab===k?"#fff":"#64748b"}}>{l}</button>
               ))}
             </div>
 
@@ -7519,7 +7543,7 @@ export default function App() {
               const fmt = v => v ? fM(v) : "—";
               const sumStyle=(v)=>({textAlign:"right",fontWeight:700,color:v>=0?"#0f172a":"#dc2626"});
               // строки-помощники
-              const goOps=(cat,sub)=>{ setFinFilterCat(cat||""); setFinFilterCategory(sub||""); setFinFilterContract(""); setFinanceTab("ops"); };
+              const goOps=(cat,sub)=>{ navigate(undefined,"ops",{finFilterCat:cat||"",finFilterCategory:sub||"",finFilterContract:""}); };
               const groupRow=(label,ser,color,cat)=>(
                 <tr key={"g-"+label} onClick={()=>goOps(cat||label,"")} style={{borderBottom:"1px solid #f1f5f9",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}>
                   <td style={{paddingLeft:24,fontWeight:700,color:"#334155"}}>{label} <span style={{fontSize:9,color:"#cbd5e1",marginLeft:4}}>↗</span></td>
@@ -7623,7 +7647,7 @@ export default function App() {
               // строка-метрика (subtotal) и строка-процент
               const MetricRow=({label,ser,color,bg})=>(<tr style={{borderTop:"2px solid #e2e8f0",background:bg}}><td style={{padding:"9px 9px",fontWeight:900,color,background:bg}}>{label}</td>{months.map(m=><td key={m} style={{padding:"9px 9px",textAlign:"right",fontWeight:800,color:(ser.byM[m]||0)>=0?color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(ser.byM[m])}</td>)}<td style={{padding:"9px 9px",textAlign:"right",fontWeight:900,color:ser.tot>=0?color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(ser.tot)}</td></tr>);
               const PctRow=({label,ser,color})=>(<tr><td style={{padding:"3px 9px 6px 22px",color,fontSize:11,fontStyle:"italic"}}>{label}</td>{months.map(m=><td key={m} style={{padding:"3px 9px 6px",textAlign:"right",color,fontSize:11,fontStyle:"italic",whiteSpace:"nowrap"}}>{fpct(ser.byM[m])}</td>)}<td style={{padding:"3px 9px 6px",textAlign:"right",color,fontSize:11,fontStyle:"italic",fontWeight:700,whiteSpace:"nowrap"}}>{fpct(ser.tot)}</td></tr>);
-              const goOps=(cat,sub)=>{ setFinFilterCat(cat||""); setFinFilterCategory(sub||""); setFinFilterContract(""); setFinanceTab("ops"); };
+              const goOps=(cat,sub)=>{ navigate(undefined,"ops",{finFilterCat:cat||"",finFilterCategory:sub||"",finFilterContract:""}); };
               const ExpGroupRows=({cat,exclude=[]})=>{ const meta=(financeMeta.expense||[]).find(c=>c.cat===cat); if(!meta)return null; const gt=agg(t=>t.type==="expense"&&t.category===cat&&!exclude.includes(t.subcategory)); if(gt.tot===0)return null; return (<Fragment><tr onClick={()=>goOps(cat,"")} style={{borderBottom:"1px solid #f8fafc",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}><td style={{padding:"6px 9px",fontWeight:700,color:"#334155"}}>{cat} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>{months.map(m=><td key={m} style={{padding:"6px 9px",textAlign:"right",color:"#dc2626",fontWeight:600,whiteSpace:"nowrap"}}>{fmt(gt.byM[m])}</td>)}<td style={{padding:"6px 9px",textAlign:"right",fontWeight:800,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(gt.tot)}</td></tr>{(meta.subs||[]).filter(s2=>!exclude.includes(s2)).map(s2=>{ const s=agg(t=>t.type==="expense"&&t.category===cat&&t.subcategory===s2); if(s.tot===0)return null; return (<tr key={s2} onClick={()=>goOps(cat,s2)} style={{cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{s2} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>);})}</Fragment>); };
               return (
                 <div className="card" style={{padding:"18px 20px",width:"100%",boxSizing:"border-box"}}>
@@ -8066,7 +8090,7 @@ export default function App() {
                               {[["Б24",p.b24],["Договор",p.contractSigned],["АВР",p.avr]].map(([l,v])=>(
                                 <span key={l} style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:7,background:yesno(v)?"#f0fdf4":"#fef2f2",color:yesno(v)?"#059669":"#dc2626",display:"inline-flex",alignItems:"center",gap:4}}>{yesno(v)?"✓":"✗"} {l}</span>
                               ))}
-                              {p.contractNo && <button onClick={e=>{ e.stopPropagation(); setFinFilterContract(p.contractNo); setFinanceTab("ops"); }} style={{marginLeft:"auto",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:7,padding:"4px 10px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📋 Операции</button>}
+                              {p.contractNo && <button onClick={e=>{ e.stopPropagation(); navigate(undefined,"ops",{finFilterContract:p.contractNo}); }} style={{marginLeft:"auto",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:7,padding:"4px 10px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📋 Операции</button>}
                             </div>
                           </div>
                         </div>
