@@ -7553,57 +7553,58 @@ export default function App() {
                   <CardSection title="📈 Динамика по месяцам" accent="#0f172a" full>
                     {months.length===0 && <div style={{color:"#94a3b8",fontSize:13}}>Нет данных за период</div>}
                     {months.length>0 && (()=>{
-                      const W=700, H=180, PAD={t:16,r:16,b:40,l:60};
-                      const cW=W-PAD.l-PAD.r, cH=H-PAD.t-PAD.b;
-                      const n=months.length;
-                      const pts=(fn)=>months.map((m,i)=>{ const x=PAD.l+(n===1?cW/2:i/(n-1)*cW); const v=fn(monthMap[m]); const y=PAD.t+cH-(Math.max(0,v)/maxMonth)*cH; return [x,y,v,m]; });
-                      const revPts  = pts(d=>d.inc);
-                      const grossPts= pts(d=>d.inc-d.cogs);
-                      const netPts  = pts(d=>d.inc-d.exp);
-                      const polyline=(pts,color,dash="")=>{
-                        const d=pts.map(([x,y],i)=>(i===0?"M":"L")+x.toFixed(1)+","+y.toFixed(1)).join(" ");
-                        return <path d={d} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" strokeDasharray={dash}/>;
+                      const W=720, H=200, PL=64, PR=20, PT=20, PB=44;
+                      const cW=W-PL-PR, cH=H-PT-PB, n=months.length;
+                      const fmtY = v => v>=1000000?(v/1000000).toFixed(1)+"M":v>=1000?Math.round(v/1000)+"k":"0";
+                      const xOf = i => PL+(n===1?cW/2:i/(n-1)*cW);
+                      const yOf = v => PT+cH-(Math.max(0,v)/maxMonth)*cH;
+                      const mkLine=(fn,color)=>{
+                        const d=months.map((m,i)=>(i===0?"M":"L")+xOf(i).toFixed(1)+","+yOf(fn(monthMap[m])).toFixed(1)).join(" ");
+                        return <path d={d} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>;
                       };
-                      const dots=(pts,color)=>pts.map(([x,y,v,m],i)=>(
-                        <circle key={i} cx={x} cy={y} r="4" fill={color} stroke="#fff" strokeWidth="1.5">
-                          <title>{MNAMES[parseInt(m.split("-")[1])-1]} {m.split("-")[0].slice(2)}: {fM(Math.round(v))} ₸</title>
-                        </circle>
-                      ));
-                      // y-axis labels
-                      const yTicks=[0,0.25,0.5,0.75,1].map(r=>({ y:PAD.t+cH-r*cH, v:Math.round(maxMonth*r) }));
+                      const mkDots=(fn,color)=>months.map((m,i)=>{
+                        const v=fn(monthMap[m]); const [yr,mo]=m.split("-");
+                        return <circle key={i} cx={xOf(i)} cy={yOf(v)} r="4.5" fill={color} stroke="#fff" strokeWidth="2">
+                          <title>{MNAMES[parseInt(mo)-1]} {yr}: {fM(Math.round(v))} ₸</title>
+                        </circle>;
+                      });
+                      const yTicks=[0,.25,.5,.75,1].map(r=>({y:PT+cH-r*cH,v:Math.round(maxMonth*r)}));
+                      const areaD=months.map((m,i)=>(i===0?"M":"L")+xOf(i).toFixed(1)+","+yOf(monthMap[m].inc).toFixed(1)).join(" ")
+                        +"L"+xOf(n-1).toFixed(1)+","+(PT+cH)+"L"+xOf(0).toFixed(1)+","+(PT+cH)+"Z";
                       return (
                         <div style={{overflowX:"auto"}}>
-                          <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",minWidth:320,maxHeight:220,display:"block"}}>
-                            {/* grid */}
+                          <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",minWidth:400,display:"block"}}>
+                            <defs>
+                              <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="#10b981" stopOpacity=".18"/>
+                                <stop offset="100%" stopColor="#10b981" stopOpacity="0"/>
+                              </linearGradient>
+                            </defs>
                             {yTicks.map((t,i)=>(
                               <g key={i}>
-                                <line x1={PAD.l} y1={t.y} x2={W-PAD.r} y2={t.y} stroke="#e2e8f0" strokeWidth="1"/>
-                                <text x={PAD.l-6} y={t.y+4} fontSize="9" fill="#94a3b8" textAnchor="end">{t.v>=1000?Math.round(t.v/1000)+"k":t.v}</text>
+                                <line x1={PL} y1={t.y} x2={W-PR} y2={t.y} stroke={i===0?"#cbd5e1":"#f1f5f9"} strokeWidth={i===0?"1.5":"1"}/>
+                                <text x={PL-8} y={t.y+4} fontSize="10" fill="#94a3b8" textAnchor="end" fontWeight="500">{fmtY(t.v)}</text>
                               </g>
                             ))}
-                            {/* zero line */}
-                            {polyline([[PAD.l,PAD.t+cH],[W-PAD.r,PAD.t+cH]],"#e2e8f0")}
-                            {/* area fill for revenue */}
-                            <path d={revPts.map(([x,y],i)=>(i===0?"M":"L")+x.toFixed(1)+","+y.toFixed(1)).join(" ")+"L"+(PAD.l+(n===1?cW/2:cW)).toFixed(1)+","+(PAD.t+cH)+"L"+PAD.l+","+(PAD.t+cH)+"Z"} fill="#10b98115"/>
-                            {/* lines */}
-                            {polyline(revPts,"#10b981")}
-                            {polyline(grossPts,"#0891b2")}
-                            {polyline(netPts,"#8b5cf6")}
-                            {/* dots */}
-                            {dots(revPts,"#10b981")}
-                            {dots(grossPts,"#0891b2")}
-                            {dots(netPts,"#8b5cf6")}
-                            {/* x labels */}
+                            <path d={areaD} fill="url(#areaGrad)"/>
+                            {mkLine(d=>d.inc,"#10b981")}
+                            {mkLine(d=>d.inc-d.cogs,"#0891b2")}
+                            {mkLine(d=>d.inc-d.exp,"#8b5cf6")}
+                            {mkDots(d=>d.inc,"#10b981")}
+                            {mkDots(d=>d.inc-d.cogs,"#0891b2")}
+                            {mkDots(d=>d.inc-d.exp,"#8b5cf6")}
                             {months.map((m,i)=>{
-                              const x=PAD.l+(n===1?cW/2:i/(n-1)*cW);
-                              const [y,mo]=m.split("-");
-                              return <text key={m} x={x} y={H-6} fontSize="9.5" fill="#64748b" textAnchor="middle" fontWeight="600">{MNAMES[parseInt(mo)-1]}{n>6?" "+y.slice(2):""}</text>;
+                              const [yr,mo]=m.split("-");
+                              return <text key={m} x={xOf(i)} y={H-8} fontSize="10.5" fill="#475569" textAnchor="middle" fontWeight="600">{MNAMES[parseInt(mo)-1]} {yr.slice(2)}</text>;
                             })}
                           </svg>
-                          <div style={{display:"flex",gap:18,marginTop:8,fontSize:11.5,color:"#64748b",flexWrap:"wrap"}}>
-                            <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:22,height:3,background:"#10b981",borderRadius:2,display:"inline-block"}}/>Выручка</span>
-                            <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:22,height:3,background:"#0891b2",borderRadius:2,display:"inline-block"}}/>Валовая прибыль</span>
-                            <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:22,height:3,background:"#8b5cf6",borderRadius:2,display:"inline-block"}}/>Чистая прибыль</span>
+                          <div style={{display:"flex",gap:20,marginTop:10,fontSize:12,color:"#64748b",flexWrap:"wrap"}}>
+                            {[["#10b981","Выручка"],["#0891b2","Валовая прибыль"],["#8b5cf6","Чистая прибыль"]].map(([c,l])=>(
+                              <span key={l} style={{display:"flex",alignItems:"center",gap:6}}>
+                                <span style={{width:24,height:3,background:c,borderRadius:2,display:"inline-block"}}/>
+                                <span style={{fontWeight:600}}>{l}</span>
+                              </span>
+                            ))}
                           </div>
                         </div>
                       );
@@ -7613,14 +7614,12 @@ export default function App() {
                   {/* ── График по проектам ── */}
                   <CardSection title="📦 Проекты по месяцам" accent="#0f172a" full>
                     {(()=>{
-                      // Бакетируем finProjects по месяцу создания (не дальше +3 мес от сегодня)
                       const _now = Date.now(), _maxTs = _now + 90*24*3600*1000, _minTs = _now - 3*365*24*3600*1000;
                       const pmKey = p => {
                         const ts = p.createdAt ? new Date(p.createdAt).getTime() : 0;
                         if(!ts||ts>_maxTs||ts<_minTs) return null;
                         const d=new Date(ts); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
                       };
-                      // Фактическая выручка и COGS по contractNo из financeTx (все время)
                       const _normCn = s => (s||"").replace(/[№\s]/g,"").trim();
                       const txByContract = {};
                       financeTx.forEach(t=>{ if(t.deletedAt||t.included===false||t.type==="transfer"||!t.contractNo) return;
@@ -7630,7 +7629,6 @@ export default function App() {
                         if(t.type==="income") txByContract[k].inc+=amt;
                         else if(t.type==="expense"&&t.category===_C_COGS) txByContract[k].cogs+=amt;
                       });
-                      // Группируем проекты по месяцу (исключаем отменённые)
                       const pMonthMap = {};
                       finProjects.filter(p=>(p.rawStatus||p.status)!=="отменен").forEach(p=>{ const k=pmKey(p); if(!k) return;
                         if(!pMonthMap[k]) pMonthMap[k]={count:0,budget:0,inc:0,gross:0};
@@ -7642,54 +7640,45 @@ export default function App() {
                       });
                       const pMonths = Object.keys(pMonthMap).sort().slice(-18);
                       if(pMonths.length===0) return <div style={{color:"#94a3b8",fontSize:13}}>Нет данных по проектам</div>;
-                      const pMax = Math.max(1,...pMonths.map(m=>Math.max(pMonthMap[m].budget,pMonthMap[m].inc)));
-                      const BAR_W=28, GAP=8, GROUP=BAR_W*2+4, STEP=GROUP+GAP;
-                      const svgW=Math.max(400, pMonths.length*STEP+80), svgH=200;
-                      const PL=60,PT=16,PB=44;
-                      const cH=svgH-PT-PB;
-                      const yTicks=[0,.25,.5,.75,1].map(r=>({y:PT+cH-r*cH,v:Math.round(pMax*r)}));
+                      const pMax = Math.max(1,...pMonths.map(m=>pMonthMap[m].budget));
+                      const fmtM = v => v>=1000000?(v/1000000).toFixed(1)+"M":v>=1000?Math.round(v/1000)+"k":"0";
+                      // Компактный HTML-чарт (не SVG) — легче управлять высотой и адаптивностью
+                      const BAR_H = 200; // высота области баров
                       return (
-                        <div style={{overflowX:"auto"}}>
-                          <svg viewBox={`0 0 ${svgW} ${svgH}`} style={{width:"100%",minWidth:320,maxHeight:230,display:"block"}}>
-                            {yTicks.map((t,i)=>(
-                              <g key={i}>
-                                <line x1={PL} y1={t.y} x2={svgW-10} y2={t.y} stroke="#e2e8f0" strokeWidth="1"/>
-                                <text x={PL-6} y={t.y+4} fontSize="9" fill="#94a3b8" textAnchor="end">{t.v>=1000?Math.round(t.v/1000)+"k":t.v}</text>
-                              </g>
-                            ))}
-                            {pMonths.map((m,i)=>{ const d=pMonthMap[m]; const [y,mo]=m.split("-");
-                              const x0=PL+i*STEP;
-                              const bH=v=>Math.max(2,v/pMax*cH);
-                              const bY=v=>PT+cH-bH(v);
+                        <div>
+                          <div style={{display:"flex",gap:3,alignItems:"flex-end",overflowX:"auto",paddingBottom:4,paddingLeft:4}}>
+                            {pMonths.map(m=>{ const d=pMonthMap[m]; const [yr,mo]=m.split("-");
+                              const budH = Math.max(4, d.budget/pMax*BAR_H);
+                              const incH = d.inc>0 ? Math.max(3, Math.min(budH, d.inc/pMax*BAR_H)) : 0;
+                              const grossH = d.gross>0 ? Math.max(3, d.gross/pMax*BAR_H) : 0;
+                              const grossPct = d.budget>0 ? Math.round(d.gross/d.budget*100) : 0;
                               return (
-                                <g key={m}>
-                                  {/* Бюджет (план) */}
-                                  <rect x={x0} y={bY(d.budget)} width={BAR_W} height={bH(d.budget)} rx="3" fill="#bfdbfe" opacity=".9">
-                                    <title>Бюджет (план): {fM(Math.round(d.budget))} ₸</title>
-                                  </rect>
-                                  {/* Факт выручка */}
-                                  <rect x={x0} y={bY(d.inc)} width={BAR_W} height={bH(d.inc)} rx="3" fill="#10b981" opacity=".85">
-                                    <title>Факт. выручка: {fM(Math.round(d.inc))} ₸</title>
-                                  </rect>
-                                  {/* Валовая прибыль */}
-                                  <rect x={x0+BAR_W+4} y={bY(d.gross)} width={BAR_W} height={bH(d.gross)} rx="3" fill="#0891b2" opacity=".85">
-                                    <title>Вал. прибыль: {fM(Math.round(d.gross))} ₸</title>
-                                  </rect>
-                                  {/* Кол-во проектов + сумма бюджета */}
-                                  <text x={x0+BAR_W} y={bY(Math.max(d.budget,d.inc))-14} fontSize="9" fill="#64748b" textAnchor="middle" fontWeight="700">{d.count} пр.</text>
-                                  <text x={x0+BAR_W} y={bY(Math.max(d.budget,d.inc))-4} fontSize="8" fill="#2563eb" textAnchor="middle">{d.budget>=1000000?(d.budget/1000000).toFixed(1)+"M":d.budget>=1000?Math.round(d.budget/1000)+"k":d.budget}</text>
+                                <div key={m} style={{flex:"1 0 64px",maxWidth:100,display:"flex",flexDirection:"column",alignItems:"center",gap:0}}>
+                                  {/* Подпись сверху */}
+                                  <div style={{fontSize:10,fontWeight:700,color:"#0f172a",marginBottom:2,whiteSpace:"nowrap"}}>{d.count} пр.</div>
+                                  <div style={{fontSize:10,color:"#2563eb",fontWeight:600,marginBottom:6,whiteSpace:"nowrap"}}>{fmtM(d.budget)}</div>
+                                  {/* Бар */}
+                                  <div style={{width:"100%",position:"relative",height:BAR_H,display:"flex",alignItems:"flex-end"}}>
+                                    {/* Фон — план */}
+                                    <div style={{position:"absolute",bottom:0,left:"10%",right:"10%",height:budH,background:"#e0f2fe",borderRadius:"6px 6px 0 0"}} title={`Бюджет: ${fM(Math.round(d.budget))} ₸`}/>
+                                    {/* Факт поступления */}
+                                    {incH>0 && <div style={{position:"absolute",bottom:0,left:"10%",right:"10%",height:incH,background:"linear-gradient(180deg,#34d399,#10b981)",borderRadius:"6px 6px 0 0",opacity:.9}} title={`Факт: ${fM(Math.round(d.inc))} ₸`}/>}
+                                    {/* Точка валовой прибыли */}
+                                    {grossH>0 && <div style={{position:"absolute",bottom:grossH-5,left:"50%",transform:"translateX(-50%)",width:10,height:10,background:"#0891b2",borderRadius:"50%",border:"2px solid #fff",zIndex:2}} title={`Вал. прибыль: ${fM(Math.round(d.gross))} ₸ (${grossPct}%)`}/>}
+                                  </div>
                                   {/* Подпись месяца */}
-                                  <text x={x0+BAR_W} y={svgH-PB+14} fontSize="9.5" fill="#475569" textAnchor="middle" fontWeight="600">{MNAMES[parseInt(mo)-1]}</text>
-                                  <text x={x0+BAR_W} y={svgH-PB+25} fontSize="8.5" fill="#94a3b8" textAnchor="middle">{y.slice(2)}</text>
-                                </g>
+                                  <div style={{marginTop:6,textAlign:"center"}}>
+                                    <div style={{fontSize:11,fontWeight:700,color:"#374151"}}>{MNAMES[parseInt(mo)-1]}</div>
+                                    <div style={{fontSize:10,color:"#9ca3af"}}>{yr.slice(2)}</div>
+                                  </div>
+                                </div>
                               );
                             })}
-                          </svg>
-                          <div style={{display:"flex",gap:16,marginTop:8,fontSize:11.5,color:"#64748b",flexWrap:"wrap"}}>
-                            <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:14,height:14,background:"#bfdbfe",borderRadius:3,display:"inline-block"}}/>Бюджет (план)</span>
-                            <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:14,height:14,background:"#10b981",borderRadius:3,display:"inline-block"}}/>Факт. выручка</span>
-                            <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:14,height:14,background:"#0891b2",borderRadius:3,display:"inline-block"}}/>Вал. прибыль</span>
-                            <span style={{fontSize:10,color:"#94a3b8"}}>Цифра над столбцом — кол-во проектов</span>
+                          </div>
+                          <div style={{display:"flex",gap:20,marginTop:14,fontSize:12,color:"#64748b",flexWrap:"wrap",borderTop:"1px solid #f1f5f9",paddingTop:12}}>
+                            <span style={{display:"flex",alignItems:"center",gap:6}}><span style={{width:16,height:16,background:"#e0f2fe",borderRadius:4,display:"inline-block",border:"1px solid #bae6fd"}}/>Объём продаж (план)</span>
+                            <span style={{display:"flex",alignItems:"center",gap:6}}><span style={{width:16,height:16,background:"linear-gradient(#34d399,#10b981)",borderRadius:4,display:"inline-block"}}/>Факт. поступления</span>
+                            <span style={{display:"flex",alignItems:"center",gap:6}}><span style={{width:10,height:10,background:"#0891b2",borderRadius:"50%",display:"inline-block",border:"2px solid #fff",outline:"1px solid #0891b2"}}/>Валовая прибыль</span>
                           </div>
                         </div>
                       );
