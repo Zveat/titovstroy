@@ -7597,6 +7597,85 @@ export default function App() {
                       );
                     })()}
                   </CardSection>
+
+                  {/* ── График по проектам ── */}
+                  <CardSection title="📦 Проекты по месяцам" accent="#0f172a" full>
+                    {(()=>{
+                      // Бакетируем finProjects по месяцу создания
+                      const pmKey = p => { const ts = p.createdAt ? new Date(p.createdAt).getTime() : 0; if(!ts) return null; const d=new Date(ts); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); };
+                      // Фактическая выручка и COGS по contractNo из financeTx (все время)
+                      const txByContract = {};
+                      financeTx.forEach(t=>{ if(t.deletedAt||t.included===false||t.type==="transfer"||!t.contractNo) return;
+                        const k=t.contractNo.trim();
+                        if(!txByContract[k]) txByContract[k]={inc:0,cogs:0};
+                        const amt=Number(t.amount)||0;
+                        if(t.type==="income") txByContract[k].inc+=amt;
+                        else if(t.type==="expense"&&t.category===_C_COGS) txByContract[k].cogs+=amt;
+                      });
+                      // Группируем проекты по месяцу
+                      const pMonthMap = {};
+                      finProjects.forEach(p=>{ const k=pmKey(p); if(!k) return;
+                        if(!pMonthMap[k]) pMonthMap[k]={count:0,budget:0,inc:0,gross:0};
+                        const cx=txByContract[(p.contractNo||"").trim()]||{inc:0,cogs:0};
+                        pMonthMap[k].count++;
+                        pMonthMap[k].budget+=(Number(p.budget)||0);
+                        pMonthMap[k].inc+=cx.inc;
+                        pMonthMap[k].gross+=Math.max(0,cx.inc-cx.cogs);
+                      });
+                      const pMonths = Object.keys(pMonthMap).sort().slice(-18);
+                      if(pMonths.length===0) return <div style={{color:"#94a3b8",fontSize:13}}>Нет данных по проектам</div>;
+                      const pMax = Math.max(1,...pMonths.map(m=>Math.max(pMonthMap[m].budget,pMonthMap[m].inc)));
+                      const BAR_W=28, GAP=8, GROUP=BAR_W*2+4, STEP=GROUP+GAP;
+                      const svgW=Math.max(400, pMonths.length*STEP+80), svgH=200;
+                      const PL=60,PT=16,PB=44;
+                      const cH=svgH-PT-PB;
+                      const yTicks=[0,.25,.5,.75,1].map(r=>({y:PT+cH-r*cH,v:Math.round(pMax*r)}));
+                      return (
+                        <div style={{overflowX:"auto"}}>
+                          <svg viewBox={`0 0 ${svgW} ${svgH}`} style={{width:"100%",minWidth:320,maxHeight:230,display:"block"}}>
+                            {yTicks.map((t,i)=>(
+                              <g key={i}>
+                                <line x1={PL} y1={t.y} x2={svgW-10} y2={t.y} stroke="#e2e8f0" strokeWidth="1"/>
+                                <text x={PL-6} y={t.y+4} fontSize="9" fill="#94a3b8" textAnchor="end">{t.v>=1000?Math.round(t.v/1000)+"k":t.v}</text>
+                              </g>
+                            ))}
+                            {pMonths.map((m,i)=>{ const d=pMonthMap[m]; const [y,mo]=m.split("-");
+                              const x0=PL+i*STEP;
+                              const bH=v=>Math.max(2,v/pMax*cH);
+                              const bY=v=>PT+cH-bH(v);
+                              return (
+                                <g key={m}>
+                                  {/* Бюджет (план) */}
+                                  <rect x={x0} y={bY(d.budget)} width={BAR_W} height={bH(d.budget)} rx="3" fill="#bfdbfe" opacity=".9">
+                                    <title>Бюджет (план): {fM(Math.round(d.budget))} ₸</title>
+                                  </rect>
+                                  {/* Факт выручка */}
+                                  <rect x={x0} y={bY(d.inc)} width={BAR_W} height={bH(d.inc)} rx="3" fill="#10b981" opacity=".85">
+                                    <title>Факт. выручка: {fM(Math.round(d.inc))} ₸</title>
+                                  </rect>
+                                  {/* Валовая прибыль */}
+                                  <rect x={x0+BAR_W+4} y={bY(d.gross)} width={BAR_W} height={bH(d.gross)} rx="3" fill="#0891b2" opacity=".85">
+                                    <title>Вал. прибыль: {fM(Math.round(d.gross))} ₸</title>
+                                  </rect>
+                                  {/* Кол-во проектов */}
+                                  <text x={x0+BAR_W} y={bY(Math.max(d.budget,d.inc))-5} fontSize="9" fill="#64748b" textAnchor="middle" fontWeight="700">{d.count}</text>
+                                  {/* Подпись месяца */}
+                                  <text x={x0+BAR_W} y={svgH-PB+14} fontSize="9.5" fill="#475569" textAnchor="middle" fontWeight="600">{MNAMES[parseInt(mo)-1]}</text>
+                                  <text x={x0+BAR_W} y={svgH-PB+25} fontSize="8.5" fill="#94a3b8" textAnchor="middle">{y.slice(2)}</text>
+                                </g>
+                              );
+                            })}
+                          </svg>
+                          <div style={{display:"flex",gap:16,marginTop:8,fontSize:11.5,color:"#64748b",flexWrap:"wrap"}}>
+                            <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:14,height:14,background:"#bfdbfe",borderRadius:3,display:"inline-block"}}/>Бюджет (план)</span>
+                            <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:14,height:14,background:"#10b981",borderRadius:3,display:"inline-block"}}/>Факт. выручка</span>
+                            <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:14,height:14,background:"#0891b2",borderRadius:3,display:"inline-block"}}/>Вал. прибыль</span>
+                            <span style={{fontSize:10,color:"#94a3b8"}}>Цифра над столбцом — кол-во проектов</span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </CardSection>
                 </div>
               );
             })()}
