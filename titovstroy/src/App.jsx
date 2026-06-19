@@ -5631,7 +5631,7 @@ export default function App() {
             <div style={{position:"relative",zIndex:1,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
               <div>
                 <div style={{fontSize:22,fontWeight:900,color:"#fff",letterSpacing:-.5,marginBottom:4,fontFamily:"'Poppins',sans-serif"}}>
-                  TitovStroy <span style={{opacity:.6,fontWeight:600}}>ERP</span>
+                  TitovStroy <span style={{opacity:.6,fontWeight:600}}>CRM</span>
                 </div>
                 <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>
                   {new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
@@ -8353,8 +8353,14 @@ export default function App() {
                         <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>На счёт</div><select className="fi" value={m.accountTo} onChange={e=>set("accountTo",e.target.value)}>{financeMeta.accounts.map(a=><option key={a.id} value={a.name}>{a.name}</option>)}</select></div>
                       </>) : (<>
                         <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Счёт</div><select className="fi" value={m.account} onChange={e=>set("account",e.target.value)}>{financeMeta.accounts.map(a=><option key={a.id} value={a.name}>{a.name}</option>)}</select></div>
-                        <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Категория</div><select className="fi" value={m.category} onChange={e=>{set("category",e.target.value);set("subcategory","");}}><option value="">— выберите —</option>{catSource.map((c,i)=><option key={i} value={c.cat}>{c.cat}</option>)}</select></div>
-                        {subSource.length>0 && <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Подкатегория</div><select className="fi" value={m.subcategory} onChange={e=>set("subcategory",e.target.value)}><option value="">— нет —</option>{subSource.map((s,i)=><option key={i} value={s}>{s}</option>)}</select></div>}
+                        <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Категория</div>
+                          <input className="fi" list="fin-cat-list" value={m.category} onChange={e=>{set("category",e.target.value);set("subcategory","");}} placeholder="— начните вводить —"/>
+                          <datalist id="fin-cat-list">{catSource.map((c,i)=><option key={i} value={c.cat}/>)}</datalist>
+                        </div>
+                        {subSource.length>0 && <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Подкатегория</div>
+                          <input className="fi" list="fin-sub-list" value={m.subcategory} onChange={e=>set("subcategory",e.target.value)} placeholder="— начните вводить —"/>
+                          <datalist id="fin-sub-list">{subSource.map((s,i)=><option key={i} value={s}/>)}</datalist>
+                        </div>}
                       </>)}
                       <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Проект / № договора</div>
                         <select className="fi" value={m.contractNo||""} onChange={e=>set("contractNo",e.target.value)}>
