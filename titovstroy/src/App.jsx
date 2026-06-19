@@ -7301,16 +7301,25 @@ export default function App() {
         periodTx.filter(t=>t.type==="income").forEach(t=>{ const k=t.category||"Без категории"; incByCat[k]=(incByCat[k]||0)+(Number(t.amount)||0); });
         const incCats = Object.entries(incByCat).sort((a,b)=>b[1]-a[1]);
 
-        // Динамика по месяцам (доход/расход)
+        // Динамика по месяцам (выручка / вал.прибыль / чистая прибыль)
+        const _C_COGS="Прямые расходы (COGS / себестоимость)";
+        const _C_FIN="Финансовые расходы"; const _S_DIV="Дивиденды учредителям";
         const monthMap = {};
-        periodTx.forEach(t=>{
-          if (t.type==="transfer") return;
-          const d=new Date(t.date||t.createdAt||0); const key=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
-          if(!monthMap[key]) monthMap[key]={inc:0,exp:0};
-          if(t.type==="income") monthMap[key].inc+=Number(t.amount)||0; else monthMap[key].exp+=Number(t.amount)||0;
+        // Считаем за ВСЁ время для полноты картины, но берём только период
+        financeTx.forEach(t=>{
+          if (t.deletedAt||t.included===false||t.type==="transfer") return;
+          const ts=t.date||t.createdAt||0; if(!inPeriod(ts)) return;
+          const d=new Date(ts); const key=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+          if(!monthMap[key]) monthMap[key]={inc:0,cogs:0,exp:0};
+          const amt=Number(t.amount)||0;
+          if(t.type==="income") monthMap[key].inc+=amt;
+          else if(t.type==="expense"){
+            monthMap[key].exp+=amt;
+            if(t.category===_C_COGS) monthMap[key].cogs+=amt;
+          }
         });
-        const months = Object.keys(monthMap).sort().slice(-12);
-        const maxMonth = Math.max(1,...months.map(m=>Math.max(monthMap[m].inc,monthMap[m].exp)));
+        const months = Object.keys(monthMap).sort().slice(-24);
+        const maxMonth = Math.max(1,...months.map(m=>Math.max(monthMap[m].inc, monthMap[m].inc-monthMap[m].cogs, monthMap[m].inc-monthMap[m].exp)));
         const MNAMES=["Янв","Фев","Мар","Апр","Май","Июн","Июл","Авг","Сен","Окт","Ноя","Дек"];
 
         // Список операций (фильтры + поиск)
@@ -7528,26 +7537,65 @@ export default function App() {
                     </CardSection>
                   </div>
 
-                  {/* ── Динамика по месяцам ── */}
-                  <CardSection title="📅 Динамика по месяцам" accent="#0f172a" full>
+                  {/* ── Динамика по месяцам (линейный график) ── */}
+                  <CardSection title="📈 Динамика по месяцам" accent="#0f172a" full>
                     {months.length===0 && <div style={{color:"#94a3b8",fontSize:13}}>Нет данных за период</div>}
-                    <div style={{display:"flex",gap:10,alignItems:"flex-end",overflowX:"auto",paddingBottom:8}}>
-                      {months.map(m=>{ const d=monthMap[m]; const [y,mo]=m.split("-"); const pr=d.inc-d.exp; return (
-                        <div key={m} style={{flex:"1 0 56px",textAlign:"center"}}>
-                          <div style={{display:"flex",gap:4,alignItems:"flex-end",justifyContent:"center",height:130}}>
-                            <div title={"Доход: "+fM(d.inc)} style={{width:16,height:Math.max(2,d.inc/maxMonth*130),background:"linear-gradient(180deg,#34d399,#10b981)",borderRadius:"4px 4px 0 0"}}/>
-                            <div title={"Расход: "+fM(d.exp)} style={{width:16,height:Math.max(2,d.exp/maxMonth*130),background:"linear-gradient(180deg,#fb7185,#f43f5e)",borderRadius:"4px 4px 0 0"}}/>
+                    {months.length>0 && (()=>{
+                      const W=700, H=180, PAD={t:16,r:16,b:40,l:60};
+                      const cW=W-PAD.l-PAD.r, cH=H-PAD.t-PAD.b;
+                      const n=months.length;
+                      const pts=(fn)=>months.map((m,i)=>{ const x=PAD.l+(n===1?cW/2:i/(n-1)*cW); const v=fn(monthMap[m]); const y=PAD.t+cH-(Math.max(0,v)/maxMonth)*cH; return [x,y,v,m]; });
+                      const revPts  = pts(d=>d.inc);
+                      const grossPts= pts(d=>d.inc-d.cogs);
+                      const netPts  = pts(d=>d.inc-d.exp);
+                      const polyline=(pts,color,dash="")=>{
+                        const d=pts.map(([x,y],i)=>(i===0?"M":"L")+x.toFixed(1)+","+y.toFixed(1)).join(" ");
+                        return <path d={d} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" strokeDasharray={dash}/>;
+                      };
+                      const dots=(pts,color)=>pts.map(([x,y,v,m],i)=>(
+                        <circle key={i} cx={x} cy={y} r="4" fill={color} stroke="#fff" strokeWidth="1.5">
+                          <title>{MNAMES[parseInt(m.split("-")[1])-1]} {m.split("-")[0].slice(2)}: {fM(Math.round(v))} ₸</title>
+                        </circle>
+                      ));
+                      // y-axis labels
+                      const yTicks=[0,0.25,0.5,0.75,1].map(r=>({ y:PAD.t+cH-r*cH, v:Math.round(maxMonth*r) }));
+                      return (
+                        <div style={{overflowX:"auto"}}>
+                          <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",minWidth:320,maxHeight:220,display:"block"}}>
+                            {/* grid */}
+                            {yTicks.map((t,i)=>(
+                              <g key={i}>
+                                <line x1={PAD.l} y1={t.y} x2={W-PAD.r} y2={t.y} stroke="#e2e8f0" strokeWidth="1"/>
+                                <text x={PAD.l-6} y={t.y+4} fontSize="9" fill="#94a3b8" textAnchor="end">{t.v>=1000?Math.round(t.v/1000)+"k":t.v}</text>
+                              </g>
+                            ))}
+                            {/* zero line */}
+                            {polyline([[PAD.l,PAD.t+cH],[W-PAD.r,PAD.t+cH]],"#e2e8f0")}
+                            {/* area fill for revenue */}
+                            <path d={revPts.map(([x,y],i)=>(i===0?"M":"L")+x.toFixed(1)+","+y.toFixed(1)).join(" ")+"L"+(PAD.l+(n===1?cW/2:cW)).toFixed(1)+","+(PAD.t+cH)+"L"+PAD.l+","+(PAD.t+cH)+"Z"} fill="#10b98115"/>
+                            {/* lines */}
+                            {polyline(revPts,"#10b981")}
+                            {polyline(grossPts,"#0891b2")}
+                            {polyline(netPts,"#8b5cf6")}
+                            {/* dots */}
+                            {dots(revPts,"#10b981")}
+                            {dots(grossPts,"#0891b2")}
+                            {dots(netPts,"#8b5cf6")}
+                            {/* x labels */}
+                            {months.map((m,i)=>{
+                              const x=PAD.l+(n===1?cW/2:i/(n-1)*cW);
+                              const [y,mo]=m.split("-");
+                              return <text key={m} x={x} y={H-6} fontSize="9.5" fill="#64748b" textAnchor="middle" fontWeight="600">{MNAMES[parseInt(mo)-1]}{n>6?" "+y.slice(2):""}</text>;
+                            })}
+                          </svg>
+                          <div style={{display:"flex",gap:18,marginTop:8,fontSize:11.5,color:"#64748b",flexWrap:"wrap"}}>
+                            <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:22,height:3,background:"#10b981",borderRadius:2,display:"inline-block"}}/>Выручка</span>
+                            <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:22,height:3,background:"#0891b2",borderRadius:2,display:"inline-block"}}/>Валовая прибыль</span>
+                            <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:22,height:3,background:"#8b5cf6",borderRadius:2,display:"inline-block"}}/>Чистая прибыль</span>
                           </div>
-                          <div style={{fontSize:10.5,color:"#475569",marginTop:6,fontWeight:600}}>{MNAMES[parseInt(mo)-1]}</div>
-                          <div style={{fontSize:9,color:"#94a3b8"}}>{y.slice(2)}</div>
-                          <div style={{fontSize:9.5,fontWeight:700,color:pr>=0?"#059669":"#dc2626",marginTop:2}}>{pr>=0?"+":""}{Math.round(pr/1000)}k</div>
                         </div>
-                      );})}
-                    </div>
-                    <div style={{display:"flex",gap:16,marginTop:10,fontSize:11.5,color:"#64748b"}}>
-                      <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:11,height:11,background:"#10b981",borderRadius:3,display:"inline-block"}}/>Доход</span>
-                      <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:11,height:11,background:"#f43f5e",borderRadius:3,display:"inline-block"}}/>Расход</span>
-                    </div>
+                      );
+                    })()}
                   </CardSection>
                 </div>
               );
