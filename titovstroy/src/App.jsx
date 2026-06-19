@@ -2948,9 +2948,11 @@ export default function App() {
   const [finPeriod, setFinPeriod] = useState("month"); // all | month | 3month | year | custom
   const [finFrom, setFinFrom] = useState("");
   const [finTo, setFinTo] = useState("");
-  const [finFilterType, setFinFilterType] = useState(""); // "" | income | expense | transfer
+  const [finFilterType, setFinFilterType] = useState("");
   const [finFilterAccount, setFinFilterAccount] = useState("");
   const [finFilterCategory, setFinFilterCategory] = useState("");
+  const [finFilterContract, setFinFilterContract] = useState(""); // фильтр по проекту/договору
+  const [finFilterCat, setFinFilterCat] = useState("");           // фильтр по категории (из ДДС/ОПУ)
   const [finSearch, setFinSearch] = useState("");
   const [finAmtMin, setFinAmtMin] = useState("");
   const [finAmtMax, setFinAmtMax] = useState("");
@@ -7227,6 +7229,8 @@ export default function App() {
           .filter(t=>finAmtMin===""||(Number(t.amount)||0)>=Number(finAmtMin))
           .filter(t=>finAmtMax===""||(Number(t.amount)||0)<=Number(finAmtMax))
           .filter(t=>!finFilterCategory || t.subcategory===finFilterCategory)
+          .filter(t=>!finFilterContract || (t.contractNo||"").trim()===finFilterContract.trim())
+          .filter(t=>!finFilterCat || t.category===finFilterCat)
           .filter(t=>!fq || [t.category,t.subcategory,t.note,t.contractNo,t.account].some(v=>v&&String(v).toLowerCase().includes(fq)))
           .sort((a,b)=>(b.date||b.createdAt||0)-(a.date||a.createdAt||0));
 
@@ -7509,16 +7513,17 @@ export default function App() {
               const fmt = v => v ? fM(v) : "—";
               const sumStyle=(v)=>({textAlign:"right",fontWeight:700,color:v>=0?"#0f172a":"#dc2626"});
               // строки-помощники
-              const groupRow=(label,ser,color)=>(
-                <tr key={"g-"+label} style={{borderBottom:"1px solid #f1f5f9"}}>
-                  <td style={{paddingLeft:24,fontWeight:700,color:"#334155"}}>{label}</td>
+              const goOps=(cat,sub)=>{ setFinFilterCat(cat||""); setFinFilterCategory(sub||""); setFinFilterContract(""); setFinanceTab("ops"); };
+              const groupRow=(label,ser,color,cat)=>(
+                <tr key={"g-"+label} onClick={()=>goOps(cat||label,"")} style={{borderBottom:"1px solid #f1f5f9",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+                  <td style={{paddingLeft:24,fontWeight:700,color:"#334155"}}>{label} <span style={{fontSize:9,color:"#cbd5e1",marginLeft:4}}>↗</span></td>
                   {months.map(m=><td key={m} style={{textAlign:"right",color,fontWeight:600}}>{fmt(ser.byM[m])}</td>)}
                   <td className="colTot" style={{textAlign:"right",fontWeight:800,color}}>{fmt(ser.tot)}</td>
                 </tr>
               );
-              const subRow=(label,ser)=>(
-                <tr key={"s-"+label}>
-                  <td style={{paddingLeft:40,color:"#64748b",fontSize:11.5}}>{label}</td>
+              const subRow=(label,ser,cat)=>(
+                <tr key={"s-"+label} onClick={()=>goOps(cat||"",label)} style={{cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+                  <td style={{paddingLeft:40,color:"#64748b",fontSize:11.5}}>{label} <span style={{fontSize:9,color:"#cbd5e1",marginLeft:4}}>↗</span></td>
                   {months.map(m=><td key={m} style={{textAlign:"right",color:"#94a3b8",fontSize:11.5}}>{fmt(ser.byM[m])}</td>)}
                   <td className="colTot" style={{textAlign:"right",color:"#64748b",fontSize:11.5}}>{fmt(ser.tot)}</td>
                 </tr>
@@ -7545,9 +7550,9 @@ export default function App() {
                         return (<Fragment key={act.key}>
                           <tr><td colSpan={nCols} style={{paddingTop:14,paddingBottom:5,fontWeight:900,color:act.color,fontSize:13,borderTop:"2px solid #eef2f7"}}>{act.label} <span style={{fontWeight:500,color:"#cbd5e1",fontSize:11}}>· {act.desc}</span></td></tr>
                           {incG.length>0 && <tr><td colSpan={nCols} style={{paddingLeft:18,paddingTop:3,paddingBottom:2,fontWeight:700,color:"#059669",fontSize:11}}>↓ Поступления</td></tr>}
-                          {incG.map(g=>(<Fragment key={g.cat}>{groupRow(g.cat,g,"#059669")}{g.subs.map(sub=>{const s=agg(t=>t.type==="income"&&t.category===g.cat&&t.subcategory===sub&&actOf(t)===act.key); return s.tot===0?null:subRow(sub,s);})}</Fragment>))}
+                          {incG.map(g=>(<Fragment key={g.cat}>{groupRow(g.cat,g,"#059669",g.cat)}{g.subs.map(sub=>{const s=agg(t=>t.type==="income"&&t.category===g.cat&&t.subcategory===sub&&actOf(t)===act.key); return s.tot===0?null:subRow(sub,s,g.cat);})}</Fragment>))}
                           {expG.length>0 && <tr><td colSpan={nCols} style={{paddingLeft:18,paddingTop:3,paddingBottom:2,fontWeight:700,color:"#dc2626",fontSize:11}}>↑ Платежи</td></tr>}
-                          {expG.map(g=>(<Fragment key={g.cat}>{groupRow(g.cat,g,"#dc2626")}{g.subs.map(sub=>{const s=agg(t=>t.type==="expense"&&t.category===g.cat&&t.subcategory===sub&&actOf(t)===act.key); return s.tot===0?null:subRow(sub,s);})}</Fragment>))}
+                          {expG.map(g=>(<Fragment key={g.cat}>{groupRow(g.cat,g,"#dc2626",g.cat)}{g.subs.map(sub=>{const s=agg(t=>t.type==="expense"&&t.category===g.cat&&t.subcategory===sub&&actOf(t)===act.key); return s.tot===0?null:subRow(sub,s,g.cat);})}</Fragment>))}
                           <tr style={{background:act.bg}}><td style={{fontWeight:800,color:act.color,background:act.bg}}>= Поток · {act.label.toLowerCase()}</td>{months.map(m=><td key={m} style={{textAlign:"right",fontWeight:800,color:(net.byM[m]||0)>=0?act.color:"#dc2626"}}>{(net.byM[m]||0)>=0?"+":""}{fmt(net.byM[m])}</td>)}<td className="colTot" style={{textAlign:"right",fontWeight:900,color:net.tot>=0?act.color:"#dc2626"}}>{net.tot>=0?"+":""}{fmt(net.tot)}</td></tr>
                         </Fragment>);
                       })}
@@ -7612,7 +7617,8 @@ export default function App() {
               // строка-метрика (subtotal) и строка-процент
               const MetricRow=({label,ser,color,bg})=>(<tr style={{borderTop:"2px solid #e2e8f0",background:bg}}><td style={{padding:"9px 9px",fontWeight:900,color,background:bg}}>{label}</td>{months.map(m=><td key={m} style={{padding:"9px 9px",textAlign:"right",fontWeight:800,color:(ser.byM[m]||0)>=0?color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(ser.byM[m])}</td>)}<td style={{padding:"9px 9px",textAlign:"right",fontWeight:900,color:ser.tot>=0?color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(ser.tot)}</td></tr>);
               const PctRow=({label,ser,color})=>(<tr><td style={{padding:"3px 9px 6px 22px",color,fontSize:11,fontStyle:"italic"}}>{label}</td>{months.map(m=><td key={m} style={{padding:"3px 9px 6px",textAlign:"right",color,fontSize:11,fontStyle:"italic",whiteSpace:"nowrap"}}>{fpct(ser.byM[m])}</td>)}<td style={{padding:"3px 9px 6px",textAlign:"right",color,fontSize:11,fontStyle:"italic",fontWeight:700,whiteSpace:"nowrap"}}>{fpct(ser.tot)}</td></tr>);
-              const ExpGroupRows=({cat,exclude=[]})=>{ const meta=(financeMeta.expense||[]).find(c=>c.cat===cat); if(!meta)return null; const gt=agg(t=>t.type==="expense"&&t.category===cat&&!exclude.includes(t.subcategory)); if(gt.tot===0)return null; return (<Fragment><tr style={{borderBottom:"1px solid #f8fafc"}}><td style={{padding:"6px 9px",fontWeight:700,color:"#334155"}}>{cat}</td>{months.map(m=><td key={m} style={{padding:"6px 9px",textAlign:"right",color:"#dc2626",fontWeight:600,whiteSpace:"nowrap"}}>{fmt(gt.byM[m])}</td>)}<td style={{padding:"6px 9px",textAlign:"right",fontWeight:800,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(gt.tot)}</td></tr>{(meta.subs||[]).filter(s2=>!exclude.includes(s2)).map(s2=>{ const s=agg(t=>t.type==="expense"&&t.category===cat&&t.subcategory===s2); if(s.tot===0)return null; return (<tr key={s2}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{s2}</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>);})}</Fragment>); };
+              const goOps=(cat,sub)=>{ setFinFilterCat(cat||""); setFinFilterCategory(sub||""); setFinFilterContract(""); setFinanceTab("ops"); };
+              const ExpGroupRows=({cat,exclude=[]})=>{ const meta=(financeMeta.expense||[]).find(c=>c.cat===cat); if(!meta)return null; const gt=agg(t=>t.type==="expense"&&t.category===cat&&!exclude.includes(t.subcategory)); if(gt.tot===0)return null; return (<Fragment><tr onClick={()=>goOps(cat,"")} style={{borderBottom:"1px solid #f8fafc",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}><td style={{padding:"6px 9px",fontWeight:700,color:"#334155"}}>{cat} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>{months.map(m=><td key={m} style={{padding:"6px 9px",textAlign:"right",color:"#dc2626",fontWeight:600,whiteSpace:"nowrap"}}>{fmt(gt.byM[m])}</td>)}<td style={{padding:"6px 9px",textAlign:"right",fontWeight:800,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(gt.tot)}</td></tr>{(meta.subs||[]).filter(s2=>!exclude.includes(s2)).map(s2=>{ const s=agg(t=>t.type==="expense"&&t.category===cat&&t.subcategory===s2); if(s.tot===0)return null; return (<tr key={s2} onClick={()=>goOps(cat,s2)} style={{cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{s2} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>);})}</Fragment>); };
               return (
                 <div className="card" style={{padding:"18px 20px",width:"100%",boxSizing:"border-box"}}>
                   <div style={{fontSize:15,fontWeight:800,color:"#0f172a",marginBottom:4}}>📈 Отчёт о прибылях и убытках (ОПУ / P&L)</div>
@@ -7628,9 +7634,9 @@ export default function App() {
                     <tbody>
                       <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#059669"}}>▼ ДОХОДЫ</td></tr>
                       {incGroups.filter(g=>g.tot!==0).map(g=>(<Fragment key={g.cat}>
-                        <tr style={{borderBottom:"1px solid #f8fafc"}}><td style={{padding:"6px 9px",fontWeight:700,color:"#334155"}}>{g.cat}</td>{months.map(m=><td key={m} style={{padding:"6px 9px",textAlign:"right",color:"#059669",fontWeight:600,whiteSpace:"nowrap"}}>{fmt(g.byM[m])}</td>)}<td style={{padding:"6px 9px",textAlign:"right",fontWeight:800,color:"#059669",whiteSpace:"nowrap"}}>{fmt(g.tot)}</td></tr>
+                        <tr onClick={()=>goOps(g.cat,"")} style={{borderBottom:"1px solid #f8fafc",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}><td style={{padding:"6px 9px",fontWeight:700,color:"#334155"}}>{g.cat} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>{months.map(m=><td key={m} style={{padding:"6px 9px",textAlign:"right",color:"#059669",fontWeight:600,whiteSpace:"nowrap"}}>{fmt(g.byM[m])}</td>)}<td style={{padding:"6px 9px",textAlign:"right",fontWeight:800,color:"#059669",whiteSpace:"nowrap"}}>{fmt(g.tot)}</td></tr>
                         {g.subs.map(sub=>{ const s=agg(t=>t.type==="income"&&t.category===g.cat&&t.subcategory===sub); if(s.tot===0)return null; return (
-                          <tr key={sub}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{sub}</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>
+                          <tr key={sub} onClick={()=>goOps(g.cat,sub)} style={{cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{sub} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>
                         );})}
                       </Fragment>))}
                       <tr style={{borderTop:"1px solid #e2e8f0"}}><td style={{padding:"7px 9px",fontWeight:800,color:"#059669"}}>Выручка (Revenue)</td>{months.map(m=><td key={m} style={{padding:"7px 9px",textAlign:"right",fontWeight:800,color:"#059669",whiteSpace:"nowrap"}}>{fmt(income.byM[m])}</td>)}<td style={{padding:"7px 9px",textAlign:"right",fontWeight:900,color:"#059669",whiteSpace:"nowrap"}}>{fmt(income.tot)}</td></tr>
@@ -7850,6 +7856,22 @@ export default function App() {
                 {!finReadonly && (()=>{const td=financeTx.filter(t=>t.deletedAt); return td.length>0&&(<button onClick={()=>setFinTxTrash(true)} style={{background:"rgba(220,38,38,.1)",color:"#dc2626",border:"1px solid rgba(220,38,38,.18)",borderRadius:9,padding:"9px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🗑 {td.length}</button>);})()}
                 <span style={{fontSize:12,color:"#94a3b8"}}>Операций: <b style={{color:"#334155"}}>{opsList.length}</b></span>
               </div>
+              {(finFilterContract || finFilterCat || finFilterCategory) && (
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+                  {finFilterContract && <div style={{display:"flex",alignItems:"center",gap:6,background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:9,padding:"7px 12px"}}>
+                    <span style={{fontSize:12,fontWeight:700,color:"#2563eb"}}>📋 Проект: {finFilterContract}</span>
+                    <button onClick={()=>setFinFilterContract("")} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:16,lineHeight:1,padding:0}}>✕</button>
+                  </div>}
+                  {finFilterCat && <div style={{display:"flex",alignItems:"center",gap:6,background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:9,padding:"7px 12px"}}>
+                    <span style={{fontSize:12,fontWeight:700,color:"#059669"}}>📂 {finFilterCat}</span>
+                    <button onClick={()=>setFinFilterCat("")} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:16,lineHeight:1,padding:0}}>✕</button>
+                  </div>}
+                  {finFilterCategory && <div style={{display:"flex",alignItems:"center",gap:6,background:"#fefce8",border:"1px solid #fef08a",borderRadius:9,padding:"7px 12px"}}>
+                    <span style={{fontSize:12,fontWeight:700,color:"#ca8a04"}}>📌 {finFilterCategory}</span>
+                    <button onClick={()=>setFinFilterCategory("")} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:16,lineHeight:1,padding:0}}>✕</button>
+                  </div>}
+                </div>
+              )}
               <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
                 <input className="fi" placeholder="🔍 Поиск по статье, комментарию, договору..." value={finSearch} onChange={e=>setFinSearch(e.target.value)} style={{flex:"1 1 240px"}}/>
                 <select className="fi" style={{width:"auto"}} value={finFilterType} onChange={e=>setFinFilterType(e.target.value)}>
@@ -8033,11 +8055,12 @@ export default function App() {
                                 {marginPct!==null&&<span style={{fontSize:11,fontWeight:800,color:"#fff",background:mCol,borderRadius:7,padding:"2px 8px"}}>{marginPct}%</span>}
                               </span>
                             </div>
-                            {/* Флаги */}
-                            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:12}}>
+                            {/* Флаги + кнопка операций */}
+                            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:12,alignItems:"center"}}>
                               {[["Б24",p.b24],["Договор",p.contractSigned],["АВР",p.avr]].map(([l,v])=>(
                                 <span key={l} style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:7,background:yesno(v)?"#f0fdf4":"#fef2f2",color:yesno(v)?"#059669":"#dc2626",display:"inline-flex",alignItems:"center",gap:4}}>{yesno(v)?"✓":"✗"} {l}</span>
                               ))}
+                              {p.contractNo && <button onClick={e=>{ e.stopPropagation(); setFinFilterContract(p.contractNo); setFinanceTab("ops"); }} style={{marginLeft:"auto",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:7,padding:"4px 10px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📋 Операции</button>}
                             </div>
                           </div>
                         </div>
