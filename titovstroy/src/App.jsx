@@ -2957,8 +2957,8 @@ export default function App() {
   const [finTxModal, setFinTxModal] = useState(null); // редактируемая/новая транзакция
   const [finCatSearch, setFinCatSearch] = useState(""); // поиск в поле статьи
   const [finCatOpen, setFinCatOpen] = useState(false);  // дропдаун статьи открыт
-  const [finProjSearch, setFinProjSearch] = useState(""); // поиск в поле проекта
-  const [finProjOpen, setFinProjOpen] = useState(false);  // дропдаун проекта открыт
+  const [finTxProjSearch, setFinTxProjSearch] = useState(""); // поиск в поле проекта (в модале операции)
+  const [finTxProjOpen, setFinTxProjOpen] = useState(false);  // дропдаун проекта открыт (в модале операции)
   const [finTxTrash, setFinTxTrash] = useState(false); // корзина операций
   const [finImportBusy, setFinImportBusy] = useState(false);
   const [finProjects, setFinProjects] = useState([]);
@@ -7234,8 +7234,8 @@ export default function App() {
         const TYPE_LABEL={income:"Доход",expense:"Расход",transfer:"Перевод"};
         const TYPE_COLOR={income:"#059669",expense:"#dc2626",transfer:"#7c3aed"};
 
-        const openNewTx = (type="income") => { setFinCatSearch(""); setFinCatOpen(false); setFinProjSearch(""); setFinProjOpen(false); setFinTxModal({ id:null, type, date:new Date().toISOString().slice(0,10), amount:"", account:accounts[0]?.name||"", accountTo:accounts[1]?.name||"", category:"", subcategory:"", note:"", contractNo:"" }); };
-        const openEditTx = (t) => { setFinCatSearch(t.subcategory||t.category||""); setFinCatOpen(false); setFinProjSearch(t.contractNo||""); setFinProjOpen(false); setFinTxModal({ ...t, date:new Date(t.date||t.createdAt||Date.now()).toISOString().slice(0,10) }); };
+        const openNewTx = (type="income") => { setFinCatSearch(""); setFinCatOpen(false); setFinTxProjSearch(""); setFinTxProjOpen(false); setFinTxModal({ id:null, type, date:new Date().toISOString().slice(0,10), amount:"", account:accounts[0]?.name||"", accountTo:accounts[1]?.name||"", category:"", subcategory:"", note:"", contractNo:"" }); };
+        const openEditTx = (t) => { setFinCatSearch(t.subcategory||t.category||""); setFinCatOpen(false); setFinTxProjSearch(t.contractNo||""); setFinTxProjOpen(false); setFinTxModal({ ...t, date:new Date(t.date||t.createdAt||Date.now()).toISOString().slice(0,10) }); };
 
         return (
           <div className="page" style={{maxWidth:1600}}>
@@ -8402,26 +8402,25 @@ export default function App() {
                         })()}
                       </>)}
                       {(()=>{
-                        const pq = finProjSearch.toLowerCase();
+                        const pq = finTxProjSearch.toLowerCase();
                         const projRows = finProjects.filter(p=>!pq || (p.contractNo||"").toLowerCase().includes(pq) || (p.description||"").toLowerCase().includes(pq) || (p.comment||"").toLowerCase().includes(pq));
-                        const projLabel = (p) => p.contractNo + (p.description?" — "+p.description.slice(0,40):"") + (p.comment?" ("+p.comment.slice(0,30)+")":"");
                         return (
                           <div style={{position:"relative"}} onClick={e=>e.stopPropagation()}>
                             <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Проект / № договора</div>
                             <div style={{position:"relative",display:"flex",alignItems:"center"}}>
-                              <input className="fi" style={{paddingRight:28}} value={finProjSearch}
-                                onFocus={()=>setFinProjOpen(true)}
-                                onBlur={()=>setTimeout(()=>setFinProjOpen(false),180)}
-                                onChange={e=>{ setFinProjSearch(e.target.value); setFinProjOpen(true); set("contractNo",e.target.value); }}
+                              <input className="fi" style={{paddingRight:28}} value={finTxProjSearch}
+                                onFocus={()=>setFinTxProjOpen(true)}
+                                onBlur={()=>setTimeout(()=>setFinTxProjOpen(false),180)}
+                                onChange={e=>{ setFinTxProjSearch(e.target.value); setFinTxProjOpen(true); set("contractNo",e.target.value); }}
                                 placeholder="— без проекта —"/>
-                              {finProjSearch && <span onMouseDown={e=>{e.preventDefault();setFinProjSearch("");set("contractNo","");setFinProjOpen(false);}} style={{position:"absolute",right:8,cursor:"pointer",color:"#94a3b8",fontSize:14,lineHeight:1}}>✕</span>}
+                              {finTxProjSearch && <span onMouseDown={e=>{e.preventDefault();setFinTxProjSearch("");set("contractNo","");setFinTxProjOpen(false);}} style={{position:"absolute",right:8,cursor:"pointer",color:"#94a3b8",fontSize:14,lineHeight:1}}>✕</span>}
                             </div>
-                            {finProjOpen && (
+                            {finTxProjOpen && (
                               <div style={{position:"absolute",zIndex:999,top:"100%",left:0,right:0,background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,.13)",maxHeight:220,overflowY:"auto",marginTop:2}}>
-                                <div onMouseDown={e=>{e.preventDefault();setFinProjSearch("");set("contractNo","");setFinProjOpen(false);}} style={{padding:"9px 14px",fontSize:12,color:"#94a3b8",cursor:"pointer",borderBottom:"1px solid #f1f5f9"}}
+                                <div onMouseDown={e=>{e.preventDefault();setFinTxProjSearch("");set("contractNo","");setFinTxProjOpen(false);}} style={{padding:"9px 14px",fontSize:12,color:"#94a3b8",cursor:"pointer",borderBottom:"1px solid #f1f5f9"}}
                                   onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}>— без проекта —</div>
                                 {projRows.map((p,i)=>(
-                                  <div key={i} onMouseDown={e=>{e.preventDefault();setFinProjSearch(p.contractNo||"");set("contractNo",p.contractNo||"");setFinProjOpen(false);}}
+                                  <div key={i} onMouseDown={e=>{e.preventDefault();setFinTxProjSearch(p.contractNo||"");set("contractNo",p.contractNo||"");setFinTxProjOpen(false);}}
                                     style={{padding:"9px 14px",fontSize:13,color:"#0f172a",cursor:"pointer",background:m.contractNo===p.contractNo?"#eff6ff":"transparent",borderBottom:"1px solid #f8fafc"}}
                                     onMouseEnter={e=>e.currentTarget.style.background="#f1f5f9"} onMouseLeave={e=>e.currentTarget.style.background=m.contractNo===p.contractNo?"#eff6ff":"transparent"}>
                                     <span style={{fontWeight:700}}>{p.contractNo}</span>
@@ -8447,7 +8446,7 @@ export default function App() {
                     </div>
                     <div style={{display:"flex",gap:8,marginTop:18,flexWrap:"wrap"}}>
                       {m.id && <button onClick={del} style={{background:"#fef2f2",color:"#dc2626",border:"1px solid #fecaca",borderRadius:9,padding:"10px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
-                      {m.id && <button onClick={()=>{ const copy={...m,id:null,createdAt:undefined,updatedAt:undefined,date:new Date().toISOString().slice(0,10)}; setFinCatSearch(copy.subcategory||copy.category||""); setFinProjSearch(copy.contractNo||""); setFinTxModal(copy); }} style={{background:"#f8fafc",color:"#475569",border:"1px solid #e2e8f0",borderRadius:9,padding:"10px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📋 Копия</button>}
+                      {m.id && <button onClick={()=>{ const copy={...m,id:null,createdAt:undefined,updatedAt:undefined,date:new Date().toISOString().slice(0,10)}; setFinCatSearch(copy.subcategory||copy.category||""); setFinTxProjSearch(copy.contractNo||""); setFinTxModal(copy); }} style={{background:"#f8fafc",color:"#475569",border:"1px solid #e2e8f0",borderRadius:9,padding:"10px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📋 Копия</button>}
                       <div style={{flex:1}}/>
                       <button onClick={()=>setFinTxModal(null)} style={{background:"#fff",color:"#64748b",border:"1px solid #e2e8f0",borderRadius:9,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Отмена</button>
                       <button onClick={save} style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:9,padding:"10px 22px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Сохранить</button>
