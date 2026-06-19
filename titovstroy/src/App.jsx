@@ -3311,7 +3311,19 @@ export default function App() {
       else if (tx.status === "empty") { setFinanceTx([]); financeTxRef.current = []; }
       else ok = false;
       if (mt.status === "found" && mt.value) { try { const p = JSON.parse(mt.value); if (p && p.accounts) { const m = mergeFinMeta(p); setFinanceMeta(m); financeMetaRef.current = m; } } catch {} }
-      if (pj.status === "found" && pj.value) { try { const p = JSON.parse(pj.value); if (Array.isArray(p)) { setFinProjects(p); finProjectsRef.current = p; } } catch {} }
+      if (pj.status === "found" && pj.value) { try { const p = JSON.parse(pj.value); if (Array.isArray(p)) {
+        const curY = new Date().getFullYear();
+        const fixed = p.map(proj => {
+          if (!proj.createdAt) return proj;
+          const d = new Date(proj.createdAt);
+          if (isNaN(d.getTime()) || d.getFullYear() <= curY + 1) return proj;
+          // год явно неверный — заменяем на текущий, день/месяц сохраняем
+          const corrected = new Date(proj.createdAt);
+          corrected.setFullYear(curY);
+          return { ...proj, createdAt: corrected.toISOString().slice(0, 10) };
+        });
+        setFinProjects(fixed); finProjectsRef.current = fixed;
+      } } catch {} }
       _financeLoaded.current = ok;
     } catch(e) { console.error(e); }
   }, []);
@@ -7601,22 +7613,28 @@ export default function App() {
                   {/* ── График по проектам ── */}
                   <CardSection title="📦 Проекты по месяцам" accent="#0f172a" full>
                     {(()=>{
-                      // Бакетируем finProjects по месяцу создания
-                      const pmKey = p => { const ts = p.createdAt ? new Date(p.createdAt).getTime() : 0; if(!ts) return null; const d=new Date(ts); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); };
+                      // Бакетируем finProjects по месяцу создания (не дальше +3 мес от сегодня)
+                      const _now = Date.now(), _maxTs = _now + 90*24*3600*1000, _minTs = _now - 3*365*24*3600*1000;
+                      const pmKey = p => {
+                        const ts = p.createdAt ? new Date(p.createdAt).getTime() : 0;
+                        if(!ts||ts>_maxTs||ts<_minTs) return null;
+                        const d=new Date(ts); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+                      };
                       // Фактическая выручка и COGS по contractNo из financeTx (все время)
+                      const _normCn = s => (s||"").replace(/[№\s]/g,"").trim();
                       const txByContract = {};
                       financeTx.forEach(t=>{ if(t.deletedAt||t.included===false||t.type==="transfer"||!t.contractNo) return;
-                        const k=t.contractNo.trim();
+                        const k=_normCn(t.contractNo);
                         if(!txByContract[k]) txByContract[k]={inc:0,cogs:0};
                         const amt=Number(t.amount)||0;
                         if(t.type==="income") txByContract[k].inc+=amt;
                         else if(t.type==="expense"&&t.category===_C_COGS) txByContract[k].cogs+=amt;
                       });
-                      // Группируем проекты по месяцу
+                      // Группируем проекты по месяцу (исключаем отменённые)
                       const pMonthMap = {};
-                      finProjects.forEach(p=>{ const k=pmKey(p); if(!k) return;
+                      finProjects.filter(p=>(p.rawStatus||p.status)!=="отменен").forEach(p=>{ const k=pmKey(p); if(!k) return;
                         if(!pMonthMap[k]) pMonthMap[k]={count:0,budget:0,inc:0,gross:0};
-                        const cx=txByContract[(p.contractNo||"").trim()]||{inc:0,cogs:0};
+                        const cx = txByContract[_normCn(p.contractNo)] || {inc:0,cogs:0};
                         pMonthMap[k].count++;
                         pMonthMap[k].budget+=(Number(p.budget)||0);
                         pMonthMap[k].inc+=cx.inc;
@@ -7657,8 +7675,9 @@ export default function App() {
                                   <rect x={x0+BAR_W+4} y={bY(d.gross)} width={BAR_W} height={bH(d.gross)} rx="3" fill="#0891b2" opacity=".85">
                                     <title>Вал. прибыль: {fM(Math.round(d.gross))} ₸</title>
                                   </rect>
-                                  {/* Кол-во проектов */}
-                                  <text x={x0+BAR_W} y={bY(Math.max(d.budget,d.inc))-5} fontSize="9" fill="#64748b" textAnchor="middle" fontWeight="700">{d.count}</text>
+                                  {/* Кол-во проектов + сумма бюджета */}
+                                  <text x={x0+BAR_W} y={bY(Math.max(d.budget,d.inc))-14} fontSize="9" fill="#64748b" textAnchor="middle" fontWeight="700">{d.count} пр.</text>
+                                  <text x={x0+BAR_W} y={bY(Math.max(d.budget,d.inc))-4} fontSize="8" fill="#2563eb" textAnchor="middle">{d.budget>=1000000?(d.budget/1000000).toFixed(1)+"M":d.budget>=1000?Math.round(d.budget/1000)+"k":d.budget}</text>
                                   {/* Подпись месяца */}
                                   <text x={x0+BAR_W} y={svgH-PB+14} fontSize="9.5" fill="#475569" textAnchor="middle" fontWeight="600">{MNAMES[parseInt(mo)-1]}</text>
                                   <text x={x0+BAR_W} y={svgH-PB+25} fontSize="8.5" fill="#94a3b8" textAnchor="middle">{y.slice(2)}</text>
