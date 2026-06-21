@@ -7550,69 +7550,103 @@ export default function App() {
                   </div>
 
                   {/* ── Динамика по месяцам (линейный график) ── */}
-                  <CardSection title="📈 Динамика по месяцам" accent="#0f172a" full>
-                    {months.length===0 && <div style={{color:"#94a3b8",fontSize:13}}>Нет данных за период</div>}
+                  <div style={{background:"#0f172a",borderRadius:16,padding:"20px 24px",marginBottom:16,boxShadow:"0 8px 32px rgba(0,0,0,.25)"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10,marginBottom:18}}>
+                      <div style={{fontSize:12,color:"#94a3b8",fontWeight:700,textTransform:"uppercase",letterSpacing:1.2}}>📈 Динамика по месяцам</div>
+                      <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+                        {[["#10b981","Выручка"],["#38bdf8","Валовая прибыль"],["#a78bfa","Чистая прибыль"]].map(([c,l])=>(
+                          <span key={l} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#64748b"}}>
+                            <span style={{width:22,height:2.5,background:c,borderRadius:2,display:"inline-block"}}/>
+                            <span style={{color:"#94a3b8",fontWeight:500}}>{l}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    {months.length===0 && <div style={{color:"#334155",fontSize:13,padding:"32px 0",textAlign:"center"}}>Нет данных за период</div>}
                     {months.length>0 && (()=>{
-                      const W=720, H=200, PL=64, PR=20, PT=20, PB=44;
+                      const W=720, H=220, PL=56, PR=16, PT=16, PB=32;
                       const cW=W-PL-PR, cH=H-PT-PB, n=months.length;
                       const fmtY = v => v>=1000000?(v/1000000).toFixed(1)+"M":v>=1000?Math.round(v/1000)+"k":"0";
                       const xOf = i => PL+(n===1?cW/2:i/(n-1)*cW);
                       const yOf = v => PT+cH-(Math.max(0,v)/maxMonth)*cH;
-                      const mkLine=(fn,color)=>{
-                        const d=months.map((m,i)=>(i===0?"M":"L")+xOf(i).toFixed(1)+","+yOf(fn(monthMap[m])).toFixed(1)).join(" ");
-                        return <path d={d} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>;
+                      const mkBezier = pts => {
+                        if(!pts.length) return "";
+                        if(pts.length===1) return `M${pts[0][0]},${pts[0][1]}`;
+                        let d=`M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
+                        for(let i=0;i<pts.length-1;i++){
+                          const [x0,y0]=pts[i],[x1,y1]=pts[i+1],cpx=(x0+x1)/2;
+                          d+=` C${cpx.toFixed(1)},${y0.toFixed(1)} ${cpx.toFixed(1)},${y1.toFixed(1)} ${x1.toFixed(1)},${y1.toFixed(1)}`;
+                        }
+                        return d;
                       };
-                      const mkDots=(fn,color)=>months.map((m,i)=>{
-                        const v=fn(monthMap[m]); const [yr,mo]=m.split("-");
-                        return <circle key={i} cx={xOf(i)} cy={yOf(v)} r="4.5" fill={color} stroke="#fff" strokeWidth="2">
-                          <title>{MNAMES[parseInt(mo)-1]} {yr}: {fM(Math.round(v))} ₸</title>
-                        </circle>;
-                      });
-                      const yTicks=[0,.25,.5,.75,1].map(r=>({y:PT+cH-r*cH,v:Math.round(maxMonth*r)}));
-                      const areaD=months.map((m,i)=>(i===0?"M":"L")+xOf(i).toFixed(1)+","+yOf(monthMap[m].inc).toFixed(1)).join(" ")
-                        +"L"+xOf(n-1).toFixed(1)+","+(PT+cH)+"L"+xOf(0).toFixed(1)+","+(PT+cH)+"Z";
+                      const LINES=[
+                        {fn:d=>d.inc,       color:"#10b981", gid:"lg1", op1:.3, op2:.02},
+                        {fn:d=>d.inc-d.cogs,color:"#38bdf8", gid:"lg2", op1:.2, op2:.0},
+                        {fn:d=>d.inc-d.exp, color:"#a78bfa", gid:"lg3", op1:.2, op2:.0},
+                      ];
+                      const yTicks=[0,.25,.5,.75,1].map(r=>({y:PT+cH*(1-r),v:Math.round(maxMonth*r)}));
                       return (
                         <div style={{overflowX:"auto"}}>
-                          <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",minWidth:400,display:"block"}}>
+                          <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",minWidth:360,display:"block"}}>
                             <defs>
-                              <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor="#10b981" stopOpacity=".18"/>
-                                <stop offset="100%" stopColor="#10b981" stopOpacity="0"/>
-                              </linearGradient>
+                              {LINES.map(({color,gid,op1,op2})=>(
+                                <linearGradient key={gid} id={gid} x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stopColor={color} stopOpacity={op1}/>
+                                  <stop offset="100%" stopColor={color} stopOpacity={op2}/>
+                                </linearGradient>
+                              ))}
                             </defs>
+                            {/* grid */}
                             {yTicks.map((t,i)=>(
                               <g key={i}>
-                                <line x1={PL} y1={t.y} x2={W-PR} y2={t.y} stroke={i===0?"#cbd5e1":"#f1f5f9"} strokeWidth={i===0?"1.5":"1"}/>
-                                <text x={PL-8} y={t.y+4} fontSize="10" fill="#94a3b8" textAnchor="end" fontWeight="500">{fmtY(t.v)}</text>
+                                <line x1={PL} y1={t.y} x2={W-PR} y2={t.y} stroke={i===0?"#1e293b":"#172033"} strokeWidth="1" strokeDasharray={i===0?"":"4 4"}/>
+                                <text x={PL-6} y={t.y+4} fontSize="10" fill="#475569" textAnchor="end">{fmtY(t.v)}</text>
                               </g>
                             ))}
-                            <path d={areaD} fill="url(#areaGrad)"/>
-                            {mkLine(d=>d.inc,"#10b981")}
-                            {mkLine(d=>d.inc-d.cogs,"#0891b2")}
-                            {mkLine(d=>d.inc-d.exp,"#8b5cf6")}
-                            {mkDots(d=>d.inc,"#10b981")}
-                            {mkDots(d=>d.inc-d.cogs,"#0891b2")}
-                            {mkDots(d=>d.inc-d.exp,"#8b5cf6")}
+                            {/* area fills */}
+                            {LINES.map(({fn,gid},li)=>{
+                              const pts=months.map((m,i)=>[xOf(i),yOf(fn(monthMap[m]))]);
+                              const bp=mkBezier(pts);
+                              if(!bp) return null;
+                              const area=bp+` L${xOf(n-1).toFixed(1)},${PT+cH} L${xOf(0).toFixed(1)},${PT+cH} Z`;
+                              return <path key={li} d={area} fill={`url(#${gid})`}/>;
+                            })}
+                            {/* lines */}
+                            {LINES.map(({fn,color},li)=>{
+                              const pts=months.map((m,i)=>[xOf(i),yOf(fn(monthMap[m]))]);
+                              return <path key={li} d={mkBezier(pts)} fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round"/>;
+                            })}
+                            {/* dots */}
+                            {LINES.map(({fn,color},li)=>months.map((m,i)=>{
+                              const v=fn(monthMap[m]); const [yr,mo]=m.split("-");
+                              return <circle key={`${li}-${i}`} cx={xOf(i)} cy={yOf(v)} r="3.5" fill={color} stroke="#0f172a" strokeWidth="2">
+                                <title>{MNAMES[parseInt(mo)-1]} {yr}: {fM(Math.round(v))} ₸</title>
+                              </circle>;
+                            }))}
+                            {/* x labels */}
                             {months.map((m,i)=>{
                               const [yr,mo]=m.split("-");
-                              return <text key={m} x={xOf(i)} y={H-8} fontSize="10.5" fill="#475569" textAnchor="middle" fontWeight="600">{MNAMES[parseInt(mo)-1]} {yr.slice(2)}</text>;
+                              return <text key={m} x={xOf(i)} y={H-4} fontSize="10" fill="#475569" textAnchor="middle">{MNAMES[parseInt(mo)-1]} {yr.slice(2)}</text>;
                             })}
                           </svg>
-                          <div style={{display:"flex",gap:20,marginTop:10,fontSize:12,color:"#64748b",flexWrap:"wrap"}}>
-                            {[["#10b981","Выручка"],["#0891b2","Валовая прибыль"],["#8b5cf6","Чистая прибыль"]].map(([c,l])=>(
-                              <span key={l} style={{display:"flex",alignItems:"center",gap:6}}>
-                                <span style={{width:24,height:3,background:c,borderRadius:2,display:"inline-block"}}/>
-                                <span style={{fontWeight:600}}>{l}</span>
-                              </span>
-                            ))}
-                          </div>
                         </div>
                       );
                     })()}
-                  </CardSection>
+                  </div>
 
                   {/* ── График по проектам ── */}
-                  <CardSection title="📦 Проекты по месяцам" accent="#0f172a" full>
+                  <div style={{background:"#0f172a",borderRadius:16,padding:"20px 24px",marginBottom:16,boxShadow:"0 8px 32px rgba(0,0,0,.25)"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10,marginBottom:18}}>
+                      <div style={{fontSize:12,color:"#94a3b8",fontWeight:700,textTransform:"uppercase",letterSpacing:1.2}}>📦 Проекты по месяцам</div>
+                      <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+                        {[["#1d4ed8","Объём продаж (план)"],["#10b981","Факт. поступления"],["#f59e0b","Валовая прибыль"]].map(([c,l])=>(
+                          <span key={l} style={{display:"flex",alignItems:"center",gap:6,fontSize:11}}>
+                            <span style={{width:12,height:12,background:c,borderRadius:3,display:"inline-block",opacity:.9}}/>
+                            <span style={{color:"#94a3b8",fontWeight:500}}>{l}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
                     {(()=>{
                       const _now = Date.now(), _maxTs = _now + 90*24*3600*1000, _minTs = _now - 3*365*24*3600*1000;
                       const pmKey = p => {
@@ -7639,51 +7673,64 @@ export default function App() {
                         pMonthMap[k].gross+=Math.max(0,cx.inc-cx.cogs);
                       });
                       const pMonths = Object.keys(pMonthMap).sort().slice(-18);
-                      if(pMonths.length===0) return <div style={{color:"#94a3b8",fontSize:13}}>Нет данных по проектам</div>;
-                      const pMax = Math.max(1,...pMonths.map(m=>pMonthMap[m].budget));
+                      if(pMonths.length===0) return <div style={{color:"#334155",fontSize:13,padding:"32px 0",textAlign:"center"}}>Нет данных по проектам</div>;
+                      const pMax = Math.max(1,...pMonths.map(m=>Math.max(pMonthMap[m].budget,pMonthMap[m].inc)));
                       const fmtM = v => v>=1000000?(v/1000000).toFixed(1)+"M":v>=1000?Math.round(v/1000)+"k":"0";
-                      // Компактный HTML-чарт (не SVG) — легче управлять высотой и адаптивностью
-                      const BAR_H = 200; // высота области баров
+                      const W=720, H=220, PL=56, PR=16, PT=12, PB=36;
+                      const cW=W-PL-PR, cH=H-PT-PB, nm=pMonths.length;
+                      const slotW=cW/nm;
+                      const BAR_W=Math.max(8,Math.min(28,slotW*0.28));
+                      const yOf=v=>PT+cH-(Math.max(0,v)/pMax)*cH;
+                      const yTicks=[0,.25,.5,.75,1].map(r=>({y:PT+cH*(1-r),v:Math.round(pMax*r)}));
                       return (
-                        <div>
-                          <div style={{display:"flex",gap:3,alignItems:"flex-end",overflowX:"auto",paddingBottom:4,paddingLeft:4}}>
-                            {pMonths.map(m=>{ const d=pMonthMap[m]; const [yr,mo]=m.split("-");
-                              const budH = Math.max(4, d.budget/pMax*BAR_H);
-                              const incH = d.inc>0 ? Math.max(3, Math.min(budH, d.inc/pMax*BAR_H)) : 0;
-                              const grossH = d.gross>0 ? Math.max(3, d.gross/pMax*BAR_H) : 0;
-                              const grossPct = d.budget>0 ? Math.round(d.gross/d.budget*100) : 0;
+                        <div style={{overflowX:"auto"}}>
+                          <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",minWidth:360,display:"block"}}>
+                            <defs>
+                              <linearGradient id="pg1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#3b82f6" stopOpacity=".9"/><stop offset="100%" stopColor="#1d4ed8" stopOpacity=".7"/></linearGradient>
+                              <linearGradient id="pg2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#34d399" stopOpacity=".9"/><stop offset="100%" stopColor="#059669" stopOpacity=".7"/></linearGradient>
+                              <linearGradient id="pg3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#fbbf24" stopOpacity=".9"/><stop offset="100%" stopColor="#d97706" stopOpacity=".7"/></linearGradient>
+                            </defs>
+                            {/* grid */}
+                            {yTicks.map((t,i)=>(
+                              <g key={i}>
+                                <line x1={PL} y1={t.y} x2={W-PR} y2={t.y} stroke={i===0?"#1e293b":"#172033"} strokeWidth="1" strokeDasharray={i===0?"":"4 4"}/>
+                                <text x={PL-6} y={t.y+4} fontSize="10" fill="#475569" textAnchor="end">{fmtM(t.v)}</text>
+                              </g>
+                            ))}
+                            {/* bars */}
+                            {pMonths.map((m,idx)=>{
+                              const d=pMonthMap[m]; const [yr,mo]=m.split("-");
+                              const cx=PL+idx*slotW+slotW/2;
+                              const bud=d.budget, inc=d.inc, gro=d.gross;
+                              const yB=yOf(bud), yI=yOf(inc), yG=yOf(gro);
+                              const hB=Math.max(1,PT+cH-yB), hI=Math.max(0,PT+cH-yI), hG=Math.max(0,PT+cH-yG);
+                              const offsets=[-BAR_W-2, 0, BAR_W+2];
                               return (
-                                <div key={m} style={{flex:"1 0 64px",maxWidth:100,display:"flex",flexDirection:"column",alignItems:"center",gap:0}}>
-                                  {/* Подпись сверху */}
-                                  <div style={{fontSize:10,fontWeight:700,color:"#0f172a",marginBottom:2,whiteSpace:"nowrap"}}>{d.count} пр.</div>
-                                  <div style={{fontSize:10,color:"#2563eb",fontWeight:600,marginBottom:6,whiteSpace:"nowrap"}}>{fmtM(d.budget)}</div>
-                                  {/* Бар */}
-                                  <div style={{width:"100%",position:"relative",height:BAR_H,display:"flex",alignItems:"flex-end"}}>
-                                    {/* Фон — план */}
-                                    <div style={{position:"absolute",bottom:0,left:"10%",right:"10%",height:budH,background:"#e0f2fe",borderRadius:"6px 6px 0 0"}} title={`Бюджет: ${fM(Math.round(d.budget))} ₸`}/>
-                                    {/* Факт поступления */}
-                                    {incH>0 && <div style={{position:"absolute",bottom:0,left:"10%",right:"10%",height:incH,background:"linear-gradient(180deg,#34d399,#10b981)",borderRadius:"6px 6px 0 0",opacity:.9}} title={`Факт: ${fM(Math.round(d.inc))} ₸`}/>}
-                                    {/* Точка валовой прибыли */}
-                                    {grossH>0 && <div style={{position:"absolute",bottom:grossH-5,left:"50%",transform:"translateX(-50%)",width:10,height:10,background:"#0891b2",borderRadius:"50%",border:"2px solid #fff",zIndex:2}} title={`Вал. прибыль: ${fM(Math.round(d.gross))} ₸ (${grossPct}%)`}/>}
-                                  </div>
-                                  {/* Подпись месяца */}
-                                  <div style={{marginTop:6,textAlign:"center"}}>
-                                    <div style={{fontSize:11,fontWeight:700,color:"#374151"}}>{MNAMES[parseInt(mo)-1]}</div>
-                                    <div style={{fontSize:10,color:"#9ca3af"}}>{yr.slice(2)}</div>
-                                  </div>
-                                </div>
+                                <g key={m}>
+                                  {/* budget bar */}
+                                  <rect x={cx+offsets[0]-BAR_W/2} y={yB} width={BAR_W} height={hB} rx="3" fill="url(#pg1)">
+                                    <title>Объём продаж: {fM(Math.round(bud))} ₸</title>
+                                  </rect>
+                                  {/* income bar */}
+                                  {hI>0&&<rect x={cx+offsets[1]-BAR_W/2} y={yI} width={BAR_W} height={hI} rx="3" fill="url(#pg2)">
+                                    <title>Факт: {fM(Math.round(inc))} ₸</title>
+                                  </rect>}
+                                  {/* gross bar */}
+                                  {hG>0&&<rect x={cx+offsets[2]-BAR_W/2} y={yG} width={BAR_W} height={hG} rx="3" fill="url(#pg3)">
+                                    <title>Вал. прибыль: {fM(Math.round(gro))} ₸</title>
+                                  </rect>}
+                                  {/* count badge */}
+                                  <text x={cx} y={Math.min(yB,yI>0?yI:yB)-6} fontSize="9.5" fill="#64748b" textAnchor="middle" fontWeight="600">{d.count} пр.</text>
+                                  {/* x label */}
+                                  <text x={cx} y={H-4} fontSize="10" fill="#475569" textAnchor="middle">{MNAMES[parseInt(mo)-1]} {yr.slice(2)}</text>
+                                </g>
                               );
                             })}
-                          </div>
-                          <div style={{display:"flex",gap:20,marginTop:14,fontSize:12,color:"#64748b",flexWrap:"wrap",borderTop:"1px solid #f1f5f9",paddingTop:12}}>
-                            <span style={{display:"flex",alignItems:"center",gap:6}}><span style={{width:16,height:16,background:"#e0f2fe",borderRadius:4,display:"inline-block",border:"1px solid #bae6fd"}}/>Объём продаж (план)</span>
-                            <span style={{display:"flex",alignItems:"center",gap:6}}><span style={{width:16,height:16,background:"linear-gradient(#34d399,#10b981)",borderRadius:4,display:"inline-block"}}/>Факт. поступления</span>
-                            <span style={{display:"flex",alignItems:"center",gap:6}}><span style={{width:10,height:10,background:"#0891b2",borderRadius:"50%",display:"inline-block",border:"2px solid #fff",outline:"1px solid #0891b2"}}/>Валовая прибыль</span>
-                          </div>
+                          </svg>
                         </div>
                       );
                     })()}
-                  </CardSection>
+                  </div>
                 </div>
               );
             })()}
