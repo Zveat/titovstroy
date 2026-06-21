@@ -2858,6 +2858,8 @@ export default function App() {
   const cats = Object.keys(Gdyn);
 
   // Авторизация
+  const [logoutConfirm, setLogoutConfirm] = useState(false);
+  const doLogout = () => { try{localStorage.removeItem(SESSION_KEY);}catch(e){} setCurrentUser(null); setLogoutConfirm(false); };
   const [currentUser, setCurrentUser] = useState(() => {
     try {
       const s = localStorage.getItem(SESSION_KEY);
@@ -5687,7 +5689,7 @@ export default function App() {
         </nav>
         {/* Collapse + Выйти */}
         <div style={{borderTop:"1px solid rgba(148,163,184,.12)",padding:"10px 0"}}>
-          <div className="nav-item" onClick={()=>{ if(!window.confirm("Выйти из аккаунта?")) return; try{localStorage.removeItem(SESSION_KEY);}catch(e){} setCurrentUser(null); }}>
+          <div className="nav-item" onClick={()=>{ setLogoutConfirm(true); }}>
             <span className="nav-ico" style={{fontSize:16,flexShrink:0}}>🚪</span>
             <span className="nav-label" style={{fontSize:13}}>Выйти</span>
           </div>
@@ -5766,7 +5768,7 @@ export default function App() {
                 <span style={{fontSize:11,fontWeight:600,display:"flex",alignItems:"center",gap:5,padding:"4px 12px",borderRadius:20,background:"rgba(255,255,255,.15)",color:"rgba(255,255,255,.9)",backdropFilter:"blur(4px)"}}>
                   {syncStatus==="saving"?"⏳ Сохраняю...":syncStatus==="saved"?"✓ Сохранено":syncStatus==="error"?"⚠ Ошибка":"☁ Синк"}
                 </span>
-                <button onClick={()=>{ if(!window.confirm("Выйти из аккаунта?")) return; try{localStorage.removeItem(SESSION_KEY);}catch(e){} setCurrentUser(null); }}
+                <button onClick={()=>{ setLogoutConfirm(true); }}
                   style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.25)",borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:600,cursor:"pointer",color:"rgba(255,255,255,.9)",fontFamily:"inherit"}}>
                   🚪 Выйти
                 </button>
@@ -9675,6 +9677,21 @@ export default function App() {
       )}
 
       </div>
+
+      {/* Модал подтверждения выхода */}
+      {logoutConfirm && (
+        <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,.55)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setLogoutConfirm(false)}>
+          <div style={{background:"#fff",borderRadius:16,padding:"28px 24px",maxWidth:320,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,.25)",textAlign:"center"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:36,marginBottom:12}}>🚪</div>
+            <div style={{fontSize:17,fontWeight:700,color:"#0f172a",marginBottom:8}}>Выйти из аккаунта?</div>
+            <div style={{fontSize:13,color:"#64748b",marginBottom:24}}>Вы будете перенаправлены на экран входа</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setLogoutConfirm(false)} style={{flex:1,padding:"11px",borderRadius:10,border:"1px solid #e2e8f0",background:"#f8fafc",color:"#475569",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Отмена</button>
+              <button onClick={doLogout} style={{flex:1,padding:"11px",borderRadius:10,border:"none",background:"#ef4444",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Выйти</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
