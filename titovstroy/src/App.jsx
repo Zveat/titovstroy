@@ -494,7 +494,12 @@ const storage = {
     let fbResponded = !_fbDb; // если FB не сконфигурирован — авторитетен localStorage
     try {
       if (_fbDb) {
-        const snap = await _race(get(ref(_fbDb, _fbKey(key))), 8000);
+        let snap = await _race(get(ref(_fbDb, _fbKey(key))), 8000);
+        // Одна повторная попытка при таймауте (сеть могла мигнуть)
+        if (snap === _TIMEOUT) {
+          await new Promise(r=>setTimeout(r,500));
+          snap = await _race(get(ref(_fbDb, _fbKey(key))), 8000);
+        }
         if (snap === _TIMEOUT) {
           fbResponded = false; // таймаут — НЕ знаем что в базе
         } else {
@@ -526,10 +531,23 @@ const storage = {
     let fbOk = false, fbError = null;
     if (_fbDb) {
       try {
-        const res = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000);
+        let res = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000);
+        // Одна повторная попытка записи при таймауте/ошибке
+        if (res === _TIMEOUT) {
+          await new Promise(r=>setTimeout(r,800));
+          res = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000);
+        }
         if (res === _TIMEOUT) { fbError = "timeout"; }
         else { fbOk = true; }
-      } catch(e) { fbError = e?.message || String(e); console.warn("FB set error:", e); }
+      } catch(e) {
+        fbError = e?.message || String(e); console.warn("FB set error:", e);
+        // повтор после ошибки
+        try {
+          await new Promise(r=>setTimeout(r,800));
+          const res2 = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000);
+          if (res2 !== _TIMEOUT) { fbOk = true; fbError = null; }
+        } catch(e2) { fbError = e2?.message || String(e2); }
+      }
     } else {
       fbError = "firebase not configured";
     }
@@ -546,6 +564,7 @@ function LoginScreen({ onLogin }) {
   const [showPass, setShowPass] = useState(false);
 
   const handleLogin = async () => {
+    if (loading) return; // защита от двойной отправки
     if (!login.trim() || !password.trim()) { setError("Введите логин и пароль"); return; }
     setLoading(true); setError("");
 
@@ -2864,6 +2883,11 @@ export default function App() {
       return user;
     } catch(e) { return null; }
   });
+  // Скользящее окно сессии: продлеваем срок при каждом открытии приложения
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: currentUser, savedAt: Date.now() })); } catch(e) {}
+  }, [currentUser?.id]);
   if (!currentUser) return <LoginScreen onLogin={setCurrentUser} />;
   return <MainApp key={currentUser.id} currentUser={currentUser} setCurrentUser={setCurrentUser} />;
 }
@@ -2880,7 +2904,12 @@ function MainApp({ currentUser, setCurrentUser }) {
   // Авторизация (currentUser приходит пропом из обёртки App — здесь компонент
   // монтируется только когда пользователь уже залогинен, поэтому хуки стабильны)
   const [logoutConfirm, setLogoutConfirm] = useState(false);
-  const doLogout = () => { try{localStorage.removeItem(SESSION_KEY);}catch(e){} setCurrentUser(null); setLogoutConfirm(false); };
+  const doLogout = () => {
+    try{localStorage.removeItem(SESSION_KEY);}catch(e){}
+    // чистим глобальный кэш карточек прайса, чтобы данные не «протекли» к другому пользователю
+    try{ Object.keys(priceCardCache).forEach(k=>delete priceCardCache[k]); }catch(e){}
+    setCurrentUser(null); setLogoutConfirm(false);
+  };
   const [showAdmin, setShowAdmin] = useState(false);
   const [loadError, setLoadError] = useState(false); // не удалось загрузить из Firebase — сохранение заблокировано
   const [cloudError, setCloudError] = useState(false); // последнее сохранение не ушло в облако (только локально)
@@ -3148,13 +3177,16 @@ function MainApp({ currentUser, setCurrentUser }) {
   const [sideCollapsed, setSideCollapsed] = useState(false);
   const [stampsBase64, setStampsBase64] = useState({});
   useEffect(()=>{
+    let cancelled = false;
     ["stamp.jpg","stamp2.jpg"].forEach(file=>{
       fetch("/"+file).then(r=>r.blob()).then(blob=>{
+        if(cancelled) return;
         const reader = new FileReader();
-        reader.onload = e => setStampsBase64(prev=>({...prev,[file]:e.target.result}));
+        reader.onload = e => { if(!cancelled) setStampsBase64(prev=>({...prev,[file]:e.target.result})); };
         reader.readAsDataURL(blob);
       }).catch(()=>{});
     });
+    return ()=>{ cancelled = true; };
   },[]);
   const stampBase64 = stampsBase64["stamp.jpg"] || "";
   const [listSearch, setListSearch] = useState("");
@@ -3434,12 +3466,17 @@ function MainApp({ currentUser, setCurrentUser }) {
     setLoadingList(true);
     let ok = false;
     try {
-      const [result, u, pr, cat] = await Promise.all([
+      const [resR, uR, prR, catR] = await Promise.allSettled([
         storage.getResult(STORAGE_KEY),
         storage.get(USERS_KEY),
         storage.get(PRICES_KEY),
         storage.get(CATALOG_KEY),
       ]);
+      // Если основная коллекция не загрузилась — считаем источник недоступным
+      const result = resR.status==="fulfilled" ? resR.value : { status:"unavailable" };
+      const u   = uR.status==="fulfilled"   ? uR.value   : null;
+      const pr  = prR.status==="fulfilled"  ? prR.value  : null;
+      const cat = catR.status==="fulfilled" ? catR.value : null;
       if (result.status === "found" && result.value) {
         try {
           const parsed = JSON.parse(result.value);
@@ -3813,10 +3850,12 @@ function MainApp({ currentUser, setCurrentUser }) {
   }, [rows, catalogVersion]);
   const subSum = (cat, sub) => allSumMap.subMap[cat+"||"+sub] || 0;
   const catSum = (cat) => allSumMap.catMap[cat] || 0;
-  const grand = allSumMap.grand;
-  const markupAmt = grand * markup / 100;
+  const grand = Number(allSumMap.grand) || 0;
+  const _markup = Number(markup) || 0;
+  const _discount = Number(discount) || 0;
+  const markupAmt = grand * _markup / 100;
   const grandWithMarkup = grand + markupAmt; // база для клиента (markup скрыт)
-  const discAmt = grandWithMarkup * discount / 100;
+  const discAmt = grandWithMarkup * _discount / 100;
   const final = grandWithMarkup - discAmt;
   const kpData = useMemo(() => {
     const mm = 1 + markup / 100;
@@ -5596,7 +5635,7 @@ function MainApp({ currentUser, setCurrentUser }) {
         .sidebar-content.collapsed{margin-left:64px}
         @media(max-width:700px){
           .sidebar{display:none!important}
-          .sidebar-content{margin-left:0!important;padding-bottom:68px!important}
+          .sidebar-content{margin-left:0!important;padding-bottom:calc(68px + env(safe-area-inset-bottom,0px))!important}
           .mob-nav{display:flex!important}
           .page{padding:18px 14px 84px!important}
           .list-header,.contracts-header{padding:10px 14px!important}
@@ -5647,7 +5686,7 @@ function MainApp({ currentUser, setCurrentUser }) {
         @media(max-width:380px){
           .kpi-grid{grid-template-columns:1fr!important}
         }
-        .mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:#ffffff;border-top:1px solid #e2e8f0;z-index:50;box-shadow:0 -4px 16px rgba(15,23,42,.06)}
+        .mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:#ffffff;border-top:1px solid #e2e8f0;z-index:50;box-shadow:0 -4px 16px rgba(15,23,42,.06);padding-bottom:env(safe-area-inset-bottom,0px)}
         .mob-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;gap:3px;border-top:2px solid transparent;transition:all .15s}
         .mob-nav-item.active{border-top-color:#2563eb;background:rgba(37,99,235,.06)}
         .fin-row:hover{background:#f8fafc}
