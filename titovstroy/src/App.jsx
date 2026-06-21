@@ -5710,10 +5710,6 @@ export default function App() {
           </div>
           );
         })}
-        <div className="mob-nav-item" onClick={()=>{ try{localStorage.removeItem(SESSION_KEY);}catch(e){} setCurrentUser(null); }}>
-          <span style={{fontSize:20}}>🚪</span>
-          <span style={{fontSize:9.5,color:"#64748b",fontWeight:600,whiteSpace:"nowrap"}}>Выйти</span>
-        </div>
       </div>
 
       {/* ── КОНТЕНТ ── */}
@@ -5769,6 +5765,10 @@ export default function App() {
                 <span style={{fontSize:11,fontWeight:600,display:"flex",alignItems:"center",gap:5,padding:"4px 12px",borderRadius:20,background:"rgba(255,255,255,.15)",color:"rgba(255,255,255,.9)",backdropFilter:"blur(4px)"}}>
                   {syncStatus==="saving"?"⏳ Сохраняю...":syncStatus==="saved"?"✓ Сохранено":syncStatus==="error"?"⚠ Ошибка":"☁ Синк"}
                 </span>
+                <button onClick={()=>{ try{localStorage.removeItem(SESSION_KEY);}catch(e){} setCurrentUser(null); }}
+                  style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.25)",borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:600,cursor:"pointer",color:"rgba(255,255,255,.9)",fontFamily:"inherit"}}>
+                  🚪 Выйти
+                </button>
               </div>
             </div>
             {/* Мини-метрики в баннере */}
