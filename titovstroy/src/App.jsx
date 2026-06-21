@@ -461,7 +461,10 @@ const writeAudit = async (user, action, entity, entityId, detail="") => {
 // Экспорт в CSV (Excel открывает напрямую; BOM + ; для русской локали)
 const downloadCSV = (filename, headers, rows) => {
   const esc = (v) => {
-    const s = v===null||v===undefined ? "" : String(v);
+    let s = v===null||v===undefined ? "" : String(v);
+    // Защита от инъекции формул в Excel/Sheets: поле, начинающееся с = + - @,
+    // предваряем апострофом, чтобы оно не выполнилось как формула
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
     return /[";\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
   };
   const lines = [headers.map(esc).join(";"), ...rows.map(r=>r.map(esc).join(";"))];
@@ -3685,6 +3688,8 @@ function MainApp({ currentUser, setCurrentUser }) {
     let list;
     try { list = JSON.parse(snap.data); } catch { window.alert("Не удалось прочитать бэкап"); return; }
     if (!Array.isArray(list)) { window.alert("Бэкап повреждён"); return; }
+    // Отфильтровываем мусор (null/undefined/без id), чтобы не записать битые записи
+    list = list.filter(e => e && typeof e==="object" && e.id);
     if (!window.confirm(`Восстановить архив на момент ${new Date(snap.ts).toLocaleString("ru-RU")}?\nСметы: ${list.length}. Текущая версия уйдёт в бэкап и её можно вернуть обратно.`)) return;
     _allowEmptySave.current = true; // восстановление может заменить на меньший набор
     estimatesRef.current = list;
@@ -3781,8 +3786,11 @@ function MainApp({ currentUser, setCurrentUser }) {
       // 2) Добавляем сметы (без дублей по id)
       const cur = estimatesRef.current;
       const existIds = new Set(cur.map(e=>e.id));
-      const toAdd = incoming.filter(e => e && e.id && !existIds.has(e.id))
-        .map(e => ({ ...e, createdAt: e.createdAt||Date.now(), updatedAt: e.updatedAt||Date.now() }));
+      const toAdd = incoming
+        // валидируем структуру: объект с id и корректным rows (объект, не массив/строка)
+        .filter(e => e && typeof e==="object" && e.id && !existIds.has(e.id)
+          && (e.rows===undefined || (typeof e.rows==="object" && !Array.isArray(e.rows))))
+        .map(e => ({ ...e, rows: (e.rows && typeof e.rows==="object" && !Array.isArray(e.rows)) ? e.rows : {}, createdAt: e.createdAt||Date.now(), updatedAt: e.updatedAt||Date.now() }));
       if (!toAdd.length) { window.alert("Все сметы из JSON уже есть в архиве (совпадение по id)."); setImportBusy(false); return; }
       const newList = [...toAdd, ...cur];
       estimatesRef.current = newList;
@@ -4268,6 +4276,9 @@ function MainApp({ currentUser, setCurrentUser }) {
   // ── Генерация HTML договора ──
   const buildContractHtml = (c, client, ca, forDocx=false, stamp=stampBase64) => {
     const type = c.type || "repair_fiz";
+    // Экранирование пользовательских данных в HTML (имена, адреса, названия работ
+    // со спецсимволами < > & не должны ломать вёрстку печати или быть XSS)
+    const esc = s => String(s==null?"":s).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
     const fmtN = n => Math.round(n||0).toLocaleString("ru-RU");
     const fmtDate = s => {
       if(!s) return {d:"__",m:"___________",y:"____",full:"__.__.______"};
@@ -4308,40 +4319,40 @@ function MainApp({ currentUser, setCurrentUser }) {
   @media print{.np{display:none}body{padding:10mm 10mm 10mm 20mm}@page{size:A4;margin:0}
   tr{page-break-inside:avoid}table{page-break-inside:auto}}`
     const isYur = client?.clientType==="yur" || client?.type==="юр";
-    const clName = client?.name||"___________________";
-    const clIIN = client?.iin||"___________________";
-    const clDoc = client?.doc||"___________________";
-    const clDir = client?.director||"";
-    const clAddr = client?.address||"___________________";
-    const clPhone = client?.phone||"___________________";
-    const clShort = (() => {
+    const clName = esc(client?.name||"___________________");
+    const clIIN = esc(client?.iin||"___________________");
+    const clDoc = esc(client?.doc||"___________________");
+    const clDir = esc(client?.director||"");
+    const clAddr = esc(client?.address||"___________________");
+    const clPhone = esc(client?.phone||"___________________");
+    const clShort = esc((() => {
       if(!client?.name) return "___";
       const parts=(client.name||"").split(" ");
       if(isYur) return client.name;
       return parts[0]+" "+(parts[1]?parts[1][0]+".":"")+(parts[2]?parts[2][0]+".":"");
-    })();
+    })());
     const TITOV = {
-      name: ca?.name||'ТОО "TITOVSTROY"',
-      bin:  ca?.bin||"231040002769",
-      bank: ca?.bank||'АО "Kaspi Bank"',
-      bik:  ca?.bik||"CASPKZKA",
-      acc:  ca?.account||"KZ38722S000030058973",
-      addr: ca?.address||"Казахстан, район им.Казыбек би, улица Кирпичная, дом 8г",
-      phone:ca?.phone||"8707 667 8766",
-      email:ca?.email||"titovstroy@mail.ru",
-      dir:  ca?.director||"Титов В.Е.",
+      name: esc(ca?.name||'ТОО "TITOVSTROY"'),
+      bin:  esc(ca?.bin||"231040002769"),
+      bank: esc(ca?.bank||'АО "Kaspi Bank"'),
+      bik:  esc(ca?.bik||"CASPKZKA"),
+      acc:  esc(ca?.account||"KZ38722S000030058973"),
+      addr: esc(ca?.address||"Казахстан, район им.Казыбек би, улица Кирпичная, дом 8г"),
+      phone:esc(ca?.phone||"8707 667 8766"),
+      email:esc(ca?.email||"titovstroy@mail.ru"),
+      dir:  esc(ca?.director||"Титов В.Е."),
     };
     const sigBlock = (role1="Подрядчик:", role2="Заказчик:") => {
       let clSigRight = "";
       if(isYur){
         clSigRight = "<b>"+role2+"</b><br><br>"+clName+"<br>БИН: "+clIIN;
-        if(client?.bank) clSigRight += "<br>Банк: "+client.bank;
-        if(client?.bik)  clSigRight += "<br>БИК: "+client.bik;
-        if(client?.account) clSigRight += "<br>ИИК: "+client.account;
+        if(client?.bank) clSigRight += "<br>Банк: "+esc(client.bank);
+        if(client?.bik)  clSigRight += "<br>БИК: "+esc(client.bik);
+        if(client?.account) clSigRight += "<br>ИИК: "+esc(client.account);
         if(clAddr)  clSigRight += "<br>Юр.Адрес: "+clAddr;
         if(clPhone) clSigRight += "<br>Тел.: "+clPhone;
-        if(client?.email) clSigRight += "<br>Почта: "+client.email;
-        if(client?.director) clSigRight += "<br><br>Директор:<br>"+(client.directorShort||client.director)+" ____________________  М.П.";
+        if(client?.email) clSigRight += "<br>Почта: "+esc(client.email);
+        if(client?.director) clSigRight += "<br><br>Директор:<br>"+esc(client.directorShort||client.director)+" ____________________  М.П.";
       } else {
         clSigRight = "<b>"+role2+"</b><br><br>ФИО: "+clName+"<br>ИИН: "+clIIN+"<br>№ документа: "+clDoc+"<br>Адрес: "+clAddr+"<br>Тел.: "+clPhone+"<br><br>"+clShort+" Подпись ___________";
       }
@@ -4377,20 +4388,20 @@ function MainApp({ currentUser, setCurrentUser }) {
       catOrder.forEach(function(cat){
         const {rows, total: catTotal} = catMap[cat];
         html += "<tr><td colspan=\"6\" style=\"background:#e5e7eb;color:#d97706;font-weight:bold;font-size:9pt;padding:3pt 5pt\">"
-          + cat + " \u2014 " + fmtN(catTotal) + " \u20b8</td></tr>";
+          + esc(cat) + " \u2014 " + fmtN(catTotal) + " \u20b8</td></tr>";
         let lastSub = "";
         rows.forEach(function(w,i){
           if(w.subcategory && w.subcategory !== lastSub){
             lastSub = w.subcategory;
             html += "<tr><td colspan=\"6\" style=\"background:#e5e7eb;color:#2563eb;font-style:italic;font-size:8.5pt;padding:2pt 5pt\">"
-              + w.subcategory + "</td></tr>";
+              + esc(w.subcategory) + "</td></tr>";
           }
           globalNum++;
           const bg = i%2===0 ? "#f3f4f6" : "#e2e8f0";
           const tdS = forDocx ? ";line-height:1.1;mso-line-height-rule:exactly" : "";
           html += "<tr style=\"background:" + bg + "\">"
             + (forDocx ? '<td width="5%"' : '<td') + ' class="tc" style="font-size:8pt'+tdS+'">' + globalNum + "</td>"
-            + (forDocx ? '<td width="45%"' : '<td') + ' style="font-size:8pt'+tdS+'">' + (w.name||"") + "</td>"
+            + (forDocx ? '<td width="45%"' : '<td') + ' style="font-size:8pt'+tdS+'">' + esc(w.name||"") + "</td>"
             + (forDocx ? '<td width="8%"' : '<td') + ' class="tc" style="font-size:8pt'+tdS+'">' + (w.unit||"\u043c\xb2") + "</td>"
             + (forDocx ? '<td width="8%"' : '<td') + ' class="tc" style="font-size:8pt'+tdS+'">' + (w.quantity||"") + "</td>"
             + (forDocx ? '<td width="17%"' : '<td') + ' class="tr" style="font-size:8pt'+tdS+'">' + (w.priceFrom ? "\u043e\u0442 "+fmtN(w.priceFrom)+" \u20b8" : fmtN(w.price) + " \u20b8") + "</td>"
@@ -4431,10 +4442,10 @@ function MainApp({ currentUser, setCurrentUser }) {
       return html;
     };
     const preambula = (role="Подрядчик") => {
-      const tit = (ca?.name||"ТОО TITOVSTROY")+", БИН "+(ca?.bin||"231040002769")+" (далее — \""+role+"\"), в лице директора "+(ca?.director||"Василия Титова")+", действующего на основании Устава";
+      const tit = esc(ca?.name||"ТОО TITOVSTROY")+", БИН "+esc(ca?.bin||"231040002769")+" (далее — \""+role+"\"), в лице директора "+esc(ca?.director||"Василия Титова")+", действующего на основании Устава";
       const tail = "совместно именуемые \"Стороны\", а по отдельности – \"Сторона\", заключили настоящий документ о нижеследующем:";
       if(isYur){
-        const clLine = clName+", БИН "+clIIN+" (далее — \"Заказчик\") в лице "+(client?.director||"Директора")+", "+(client?.directorShort||clDir)+", действующего на основании Устава, с другой стороны, "+tail;
+        const clLine = clName+", БИН "+clIIN+" (далее — \"Заказчик\") в лице "+esc(client?.director||"Директора")+", "+esc(client?.directorShort||client?.director||"")+", действующего на основании Устава, с другой стороны, "+tail;
         return "<p>"+tit+", с одной стороны, и</p><p>"+clLine+"</p>";
       }
       const cl = clName+", ИИН "+clIIN+", № документа "+clDoc+", Выдан МВД РК, (далее — \"Заказчик\") с одной стороны, и";
