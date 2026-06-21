@@ -567,6 +567,7 @@ function LoginScreen({ onLogin }) {
     if (user) {
       try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user, savedAt: Date.now() })); } catch(e) {}
       onLogin(user);
+      return; // компонент размонтируется, setLoading вызывать нельзя
     } else {
       setError("Неверный логин или пароль");
     }
@@ -575,7 +576,7 @@ function LoginScreen({ onLogin }) {
 
   return (
     <div style={{minHeight:"100vh",background:"#f8fafc",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'Inter','Segoe UI',sans-serif"}}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@600;700;800;900&display=swap');*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Inter','Segoe UI',sans-serif;-webkit-font-smoothing:antialiased;color:#111827}h1,h2,h3{font-family:'Poppins','Inter',sans-serif;letter-spacing:-.02em}button{font-family:'Inter','Segoe UI',sans-serif}a[x-apple-data-detectors],a[href^="tel"]{color:inherit!important;text-decoration:none!important;pointer-events:none!important;-webkit-text-decoration-color:inherit!important}`}</style>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@600;700;800;900&display=swap');*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Inter','Segoe UI',sans-serif;-webkit-font-smoothing:antialiased;color:#111827;background:#f8fafc}h1,h2,h3{font-family:'Poppins','Inter',sans-serif;letter-spacing:-.02em}button{font-family:'Inter','Segoe UI',sans-serif}a[x-apple-data-detectors],a[href^="tel"]{color:inherit!important;text-decoration:none!important;pointer-events:none!important;-webkit-text-decoration-color:inherit!important}`}</style>
       <div style={{width:"100%",maxWidth:380}}>
         {/* Лого */}
         <div style={{textAlign:"center",marginBottom:32}}>
@@ -5686,7 +5687,7 @@ export default function App() {
         </nav>
         {/* Collapse + Выйти */}
         <div style={{borderTop:"1px solid rgba(148,163,184,.12)",padding:"10px 0"}}>
-          <div className="nav-item" onClick={()=>{ try{localStorage.removeItem(SESSION_KEY);}catch(e){} setCurrentUser(null); }}>
+          <div className="nav-item" onClick={()=>{ if(!window.confirm("Выйти из аккаунта?")) return; try{localStorage.removeItem(SESSION_KEY);}catch(e){} setCurrentUser(null); }}>
             <span className="nav-ico" style={{fontSize:16,flexShrink:0}}>🚪</span>
             <span className="nav-label" style={{fontSize:13}}>Выйти</span>
           </div>
@@ -5765,7 +5766,7 @@ export default function App() {
                 <span style={{fontSize:11,fontWeight:600,display:"flex",alignItems:"center",gap:5,padding:"4px 12px",borderRadius:20,background:"rgba(255,255,255,.15)",color:"rgba(255,255,255,.9)",backdropFilter:"blur(4px)"}}>
                   {syncStatus==="saving"?"⏳ Сохраняю...":syncStatus==="saved"?"✓ Сохранено":syncStatus==="error"?"⚠ Ошибка":"☁ Синк"}
                 </span>
-                <button onClick={()=>{ try{localStorage.removeItem(SESSION_KEY);}catch(e){} setCurrentUser(null); }}
+                <button onClick={()=>{ if(!window.confirm("Выйти из аккаунта?")) return; try{localStorage.removeItem(SESSION_KEY);}catch(e){} setCurrentUser(null); }}
                   style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.25)",borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:600,cursor:"pointer",color:"rgba(255,255,255,.9)",fontFamily:"inherit"}}>
                   🚪 Выйти
                 </button>
