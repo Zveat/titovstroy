@@ -9632,7 +9632,7 @@ export default function App() {
         />
       )}
 
-      </div>{/* /sidebar-content */}
+      </div>
     </div>
   );
 }
