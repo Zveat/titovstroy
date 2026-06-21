@@ -7441,11 +7441,11 @@ export default function App() {
               const PIE_COLORS=["#2563eb","#059669","#f59e0b","#8b5cf6","#dc2626","#0891b2","#d97706","#e11d48","#84cc16","#06b6d4","#ec4899","#14b8a6"];
               const Donut=({slices,total,size=170,thickness=24,centerLabel})=>{
                 const r=(size-thickness)/2, cx=size/2, circ=2*Math.PI*r;
-                if(!total||slices.length===0) return <div style={{width:size,height:size,borderRadius:"50%",border:"24px solid #f1f5f9",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:"#cbd5e1",boxSizing:"border-box"}}>нет данных</div>;
+                if(!total||slices.length===0) return <div style={{width:size,height:size,borderRadius:"50%",border:"24px solid #1e293b",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:"#334155",boxSizing:"border-box"}}>нет данных</div>;
                 let offset=0;
                 return (
                   <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{flexShrink:0}}>
-                    <circle cx={cx} cy={cx} r={r} fill="none" stroke="#f1f5f9" strokeWidth={thickness}/>
+                    <circle cx={cx} cy={cx} r={r} fill="none" stroke="#1e293b" strokeWidth={thickness}/>
                     <g transform={`rotate(-90 ${cx} ${cx})`}>
                       {slices.slice(0,12).map(([label,v],i)=>{
                         const len=(v/total)*circ;
@@ -7453,37 +7453,37 @@ export default function App() {
                         offset+=len; return el;
                       })}
                     </g>
-                    <text x={cx} y={cx-2} textAnchor="middle" fontSize={size>150?16:13} fontWeight="800" fill="#0f172a">{fM(total)}</text>
-                    <text x={cx} y={cx+15} textAnchor="middle" fontSize={10} fill="#94a3b8">{centerLabel||"₸ всего"}</text>
+                    <text x={cx} y={cx-2} textAnchor="middle" fontSize={size>150?16:13} fontWeight="800" fill="#f1f5f9">{fM(total)}</text>
+                    <text x={cx} y={cx+15} textAnchor="middle" fontSize={10} fill="#475569">{centerLabel||"₸ всего"}</text>
                   </svg>
                 );
               };
 
-              const cardSt={background:"#fff",border:"1px solid #eef2f7",borderRadius:18,boxShadow:"0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.14)"};
+              const cardSt={background:"#0f172a",border:"1px solid #1e293b",borderRadius:18,boxShadow:"0 8px 32px rgba(0,0,0,.25)"};
               const CardSection=({title,accent,children,full})=>(
                 <div style={{...cardSt,overflow:"hidden",gridColumn:full?"1 / -1":"auto"}}>
-                  <div style={{height:4,background:accent||"#2563eb"}}/>
-                  <div style={{padding:"16px 20px"}}>
-                    <div style={{fontSize:13.5,fontWeight:800,color:"#0f172a",marginBottom:14,letterSpacing:-.2}}>{title}</div>
+                  <div style={{height:3,background:accent||"#2563eb"}}/>
+                  <div style={{padding:"14px 18px"}}>
+                    <div style={{fontSize:11,fontWeight:700,color:"#64748b",marginBottom:12,letterSpacing:1,textTransform:"uppercase"}}>{title}</div>
                     {children}
                   </div>
                 </div>
               );
               const KpiRow=({label,val,color,bold,big})=>(
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:bold?"9px 0":"6px 0",borderBottom:"1px solid #f5f7fa",gap:8}}>
-                  <span style={{fontSize:bold?13:12.5,color:bold?"#0f172a":"#64748b",fontWeight:bold?700:500}}>{label}</span>
-                  <span style={{fontSize:big?20:(bold?15:13.5),fontWeight:bold?800:600,color:color||"#0f172a",whiteSpace:"nowrap"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:bold?"8px 0":"5px 0",borderBottom:"1px solid #1e293b",gap:8}}>
+                  <span style={{fontSize:bold?12.5:12,color:bold?"#cbd5e1":"#475569",fontWeight:bold?600:400}}>{label}</span>
+                  <span style={{fontSize:big?22:(bold?15:13),fontWeight:bold?800:600,color:color||"#f1f5f9",whiteSpace:"nowrap"}}>
                     {typeof val==="number"?fM(val)+" ₸":val}
                   </span>
                 </div>
               );
               const LegendItem=({label,val,total,color})=>{ const p=total>0?Math.round(val/total*100):0; return (
-                <div style={{marginBottom:9}}>
-                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3,gap:8}}>
-                    <span style={{display:"flex",alignItems:"center",gap:7,color:"#334155",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}><span style={{width:9,height:9,borderRadius:3,background:color,flexShrink:0}}/>{label}</span>
-                    <span style={{fontWeight:700,color:"#0f172a",whiteSpace:"nowrap"}}>{fM(val)} <span style={{color,fontSize:11}}>· {p}%</span></span>
+                <div style={{marginBottom:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,marginBottom:3,gap:8}}>
+                    <span style={{display:"flex",alignItems:"center",gap:7,color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}><span style={{width:8,height:8,borderRadius:2,background:color,flexShrink:0}}/>{label}</span>
+                    <span style={{fontWeight:700,color:"#e2e8f0",whiteSpace:"nowrap"}}>{fM(val)} <span style={{color,fontSize:10}}>· {p}%</span></span>
                   </div>
-                  <div style={{height:5,background:"#f1f5f9",borderRadius:5}}><div style={{height:"100%",width:p+"%",background:color,borderRadius:5,transition:"width .4s"}}/></div>
+                  <div style={{height:4,background:"#1e293b",borderRadius:4}}><div style={{height:"100%",width:p+"%",background:color,borderRadius:4,transition:"width .4s"}}/></div>
                 </div>
               );};
 
@@ -7505,22 +7505,22 @@ export default function App() {
                       <KpiRow label="Поступления (вкл. авансы)" val={incomeSum} color="#059669"/>
                       <KpiRow label="Выплаты" val={expenseSum} color="#dc2626"/>
                       <KpiRow label="Разница" val={incomeSum-expenseSum} color={(incomeSum-expenseSum)>=0?"#0891b2":"#dc2626"} bold big/>
-                      <div style={{marginTop:12,padding:"10px 12px",background:"#f8fafc",borderRadius:10,fontSize:11.5,color:"#64748b",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                        <span>Сальдо по всем счетам</span><b style={{color:"#0f172a",fontSize:13}}>{fM(totalBalance)} ₸</b>
+                      <div style={{marginTop:12,padding:"10px 12px",background:"#1e293b",borderRadius:10,fontSize:11.5,color:"#475569",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <span>Сальдо по всем счетам</span><b style={{color:"#38bdf8",fontSize:13}}>{fM(totalBalance)} ₸</b>
                       </div>
                     </CardSection>
 
                     {/* Остатки */}
                     <CardSection title="💳 Остатки на счетах, ₸" accent="#7c3aed">
                       {accounts.map(a=>(
-                        <div key={a.id} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f5f7fa"}}>
-                          <span style={{fontSize:12.5,color:"#64748b"}}>{a.name}</span>
-                          <span style={{fontSize:13.5,fontWeight:700,color:(balances[a.name]||0)>=0?"#0f172a":"#dc2626"}}>{fM(balances[a.name]||0)} ₸</span>
+                        <div key={a.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #1e293b"}}>
+                          <span style={{fontSize:12,color:"#475569"}}>{a.name}</span>
+                          <span style={{fontSize:13,fontWeight:700,color:(balances[a.name]||0)>=0?"#e2e8f0":"#dc2626"}}>{fM(balances[a.name]||0)} ₸</span>
                         </div>
                       ))}
                       <div style={{display:"flex",justifyContent:"space-between",paddingTop:10}}>
-                        <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>ИТОГО</span>
-                        <span style={{fontSize:20,fontWeight:800,color:totalBalance>=0?"#7c3aed":"#dc2626"}}>{fM(totalBalance)} ₸</span>
+                        <span style={{fontSize:12,fontWeight:700,color:"#94a3b8"}}>ИТОГО</span>
+                        <span style={{fontSize:22,fontWeight:800,color:totalBalance>=0?"#a78bfa":"#dc2626"}}>{fM(totalBalance)} ₸</span>
                       </div>
                     </CardSection>
                   </div>
@@ -7564,7 +7564,7 @@ export default function App() {
                     </div>
                     {months.length===0 && <div style={{color:"#334155",fontSize:13,padding:"32px 0",textAlign:"center"}}>Нет данных за период</div>}
                     {months.length>0 && (()=>{
-                      const W=720, H=220, PL=56, PR=16, PT=16, PB=32;
+                      const W=720, H=160, PL=56, PR=16, PT=12, PB=28;
                       const cW=W-PL-PR, cH=H-PT-PB, n=months.length;
                       const fmtY = v => v>=1000000?(v/1000000).toFixed(1)+"M":v>=1000?Math.round(v/1000)+"k":"0";
                       const xOf = i => PL+(n===1?cW/2:i/(n-1)*cW);
@@ -7676,7 +7676,7 @@ export default function App() {
                       if(pMonths.length===0) return <div style={{color:"#334155",fontSize:13,padding:"32px 0",textAlign:"center"}}>Нет данных по проектам</div>;
                       const pMax = Math.max(1,...pMonths.map(m=>Math.max(pMonthMap[m].budget,pMonthMap[m].inc)));
                       const fmtM = v => v>=1000000?(v/1000000).toFixed(1)+"M":v>=1000?Math.round(v/1000)+"k":"0";
-                      const W=720, H=220, PL=56, PR=16, PT=12, PB=36;
+                      const W=720, H=160, PL=56, PR=16, PT=10, PB=28;
                       const cW=W-PL-PR, cH=H-PT-PB, nm=pMonths.length;
                       const slotW=cW/nm;
                       const BAR_W=Math.max(8,Math.min(28,slotW*0.28));
@@ -8254,11 +8254,11 @@ export default function App() {
                       ["Валовая прибыль",fM(totIncome-totExpense)+" ₸",(totIncome-totExpense)>=0?"#059669":"#dc2626","#f0fdf4"],
                       ["Маржа",totMargin+"%",totMargin>=30?"#059669":totMargin>=0?"#f59e0b":"#dc2626","#fffbeb"],
                     ];
-                    return <div className="fin-tiles" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:16}}>
+                    return <div className="fin-tiles" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8,marginBottom:16}}>
                       {tiles.map(([l,v,c,bg])=>(
-                        <div key={l} style={{background:bg,borderRadius:12,padding:"12px 14px",border:"1px solid "+c+"22"}}>
-                          <div style={{fontSize:11,color:"#64748b",fontWeight:600,marginBottom:3}}>{l}</div>
-                          <div style={{fontSize:17,fontWeight:800,color:c}}>{v}</div>
+                        <div key={l} style={{background:"#0f172a",borderRadius:12,padding:"10px 14px",border:"1px solid #1e293b",boxShadow:"0 4px 12px rgba(0,0,0,.2)"}}>
+                          <div style={{fontSize:10,color:"#475569",fontWeight:600,marginBottom:4,textTransform:"uppercase",letterSpacing:.8}}>{l}</div>
+                          <div style={{fontSize:16,fontWeight:800,color:c}}>{v}</div>
                         </div>
                       ))}
                     </div>;
