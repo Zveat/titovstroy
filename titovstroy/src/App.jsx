@@ -3451,7 +3451,18 @@ export default function App() {
         console.error("loadEstimates: данные недоступны (Firebase не ответил) — сохранение заблокировано до перезагрузки");
         setLoadError(true);
       }
-      try { if (u) setAllUsers(JSON.parse(u.value)); } catch {}
+      try { if (u) {
+        const uList=JSON.parse(u.value); setAllUsers(uList);
+        // синхронизируем роль текущего пользователя если она изменилась в Firebase
+        setCurrentUser(prev=>{
+          if(!prev) return prev;
+          const fresh=uList.find(x=>x.id===prev.id);
+          if(!fresh || (fresh.role===prev.role && fresh.name===prev.name)) return prev;
+          const updated={...prev,...fresh};
+          try{ localStorage.setItem(SESSION_KEY,JSON.stringify({user:updated,savedAt:Date.now()})); }catch(e){}
+          return updated;
+        });
+      }} catch {}
       try { if (pr) setPriceOverrides(JSON.parse(pr.value)); } catch {}
       try { if (cat) setCatalogOverrides(JSON.parse(cat.value)); } catch {}
     } catch(e) {
@@ -5699,6 +5710,10 @@ export default function App() {
           </div>
           );
         })}
+        <div className="mob-nav-item" onClick={()=>{ try{localStorage.removeItem(SESSION_KEY);}catch(e){} setCurrentUser(null); }}>
+          <span style={{fontSize:20}}>🚪</span>
+          <span style={{fontSize:9.5,color:"#64748b",fontWeight:600,whiteSpace:"nowrap"}}>Выйти</span>
+        </div>
       </div>
 
       {/* ── КОНТЕНТ ── */}
@@ -9635,7 +9650,19 @@ export default function App() {
         <AdminPageContent
           currentUser={currentUser}
           presence={presence}
-          onUsersChanged={async ()=>{ const u=await storage.get(USERS_KEY); if(u) setAllUsers(JSON.parse(u.value)); }}
+          onUsersChanged={async ()=>{
+            const u=await storage.get(USERS_KEY);
+            if(!u) return;
+            const list=JSON.parse(u.value);
+            setAllUsers(list);
+            // обновляем currentUser если его роль/имя изменились
+            const me=list.find(x=>x.id===currentUser.id);
+            if(me && (me.role!==currentUser.role || me.name!==currentUser.name)){
+              const updated={...currentUser,...me};
+              setCurrentUser(updated);
+              try{ localStorage.setItem(SESSION_KEY,JSON.stringify({user:updated,savedAt:Date.now()})); }catch(e){}
+            }
+          }}
           clients={contractClients}
           saveClients={saveContractClients}
           clientsRef={clientsRef}
