@@ -7499,7 +7499,7 @@ export default function App() {
                       <KpiRow label="Выручка (без авансов)" val={incSumNoAdv} color="#059669"/>
                       <KpiRow label="Расходы (без дивид.)" val={expNoDivSum} color="#dc2626"/>
                       <KpiRow label="Дивиденды" val={divSum} color="#d97706"/>
-                      {Object.entries(divByRecipient).length>1 && Object.entries(divByRecipient).map(([r,v])=>(
+                      {Object.entries(divByRecipient).filter(([r])=>r!=="Не указан").map(([r,v])=>(
                         <div key={r} style={{display:"flex",justifyContent:"space-between",padding:"3px 0 3px 14px",borderBottom:"1px solid #f5f7fa",gap:8}}>
                           <span style={{fontSize:11.5,color:"#94a3b8"}}>↳ {r}</span>
                           <span style={{fontSize:12,fontWeight:600,color:"#d97706",whiteSpace:"nowrap"}}>{fM(v)} ₸</span>
@@ -7558,10 +7558,8 @@ export default function App() {
                     </CardSection>
                   </div>
 
-                  {/* ── Оба графика рядом ── */}
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(340px,1fr))",gap:12,marginBottom:16}}>
                   {/* ── Динамика по месяцам (линейный график) ── */}
-                  <div style={{background:"#0f172a",borderRadius:16,padding:"16px 18px",boxShadow:"0 8px 32px rgba(0,0,0,.25)"}}>
+                  <div style={{background:"#0f172a",borderRadius:16,padding:"16px 18px",marginBottom:12,boxShadow:"0 8px 32px rgba(0,0,0,.25)"}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8,marginBottom:14}}>
                       <div style={{fontSize:11,color:"#94a3b8",fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>📈 Динамика по месяцам</div>
                       <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
@@ -7646,7 +7644,7 @@ export default function App() {
                   </div>
 
                   {/* ── График по проектам ── */}
-                  <div style={{background:"#0f172a",borderRadius:16,padding:"16px 18px",boxShadow:"0 8px 32px rgba(0,0,0,.25)"}}>
+                  <div style={{background:"#0f172a",borderRadius:16,padding:"16px 18px",marginBottom:12,boxShadow:"0 8px 32px rgba(0,0,0,.25)"}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8,marginBottom:14}}>
                       <div style={{fontSize:11,color:"#94a3b8",fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>📦 Проекты по месяцам</div>
                       <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
@@ -7741,7 +7739,6 @@ export default function App() {
                         </div>
                       );
                     })()}
-                  </div>
                   </div>
                 </div>
               );
