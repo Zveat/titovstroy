@@ -8638,7 +8638,7 @@ export default function App() {
               const set = (k,v)=>setFinTxModal(p=>({...p,[k]:v}));
               const catSource = m.type==="income" ? financeMeta.income : m.type==="expense" ? financeMeta.expense : [];
               const subSource = catSource.find(c=>c.cat===m.category)?.subs || [];
-              const save = async ()=>{
+              const save = ()=>{
                 const amt=Number(m.amount)||0;
                 if(amt<=0){ alert("Укажите сумму"); return; }
                 if(m.type==="transfer" && m.account===m.accountTo){ alert("Счета должны отличаться"); return; }
@@ -8651,16 +8651,16 @@ export default function App() {
                 const cur=financeTxRef.current;
                 const isNew = !m.id;
                 const list = isNew ? [tx,...cur] : cur.map(x=>x.id===m.id?tx:x);
-                await saveFinanceTx(list,{replace:true});
-                writeAudit(currentUser, isNew?"создал операцию":"изменил операцию", "finance_tx", tx.id, `${tx.type} ${Math.round(tx.amount)} ₸ ${tx.category||""}`);
                 setFinTxModal(null);
+                saveFinanceTx(list,{replace:true});
+                writeAudit(currentUser, isNew?"создал операцию":"изменил операцию", "finance_tx", tx.id, `${tx.type} ${Math.round(tx.amount)} ₸ ${tx.category||""}`);
               };
-              const del = async ()=>{
+              const del = ()=>{
                 if(!m.id) return; if(!confirm("Переместить операцию в корзину?")) return;
                 const list=financeTxRef.current.map(x=>x.id===m.id?{...x,deletedAt:Date.now()}:x);
-                await saveFinanceTx(list,{replace:true});
-                writeAudit(currentUser,"удалил операцию","finance_tx",m.id,`${m.type} ${Math.round(Number(m.amount)||0)} ₸`);
                 setFinTxModal(null);
+                saveFinanceTx(list,{replace:true});
+                writeAudit(currentUser,"удалил операцию","finance_tx",m.id,`${m.type} ${Math.round(Number(m.amount)||0)} ₸`);
               };
               return (
                 <div onClick={()=>{setFinCatOpen(false);setFinTxModal(null);}} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.55)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
