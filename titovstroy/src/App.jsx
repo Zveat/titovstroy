@@ -7413,7 +7413,10 @@ export default function App() {
             {financeTab==="dashboard" && (()=>{
               // ── P&L (совпадает с ОПУ) ──
               const S_DIV="Дивиденды учредителям";
-              const divSum = periodTx.filter(t=>t.type==="expense"&&t.subcategory===S_DIV).reduce((s,t)=>s+(Number(t.amount)||0),0);
+              const divTx = periodTx.filter(t=>t.type==="expense"&&t.subcategory===S_DIV);
+              const divSum = divTx.reduce((s,t)=>s+(Number(t.amount)||0),0);
+              const divByRecipient = {};
+              divTx.forEach(t=>{ const r=t.recipient||"Не указан"; divByRecipient[r]=(divByRecipient[r]||0)+(Number(t.amount)||0); });
               // Выручка без авансов и без финансирования (займы/вклады/возврат активов — не выручка)
               const incSumNoAdv = periodTx.filter(t=>t.type==="income"&&!t.isAdvance&&t.category!==C_FINANCING_INC&&t.category!==C_ASSET_INC).reduce((s,t)=>s+(Number(t.amount)||0),0);
               // Расходы P&L: без дивидендов, без финансовой деятельности и выданных займов/активов (они не расход); CapEx — расход кассовым методом
@@ -7496,6 +7499,12 @@ export default function App() {
                       <KpiRow label="Выручка (без авансов)" val={incSumNoAdv} color="#059669"/>
                       <KpiRow label="Расходы (без дивид.)" val={expNoDivSum} color="#dc2626"/>
                       <KpiRow label="Дивиденды" val={divSum} color="#d97706"/>
+                      {Object.entries(divByRecipient).length>1 && Object.entries(divByRecipient).map(([r,v])=>(
+                        <div key={r} style={{display:"flex",justifyContent:"space-between",padding:"3px 0 3px 14px",borderBottom:"1px solid #f5f7fa",gap:8}}>
+                          <span style={{fontSize:11.5,color:"#94a3b8"}}>↳ {r}</span>
+                          <span style={{fontSize:12,fontWeight:600,color:"#d97706",whiteSpace:"nowrap"}}>{fM(v)} ₸</span>
+                        </div>
+                      ))}
                       <KpiRow label="Чистая прибыль" val={netP} color={netP>=0?"#2563eb":"#dc2626"} bold big/>
                       <KpiRow label="Рентабельность" val={rentab+"%"} color={rentab>=0?"#7c3aed":"#dc2626"} bold/>
                     </CardSection>
@@ -7549,20 +7558,22 @@ export default function App() {
                     </CardSection>
                   </div>
 
+                  {/* ── Оба графика рядом ── */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(340px,1fr))",gap:12,marginBottom:16}}>
                   {/* ── Динамика по месяцам (линейный график) ── */}
-                  <div style={{background:"#0f172a",borderRadius:16,padding:"20px 24px",marginBottom:16,boxShadow:"0 8px 32px rgba(0,0,0,.25)"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10,marginBottom:18}}>
-                      <div style={{fontSize:12,color:"#94a3b8",fontWeight:700,textTransform:"uppercase",letterSpacing:1.2}}>📈 Динамика по месяцам</div>
-                      <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
-                        {[["#10b981","Выручка"],["#38bdf8","Валовая прибыль"],["#a78bfa","Чистая прибыль"]].map(([c,l])=>(
-                          <span key={l} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#64748b"}}>
-                            <span style={{width:22,height:2.5,background:c,borderRadius:2,display:"inline-block"}}/>
-                            <span style={{color:"#94a3b8",fontWeight:500}}>{l}</span>
+                  <div style={{background:"#0f172a",borderRadius:16,padding:"16px 18px",boxShadow:"0 8px 32px rgba(0,0,0,.25)"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8,marginBottom:14}}>
+                      <div style={{fontSize:11,color:"#94a3b8",fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>📈 Динамика по месяцам</div>
+                      <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                        {[["#10b981","Выручка"],["#0891b2","Вал. приб."],["#8b5cf6","Чистая приб."]].map(([c,l])=>(
+                          <span key={l} style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:"#64748b"}}>
+                            <span style={{width:16,height:2,background:c,borderRadius:2,display:"inline-block"}}/>
+                            <span style={{color:"#64748b"}}>{l}</span>
                           </span>
                         ))}
                       </div>
                     </div>
-                    {months.length===0 && <div style={{color:"#334155",fontSize:13,padding:"32px 0",textAlign:"center"}}>Нет данных за период</div>}
+                    {months.length===0 && <div style={{color:"#334155",fontSize:13,padding:"24px 0",textAlign:"center"}}>Нет данных за период</div>}
                     {months.length>0 && (()=>{
                       const W=720, H=160, PL=56, PR=16, PT=12, PB=28;
                       const cW=W-PL-PR, cH=H-PT-PB, n=months.length;
@@ -7587,7 +7598,7 @@ export default function App() {
                       const yTicks=[0,.25,.5,.75,1].map(r=>({y:PT+cH*(1-r),v:Math.round(maxMonth*r)}));
                       return (
                         <div style={{overflowX:"auto"}}>
-                          <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",minWidth:360,display:"block"}}>
+                          <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",minWidth:280,display:"block"}}>
                             <defs>
                               {LINES.map(({color,gid,op1,op2})=>(
                                 <linearGradient key={gid} id={gid} x1="0" y1="0" x2="0" y2="1">
@@ -7614,12 +7625,12 @@ export default function App() {
                             {/* lines */}
                             {LINES.map(({fn,color},li)=>{
                               const pts=months.map((m,i)=>[xOf(i),yOf(fn(monthMap[m]))]);
-                              return <path key={li} d={mkBezier(pts)} fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round"/>;
+                              return <path key={li} d={mkBezier(pts)} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round"/>;
                             })}
                             {/* dots */}
                             {LINES.map(({fn,color},li)=>months.map((m,i)=>{
                               const v=fn(monthMap[m]); const [yr,mo]=m.split("-");
-                              return <circle key={`${li}-${i}`} cx={xOf(i)} cy={yOf(v)} r="3.5" fill={color} stroke="#0f172a" strokeWidth="2">
+                              return <circle key={`${li}-${i}`} cx={xOf(i)} cy={yOf(v)} r="3" fill={color} stroke="#0f172a" strokeWidth="1.5">
                                 <title>{MNAMES[parseInt(mo)-1]} {yr}: {fM(Math.round(v))} ₸</title>
                               </circle>;
                             }))}
@@ -7635,14 +7646,14 @@ export default function App() {
                   </div>
 
                   {/* ── График по проектам ── */}
-                  <div style={{background:"#0f172a",borderRadius:16,padding:"20px 24px",marginBottom:16,boxShadow:"0 8px 32px rgba(0,0,0,.25)"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10,marginBottom:18}}>
-                      <div style={{fontSize:12,color:"#94a3b8",fontWeight:700,textTransform:"uppercase",letterSpacing:1.2}}>📦 Проекты по месяцам</div>
-                      <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
-                        {[["#1d4ed8","Объём продаж (план)"],["#10b981","Факт. поступления"],["#f59e0b","Валовая прибыль"]].map(([c,l])=>(
-                          <span key={l} style={{display:"flex",alignItems:"center",gap:6,fontSize:11}}>
-                            <span style={{width:12,height:12,background:c,borderRadius:3,display:"inline-block",opacity:.9}}/>
-                            <span style={{color:"#94a3b8",fontWeight:500}}>{l}</span>
+                  <div style={{background:"#0f172a",borderRadius:16,padding:"16px 18px",boxShadow:"0 8px 32px rgba(0,0,0,.25)"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8,marginBottom:14}}>
+                      <div style={{fontSize:11,color:"#94a3b8",fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>📦 Проекты по месяцам</div>
+                      <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                        {[["#3b82f6","План"],["#10b981","Факт"],["#f59e0b","Вал. приб."]].map(([c,l])=>(
+                          <span key={l} style={{display:"flex",alignItems:"center",gap:5,fontSize:10}}>
+                            <span style={{width:10,height:10,background:c,borderRadius:2,display:"inline-block",opacity:.9}}/>
+                            <span style={{color:"#64748b"}}>{l}</span>
                           </span>
                         ))}
                       </div>
@@ -8620,6 +8631,7 @@ export default function App() {
                 const ts=m.date?new Date(m.date).getTime():Date.now();
                 const tx={ id:m.id||genId(), type:m.type, date:ts, amount:amt, account:m.account, accountTo:m.type==="transfer"?m.accountTo:undefined,
                   category:m.type==="transfer"?"Перевод":m.category, subcategory:m.type==="transfer"?"":m.subcategory, note:m.note||"", contractNo:m.contractNo||"",
+                  recipient:m.recipient||"",
                   isAdvance:m.type==="income"?!!m.isAdvance:false,
                   included:m.included!==false, opuMonth:m.opuMonth, createdAt:m.createdAt||ts, updatedAt:Date.now() };
                 const cur=financeTxRef.current;
@@ -8732,6 +8744,12 @@ export default function App() {
                           </div>
                         );
                       })()}
+                      {m.subcategory==="Дивиденды учредителям" && (
+                        <div>
+                          <div style={{fontSize:11,color:"#d97706",marginBottom:4,fontWeight:700}}>👤 Получатель (учредитель)</div>
+                          <input className="fi" value={m.recipient||""} onChange={e=>set("recipient",e.target.value)} placeholder="Имя учредителя"/>
+                        </div>
+                      )}
                       <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Комментарий</div><input className="fi" value={m.note} onChange={e=>set("note",e.target.value)} placeholder="комментарий"/></div>
                       {m.type==="income" && (
                         <label style={{display:"flex",alignItems:"flex-start",gap:8,fontSize:12,color:"#475569",cursor:"pointer",fontWeight:600,background:"#fffbeb",border:"1px solid #fde68a",borderRadius:9,padding:"9px 11px"}}>
