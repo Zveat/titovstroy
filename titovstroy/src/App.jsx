@@ -226,11 +226,11 @@ function getPrice(work, qty, complexity, cpxPct) {
     for (const t of w.tiers) {
       if (qty >= t.min && qty <= t.max) { price = t.price; break; }
     }
-    if (price === null) price = w.tiers[w.tiers.length - 1].price;
+    if (price === null) price = w.tiers[w.tiers.length - 1]?.price ?? null;
   } else if (w.fixedPrice) {
     price = w.fixedPrice;
   }
-  return price !== null ? price * mult : null;
+  return (price !== null && !isNaN(Number(price))) ? Number(price) * mult : null;
 }
 
 function groupData(works) {
@@ -249,6 +249,8 @@ function groupData(works) {
 const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
 // Себестоимость за единицу с учётом разового ручного переопределения в строке сметы
 const rowCostPerUnit = (r, w) => (r && r.manualCost !== undefined && r.manualCost !== "" && !isNaN(Number(r.manualCost))) ? Number(r.manualCost) : (Number(w?.cost) || 0);
+// Надёжное приведение updatedAt к числу: поддерживает и число (Date.now()), и ISO-строку
+const _ts = v => { if (typeof v === "number") return v; const n = new Date(v).getTime(); return isNaN(n) ? 0 : n; };
 // Открыть/распечатать готовый HTML-документ. В обычном браузере открываем новую вкладку,
 // в PWA (standalone) на iOS новые окна не открываются — печатаем через скрытый iframe.
 const openOrPrintHtml = (html, revokeMs = 30000) => {
@@ -3563,7 +3565,7 @@ function MainApp({ currentUser, setCurrentUser }) {
         if (!e || !e.id) continue;
         const ex = map.get(e.id);
         if (!ex) map.set(e.id, e);
-        else map.set(e.id, (e.updatedAt || 0) >= (ex.updatedAt || 0) ? e : ex);
+        else map.set(e.id, _ts(e.updatedAt) >= _ts(ex.updatedAt) ? e : ex);
       }
       for (const id of removedIds) map.delete(id);
       finalList = [...map.values()];
@@ -3633,7 +3635,7 @@ function MainApp({ currentUser, setCurrentUser }) {
         if (!e || !e.id) continue;
         const ex = map.get(e.id);
         if (!ex) map.set(e.id, e);
-        else map.set(e.id, (e.updatedAt || 0) >= (ex.updatedAt || 0) ? e : ex);
+        else map.set(e.id, _ts(e.updatedAt) >= _ts(ex.updatedAt) ? e : ex);
       }
       for (const id of removedIds) map.delete(id);
       finalList = [...map.values()];
@@ -3856,7 +3858,7 @@ function MainApp({ currentUser, setCurrentUser }) {
   const markupAmt = grand * _markup / 100;
   const grandWithMarkup = grand + markupAmt; // база для клиента (markup скрыт)
   const discAmt = grandWithMarkup * _discount / 100;
-  const final = grandWithMarkup - discAmt;
+  const final = Math.round(grandWithMarkup - discAmt); // округляем итог, чтобы не копилась дробная погрешность в сохранённом total
   const kpData = useMemo(() => {
     const mm = 1 + markup / 100;
     const out = [];
