@@ -2848,7 +2848,27 @@ function BalanceSheet({ assetsSections, liabSections, capitalSection, totalAsset
 
 // ── Генерация договора: HTML / PDF / DOCX / WhatsApp ──
 
+// Обёртка авторизации. MainApp монтируется ТОЛЬКО при наличии currentUser,
+// поэтому при входе/выходе он целиком монтируется/размонтируется и порядок
+// хуков внутри него всегда стабилен (иначе React падал в белый экран).
 export default function App() {
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const s = localStorage.getItem(SESSION_KEY);
+      if (!s) return null;
+      const parsed = JSON.parse(s);
+      const user = parsed?.user || parsed;
+      const savedAt = parsed?.savedAt || Date.now();
+      if (!user?.id) return null;
+      if (Date.now() - savedAt > 30 * 24 * 60 * 60 * 1000) { localStorage.removeItem(SESSION_KEY); return null; }
+      return user;
+    } catch(e) { return null; }
+  });
+  if (!currentUser) return <LoginScreen onLogin={setCurrentUser} />;
+  return <MainApp key={currentUser.id} currentUser={currentUser} setCurrentUser={setCurrentUser} />;
+}
+
+function MainApp({ currentUser, setCurrentUser }) {
   const [catalogVersion, setCatalogVersion] = useState(0);
   useEffect(() => {
     _onCatalogChange = () => setCatalogVersion(v => v + 1);
@@ -2857,22 +2877,10 @@ export default function App() {
   const Gdyn = useMemo(() => groupData(getEffectiveCatalog()), [catalogVersion]);
   const cats = Object.keys(Gdyn);
 
-  // Авторизация
+  // Авторизация (currentUser приходит пропом из обёртки App — здесь компонент
+  // монтируется только когда пользователь уже залогинен, поэтому хуки стабильны)
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const doLogout = () => { try{localStorage.removeItem(SESSION_KEY);}catch(e){} setCurrentUser(null); setLogoutConfirm(false); };
-  const [currentUser, setCurrentUser] = useState(() => {
-    try {
-      const s = localStorage.getItem(SESSION_KEY);
-      if (!s) return null;
-      const parsed = JSON.parse(s);
-      // Support both old format (user object directly) and new format ({user, savedAt})
-      const user = parsed?.user || parsed;
-      const savedAt = parsed?.savedAt || Date.now();
-      if (!user?.id) return null;
-      if (Date.now() - savedAt > 30 * 24 * 60 * 60 * 1000) { localStorage.removeItem(SESSION_KEY); return null; }
-      return user;
-    } catch(e) { return null; }
-  });
   const [showAdmin, setShowAdmin] = useState(false);
   const [loadError, setLoadError] = useState(false); // не удалось загрузить из Firebase — сохранение заблокировано
   const [cloudError, setCloudError] = useState(false); // последнее сохранение не ушло в облако (только локально)
@@ -5475,9 +5483,6 @@ export default function App() {
   // ─────────────────────────────────────────────────────────────────────────
   // РЕНДЕР
   // ─────────────────────────────────────────────────────────────────────────
-  // Показать экран входа если не авторизован
-  if (!currentUser) return <LoginScreen onLogin={setCurrentUser} />;
-
   const NAV_ITEMS = useMemo(() => [
     ...(currentUser.role !== "viewer" ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
     { id:"objects",   icon:"📦", label:"Объекты" },
