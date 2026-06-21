@@ -7432,11 +7432,16 @@ export default function App() {
               });
               const incSlices=Object.entries(incBySub).sort((a,b)=>b[1]-a[1]);
 
-              // ── Расходы по подкатегориям ──
+              // ── Расходы по подкатегориям (дивиденды разбиваем по получателям) ──
               const expBySub = {};
               periodTx.filter(t=>t.type==="expense").forEach(t=>{
-                const k = t.subcategory||t.category||"Прочее";
-                expBySub[k]=(expBySub[k]||0)+(Number(t.amount)||0);
+                if(t.subcategory==="Дивиденды учредителям" && t.recipient){
+                  const k="Дивиденды: "+t.recipient;
+                  expBySub[k]=(expBySub[k]||0)+(Number(t.amount)||0);
+                } else {
+                  const k = t.subcategory||t.category||"Прочее";
+                  expBySub[k]=(expBySub[k]||0)+(Number(t.amount)||0);
+                }
               });
               const expSlices=Object.entries(expBySub).sort((a,b)=>b[1]-a[1]);
 
@@ -7838,7 +7843,7 @@ export default function App() {
                           {incG.length>0 && <tr><td colSpan={nCols} style={{paddingLeft:18,paddingTop:3,paddingBottom:2,fontWeight:700,color:"#059669",fontSize:11}}>↓ Поступления</td></tr>}
                           {incG.map(g=>(<Fragment key={g.cat}>{groupRow(g.cat,g,"#059669",g.cat)}{g.subs.map(sub=>{const s=agg(t=>t.type==="income"&&t.category===g.cat&&t.subcategory===sub&&actOf(t)===act.key); return s.tot===0?null:subRow(sub,s,g.cat);})}</Fragment>))}
                           {expG.length>0 && <tr><td colSpan={nCols} style={{paddingLeft:18,paddingTop:3,paddingBottom:2,fontWeight:700,color:"#dc2626",fontSize:11}}>↑ Платежи</td></tr>}
-                          {expG.map(g=>(<Fragment key={g.cat}>{groupRow(g.cat,g,"#dc2626",g.cat)}{g.subs.map(sub=>{const s=agg(t=>t.type==="expense"&&t.category===g.cat&&t.subcategory===sub&&actOf(t)===act.key); return s.tot===0?null:subRow(sub,s,g.cat);})}</Fragment>))}
+                          {expG.map(g=>(<Fragment key={g.cat}>{groupRow(g.cat,g,"#dc2626",g.cat)}{g.subs.map(sub=>{const s=agg(t=>t.type==="expense"&&t.category===g.cat&&t.subcategory===sub&&actOf(t)===act.key); if(s.tot===0)return null; if(sub===S_DIV){const drec={}; financeTx.filter(t=>t.included!==false&&t.type==="expense"&&t.subcategory===S_DIV&&t.recipient&&actOf(t)===act.key).forEach(t=>{const r=t.recipient,m=tsKey(t.date||t.createdAt||0);if(!months.includes(m))return;if(!drec[r]){drec[r]={byM:{},tot:0};months.forEach(mo=>{drec[r].byM[mo]=0;});}drec[r].byM[m]=(drec[r].byM[m]||0)+(Number(t.amount)||0);drec[r].tot+=(Number(t.amount)||0);}); return(<Fragment key={sub}>{subRow(sub,s,g.cat)}{Object.entries(drec).map(([r,ser])=>(<tr key={"dr-"+r}><td style={{paddingLeft:56,color:"#94a3b8",fontSize:11}}>↳ {r}</td>{months.map(m=><td key={m} style={{textAlign:"right",color:"#94a3b8",fontSize:11}}>{ser.byM[m]>0?fmt(ser.byM[m]):"—"}</td>)}<td className="colTot" style={{textAlign:"right",color:"#94a3b8",fontSize:11}}>{fmt(ser.tot)}</td></tr>))}</Fragment>);} return subRow(sub,s,g.cat);})}</Fragment>))}
                           <tr style={{background:act.bg}}><td style={{fontWeight:800,color:act.color,background:act.bg}}>= Поток · {act.label.toLowerCase()}</td>{months.map(m=><td key={m} style={{textAlign:"right",fontWeight:800,color:(net.byM[m]||0)>=0?act.color:"#dc2626"}}>{(net.byM[m]||0)>=0?"+":""}{fmt(net.byM[m])}</td>)}<td className="colTot" style={{textAlign:"right",fontWeight:900,color:net.tot>=0?act.color:"#dc2626"}}>{net.tot>=0?"+":""}{fmt(net.tot)}</td></tr>
                         </Fragment>);
                       })}
@@ -7890,6 +7895,14 @@ export default function App() {
               const opex=agg(t=>t.type==="expense"&&t.category===C_OPEX);
               const finc=agg(t=>t.type==="expense"&&t.category===C_FIN&&t.subcategory!==S_DIV); // фин.расходы без дивидендов
               const div=agg(t=>t.type==="expense"&&t.category===C_FIN&&t.subcategory===S_DIV);  // дивиденды
+              // разбивка дивидендов по получателям для ОПиУ
+              const divByRecOpu = {};
+              financeTx.filter(t=>t.included!==false&&t.type==="expense"&&t.subcategory===S_DIV&&t.recipient).forEach(t=>{
+                const r=t.recipient; const m=opMonth(t); if(!inPM(m)) return;
+                if(!divByRecOpu[r]){divByRecOpu[r]={byM:{},tot:0}; months.forEach(mo=>{divByRecOpu[r].byM[mo]=0;});}
+                divByRecOpu[r].byM[m]=(divByRecOpu[r].byM[m]||0)+(Number(t.amount)||0);
+                divByRecOpu[r].tot+=(Number(t.amount)||0);
+              });
               const sub=(a,b)=>{ const byM={}; months.forEach(m=>byM[m]=(a.byM[m]||0)-(b.byM[m]||0)); return {byM,tot:a.tot-b.tot}; };
               const gross=sub(income,cogs);          // Валовая прибыль = Выручка − COGS
               const ebitda=sub(gross,opex);          // EBITDA / Операционная прибыль = ВП − OPEX
@@ -7945,6 +7958,9 @@ export default function App() {
                       {div.tot!==0 && (<>
                         <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#94a3b8"}}>▼ РАСПРЕДЕЛЕНИЕ ПРИБЫЛИ</td></tr>
                         <tr><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>− Дивиденды учредителям</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(div.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(div.tot)}</td></tr>
+                        {Object.entries(divByRecOpu).map(([r,ser])=>(
+                          <tr key={r}><td style={{padding:"3px 9px 3px 36px",color:"#94a3b8",fontSize:11}}>↳ {r}</td>{months.map(m=><td key={m} style={{padding:"3px 9px",textAlign:"right",color:"#94a3b8",fontSize:11,whiteSpace:"nowrap"}}>{ser.byM[m]>0?fmt(ser.byM[m]):"—"}</td>)}<td style={{padding:"3px 9px",textAlign:"right",color:"#94a3b8",fontSize:11,whiteSpace:"nowrap"}}>{fmt(ser.tot)}</td></tr>
+                        ))}
                         <MetricRow label="НЕРАСПРЕДЕЛЁННАЯ ПРИБЫЛЬ" ser={retained} color="#0f172a" bg="#f1f5f9"/>
                       </>)}
                     </tbody>
