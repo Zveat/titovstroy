@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef, Fragment } from "react";
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, get, set } from "firebase/database";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
 function useDebounce(value, ms) {
@@ -19,7 +20,21 @@ const firebaseConfig = {
   appId:             "1:736574510792:web:b5d243a051caf4887337fd"
 };
 let _fbDb = null;
-try { _fbDb = getDatabase(initializeApp(firebaseConfig)); } catch(e) {}
+let _fbAuth = null;
+// Promise resolves when anonymous auth is ready (or immediately if auth unavailable)
+let _fbAuthReady = Promise.resolve();
+try {
+  const _fbApp = initializeApp(firebaseConfig);
+  _fbDb = getDatabase(_fbApp);
+  _fbAuth = getAuth(_fbApp);
+  _fbAuthReady = new Promise(resolve => {
+    const unsub = onAuthStateChanged(_fbAuth, user => {
+      unsub();
+      if (user) { resolve(); }
+      else { signInAnonymously(_fbAuth).then(resolve).catch(resolve); }
+    });
+  });
+} catch(e) {}
 
 const WORKS_DATA = [
   { code:"DEM-001", cat:"Черновые", sub:"Демонтаж", name:"Снятие обоев (не до основания)", unit:"м²", tiers:[], cost:200, margin:0.4, fixedPrice:333 },
@@ -499,6 +514,7 @@ const storage = {
     let fbResponded = !_fbDb; // если FB не сконфигурирован — авторитетен localStorage
     try {
       if (_fbDb) {
+        await _fbAuthReady;
         let snap = await _race(get(ref(_fbDb, _fbKey(key))), 8000);
         // Одна повторная попытка при таймауте (сеть могла мигнуть)
         if (snap === _TIMEOUT) {
@@ -536,6 +552,7 @@ const storage = {
     let fbOk = false, fbError = null;
     if (_fbDb) {
       try {
+        await _fbAuthReady;
         let res = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000);
         // Одна повторная попытка записи при таймауте/ошибке
         if (res === _TIMEOUT) {
