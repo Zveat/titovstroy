@@ -3317,6 +3317,7 @@ function MainApp({ currentUser, setCurrentUser }) {
       // Объекты
       if (ob.status === "found" && ob.value) { try { const p = JSON.parse(ob.value); if (Array.isArray(p)) { setObjects(p); objectsRef.current = p; } } catch {} }
       else if (ob.status === "empty") { setObjects([]); objectsRef.current = []; }
+      else { ok = false; }
       // Клиенты
       if (cl.status === "found" && cl.value) { try { const p = JSON.parse(cl.value); if (Array.isArray(p)) { const cls = p.map(c=>({...c, createdAt:c.createdAt||Date.now()})); setContractClients(cls); clientsRef.current = cls; } } catch {} }
       else if (cl.status === "empty") { setContractClients([]); clientsRef.current = []; }
@@ -5444,7 +5445,6 @@ function MainApp({ currentUser, setCurrentUser }) {
     const works = [];
     const rows = est.rows || {};
     for (const [key, r] of Object.entries(rows)) {
-      if (!Number(r?.qty) > 0 && Number(r?.qty) !== 0) continue;
       const qty = Number(r.qty || 0);
       if (qty <= 0) continue;
       const w = catalog.find(x => x.name === key) || catalog.find(x => x.code === key);
@@ -5457,11 +5457,11 @@ function MainApp({ currentUser, setCurrentUser }) {
         subcategory: w.sub,
         quantity: qty,
         unit: w.unit || "м²",
-        pricePerUnit: price ? Math.round(price / qty) : 0,
-        total: price ? Math.round(price) : 0,
+        pricePerUnit: price ? Math.round(price) : 0,
+        total: price ? Math.round(price * qty) : 0,
       });
     }
-    const totalAmount = Math.round((est.total || 0) * (1 - (est.discount || 0) / 100));
+    const totalAmount = est.total || 0; // est.total already has discount applied
     const json = {
       estimateInfo: {
         id: est.id,
