@@ -2355,9 +2355,11 @@ const DOC_TYPES = [
 ];
 const TYPE_LABELS = { repair_fiz:"Договор ремонта", annex:"Приложение", design:"Дизайн-проект", design_add:"Доп. соглашение дизайн", reservation:"Бронь" };
 
-function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onGDoc, onAddClientFromEstimate, onUpdateClient, currentUserRole, fmt }) {
+function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onGDoc, onAddClientFromEstimate, onUpdateClient, onCreateClient, currentUserRole, fmt }) {
   const [withStamp, setWithStamp] = useState(true);
   const [showClientForm, setShowClientForm] = useState(false);
+  const [showNewClientForm, setShowNewClientForm] = useState(false);
+  const [newClientData, setNewClientData] = useState({ name:"", phone:"", type:"физ" });
   const type = contract.type || "repair_fiz";
   const total = (contract.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
   const upd = (patch) => onUpdate(prev=>({...prev,...patch}));
@@ -2533,18 +2535,65 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
           )}
         </div>
         <div style={{display:"flex",gap:6,alignItems:"center"}}>
-          <select className="fi" style={{flex:1}} value={contract.clientId||""} onChange={e=>upd({clientId:e.target.value})}>
+          <select className="fi" style={{flex:1}} value={contract.clientId||""} onChange={e=>{upd({clientId:e.target.value});setShowNewClientForm(false);}}>
             <option value="">— Выбрать клиента —</option>
             {clients.map(c=>(<option key={c.id} value={c.id}>{c.name}{c.clientType==="yur" || c.type==="юр" ? " (ЮР)" : ""}</option>))}
           </select>
-          {contract.clientId && (
-            <button onClick={()=>setShowClientForm(s=>!s)}
-              style={{background:showClientForm?"#eff6ff":"#f3f4f6",color:"#2563eb",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-              ✎ Данные
-            </button>
-          )}
+          {contract.clientId
+            ? <button onClick={()=>setShowClientForm(s=>!s)}
+                style={{background:showClientForm?"#eff6ff":"#f3f4f6",color:"#2563eb",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                ✎ Данные
+              </button>
+            : <button onClick={()=>{setShowNewClientForm(s=>!s);setShowClientForm(false);}}
+                style={{background:showNewClientForm?"#eff6ff":"#f3f4f6",color:"#059669",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                + Новый
+              </button>
+          }
         </div>
-        {!contract.clientId && contract.estClient && (
+        {showNewClientForm && (
+          <div style={{marginTop:8,padding:"12px 14px",background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,display:"flex",flexDirection:"column",gap:8}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#059669"}}>Новый клиент</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <div>
+                <div style={{fontSize:11,color:"#94a3b8",marginBottom:3}}>Тип</div>
+                <select className="fi" value={newClientData.type} onChange={e=>setNewClientData(p=>({...p,type:e.target.value}))}>
+                  <option value="физ">Физ. лицо</option>
+                  <option value="юр">Юр. лицо</option>
+                </select>
+              </div>
+              <div>
+                <div style={{fontSize:11,color:"#94a3b8",marginBottom:3}}>ФИО / Название *</div>
+                <input className="fi" value={newClientData.name} onChange={e=>setNewClientData(p=>({...p,name:e.target.value}))} placeholder="Иванов Иван Иванович"/>
+              </div>
+              <div>
+                <div style={{fontSize:11,color:"#94a3b8",marginBottom:3}}>Телефон</div>
+                <input className="fi" value={newClientData.phone||""} onChange={e=>setNewClientData(p=>({...p,phone:e.target.value}))} placeholder="+7 ..."/>
+              </div>
+              <div>
+                <div style={{fontSize:11,color:"#94a3b8",marginBottom:3}}>Адрес</div>
+                <input className="fi" value={newClientData.address||""} onChange={e=>setNewClientData(p=>({...p,address:e.target.value}))} placeholder="г. Алматы ..."/>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={async ()=>{
+                if(!newClientData.name.trim()) return;
+                const nc = {id:Date.now().toString(),createdAt:Date.now(),...newClientData,name:newClientData.name.trim()};
+                await onCreateClient(nc);
+                upd({clientId:nc.id});
+                setShowNewClientForm(false);
+                setNewClientData({name:"",phone:"",type:"физ"});
+                setShowClientForm(true);
+              }} style={{background:"#059669",color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                Создать и выбрать
+              </button>
+              <button onClick={()=>{setShowNewClientForm(false);setNewClientData({name:"",phone:"",type:"физ"});}}
+                style={{background:"#f3f4f6",color:"#64748b",border:"none",borderRadius:8,padding:"7px 14px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+                Отмена
+              </button>
+            </div>
+          </div>
+        )}
+        {!contract.clientId && !showNewClientForm && contract.estClient && (
           <button onClick={async ()=>{ await onAddClientFromEstimate(); setShowClientForm(true); }}
             style={{marginTop:6,background:"#eff6ff",color:"#059669",border:"1px solid #eff6ff",borderRadius:8,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
             + Создать клиента из сметы ({contract.estClient})
@@ -9723,6 +9772,9 @@ function MainApp({ currentUser, setCurrentUser }) {
                 }}
                 onUpdateClient={(updated)=>{
                   saveContractClients(contractClients.map(x=>x.id===updated.id?updated:x));
+                }}
+                onCreateClient={async (newClient)=>{
+                  await saveContractClients([...contractClients, newClient]);
                 }}
                 currentUserRole={currentUser.role}
                 fmt={fmt}
