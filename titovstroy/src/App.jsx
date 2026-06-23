@@ -3456,7 +3456,10 @@ function MainApp({ currentUser, setCurrentUser }) {
     const objEsts = estimates.filter(e => e.objectId === objectId);
     if (!objEsts.length) return [];
     const catalog = getEffectiveCatalog();
-    const byCat = {}; // cat -> { priceClient, costPlan }
+    // Группируем по категории+подкатегории (как в смете): Черновые › Демонтаж и т.д.
+    // Сохраняем порядок появления.
+    const map = {}; // "cat|sub" -> { cat, sub, priceClient, costPlan }
+    const order = [];
     for (const est of objEsts) {
       const mk = 1 + (Number(est.markup) || 0) / 100;
       const disc = 1 - (Number(est.discount) || 0) / 100;
@@ -3470,12 +3473,14 @@ function MainApp({ currentUser, setCurrentUser }) {
         const priceClient = (Number(raw) || 0) * mk * disc * qty;
         const costPlan = rowCostPerUnit(r, w) * qty;
         const cat = w.cat || "Прочее";
-        const a = byCat[cat] || (byCat[cat] = { priceClient: 0, costPlan: 0 });
-        a.priceClient += priceClient;
-        a.costPlan += costPlan;
+        const sub = w.sub || cat;
+        const k = cat + "|" + sub;
+        if (!map[k]) { map[k] = { cat, sub, priceClient: 0, costPlan: 0 }; order.push(k); }
+        map[k].priceClient += priceClient;
+        map[k].costPlan += costPlan;
       }
     }
-    return Object.entries(byCat).map(([name, v]) => ({ name, priceClient: Math.round(v.priceClient), costPlan: Math.round(v.costPlan) }));
+    return order.map(k => ({ cat: map[k].cat, name: map[k].sub, priceClient: Math.round(map[k].priceClient), costPlan: Math.round(map[k].costPlan) }));
   }, [estimates]);
 
   // ── ФИНАНСЫ: загрузка/сохранение ──
