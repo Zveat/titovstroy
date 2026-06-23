@@ -3314,6 +3314,17 @@ function MainApp({ currentUser, setCurrentUser }) {
   // Только «живые» (не удалённые) объекты — используется в дашборде, аналитике и всех расчётах
   const liveObjects = useMemo(() => objects.filter(o=>!o.deletedAt), [objects]);
 
+  // Объекты «в работе» для раздела «Производство»: только те, по которым заведён
+  // проект в Финансах (связь по objectId, либо по номеру договора).
+  const productionObjects = useMemo(() => {
+    const ids = new Set();
+    for (const p of (finProjects || [])) {
+      if (p.objectId) ids.add(p.objectId);
+      else if (p.contractNo) { const c = contracts.find(x => normCN(x.number) === normCN(p.contractNo)); if (c?.objectId) ids.add(c.objectId); }
+    }
+    return liveObjects.filter(o => ids.has(o.id));
+  }, [liveObjects, finProjects, contracts]);
+
   // Мемоизированный фильтрованный/сортированный список смет
   const filteredEstimates = useMemo(() => {
     const q = debouncedListSearch.toLowerCase().trim();
@@ -9872,7 +9883,7 @@ function MainApp({ currentUser, setCurrentUser }) {
       {effScreen === "production" && (
         <div style={{padding:"20px 16px 90px"}}>
           <ProductionModule
-            objects={liveObjects}
+            objects={productionObjects}
             estimates={estimates}
             contracts={contracts}
             productions={productions}
