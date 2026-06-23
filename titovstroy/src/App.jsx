@@ -3322,7 +3322,8 @@ function MainApp({ currentUser, setCurrentUser }) {
       if (p.objectId) ids.add(p.objectId);
       else if (p.contractNo) { const c = contracts.find(x => normCN(x.number) === normCN(p.contractNo)); if (c?.objectId) ids.add(c.objectId); }
     }
-    return liveObjects.filter(o => ids.has(o.id));
+    // «В работе» = договор подписан (статус «Заключён») либо уже есть фин-проект
+    return liveObjects.filter(o => o.status === "signed" || ids.has(o.id));
   }, [liveObjects, finProjects, contracts]);
 
   // Мемоизированный фильтрованный/сортированный список смет
@@ -9153,6 +9154,20 @@ function MainApp({ currentUser, setCurrentUser }) {
           const list = objectsRef.current.map(x=>x.id===obj.id?updated:x);
           await saveObjects(list);
           setCurrentObject(updated);
+          // При подписании договора (статус «Заключён») автоматически заводим
+          // проект в Финансах — объект становится «в работе» и появляется в Производстве.
+          if (patch.status === "signed") {
+            const cur = finProjectsRef.current;
+            const exists = cur.some(p => p.objectId === obj.id
+              || (p.contractNo && contractsRef.current.some(c => c.objectId === obj.id && normCN(c.number) === normCN(p.contractNo))));
+            if (!exists) {
+              const contract = contractsRef.current.find(c => c.objectId === obj.id) || null;
+              const estTotal = estimates.filter(e => e.objectId === obj.id).reduce((s, e) => s + (Number(e.total) || 0), 0);
+              const draft = finProjDraftFromObject(updated, contract);
+              const proj = { ...draft, id: genId(), budget: draft.budget || estTotal || 0 };
+              await saveFinanceProjects([...cur, proj]);
+            }
+          }
         };
 
         return (
