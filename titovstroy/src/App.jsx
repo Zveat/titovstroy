@@ -3319,12 +3319,22 @@ function MainApp({ currentUser, setCurrentUser }) {
   const productionObjects = useMemo(() => {
     const ids = new Set();
     for (const p of (finProjects || [])) {
-      if (p.objectId) ids.add(p.objectId);
-      else if (p.contractNo) { const c = contracts.find(x => normCN(x.number) === normCN(p.contractNo)); if (c?.objectId) ids.add(c.objectId); }
+      if ((p.rawStatus || p.status) === "отменен") continue; // отменённые не показываем
+      // 1) прямая связь по objectId
+      if (p.objectId) { ids.add(p.objectId); continue; }
+      // 2) связь через договор (contractLinkMap — то же, что в Финансах)
+      const link = p.contractNo ? contractLinkMap[normCN(p.contractNo)] : null;
+      if (link?.object) { ids.add(link.object.id); continue; }
+      // 3) запасной матч по имени/телефону клиента в описании проекта
+      const desc = ((p.description || "") + " " + (p.client || "") + " " + (p.comment || "")).toLowerCase();
+      const obj = liveObjects.find(o =>
+        (o.clientName && desc.includes(o.clientName.toLowerCase())) ||
+        (o.clientPhone && o.clientPhone.length > 4 && desc.includes(o.clientPhone.toLowerCase())));
+      if (obj) ids.add(obj.id);
     }
-    // «В работе» = договор подписан (статус «Заключён») либо уже есть фин-проект
+    // «В работе» = договор подписан (статус «Заключён») либо есть фин-проект
     return liveObjects.filter(o => o.status === "signed" || ids.has(o.id));
-  }, [liveObjects, finProjects, contracts]);
+  }, [liveObjects, finProjects, contractLinkMap]);
 
   // Мемоизированный фильтрованный/сортированный список смет
   const filteredEstimates = useMemo(() => {
