@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef, Fragment } from "react";
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, get, set } from "firebase/database";
+import ProductionModule from "./production/ProductionModule.jsx";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
@@ -330,6 +331,8 @@ const DEAL_STATUSES = [
 ];
 const OBJECTS_KEY         = "titovstroy-objects";
 const OBJECTS_BACKUPS_KEY = "titovstroy-objects-backups";
+const PRODUCTIONS_KEY         = "titovstroy-productions";   // производственные карточки объектов
+const PRODUCTIONS_BACKUPS_KEY = "titovstroy-productions-backups";
 // единый снимок рабочего пространства: объекты + их сметы + их договора
 const WORKSPACE_BACKUPS_KEY = "titovstroy-workspace-backups";
 // legacy ключ для миграции старых сделок
@@ -3147,6 +3150,11 @@ function MainApp({ currentUser, setCurrentUser }) {
   const objectsRef = useRef([]);
   useEffect(() => { objectsRef.current = objects; }, [objects]);
 
+  // Производственные карточки объектов (раздел «Производство»)
+  const [productions, setProductions] = useState([]);
+  const productionsRef = useRef([]);
+  useEffect(() => { productionsRef.current = productions; }, [productions]);
+
   // ── ФИНАНСЫ ──
   const [financeTx, setFinanceTx] = useState([]);
   const financeTxRef = useRef([]);
@@ -3389,7 +3397,7 @@ function MainApp({ currentUser, setCurrentUser }) {
   const loadContracts = useCallback(async () => {
     let ok = true;
     try {
-      const [cr, cl, ca, ob] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY), storage.getResult(OBJECTS_KEY)]);
+      const [cr, cl, ca, ob, pd] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY), storage.getResult(OBJECTS_KEY), storage.getResult(PRODUCTIONS_KEY)]);
       // Договоры
       if (cr.status === "found" && cr.value) { try { const p = JSON.parse(cr.value); if (Array.isArray(p)) { setContracts(p); contractsRef.current = p; } } catch {} }
       else if (cr.status === "empty") { setContracts([]); contractsRef.current = []; }
@@ -3398,6 +3406,9 @@ function MainApp({ currentUser, setCurrentUser }) {
       if (ob.status === "found" && ob.value) { try { const p = JSON.parse(ob.value); if (Array.isArray(p)) { setObjects(p); objectsRef.current = p; } } catch {} }
       else if (ob.status === "empty") { setObjects([]); objectsRef.current = []; }
       else { ok = false; }
+      // Производственные карточки
+      if (pd.status === "found" && pd.value) { try { const p = JSON.parse(pd.value); if (Array.isArray(p)) { setProductions(p); productionsRef.current = p; } } catch {} }
+      else if (pd.status === "empty") { setProductions([]); productionsRef.current = []; }
       // Клиенты
       if (cl.status === "found" && cl.value) { try { const p = JSON.parse(cl.value); if (Array.isArray(p)) { const cls = p.map(c=>({...c, createdAt:c.createdAt||Date.now()})); setContractClients(cls); clientsRef.current = cls; } } catch {} }
       else if (cl.status === "empty") { setContractClients([]); clientsRef.current = []; }
@@ -3430,6 +3441,42 @@ function MainApp({ currentUser, setCurrentUser }) {
     const r = await saveListProtected(OBJECTS_KEY, OBJECTS_BACKUPS_KEY, list, (fl)=>{ objectsRef.current = fl; setObjects(fl); }, { loadedRef: _contractsLoaded, ...opts });
     return r;
   };
+  const saveProductions = async (list, opts = {}) => {
+    return await saveListProtected(PRODUCTIONS_KEY, PRODUCTIONS_BACKUPS_KEY, list, (fl)=>{ productionsRef.current = fl; setProductions(fl); }, { loadedRef: _contractsLoaded, ...opts });
+  };
+  // upsert одной производственной карточки (ключ — objectId)
+  const onSaveProduction = useCallback(async (record) => {
+    const cur = productionsRef.current;
+    const exists = cur.some(p => p.objectId === record.objectId);
+    const list = exists ? cur.map(p => p.objectId === record.objectId ? record : p) : [...cur, record];
+    await saveProductions(list, { replace: true });
+  }, []);
+  // Построить этапы из привязанной к объекту сметы: группировка по категориям сметы
+  const buildStagesFromEstimate = useCallback((objectId) => {
+    const objEsts = estimates.filter(e => e.objectId === objectId);
+    if (!objEsts.length) return [];
+    const catalog = getEffectiveCatalog();
+    const byCat = {}; // cat -> { priceClient, costPlan }
+    for (const est of objEsts) {
+      const mk = 1 + (Number(est.markup) || 0) / 100;
+      const disc = 1 - (Number(est.discount) || 0) / 100;
+      for (const [key, r] of Object.entries(est.rows || {})) {
+        const qty = Number(r?.qty || 0);
+        if (qty <= 0) continue;
+        const w = catalog.find(x => x.code === key) || catalog.find(x => x.name === key);
+        if (!w) continue;
+        const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
+        const raw = (r.manualPrice !== undefined && r.manualPrice !== "") ? Number(r.manualPrice) : getPrice(w, qty, r.complexity || "std", cpxPct);
+        const priceClient = (Number(raw) || 0) * mk * disc * qty;
+        const costPlan = rowCostPerUnit(r, w) * qty;
+        const cat = w.cat || "Прочее";
+        const a = byCat[cat] || (byCat[cat] = { priceClient: 0, costPlan: 0 });
+        a.priceClient += priceClient;
+        a.costPlan += costPlan;
+      }
+    }
+    return Object.entries(byCat).map(([name, v]) => ({ name, priceClient: Math.round(v.priceClient), costPlan: Math.round(v.costPlan) }));
+  }, [estimates]);
 
   // ── ФИНАНСЫ: загрузка/сохранение ──
   const loadFinance = useCallback(async () => {
@@ -5617,6 +5664,7 @@ function MainApp({ currentUser, setCurrentUser }) {
   const NAV_ITEMS = useMemo(() => [
     ...(currentUser.role !== "viewer" ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
     { id:"objects",   icon:"📦", label:"Объекты" },
+    ...(currentUser.role !== "viewer" ? [{ id:"production", icon:"🏗", label:"Производство" }] : []),
     { id:"contracts", icon:"📄", label:"Прочие договора", short:"Договора" },
     ...(currentUser.role !== "viewer" ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
     ...((currentUser.role==="admin"||currentUser.role==="manager") ? [{ id:"finance", icon:"💰", label:"Финансы" }] : []),
@@ -5625,7 +5673,7 @@ function MainApp({ currentUser, setCurrentUser }) {
 
   // Наблюдатель не имеет доступа к дашборду/аналитике/админке — показываем объекты.
   // Вычисляем эффективный экран без setState во время рендера (иначе нарушаются правила хуков).
-  const effScreen = (currentUser.role === "viewer" && (screen === "dashboard" || screen === "analytics" || screen === "admin" || screen === "deals" || screen === "finance")) ? "objects"
+  const effScreen = (currentUser.role === "viewer" && (screen === "dashboard" || screen === "analytics" || screen === "admin" || screen === "deals" || screen === "finance" || screen === "production")) ? "objects"
     : (currentUser.role !== "admin" && currentUser.role !== "manager" && screen === "finance") ? "objects"
     : screen;
   // Руководитель видит финансы только для чтения
@@ -9813,6 +9861,23 @@ function MainApp({ currentUser, setCurrentUser }) {
           contragentsRef={contragentsRef}
           onBackupWorkspace={openWorkspaceBackups}
         />
+      )}
+
+      {/* ── ЭКРАН: ПРОИЗВОДСТВО ── */}
+      {effScreen === "production" && (
+        <div style={{padding:"20px 16px 90px"}}>
+          <ProductionModule
+            objects={liveObjects}
+            estimates={estimates}
+            contracts={contracts}
+            productions={productions}
+            onSaveProduction={onSaveProduction}
+            buildStagesFromEstimate={buildStagesFromEstimate}
+            fmt={fmt}
+            genId={genId}
+            currentUser={currentUser}
+          />
+        </div>
       )}
 
       </div>
