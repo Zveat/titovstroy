@@ -2916,6 +2916,19 @@ export default function App() {
   return <MainApp key={currentUser.id} currentUser={currentUser} setCurrentUser={setCurrentUser} />;
 }
 
+// Мигрирует ключи rows со старого формата (name) на новый (code).
+// Нужно при открытии смет, созданных до перехода на code-ключи.
+function migrateRowsToCodeKeys(rows, catalog) {
+  const result = {};
+  for (const [key, val] of Object.entries(rows || {})) {
+    const byCode = catalog.find(w => w.code === key);
+    if (byCode) { result[key] = val; continue; }
+    const byName = catalog.find(w => w.name === key);
+    result[byName ? byName.code : key] = val;
+  }
+  return result;
+}
+
 function MainApp({ currentUser, setCurrentUser }) {
   const [catalogVersion, setCatalogVersion] = useState(0);
   useEffect(() => {
@@ -3830,19 +3843,19 @@ function MainApp({ currentUser, setCurrentUser }) {
     setRows(p => ({ ...p, [name]: { ...p[name], [field]: val } })), []);
 
   const rowPrice = (work) => {
-    const r = rows[work.name] || {};
+    const r = rows[work.code] || rows[work.name] || {};
     if (r.manualPrice !== undefined && r.manualPrice !== "") { const n = Number(r.manualPrice); return isNaN(n) ? null : n; }
     const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
     return getPrice(work, Number(r.qty || 0), r.complexity || "std", cpxPct);
   };
   const rowTotal = (work) => {
-    const qty = Number((rows[work.name] || {}).qty || 0);
+    const qty = Number((rows[work.code] || rows[work.name] || {}).qty || 0);
     const price = rowPrice(work);
     return qty > 0 && price ? qty * price : 0;
   };
   // Возвращает "цену от" если у работы нет точной цены (не идёт в расчёт)
   const rowPriceFrom = (work) => {
-    const r = rows[work.name] || {};
+    const r = rows[work.code] || rows[work.name] || {};
     if (r.manualPrice !== undefined && r.manualPrice !== "") return null; // ручная цена — точная
     const w = getEffectiveWork(work);
     if (w.fixedPrice || (w.tiers && w.tiers.length > 0) || w.cost) return null; // есть точная цена
@@ -3858,7 +3871,7 @@ function MainApp({ currentUser, setCurrentUser }) {
       for (const sub of Object.keys(Gdyn[cat]||{})) {
         let subTotal = 0;
         for (const w of (Gdyn[cat][sub]||[])) {
-          const r = rows[w.name] || {};
+          const r = rows[w.code] || rows[w.name] || {};
           const qty = Number(r.qty || 0);
           if (!qty) continue;
           const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
@@ -3890,9 +3903,9 @@ function MainApp({ currentUser, setCurrentUser }) {
     const out = [];
     const fromOut = [];
     for (const cat of cats) for (const sub of Object.keys(Gdyn[cat]||{})) for (const w of Gdyn[cat]?.[sub]||[]) {
-      const qty = Number((rows[w.name]||{}).qty||0);
+      const qty = Number((rows[w.code]||rows[w.name]||{}).qty||0);
       if (qty <= 0) continue;
-      const r = rows[w.name]||{};
+      const r = rows[w.code]||rows[w.name]||{};
       const displayName = r.manualName !== undefined ? r.manualName : w.name;
       const displayUnit = r.manualUnit !== undefined ? r.manualUnit : w.unit;
       const price = rowPrice(w);
@@ -4136,7 +4149,7 @@ function MainApp({ currentUser, setCurrentUser }) {
     const validNames = new Set(nonViewerUsers.map(u=>u.name));
     const p = est.proj || {...EMPTY_PROJ};
     setProj({...p, manager: validNames.has(p.manager||"") ? p.manager : ""});
-    setRows(est.rows || {});
+    setRows(migrateRowsToCodeKeys(est.rows || {}, getEffectiveCatalog()));
     setDiscount(est.discount || 0);
     setMarkup(est.markup || 0);
     setNote(est.note || "");
@@ -6358,7 +6371,7 @@ function MainApp({ currentUser, setCurrentUser }) {
               {showSelectedOnly && (() => {
                 const selectedWorks = [];
                 for (const cat of cats) for (const sub of Object.keys(Gdyn[cat]||{})) for (const w of Gdyn[cat]?.[sub]||[]) {
-                  const r = rows[w.name]||{};
+                  const r = rows[w.code]||rows[w.name]||{};
                   if (Number(r.qty||0) > 0) selectedWorks.push({...w, cat, sub});
                 }
                 return (
@@ -6376,7 +6389,7 @@ function MainApp({ currentUser, setCurrentUser }) {
                     </div>
                     <div style={{padding:"4px 0"}}>
                       {selectedWorks.map(work => {
-                        const r = rows[work.name]||{};
+                        const r = rows[work.code]||rows[work.name]||{};
                         const qty = Number(r.qty||0);
                         const price = rowPrice(work);
                         const total = rowTotal(work);
@@ -6389,15 +6402,15 @@ function MainApp({ currentUser, setCurrentUser }) {
                                 <div style={{display:"flex",alignItems:"center",gap:4}}>
                                   <input autoFocus style={{fontSize:13,background:"#f8fafc",border:"1px solid #2563eb",color:"#0f172a",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",outline:"none",width:"100%",minWidth:0}}
                                     value={r.manualName !== undefined ? r.manualName : work.name}
-                                    onChange={e=>setRow(work.name,"manualName",e.target.value)}
-                                    onBlur={()=>setRow(work.name,"editingName",false)}
-                                    onKeyDown={e=>{if(e.key==="Enter"||e.key==="Escape")setRow(work.name,"editingName",false);}}/>
-                                  {r.manualName !== undefined && <span onClick={()=>{setRow(work.name,"manualName",undefined);setRow(work.name,"editingName",false);}} title="Сбросить" style={{cursor:"pointer",fontSize:10,color:"#ef4444",flexShrink:0}}>✕</span>}
+                                    onChange={e=>setRow(work.code || work.name,"manualName",e.target.value)}
+                                    onBlur={()=>setRow(work.code || work.name,"editingName",false)}
+                                    onKeyDown={e=>{if(e.key==="Enter"||e.key==="Escape")setRow(work.code || work.name,"editingName",false);}}/>
+                                  {r.manualName !== undefined && <span onClick={()=>{setRow(work.code || work.name,"manualName",undefined);setRow(work.code || work.name,"editingName",false);}} title="Сбросить" style={{cursor:"pointer",fontSize:10,color:"#ef4444",flexShrink:0}}>✕</span>}
                                 </div>
                               ) : (
                                 <div style={{display:"flex",alignItems:"center",gap:4}}>
                                   <span style={{fontSize:13,color:"#0f172a",fontWeight:500}}>{displayName}</span>
-                                  {currentUser.role!=="viewer" && <span onClick={()=>setRow(work.name,"editingName",true)} title="Изменить название" style={{cursor:"pointer",fontSize:10,color:"#94a3b8",opacity:.6,flexShrink:0,lineHeight:1}}>✏</span>}
+                                  {currentUser.role!=="viewer" && <span onClick={()=>setRow(work.code || work.name,"editingName",true)} title="Изменить название" style={{cursor:"pointer",fontSize:10,color:"#94a3b8",opacity:.6,flexShrink:0,lineHeight:1}}>✏</span>}
                                 </div>
                               )}
                               <div style={{fontSize:10,color:"#94a3b8"}}>{work.cat} · {work.sub}</div>
@@ -6411,9 +6424,9 @@ function MainApp({ currentUser, setCurrentUser }) {
                                     <span style={{display:"inline-flex",alignItems:"center",gap:3}}>Себест/ед:
                                       <input type="number" min="0" placeholder={String(Number(work.cost)||0)}
                                         value={r.manualCost!==undefined?r.manualCost:(work.cost||"")}
-                                        onChange={e=>setRow(work.name,"manualCost",e.target.value===""?undefined:Number(e.target.value))}
+                                        onChange={e=>setRow(work.code || work.name,"manualCost",e.target.value===""?undefined:Number(e.target.value))}
                                         style={{width:64,border:"1px solid #e2e8f0",borderRadius:4,padding:"1px 5px",fontSize:11,textAlign:"right",fontFamily:"inherit",background:"#fff",color:r.manualCost!==undefined?"#2563eb":"#334155",fontWeight:r.manualCost!==undefined?700:400}}/>
-                                      {r.manualCost!==undefined && <span onClick={()=>setRow(work.name,"manualCost",undefined)} title="Сбросить" style={{cursor:"pointer",color:"#ef4444"}}>✕</span>}
+                                      {r.manualCost!==undefined && <span onClick={()=>setRow(work.code || work.name,"manualCost",undefined)} title="Сбросить" style={{cursor:"pointer",color:"#ef4444"}}>✕</span>}
                                     </span>
                                     {costPerUnit > 0 && <span>Себест: <b style={{color:"#334155"}}>{fmt(costPerUnit * qty)} ₸</b></span>}
                                     {marginPct !== null && <span>Маржа: <b style={{color: marginPct>=35?"#059669":marginPct>=20?"#d97706":"#ef4444"}}>{marginPct}%</b></span>}
@@ -6427,41 +6440,41 @@ function MainApp({ currentUser, setCurrentUser }) {
                                   <span style={{fontSize:11,color:"#94a3b8"}}>Цена:</span>
                                   <input type="number" min="0"
                                     value={r.manualPrice !== undefined ? r.manualPrice : (price||"")}
-                                    onChange={e=>setRow(work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}
+                                    onChange={e=>setRow(work.code || work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}
                                     style={{width:80,border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 5px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
                                   <span style={{fontSize:11,color:"#94a3b8"}}>Объём:</span>
                                   <input type="number" min="0"
                                     value={r.qty||""}
-                                    onChange={e=>setRow(work.name,"qty",e.target.value)}
+                                    onChange={e=>setRow(work.code || work.name,"qty",e.target.value)}
                                     style={{width:60,border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 5px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
                                 </div>
                                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%"}}>
                                   <span style={{fontSize:13,fontWeight:700,color:total>0?"#2563eb":"#94a3b8"}}>{total>0?fmt(total)+" ₸":"—"}</span>
-                                  <button onClick={()=>setRow(work.name,"qty","")} title="Убрать из сметы"
+                                  <button onClick={()=>setRow(work.code || work.name,"qty","")} title="Убрать из сметы"
                                     style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:14,padding:0,lineHeight:1}}>✕</button>
                                 </div>
                               </div>
                             </div>
                             <div className="wrow-desk" style={{textAlign:"center"}}>
                               <input value={displayUnit}
-                                onChange={e=>setRow(work.name,"manualUnit",e.target.value===(work.unit||"м²")?undefined:e.target.value)}
+                                onChange={e=>setRow(work.code || work.name,"manualUnit",e.target.value===(work.unit||"м²")?undefined:e.target.value)}
                                 style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:4,padding:"3px 4px",fontSize:11,textAlign:"center",fontFamily:"inherit",background:"#fff"}}/>
                             </div>
                             <div className="wrow-desk" style={{textAlign:"right"}}>
                               <input type="number" min="0"
                                 value={r.manualPrice !== undefined ? r.manualPrice : (price||"")}
-                                onChange={e=>setRow(work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}
+                                onChange={e=>setRow(work.code || work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}
                                 style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:4,padding:"3px 6px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
                             </div>
                             <div className="wrow-desk" style={{textAlign:"right"}}>
                               <input type="number" min="0"
                                 value={r.qty||""}
-                                onChange={e=>setRow(work.name,"qty",e.target.value)}
+                                onChange={e=>setRow(work.code || work.name,"qty",e.target.value)}
                                 style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:4,padding:"3px 6px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
                             </div>
                             <div className="wrow-desk" style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:6}}>
                               <span style={{fontSize:13,fontWeight:700,color:total>0?"#2563eb":"#94a3b8"}}>{total>0?fmt(total):"—"}</span>
-                              <button onClick={()=>setRow(work.name,"qty","")} title="Убрать из сметы"
+                              <button onClick={()=>setRow(work.code || work.name,"qty","")} title="Убрать из сметы"
                                 style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:14,padding:0,lineHeight:1}}>✕</button>
                             </div>
                           </div>
@@ -6531,7 +6544,7 @@ function MainApp({ currentUser, setCurrentUser }) {
                     </div>
                   )}
                   {(isSearching ? searchResults : (Gdyn[safeCat]?.[safeActiveSub]||[])).map(work=>{
-                    const r = rows[work.name]||{};
+                    const r = rows[work.code]||rows[work.name]||{};
                     const qty = Number(r.qty||0);
                     const cpx = r.complexity||"std";
                     const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : (cpx==="mid"?20:cpx==="hard"?50:0);
@@ -6556,10 +6569,10 @@ function MainApp({ currentUser, setCurrentUser }) {
                         <input className="num" style={{width:90}} type="number" min="0" placeholder="Цена"
                           autoFocus={editingPriceRow===work.name}
                           value={r.manualPrice!==undefined ? r.manualPrice : (price||"")}
-                          onChange={e=>setRow(work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}
+                          onChange={e=>setRow(work.code || work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}
                           onBlur={()=>{ if(!editPrices) setEditingPriceRow(null); }}
                           onKeyDown={e=>{ if(e.key==="Enter"||e.key==="Escape"){ if(!editPrices) setEditingPriceRow(null); } }}/>
-                        {r.manualPrice!==undefined && <span onClick={()=>setRow(work.name,"manualPrice",undefined)} title="Сбросить" style={{cursor:"pointer",fontSize:10,color:"#ef4444",marginLeft:2}}>✕</span>}
+                        {r.manualPrice!==undefined && <span onClick={()=>setRow(work.code || work.name,"manualPrice",undefined)} title="Сбросить" style={{cursor:"pointer",fontSize:10,color:"#ef4444",marginLeft:2}}>✕</span>}
                       </div>
                     ) : displayPrice != null ? (
                       <div style={{display:"flex",alignItems:"center",gap:4,justifyContent:"flex-end"}}>
@@ -6578,7 +6591,7 @@ function MainApp({ currentUser, setCurrentUser }) {
                       </div>
                     );
                     const qtyInput = <input className="num" style={{width:70,textAlign:"center",opacity:currentUser.role==="viewer"?.4:1}} type="number" min="0" placeholder="0" disabled={currentUser.role==="viewer"}
-                      value={r.qty||""} onChange={e=>setRow(work.name,"qty",e.target.value)}/>;
+                      value={r.qty||""} onChange={e=>setRow(work.code || work.name,"qty",e.target.value)}/>;
                     const nameBlock = (
                       <div style={{minWidth:0}}>
                         {showBreadcrumb && <div style={{fontSize:10,color:"#334155",marginBottom:2}}>{work.cat} › {work.sub}</div>}
@@ -6586,15 +6599,15 @@ function MainApp({ currentUser, setCurrentUser }) {
                           <div style={{display:"flex",alignItems:"center",gap:4}}>
                             <input autoFocus style={{fontSize:13,background:"#f8fafc",border:"1px solid #2563eb",color:"#0f172a",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",outline:"none",width:"100%",minWidth:0}}
                               value={r.manualName !== undefined ? r.manualName : work.name}
-                              onChange={e=>setRow(work.name,"manualName",e.target.value)}
-                              onBlur={()=>setRow(work.name,"editingName",false)}
-                              onKeyDown={e=>{if(e.key==="Enter"||e.key==="Escape")setRow(work.name,"editingName",false);}}/>
-                            {r.manualName !== undefined && <span onClick={()=>{setRow(work.name,"manualName",undefined);setRow(work.name,"editingName",false);}} title="Сбросить" style={{cursor:"pointer",fontSize:10,color:"#ef4444",flexShrink:0}}>✕</span>}
+                              onChange={e=>setRow(work.code || work.name,"manualName",e.target.value)}
+                              onBlur={()=>setRow(work.code || work.name,"editingName",false)}
+                              onKeyDown={e=>{if(e.key==="Enter"||e.key==="Escape")setRow(work.code || work.name,"editingName",false);}}/>
+                            {r.manualName !== undefined && <span onClick={()=>{setRow(work.code || work.name,"manualName",undefined);setRow(work.code || work.name,"editingName",false);}} title="Сбросить" style={{cursor:"pointer",fontSize:10,color:"#ef4444",flexShrink:0}}>✕</span>}
                           </div>
                         ) : (
                           <div style={{display:"flex",alignItems:"center",gap:4}}>
                             <span style={{fontSize:13,color:filled?"#0f172a":"#94a3b8",lineHeight:1.3}}>{r.manualName !== undefined ? r.manualName : work.name}</span>
-                            {currentUser.role!=="viewer" && <span onClick={()=>setRow(work.name,"editingName",true)} title="Изменить название" style={{cursor:"pointer",fontSize:10,color:"#94a3b8",opacity:.6,flexShrink:0,lineHeight:1}}>✏</span>}
+                            {currentUser.role!=="viewer" && <span onClick={()=>setRow(work.code || work.name,"editingName",true)} title="Изменить название" style={{cursor:"pointer",fontSize:10,color:"#94a3b8",opacity:.6,flexShrink:0,lineHeight:1}}>✏</span>}
                           </div>
                         )}
                         {tierHint && <div style={{fontSize:10,color:"#334155",marginTop:1}}>{tierHint}</div>}
@@ -6604,7 +6617,7 @@ function MainApp({ currentUser, setCurrentUser }) {
                             <input className="num" type="number" min="-50" max="300" step="5"
                               style={{width:52,fontSize:11,padding:"2px 6px",textAlign:"right"}}
                               value={cpxPct}
-                              onChange={e=>{setRow(work.name,"cpxPct",Number(e.target.value));setRow(work.name,"manualPrice",undefined);}}/>
+                              onChange={e=>{setRow(work.code || work.name,"cpxPct",Number(e.target.value));setRow(work.code || work.name,"manualPrice",undefined);}}/>
                             <span style={{fontSize:10,color:"#94a3b8"}}>%</span>
                           </div>
                         )}
@@ -6613,9 +6626,9 @@ function MainApp({ currentUser, setCurrentUser }) {
                             <span style={{display:"inline-flex",alignItems:"center",gap:3}}>Себест/ед:
                               <input type="number" min="0" placeholder={String(Number(work.cost)||0)}
                                 value={r.manualCost!==undefined?r.manualCost:(work.cost||"")}
-                                onChange={e=>setRow(work.name,"manualCost",e.target.value===""?undefined:Number(e.target.value))}
+                                onChange={e=>setRow(work.code || work.name,"manualCost",e.target.value===""?undefined:Number(e.target.value))}
                                 style={{width:64,border:"1px solid #e2e8f0",borderRadius:4,padding:"1px 5px",fontSize:11,textAlign:"right",fontFamily:"inherit",background:"#fff",color:r.manualCost!==undefined?"#2563eb":"#334155",fontWeight:r.manualCost!==undefined?700:400}}/>
-                              {r.manualCost!==undefined && <span onClick={()=>setRow(work.name,"manualCost",undefined)} title="Сбросить" style={{cursor:"pointer",color:"#ef4444"}}>✕</span>}
+                              {r.manualCost!==undefined && <span onClick={()=>setRow(work.code || work.name,"manualCost",undefined)} title="Сбросить" style={{cursor:"pointer",color:"#ef4444"}}>✕</span>}
                             </span>
                             {costPerUnit > 0 && <span>Себест: <b style={{color:"#334155"}}>{fmt(costPerUnit * qty)} ₸</b></span>}
                             {marginPct !== null && (
@@ -6638,15 +6651,15 @@ function MainApp({ currentUser, setCurrentUser }) {
                             <div style={{display:"flex",alignItems:"center",gap:3}}>
                               <input autoFocus style={{width:46,background:"#f8fafc",border:"1px solid #2563eb",borderRadius:4,padding:"2px 5px",fontSize:11,fontFamily:"inherit",outline:"none",textAlign:"center",color:"#0f172a"}}
                                 value={r.manualUnit !== undefined ? r.manualUnit : work.unit}
-                                onChange={e=>setRow(work.name,"manualUnit",e.target.value)}
-                                onBlur={()=>setRow(work.name,"editingUnit",false)}
-                                onKeyDown={e=>{if(e.key==="Enter"||e.key==="Escape")setRow(work.name,"editingUnit",false);}}/>
-                              {r.manualUnit !== undefined && <span onClick={()=>{setRow(work.name,"manualUnit",undefined);setRow(work.name,"editingUnit",false);}} title="Сбросить" style={{cursor:"pointer",fontSize:10,color:"#ef4444"}}>✕</span>}
+                                onChange={e=>setRow(work.code || work.name,"manualUnit",e.target.value)}
+                                onBlur={()=>setRow(work.code || work.name,"editingUnit",false)}
+                                onKeyDown={e=>{if(e.key==="Enter"||e.key==="Escape")setRow(work.code || work.name,"editingUnit",false);}}/>
+                              {r.manualUnit !== undefined && <span onClick={()=>{setRow(work.code || work.name,"manualUnit",undefined);setRow(work.code || work.name,"editingUnit",false);}} title="Сбросить" style={{cursor:"pointer",fontSize:10,color:"#ef4444"}}>✕</span>}
                             </div>
                           ) : (
                             <>
                               <span style={{color:r.manualUnit!==undefined?"#2563eb":"#94a3b8",fontWeight:r.manualUnit!==undefined?700:400}}>{r.manualUnit !== undefined ? r.manualUnit : work.unit}</span>
-                              {currentUser.role!=="viewer" && <span onClick={()=>setRow(work.name,"editingUnit",true)} title="Изменить ед. изм." style={{cursor:"pointer",fontSize:10,color:"#94a3b8",opacity:.6,lineHeight:1}}>✏</span>}
+                              {currentUser.role!=="viewer" && <span onClick={()=>setRow(work.code || work.name,"editingUnit",true)} title="Изменить ед. изм." style={{cursor:"pointer",fontSize:10,color:"#94a3b8",opacity:.6,lineHeight:1}}>✏</span>}
                             </>
                           )}
                         </div>
@@ -6662,7 +6675,7 @@ function MainApp({ currentUser, setCurrentUser }) {
                             {displayPrice!=null ? fmt(displayPrice)+" ₸/ед" : <span style={{fontStyle:"italic",fontSize:10}}>нет цены</span>}
                           </span>
                           <input className="num" style={{width:82,textAlign:"center",fontSize:16,padding:"7px 10px",fontWeight:700}} type="number" min="0" placeholder="0"
-                            value={r.qty||""} onChange={e=>setRow(work.name,"qty",e.target.value)}/>
+                            value={r.qty||""} onChange={e=>setRow(work.code || work.name,"qty",e.target.value)}/>
                           {total>0
                             ? <span style={{fontSize:12,fontWeight:800,color:"#0f172a",whiteSpace:"nowrap"}}>{fmt(total)} ₸</span>
                             : <span style={{fontSize:10,color:"#334155"}}>—</span>}
@@ -6680,7 +6693,7 @@ function MainApp({ currentUser, setCurrentUser }) {
                         const subWorks = (Gdyn[safeCat]?.[safeActiveSub]||[]);
                         let subCost=0, subProfit=0;
                         for(const w of subWorks){
-                          const rr=rows[w.name]||{};
+                          const rr=rows[w.code]||rows[w.name]||{};
                           const qty=Number(rr.qty||0);
                           const p=rowPrice(w); const bp=getBasePrice(w);
                           const dp=p??bp;
@@ -6769,10 +6782,10 @@ function MainApp({ currentUser, setCurrentUser }) {
                         </div>
                       )}
                       {showFinancial && currentUser.role!=="viewer" && (() => {
-                        const allFilled = getEffectiveCatalog().filter(w => Number((rows[w.name]||{}).qty||0) > 0);
+                        const allFilled = getEffectiveCatalog().filter(w => Number((rows[w.code]||rows[w.name]||{}).qty||0) > 0);
                         let totalCost=0, totalRevenue=0;
                         for(const w of allFilled){
-                          const rr=rows[w.name]||{};
+                          const rr=rows[w.code]||rows[w.name]||{};
                           const qty=Number(rr.qty||0);
                           const p=rowPrice(w); const bp=getBasePrice(w); const dp=p??bp;
                           totalCost += rowCostPerUnit(rr,w)*qty;
