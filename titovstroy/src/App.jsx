@@ -356,7 +356,8 @@ const FINANCE_TX_KEY          = "titovstroy-finance-tx";        // массив 
 const FINANCE_TX_BACKUPS_KEY  = "titovstroy-finance-tx-backups";
 const FINANCE_META_KEY        = "titovstroy-finance-meta";      // {accounts, income, expense}
 const FINANCE_META_BACKUPS_KEY= "titovstroy-finance-meta-backups";
-const FINANCE_PROJECTS_KEY    = "titovstroy-finance-projects";   // массив проектов
+const FINANCE_PROJECTS_KEY         = "titovstroy-finance-projects";   // массив проектов
+const FINANCE_PROJECTS_BACKUPS_KEY = "titovstroy-finance-projects-backups";
 // Справочник финансов по умолчанию (из исходной таблицы)
 const DEFAULT_FIN_META = {
   accounts: [
@@ -606,8 +607,9 @@ function LoginScreen({ onLogin }) {
     );
 
     if (user) {
-      try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user, savedAt: Date.now() })); } catch(e) {}
-      onLogin(user);
+      const { password: _pw, ...safeUser } = user; // не храним пароль в сессии
+      try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: safeUser, savedAt: Date.now() })); } catch(e) {}
+      onLogin(safeUser);
       return; // компонент размонтируется, setLoading вызывать нельзя
     } else {
       setError("Неверный логин или пароль");
@@ -2932,7 +2934,6 @@ function MainApp({ currentUser, setCurrentUser }) {
     try{ Object.keys(priceCardCache).forEach(k=>delete priceCardCache[k]); }catch(e){}
     setCurrentUser(null); setLogoutConfirm(false);
   };
-  const [showAdmin, setShowAdmin] = useState(false);
   const [loadError, setLoadError] = useState(false); // не удалось загрузить из Firebase — сохранение заблокировано
   const [cloudError, setCloudError] = useState(false); // последнее сохранение не ушло в облако (только локально)
   const [listBackups, setListBackups] = useState(null); // {label, items, onRestore}
@@ -3412,9 +3413,8 @@ function MainApp({ currentUser, setCurrentUser }) {
     } catch(e) { console.error(e); setCloudError(true); }
   };
 
-  const saveFinanceProjects = async (list) => {
-    finProjectsRef.current = list; setFinProjects(list);
-    try { await storage.set(FINANCE_PROJECTS_KEY, JSON.stringify(list)); } catch(e) { console.error(e); }
+  const saveFinanceProjects = async (list, opts = {}) => {
+    return await saveListProtected(FINANCE_PROJECTS_KEY, FINANCE_PROJECTS_BACKUPS_KEY, list, (fl)=>{ finProjectsRef.current = fl; setFinProjects(fl); }, { loadedRef: _financeLoaded, ...opts });
   };
 
   // Бэкапы списков (договоры/клиенты/контрагенты)
