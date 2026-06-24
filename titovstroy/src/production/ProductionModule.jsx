@@ -92,7 +92,7 @@ export default function ProductionModule({
         </div>
         {addOpen && (() => {
           const prodIds = new Set((productions || []).map(p => p.objectId));
-          const candidates = (allObjects || []).filter(o => !prodIds.has(o.id));
+          const candidates = (allObjects || []).filter(o => !o.deletedAt && !prodIds.has(o.id));
           return (
             <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, marginBottom: 14 }}>
               <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Добавить объект в производство вручную ({candidates.length} доступно):</div>
