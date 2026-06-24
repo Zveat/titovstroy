@@ -36,13 +36,14 @@ const groupByCat = (stages) => {
 };
 
 export default function ProductionModule({
-  objects, estimates, contracts, productions,
+  objects, allObjects, estimates, contracts, productions,
   onSaveProduction, buildStagesFromEstimate,
   fmt, genId, currentUser,
 }) {
   const [openId, setOpenId] = useState(null);
   const [tab, setTab] = useState("info");
   const [search, setSearch] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
 
   const prodByObj = useMemo(() => {
     const m = {};
@@ -83,9 +84,27 @@ export default function ProductionModule({
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 4px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
           <h2 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a", margin: 0 }}>🏗 Производство</h2>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск по клиенту, адресу…"
-            style={{ flex: "1 1 240px", maxWidth: 320, border: "1px solid #e2e8f0", borderRadius: 10, padding: "9px 14px", fontSize: 14, fontFamily: "inherit", outline: "none" }} />
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск по клиенту, адресу…"
+              style={{ flex: "1 1 200px", minWidth: 180, border: "1px solid #e2e8f0", borderRadius: 10, padding: "9px 14px", fontSize: 14, fontFamily: "inherit", outline: "none" }} />
+            <button onClick={() => setAddOpen(v => !v)} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 10, padding: "9px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>+ Добавить объект</button>
+          </div>
         </div>
+        {addOpen && (() => {
+          const shownIds = new Set(objects.map(o => o.id));
+          const candidates = (allObjects || []).filter(o => !shownIds.has(o.id));
+          return (
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, marginBottom: 14 }}>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Добавить объект в производство вручную (для переноса текущих работ):</div>
+              <select defaultValue="" onChange={e => { const o = candidates.find(x => x.id === e.target.value); if (o) { onSaveProduction(emptyProduction(o.id, genId)); setAddOpen(false); } }}
+                style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "9px 12px", fontSize: 14, fontFamily: "inherit", cursor: "pointer" }}>
+                <option value="">— Выбрать объект —</option>
+                {candidates.map(o => <option key={o.id} value={o.id}>{o.clientName || "Без имени"}{o.address ? " · " + o.address : ""}</option>)}
+              </select>
+              {candidates.length === 0 && <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Все объекты уже в производстве.</div>}
+            </div>
+          );
+        })()}
         <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 12 }}>Объектов: {list.length}</div>
         {list.length === 0 && <div style={{ textAlign: "center", color: "#94a3b8", padding: "50px 0", fontSize: 14 }}>Нет объектов. Объекты создаются в разделе «Объекты».</div>}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 12 }}>
