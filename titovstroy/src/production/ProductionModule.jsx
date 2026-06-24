@@ -35,8 +35,18 @@ const groupByCat = (stages) => {
   return order.map(c => [c, g[c]]);
 };
 
+// Имя/адрес из проекта Финансов (description = "Клиент | Адрес | Телефон")
+const projTitle = (p) => {
+  const d = (p.description || "").split("|").map(s => s.trim());
+  return d[0] || ("№" + (p.contractNo || "")) || "Проект";
+};
+const projAddress = (p) => {
+  const d = (p.description || "").split("|").map(s => s.trim());
+  return d[1] || "";
+};
+
 export default function ProductionModule({
-  objects, allObjects, estimates, contracts, productions,
+  objects, allObjects, unlinkedProjects, estimates, contracts, productions,
   onSaveProduction, buildStagesFromEstimate,
   fmt, genId, currentUser,
 }) {
@@ -57,7 +67,12 @@ export default function ProductionModule({
     return Math.round(done / p.checklistLaunch.length * 100);
   };
 
-  const openObj = objects.find(o => o.id === openId);
+  // Объект может быть реальным (из objects) либо "виртуальным" — из карточки производства,
+  // созданной по проекту Финансов (objectId начинается с "fp:").
+  const openObj = openId ? (
+    objects.find(o => o.id === openId) ||
+    (() => { const pr = prodByObj[openId]; return pr ? { id: openId, clientName: pr.title || "Проект", address: pr.address || "", clientPhone: "" } : null; })()
+  ) : null;
   const openProd = openObj ? (prodByObj[openObj.id] || emptyProduction(openObj.id, genId)) : null;
 
   // АВТОЗАПОЛНЕНИЕ: при первом открытии объекта тянем этапы из сметы (категория › подкатегория).
@@ -77,8 +92,18 @@ export default function ProductionModule({
   // ─── СПИСОК ОБЪЕКТОВ ───
   if (!openObj) {
     const q = search.toLowerCase().trim();
-    const list = objects
-      .filter(o => !q || [o.clientName, o.address, o.clientPhone].some(v => v && v.toLowerCase().includes(q)))
+    // Реальные объекты в производстве
+    const objEntries = objects.map(o => ({
+      id: o.id, name: o.clientName || "Без названия", address: o.address || "—",
+      updatedAt: o.updatedAt || 0,
+    }));
+    // Виртуальные карточки из проектов Финансов (objectId = "fp:...") без реального объекта
+    const objIdSet = new Set(objects.map(o => o.id));
+    const orphanEntries = (productions || [])
+      .filter(p => String(p.objectId).startsWith("fp:") && !objIdSet.has(p.objectId))
+      .map(p => ({ id: p.objectId, name: p.title || "Проект", address: p.address || "—", updatedAt: p.updatedAt || 0 }));
+    const list = [...objEntries, ...orphanEntries]
+      .filter(o => !q || [o.name, o.address].some(v => v && v.toLowerCase().includes(q)))
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     return (
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 4px" }}>
@@ -92,16 +117,37 @@ export default function ProductionModule({
         </div>
         {addOpen && (() => {
           const prodIds = new Set((productions || []).map(p => p.objectId));
-          const candidates = (allObjects || []).filter(o => !o.deletedAt && !prodIds.has(o.id));
+          const objCands = (allObjects || []).filter(o => !o.deletedAt && !prodIds.has(o.id));
+          const projCands = (unlinkedProjects || []).filter(p => !prodIds.has("fp:" + p.id));
+          const total = objCands.length + projCands.length;
           return (
             <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, marginBottom: 14 }}>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Добавить объект в производство вручную ({candidates.length} доступно):</div>
-              <select defaultValue="" onChange={e => { const o = (allObjects || []).find(x => x.id === e.target.value); if (o) { onSaveProduction(emptyProduction(o.id, genId)); setAddOpen(false); } }}
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Добавить в производство вручную ({total} доступно):</div>
+              <select defaultValue="" onChange={e => {
+                const v = e.target.value; if (!v) return;
+                if (v.startsWith("fp:")) {
+                  const p = projCands.find(x => "fp:" + x.id === v);
+                  if (p) { onSaveProduction({ ...emptyProduction(v, genId), title: projTitle(p), address: projAddress(p), finProjectId: p.id, budget: Number(p.budget) || 0 }); }
+                } else {
+                  const o = objCands.find(x => x.id === v);
+                  if (o) onSaveProduction(emptyProduction(o.id, genId));
+                }
+                setAddOpen(false);
+              }}
                 style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "9px 12px", fontSize: 14, fontFamily: "inherit", cursor: "pointer" }}>
-                <option value="">— Выбрать объект —</option>
-                {candidates.map(o => <option key={o.id} value={o.id}>{o.clientName || "Без имени"}{o.address ? " · " + o.address : ""}</option>)}
+                <option value="">— Выбрать —</option>
+                {projCands.length > 0 && (
+                  <optgroup label="Проекты из Финансов">
+                    {projCands.map(p => <option key={"fp:" + p.id} value={"fp:" + p.id}>{projTitle(p)}{projAddress(p) ? " · " + projAddress(p) : ""}{p.contractNo ? " (№" + p.contractNo + ")" : ""}</option>)}
+                  </optgroup>
+                )}
+                {objCands.length > 0 && (
+                  <optgroup label="Объекты / лиды">
+                    {objCands.map(o => <option key={o.id} value={o.id}>{o.clientName || "Без имени"}{o.address ? " · " + o.address : ""}</option>)}
+                  </optgroup>
+                )}
               </select>
-              {candidates.length === 0 && <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Все объекты уже в производстве.</div>}
+              {total === 0 && <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Всё уже в производстве.</div>}
             </div>
           );
         })()}
@@ -119,7 +165,7 @@ export default function ProductionModule({
                 style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 16, cursor: "pointer", transition: "box-shadow .15s, transform .1s" }}
                 onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 8px 24px rgba(0,0,0,.08)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
                 onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#0f172a", marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.clientName || "Без названия"}</div>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#0f172a", marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.name || "Без названия"}</div>
                 <div style={{ fontSize: 12, color: "#64748b", marginBottom: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.address || "—"}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                   <div style={{ flex: 1, height: 8, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}>
