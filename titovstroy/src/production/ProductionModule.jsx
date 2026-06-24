@@ -91,12 +91,12 @@ export default function ProductionModule({
           </div>
         </div>
         {addOpen && (() => {
-          const shownIds = new Set(objects.map(o => o.id));
-          const candidates = (allObjects || []).filter(o => !shownIds.has(o.id));
+          const prodIds = new Set((productions || []).map(p => p.objectId));
+          const candidates = (allObjects || []).filter(o => !prodIds.has(o.id));
           return (
             <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, marginBottom: 14 }}>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Добавить объект в производство вручную (для переноса текущих работ):</div>
-              <select defaultValue="" onChange={e => { const o = candidates.find(x => x.id === e.target.value); if (o) { onSaveProduction(emptyProduction(o.id, genId)); setAddOpen(false); } }}
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Добавить объект в производство вручную ({candidates.length} доступно):</div>
+              <select defaultValue="" onChange={e => { const o = (allObjects || []).find(x => x.id === e.target.value); if (o) { onSaveProduction(emptyProduction(o.id, genId)); setAddOpen(false); } }}
                 style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "9px 12px", fontSize: 14, fontFamily: "inherit", cursor: "pointer" }}>
                 <option value="">— Выбрать объект —</option>
                 {candidates.map(o => <option key={o.id} value={o.id}>{o.clientName || "Без имени"}{o.address ? " · " + o.address : ""}</option>)}
