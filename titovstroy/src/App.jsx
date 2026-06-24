@@ -3332,9 +3332,11 @@ function MainApp({ currentUser, setCurrentUser }) {
         (o.clientPhone && o.clientPhone.length > 4 && desc.includes(o.clientPhone.toLowerCase())));
       if (obj) ids.add(obj.id);
     }
-    // «В работе» = договор подписан (статус «Заключён») либо есть фин-проект
-    return liveObjects.filter(o => o.status === "signed" || ids.has(o.id));
-  }, [liveObjects, finProjects, contractLinkMap]);
+    // объекты, по которым уже создана карточка производства (в т.ч. добавленные вручную)
+    const prodIds = new Set((productions || []).map(p => p.objectId));
+    // «В работе» = договор подписан (статус «Заключён») / есть фин-проект / есть карточка
+    return liveObjects.filter(o => o.status === "signed" || ids.has(o.id) || prodIds.has(o.id));
+  }, [liveObjects, finProjects, contractLinkMap, productions]);
 
   // Мемоизированный фильтрованный/сортированный список смет
   const filteredEstimates = useMemo(() => {
@@ -9909,6 +9911,7 @@ function MainApp({ currentUser, setCurrentUser }) {
         <div style={{padding:"20px 16px 90px"}}>
           <ProductionModule
             objects={productionObjects}
+            allObjects={liveObjects}
             estimates={estimates}
             contracts={contracts}
             productions={productions}
