@@ -9911,7 +9911,7 @@ function MainApp({ currentUser, setCurrentUser }) {
         <div style={{padding:"20px 16px 90px"}}>
           <ProductionModule
             objects={productionObjects}
-            allObjects={liveObjects}
+            allObjects={objects}
             estimates={estimates}
             contracts={contracts}
             productions={productions}
