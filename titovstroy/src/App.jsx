@@ -3338,6 +3338,25 @@ function MainApp({ currentUser, setCurrentUser }) {
     return liveObjects.filter(o => o.status === "signed" || ids.has(o.id) || prodIds.has(o.id));
   }, [liveObjects, finProjects, contractLinkMap, productions]);
 
+  // Проекты из Финансов, которые НЕ привязаны ни к одному объекту — их тоже можно
+  // добавить в производство вручную (разовая миграция текущих работ из Google-таблиц).
+  const unlinkedFinProjects = useMemo(() => {
+    const out = [];
+    for (const p of (finProjects || [])) {
+      if ((p.rawStatus || p.status) === "отменен") continue;
+      if (p.objectId) continue;
+      const link = p.contractNo ? contractLinkMap[normCN(p.contractNo)] : null;
+      if (link?.object) continue;
+      const desc = ((p.description || "") + " " + (p.client || "") + " " + (p.comment || "")).toLowerCase();
+      const obj = liveObjects.find(o =>
+        (o.clientName && desc.includes(o.clientName.toLowerCase())) ||
+        (o.clientPhone && o.clientPhone.length > 4 && desc.includes(o.clientPhone.toLowerCase())));
+      if (obj) continue;
+      out.push(p);
+    }
+    return out;
+  }, [finProjects, contractLinkMap, liveObjects]);
+
   // Мемоизированный фильтрованный/сортированный список смет
   const filteredEstimates = useMemo(() => {
     const q = debouncedListSearch.toLowerCase().trim();
@@ -9912,6 +9931,7 @@ function MainApp({ currentUser, setCurrentUser }) {
           <ProductionModule
             objects={productionObjects}
             allObjects={objects}
+            unlinkedProjects={unlinkedFinProjects}
             estimates={estimates}
             contracts={contracts}
             productions={productions}
