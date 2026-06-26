@@ -5886,37 +5886,39 @@ function MainApp({ currentUser, setCurrentUser }) {
         .fin-row:hover{background:#f8fafc}
         .fin-row:hover{box-shadow:0 8px 24px rgba(15,23,42,.10)!important;transform:translateY(-2px)}
         /* ── rep-table: ДДС и ОПУ ─────────────────────────────── */
-        .rep-wrap{width:100%;overflow:auto;max-height:calc(100vh - 200px);border:1px solid #dde3ed;border-radius:14px;box-shadow:0 2px 12px rgba(15,23,42,.07)}
-        .rep-table{border-collapse:collapse;font-size:13px;width:100%;min-width:700px}
+        .rep-wrap{width:100%;overflow:auto;max-height:calc(100vh - 200px);border:1px solid #e2e8f0;border-radius:12px;background:#fff}
+        .rep-table{border-collapse:collapse;font-size:13px;width:100%;min-width:700px;background:#fff}
         /* Заголовок */
         .rep-table thead th{
           position:sticky;top:0;z-index:5;
-          background:#1e293b;color:#e2e8f0;
-          font-size:12px;font-weight:700;letter-spacing:.3px;
-          padding:11px 14px;white-space:nowrap;
-          border-bottom:2px solid #334155;
+          background:#fff;color:#64748b;
+          font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;
+          padding:10px 16px;white-space:nowrap;
+          border-bottom:2px solid #e2e8f0;
           text-align:right
         }
-        .rep-table thead th:first-child{left:0;z-index:6;text-align:left;min-width:200px;max-width:260px}
-        .rep-table thead th.colTot{background:#0f172a;color:#f8fafc;border-left:2px solid #334155}
-        /* Тело */
-        .rep-table td{padding:8px 14px;white-space:nowrap;font-size:13px;border-bottom:1px solid #f1f5f9;text-align:right}
-        .rep-table td:first-child{text-align:left;white-space:normal;word-break:break-word;min-width:200px;max-width:260px}
+        .rep-table thead th:first-child{left:0;z-index:6;text-align:left;min-width:220px;max-width:280px}
+        .rep-table thead th.colTot{background:#f8fafc;color:#0f172a;font-weight:700;border-left:1px solid #e2e8f0}
+        /* Тело — базовые ячейки */
+        .rep-table td{padding:9px 16px;white-space:nowrap;font-size:13px;border-bottom:1px solid #f1f5f9;text-align:right;color:#1e293b;background:#fff}
+        .rep-table td:first-child{text-align:left;white-space:normal;word-break:break-word;min-width:220px;max-width:280px}
         /* sticky первая колонка */
-        .rep-table tbody td:first-child,.rep-table tbody th:first-child{position:sticky;left:0;z-index:2;background:#fff}
-        /* zebra */
-        .rep-table tbody tr:nth-child(even) td{background:#f8fafc}
-        .rep-table tbody tr:nth-child(even) td:first-child{background:#f8fafc}
-        .rep-table tbody tr:hover td{background:#eff6ff!important}
-        .rep-table tbody tr:hover td:first-child{background:#eff6ff!important}
+        .rep-table tbody td:first-child,.rep-table tbody th:first-child{position:sticky;left:0;z-index:2}
+        /* hover */
+        .rep-table tbody tr:hover td{background:#f8fafc!important}
         /* итоговая колонка */
-        .rep-table .colTot{background:#f1f5f9;border-left:2px solid #dde3ed;font-weight:700}
-        .rep-table tbody tr:nth-child(even) .colTot{background:#e9eef6}
-        .rep-table tbody tr:hover .colTot{background:#dbeafe!important}
+        .rep-table .colTot{background:#f8fafc;border-left:1px solid #e2e8f0}
+        .rep-table tbody tr:hover .colTot{background:#f1f5f9!important}
+        /* секционный заголовок-разделитель */
+        .rep-section td{padding:8px 16px 6px!important;font-size:10.5px!important;font-weight:700!important;letter-spacing:.8px!important;text-transform:uppercase!important;color:#94a3b8!important;background:#f8fafc!important;border-top:1px solid #e2e8f0!important;border-bottom:1px solid #e2e8f0!important}
+        /* строка итога секции */
+        .rep-metric td{padding:11px 16px!important;font-weight:700!important;font-size:13.5px!important;background:#fff!important;border-top:2px solid #e2e8f0!important}
+        .rep-metric td:first-child{font-weight:800!important}
+        /* строка процента */
+        .rep-pct td{padding:2px 16px 8px!important;font-size:11.5px!important;font-style:italic!important;color:#94a3b8!important;background:#fff!important;border-bottom:none!important}
         /* nostick */
-        .rep-table.nostick tbody td:first-child{position:static;background:transparent}
+        .rep-table.nostick tbody td:first-child{position:static}
         .rep-table.nostick thead th:first-child{left:auto}
-        .rep-table.nostick tbody tr:hover td:first-child{background:#eff6ff!important}
       `}</style>
 
       {/* ── SIDEBAR (десктоп) ── */}
@@ -8107,23 +8109,23 @@ function MainApp({ currentUser, setCurrentUser }) {
                       <th className="colTot" style={{textAlign:"right"}}>Итого</th>
                     </tr></thead>
                     <tbody>
-                      <tr style={{background:"#f8fafc"}}><td style={{fontWeight:800,color:"#475569"}}>Сальдо на начало</td>{months.map((m,i)=><td key={m} style={sumStyle(i===0?saldoStart:saldoEnd[months[i-1]])}>{fM(i===0?saldoStart:saldoEnd[months[i-1]])}</td>)}<td className="colTot" style={sumStyle(saldoStart)}>{fM(saldoStart)}</td></tr>
+                      <tr onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}><td style={{fontWeight:700,color:"#475569"}}>Сальдо на начало</td>{months.map((m,i)=><td key={m} style={sumStyle(i===0?saldoStart:saldoEnd[months[i-1]])}>{fM(i===0?saldoStart:saldoEnd[months[i-1]])}</td>)}<td className="colTot" style={sumStyle(saldoStart)}>{fM(saldoStart)}</td></tr>
                       {ACTS.map(act=>{
                         const inc=actInc(act.key), exp=actExp(act.key), net=actNet(act.key);
                         if(inc.tot===0 && exp.tot===0) return null;
                         const incG=incCats.map(c=>({cat:c.cat,subs:c.subs||[],...agg(t=>t.type==="income"&&t.category===c.cat&&actOf(t)===act.key)})).filter(g=>g.tot!==0);
                         const expG=expCats.map(c=>({cat:c.cat,subs:c.subs||[],...agg(t=>t.type==="expense"&&t.category===c.cat&&actOf(t)===act.key)})).filter(g=>g.tot!==0);
                         return (<Fragment key={act.key}>
-                          <tr><td colSpan={nCols} style={{paddingTop:14,paddingBottom:5,fontWeight:900,color:act.color,fontSize:13,borderTop:"2px solid #eef2f7"}}>{act.label} <span style={{fontWeight:500,color:"#cbd5e1",fontSize:11}}>· {act.desc}</span></td></tr>
-                          {incG.length>0 && <tr><td colSpan={nCols} style={{paddingLeft:18,paddingTop:3,paddingBottom:2,fontWeight:700,color:"#059669",fontSize:11}}>↓ Поступления</td></tr>}
-                          {incG.map(g=>(<Fragment key={g.cat}>{groupRow(g.cat,g,"#059669",g.cat)}{g.subs.map(sub=>{const s=agg(t=>t.type==="income"&&t.category===g.cat&&t.subcategory===sub&&actOf(t)===act.key); return s.tot===0?null:subRow(sub,s,g.cat);})}</Fragment>))}
-                          {expG.length>0 && <tr><td colSpan={nCols} style={{paddingLeft:18,paddingTop:3,paddingBottom:2,fontWeight:700,color:"#dc2626",fontSize:11}}>↑ Платежи</td></tr>}
+                          <tr className="rep-section"><td colSpan={nCols}>{act.label} <span style={{fontWeight:400,letterSpacing:0,textTransform:"none",fontSize:11,color:"#cbd5e1"}}>· {act.desc}</span></td></tr>
+                          {incG.length>0 && <tr><td colSpan={nCols} style={{paddingLeft:18,paddingTop:4,paddingBottom:2,fontWeight:600,color:"#64748b",fontSize:11.5}}>Поступления</td></tr>}
+                          {incG.map(g=>(<Fragment key={g.cat}>{groupRow(g.cat,g,"#1e293b",g.cat)}{g.subs.map(sub=>{const s=agg(t=>t.type==="income"&&t.category===g.cat&&t.subcategory===sub&&actOf(t)===act.key); return s.tot===0?null:subRow(sub,s,g.cat);})}</Fragment>))}
+                          {expG.length>0 && <tr><td colSpan={nCols} style={{paddingLeft:18,paddingTop:4,paddingBottom:2,fontWeight:600,color:"#64748b",fontSize:11.5}}>Платежи</td></tr>}
                           {expG.map(g=>(<Fragment key={g.cat}>{groupRow(g.cat,g,"#dc2626",g.cat)}{g.subs.map(sub=>{const s=agg(t=>t.type==="expense"&&t.category===g.cat&&t.subcategory===sub&&actOf(t)===act.key); if(s.tot===0)return null; if(sub===S_DIV){const drec={}; financeTx.filter(t=>!t.deletedAt&&t.included!==false&&t.type==="expense"&&t.subcategory===S_DIV&&t.recipient&&actOf(t)===act.key).forEach(t=>{const r=t.recipient,m=tsKey(t.date||t.createdAt||0);if(!months.includes(m))return;if(!drec[r]){drec[r]={byM:{},tot:0};months.forEach(mo=>{drec[r].byM[mo]=0;});}drec[r].byM[m]=(drec[r].byM[m]||0)+(Number(t.amount)||0);drec[r].tot+=(Number(t.amount)||0);}); return(<Fragment key={sub}>{subRow(sub,s,g.cat)}{Object.entries(drec).map(([r,ser])=>(<tr key={"dr-"+r}><td style={{paddingLeft:56,color:"#94a3b8",fontSize:11}}>↳ {r}</td>{months.map(m=><td key={m} style={{textAlign:"right",color:"#94a3b8",fontSize:11}}>{ser.byM[m]>0?fmt(ser.byM[m]):"—"}</td>)}<td className="colTot" style={{textAlign:"right",color:"#94a3b8",fontSize:11}}>{fmt(ser.tot)}</td></tr>))}</Fragment>);} return subRow(sub,s,g.cat);})}</Fragment>))}
-                          <tr style={{background:act.bg}}><td style={{fontWeight:800,color:act.color,background:act.bg}}>= Поток · {act.label.toLowerCase()}</td>{months.map(m=><td key={m} style={{textAlign:"right",fontWeight:800,color:(net.byM[m]||0)>=0?act.color:"#dc2626"}}>{(net.byM[m]||0)>=0?"+":""}{fmt(net.byM[m])}</td>)}<td className="colTot" style={{textAlign:"right",fontWeight:900,color:net.tot>=0?act.color:"#dc2626"}}>{net.tot>=0?"+":""}{fmt(net.tot)}</td></tr>
+                          <tr className="rep-metric"><td>Чистый поток · {act.label.toLowerCase()}</td>{months.map(m=><td key={m} style={{color:(net.byM[m]||0)<0?"#dc2626":undefined}}>{(net.byM[m]||0)>=0?"+":""}{fmt(net.byM[m])}</td>)}<td className="colTot" style={{color:net.tot<0?"#dc2626":undefined}}>{net.tot>=0?"+":""}{fmt(net.tot)}</td></tr>
                         </Fragment>);
                       })}
-                      <tr style={{borderTop:"2px solid #cbd5e1",background:"#eff6ff"}}><td style={{fontWeight:900,color:"#2563eb",background:"#eff6ff"}}>ЧИСТЫЙ ДЕНЕЖНЫЙ ПОТОК</td>{months.map(m=>{const v=(incTotal.byM[m]||0)-(expTotal.byM[m]||0);return <td key={m} style={{textAlign:"right",fontWeight:800,color:v>=0?"#2563eb":"#dc2626"}}>{v>=0?"+":""}{fmt(v)}</td>;})}<td className="colTot" style={{textAlign:"right",fontWeight:900,color:(incTotal.tot-expTotal.tot)>=0?"#2563eb":"#dc2626"}}>{fmt(incTotal.tot-expTotal.tot)}</td></tr>
-                      <tr style={{background:"#f1f5f9"}}><td style={{fontWeight:900,color:"#0f172a",background:"#f1f5f9"}}>Сальдо на конец</td>{months.map(m=><td key={m} style={{...sumStyle(saldoEnd[m]),fontWeight:900}}>{fM(saldoEnd[m])}</td>)}<td className="colTot" style={{...sumStyle(run),fontWeight:900}}>{fM(run)}</td></tr>
+                      <tr className="rep-metric" style={{borderTop:"2px solid #cbd5e1"}}><td style={{fontWeight:900}}>ЧИСТЫЙ ДЕНЕЖНЫЙ ПОТОК</td>{months.map(m=>{const v=(incTotal.byM[m]||0)-(expTotal.byM[m]||0);return <td key={m} style={{color:v<0?"#dc2626":undefined}}>{v>=0?"+":""}{fmt(v)}</td>;})}<td className="colTot" style={{color:(incTotal.tot-expTotal.tot)<0?"#dc2626":undefined}}>{(incTotal.tot-expTotal.tot)>=0?"+":""}{fmt(incTotal.tot-expTotal.tot)}</td></tr>
+                      <tr className="rep-metric"><td style={{fontWeight:900}}>Сальдо на конец</td>{months.map(m=><td key={m} style={{...sumStyle(saldoEnd[m])}}>{fM(saldoEnd[m])}</td>)}<td className="colTot" style={{...sumStyle(run)}}>{fM(run)}</td></tr>
                     </tbody>
                   </table>
                   </div>)}
@@ -8190,16 +8192,15 @@ function MainApp({ currentUser, setCurrentUser }) {
               const HCell={padding:"7px 9px",textAlign:"right",color:"#64748b",fontWeight:700,whiteSpace:"nowrap",fontSize:11.5};
               // строка-метрика (subtotal) и строка-процент
               // строка итога секции (крупная, цветной фон)
-              const MetricRow=({label,ser,color,bg})=>(<tr style={{borderTop:"3px solid "+color+"44",background:bg||color+"11"}}>
-                <td style={{padding:"11px 14px",fontWeight:900,fontSize:14,color,background:bg||color+"11",letterSpacing:"-.2px"}}>{label}</td>
-                {months.map(m=>{const v=ser.byM[m]||0;return <td key={m} style={{padding:"11px 14px",textAlign:"right",fontWeight:800,fontSize:13.5,color:v>=0?color:"#dc2626"}}>{v?fM(v):"—"}</td>;})}
-                <td className="colTot" style={{padding:"11px 14px",textAlign:"right",fontWeight:900,fontSize:14,color:ser.tot>=0?color:"#dc2626"}}>{ser.tot?fM(ser.tot):"—"}</td>
+              const MetricRow=({label,ser})=>(<tr className="rep-metric">
+                <td>{label}</td>
+                {months.map(m=>{const v=ser.byM[m]||0;return <td key={m} style={{color:v<0?"#dc2626":undefined}}>{v?fM(v):"—"}</td>;})}
+                <td className="colTot" style={{color:ser.tot<0?"#dc2626":undefined}}>{ser.tot?fM(ser.tot):"—"}</td>
               </tr>);
-              // строка процента (курсив под MetricRow)
-              const PctRow=({label,ser,color})=>(<tr style={{background:color+"08"}}>
-                <td style={{padding:"2px 14px 8px 22px",color,fontSize:11.5,fontStyle:"italic"}}>{label}</td>
-                {months.map(m=><td key={m} style={{padding:"2px 14px 8px",textAlign:"right",color,fontSize:11.5,fontStyle:"italic"}}>{fpct(ser.byM[m])}</td>)}
-                <td className="colTot" style={{padding:"2px 14px 8px",textAlign:"right",color,fontSize:11.5,fontStyle:"italic",fontWeight:700}}>{fpct(ser.tot)}</td>
+              const PctRow=({label,ser})=>(<tr className="rep-pct">
+                <td>{label}</td>
+                {months.map(m=><td key={m}>{fpct(ser.byM[m])}</td>)}
+                <td className="colTot">{fpct(ser.tot)}</td>
               </tr>);
               const goOps=(cat,sub)=>{ navigate(undefined,"ops",{finFilterCat:cat||"",finFilterCategory:sub||"",finFilterContract:""}); };
               // группа расходов: категория + подкатегории
@@ -8235,46 +8236,46 @@ function MainApp({ currentUser, setCurrentUser }) {
                       <th className="colTot" style={{textAlign:"right"}}>Итого</th>
                     </tr></thead>
                     <tbody>
-                      {/* ── секционный заголовок ── */}
-                      <tr><td colSpan={months.length+2} style={{padding:"10px 14px 5px",fontWeight:800,fontSize:11,letterSpacing:".8px",textTransform:"uppercase",color:"#fff",background:"#059669",borderTop:"2px solid #047857"}}>▼ Доходы</td></tr>
+                      {/* ── Доходы ── */}
+                      <tr className="rep-section"><td colSpan={months.length+2}>Доходы</td></tr>
                       {incGroups.filter(g=>g.tot!==0).map(g=>(<Fragment key={g.cat}>
-                        <tr onClick={()=>goOps(g.cat,"")} style={{cursor:"pointer",borderTop:"1px solid #e2e8f0"}} onMouseEnter={e=>e.currentTarget.style.background="#f0fdf4"} onMouseLeave={e=>e.currentTarget.style.background=""}>
-                          <td style={{padding:"8px 14px",fontWeight:700,color:"#1e293b",fontSize:13}}>{g.cat} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>
-                          {months.map(m=><td key={m} style={{padding:"8px 14px",textAlign:"right",color:"#059669",fontWeight:600}}>{g.byM[m]?fM(g.byM[m]):"—"}</td>)}
-                          <td className="colTot" style={{padding:"8px 14px",textAlign:"right",fontWeight:800,color:"#059669"}}>{g.tot?fM(g.tot):"—"}</td>
+                        <tr onClick={()=>goOps(g.cat,"")} style={{cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+                          <td style={{fontWeight:700,color:"#1e293b"}}>{g.cat} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>
+                          {months.map(m=><td key={m} style={{fontWeight:600}}>{g.byM[m]?fM(g.byM[m]):"—"}</td>)}
+                          <td className="colTot" style={{fontWeight:800}}>{g.tot?fM(g.tot):"—"}</td>
                         </tr>
                         {g.subs.map(sub=>{ const s=agg(t=>t.type==="income"&&t.category===g.cat&&t.subcategory===sub); if(s.tot===0)return null; return (
-                          <tr key={sub} onClick={()=>goOps(g.cat,sub)} style={{cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f0fdf4"} onMouseLeave={e=>e.currentTarget.style.background=""}>
-                            <td style={{padding:"5px 14px 5px 28px",color:"#64748b",fontSize:12}}>· {sub} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>
-                            {months.map(m=><td key={m} style={{padding:"5px 14px",textAlign:"right",color:"#94a3b8",fontSize:12}}>{s.byM[m]?fM(s.byM[m]):"—"}</td>)}
-                            <td className="colTot" style={{padding:"5px 14px",textAlign:"right",color:"#64748b",fontSize:12}}>{s.tot?fM(s.tot):"—"}</td>
+                          <tr key={sub} onClick={()=>goOps(g.cat,sub)} style={{cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+                            <td style={{paddingLeft:28,color:"#64748b",fontSize:12}}>· {sub} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>
+                            {months.map(m=><td key={m} style={{color:"#94a3b8",fontSize:12}}>{s.byM[m]?fM(s.byM[m]):"—"}</td>)}
+                            <td className="colTot" style={{color:"#64748b",fontSize:12}}>{s.tot?fM(s.tot):"—"}</td>
                           </tr>
                         );})}
                       </Fragment>))}
-                      <tr style={{borderTop:"2px solid #059669"}}><td style={{padding:"9px 14px",fontWeight:800,fontSize:13.5,color:"#059669",background:"#f0fdf4"}}>Выручка (Revenue)</td>{months.map(m=><td key={m} style={{padding:"9px 14px",textAlign:"right",fontWeight:800,fontSize:13.5,color:"#059669",background:"#f0fdf4"}}>{income.byM[m]?fM(income.byM[m]):"—"}</td>)}<td className="colTot" style={{padding:"9px 14px",textAlign:"right",fontWeight:900,fontSize:14,color:"#059669",background:"#dcfce7"}}>{income.tot?fM(income.tot):"—"}</td></tr>
-                      {adv.tot!==0 && (<tr style={{background:"#fffbeb"}}><td style={{padding:"4px 14px 4px 28px",color:"#b45309",fontSize:11.5,fontStyle:"italic",background:"#fffbeb"}} title="Авансы — обязательство, не входят в выручку и прибыль">· Справочно: авансы полученные (обязательство)</td>{months.map(m=><td key={m} style={{padding:"4px 14px",textAlign:"right",color:"#d97706",fontSize:11.5,fontStyle:"italic"}}>{adv.byM[m]?fM(adv.byM[m]):"—"}</td>)}<td className="colTot" style={{padding:"4px 14px",textAlign:"right",color:"#b45309",fontSize:11.5,fontStyle:"italic",fontWeight:700}}>{adv.tot?fM(adv.tot):"—"}</td></tr>)}
+                      <MetricRow label="Выручка (Revenue)" ser={income}/>
+                      {adv.tot!==0 && (<tr className="rep-pct"><td style={{paddingLeft:28}} title="Авансы — обязательство, не входят в выручку и прибыль">· Справочно: авансы полученные (обязательство)</td>{months.map(m=><td key={m}>{adv.byM[m]?fM(adv.byM[m]):"—"}</td>)}<td className="colTot">{adv.tot?fM(adv.tot):"—"}</td></tr>)}
                       {/* ── Себестоимость ── */}
-                      <tr><td colSpan={months.length+2} style={{padding:"10px 14px 5px",fontWeight:800,fontSize:11,letterSpacing:".8px",textTransform:"uppercase",color:"#fff",background:"#dc2626",borderTop:"2px solid #b91c1c"}}>▼ Себестоимость (COGS)</td></tr>
+                      <tr className="rep-section"><td colSpan={months.length+2}>Себестоимость (COGS)</td></tr>
                       <ExpGroupRows cat={C_COGS}/>
-                      <MetricRow label="ВАЛОВАЯ ПРИБЫЛЬ" ser={gross} color="#0891b2"/>
-                      <PctRow label="Валовая маржинальность" ser={grossM} color="#0891b2"/>
+                      <MetricRow label="ВАЛОВАЯ ПРИБЫЛЬ" ser={gross}/>
+                      <PctRow label="Валовая маржинальность" ser={grossM}/>
                       {/* ── OPEX ── */}
-                      <tr><td colSpan={months.length+2} style={{padding:"10px 14px 5px",fontWeight:800,fontSize:11,letterSpacing:".8px",textTransform:"uppercase",color:"#fff",background:"#b45309",borderTop:"2px solid #92400e"}}>▼ Операционные расходы (OPEX)</td></tr>
+                      <tr className="rep-section"><td colSpan={months.length+2}>Операционные расходы (OPEX)</td></tr>
                       <ExpGroupRows cat={C_OPEX}/>
-                      <MetricRow label="EBITDA / Операционная прибыль" ser={ebitda} color="#7c3aed"/>
-                      <PctRow label="Операционная рентабельность" ser={ebitdaM} color="#7c3aed"/>
+                      <MetricRow label="EBITDA / Операционная прибыль" ser={ebitda}/>
+                      <PctRow label="Операционная рентабельность" ser={ebitdaM}/>
                       {/* ── Финансовые расходы ── */}
-                      <tr><td colSpan={months.length+2} style={{padding:"10px 14px 5px",fontWeight:800,fontSize:11,letterSpacing:".8px",textTransform:"uppercase",color:"#fff",background:"#7c3aed",borderTop:"2px solid #5b21b6"}}>▼ Финансовые расходы (налоги, комиссии)</td></tr>
+                      <tr className="rep-section"><td colSpan={months.length+2}>Финансовые расходы (налоги, комиссии)</td></tr>
                       <ExpGroupRows cat={C_FIN} exclude={[S_DIV]}/>
-                      <MetricRow label="ЧИСТАЯ ПРИБЫЛЬ" ser={net} color="#2563eb"/>
-                      <PctRow label="Рентабельность по чистой прибыли" ser={netM} color="#2563eb"/>
+                      <MetricRow label="ЧИСТАЯ ПРИБЫЛЬ" ser={net}/>
+                      <PctRow label="Рентабельность по чистой прибыли" ser={netM}/>
                       {div.tot!==0 && (<>
-                        <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#94a3b8"}}>▼ РАСПРЕДЕЛЕНИЕ ПРИБЫЛИ</td></tr>
-                        <tr><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>− Дивиденды учредителям</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(div.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(div.tot)}</td></tr>
+                        <tr className="rep-section"><td colSpan={months.length+2}>Распределение прибыли</td></tr>
+                        <tr onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}><td style={{paddingLeft:28,color:"#64748b",fontSize:12}}>− Дивиденды учредителям</td>{months.map(m=><td key={m} style={{color:"#94a3b8",fontSize:12}}>{fmt(div.byM[m])}</td>)}<td className="colTot" style={{color:"#64748b",fontSize:12}}>{fmt(div.tot)}</td></tr>
                         {Object.entries(divByRecOpu).map(([r,ser])=>(
-                          <tr key={r}><td style={{padding:"3px 9px 3px 36px",color:"#94a3b8",fontSize:11}}>↳ {r}</td>{months.map(m=><td key={m} style={{padding:"3px 9px",textAlign:"right",color:"#94a3b8",fontSize:11,whiteSpace:"nowrap"}}>{ser.byM[m]>0?fmt(ser.byM[m]):"—"}</td>)}<td style={{padding:"3px 9px",textAlign:"right",color:"#94a3b8",fontSize:11,whiteSpace:"nowrap"}}>{fmt(ser.tot)}</td></tr>
+                          <tr key={r} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}><td style={{paddingLeft:40,color:"#94a3b8",fontSize:11}}>↳ {r}</td>{months.map(m=><td key={m} style={{color:"#94a3b8",fontSize:11}}>{ser.byM[m]>0?fmt(ser.byM[m]):"—"}</td>)}<td className="colTot" style={{color:"#94a3b8",fontSize:11}}>{fmt(ser.tot)}</td></tr>
                         ))}
-                        <MetricRow label="НЕРАСПРЕДЕЛЁННАЯ ПРИБЫЛЬ" ser={retained} color="#0f172a" bg="#f1f5f9"/>
+                        <MetricRow label="НЕРАСПРЕДЕЛЁННАЯ ПРИБЫЛЬ" ser={retained}/>
                       </>)}
                     </tbody>
                   </table>
