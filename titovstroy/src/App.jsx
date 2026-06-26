@@ -8093,7 +8093,7 @@ function MainApp({ currentUser, setCurrentUser }) {
                           {incG.length>0 && <tr><td colSpan={nCols} style={{paddingLeft:18,paddingTop:3,paddingBottom:2,fontWeight:700,color:"#059669",fontSize:11}}>↓ Поступления</td></tr>}
                           {incG.map(g=>(<Fragment key={g.cat}>{groupRow(g.cat,g,"#059669",g.cat)}{g.subs.map(sub=>{const s=agg(t=>t.type==="income"&&t.category===g.cat&&t.subcategory===sub&&actOf(t)===act.key); return s.tot===0?null:subRow(sub,s,g.cat);})}</Fragment>))}
                           {expG.length>0 && <tr><td colSpan={nCols} style={{paddingLeft:18,paddingTop:3,paddingBottom:2,fontWeight:700,color:"#dc2626",fontSize:11}}>↑ Платежи</td></tr>}
-                          {expG.map(g=>(<Fragment key={g.cat}>{groupRow(g.cat,g,"#dc2626",g.cat)}{g.subs.map(sub=>{const s=agg(t=>t.type==="expense"&&t.category===g.cat&&t.subcategory===sub&&actOf(t)===act.key); if(s.tot===0)return null; if(sub===S_DIV){const drec={}; financeTx.filter(t=>t.included!==false&&t.type==="expense"&&t.subcategory===S_DIV&&t.recipient&&actOf(t)===act.key).forEach(t=>{const r=t.recipient,m=tsKey(t.date||t.createdAt||0);if(!months.includes(m))return;if(!drec[r]){drec[r]={byM:{},tot:0};months.forEach(mo=>{drec[r].byM[mo]=0;});}drec[r].byM[m]=(drec[r].byM[m]||0)+(Number(t.amount)||0);drec[r].tot+=(Number(t.amount)||0);}); return(<Fragment key={sub}>{subRow(sub,s,g.cat)}{Object.entries(drec).map(([r,ser])=>(<tr key={"dr-"+r}><td style={{paddingLeft:56,color:"#94a3b8",fontSize:11}}>↳ {r}</td>{months.map(m=><td key={m} style={{textAlign:"right",color:"#94a3b8",fontSize:11}}>{ser.byM[m]>0?fmt(ser.byM[m]):"—"}</td>)}<td className="colTot" style={{textAlign:"right",color:"#94a3b8",fontSize:11}}>{fmt(ser.tot)}</td></tr>))}</Fragment>);} return subRow(sub,s,g.cat);})}</Fragment>))}
+                          {expG.map(g=>(<Fragment key={g.cat}>{groupRow(g.cat,g,"#dc2626",g.cat)}{g.subs.map(sub=>{const s=agg(t=>t.type==="expense"&&t.category===g.cat&&t.subcategory===sub&&actOf(t)===act.key); if(s.tot===0)return null; if(sub===S_DIV){const drec={}; financeTx.filter(t=>!t.deletedAt&&t.included!==false&&t.type==="expense"&&t.subcategory===S_DIV&&t.recipient&&actOf(t)===act.key).forEach(t=>{const r=t.recipient,m=tsKey(t.date||t.createdAt||0);if(!months.includes(m))return;if(!drec[r]){drec[r]={byM:{},tot:0};months.forEach(mo=>{drec[r].byM[mo]=0;});}drec[r].byM[m]=(drec[r].byM[m]||0)+(Number(t.amount)||0);drec[r].tot+=(Number(t.amount)||0);}); return(<Fragment key={sub}>{subRow(sub,s,g.cat)}{Object.entries(drec).map(([r,ser])=>(<tr key={"dr-"+r}><td style={{paddingLeft:56,color:"#94a3b8",fontSize:11}}>↳ {r}</td>{months.map(m=><td key={m} style={{textAlign:"right",color:"#94a3b8",fontSize:11}}>{ser.byM[m]>0?fmt(ser.byM[m]):"—"}</td>)}<td className="colTot" style={{textAlign:"right",color:"#94a3b8",fontSize:11}}>{fmt(ser.tot)}</td></tr>))}</Fragment>);} return subRow(sub,s,g.cat);})}</Fragment>))}
                           <tr style={{background:act.bg}}><td style={{fontWeight:800,color:act.color,background:act.bg}}>= Поток · {act.label.toLowerCase()}</td>{months.map(m=><td key={m} style={{textAlign:"right",fontWeight:800,color:(net.byM[m]||0)>=0?act.color:"#dc2626"}}>{(net.byM[m]||0)>=0?"+":""}{fmt(net.byM[m])}</td>)}<td className="colTot" style={{textAlign:"right",fontWeight:900,color:net.tot>=0?act.color:"#dc2626"}}>{net.tot>=0?"+":""}{fmt(net.tot)}</td></tr>
                         </Fragment>);
                       })}
@@ -8120,9 +8120,9 @@ function MainApp({ currentUser, setCurrentUser }) {
               const isFinInc = t => t.category===C_FINANCING_INC || t.category===C_ASSET_INC;
               const isNonPL = t => t.category===C_FINACT || t.category===C_ASSET_OUT;
               const opuRows=[
-                ...financeTx.filter(t=>t.included!==false&&t.type==="income"&&!t.isAdvance&&!isFinInc(t)).map(t=>({type:"income",category:t.category,subcategory:t.subcategory,amount:Number(t.amount)||0,month:opMonth(t)})),
-                ...financeTx.filter(t=>t.included!==false&&t.type==="income"&&(t.isAdvance||isFinInc(t))).map(t=>({type:"advance",category:t.category,subcategory:t.subcategory,amount:Number(t.amount)||0,month:opMonth(t)})),
-                ...financeTx.filter(t=>t.included!==false&&t.type==="expense"&&!isNonPL(t)).map(t=>({type:"expense",category:t.category,subcategory:t.subcategory,amount:Number(t.amount)||0,month:opMonth(t)})),
+                ...financeTx.filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&!t.isAdvance&&!isFinInc(t)).map(t=>({type:"income",category:t.category,subcategory:t.subcategory,amount:Number(t.amount)||0,month:opMonth(t)})),
+                ...financeTx.filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&(t.isAdvance||isFinInc(t))).map(t=>({type:"advance",category:t.category,subcategory:t.subcategory,amount:Number(t.amount)||0,month:opMonth(t)})),
+                ...financeTx.filter(t=>!t.deletedAt&&t.included!==false&&t.type==="expense"&&!isNonPL(t)).map(t=>({type:"expense",category:t.category,subcategory:t.subcategory,amount:Number(t.amount)||0,month:opMonth(t)})),
               ];
               const monthsSet={};
               opuRows.forEach(r=>{ if(inPM(r.month)) monthsSet[r.month]=true; });
@@ -8147,7 +8147,7 @@ function MainApp({ currentUser, setCurrentUser }) {
               const div=agg(t=>t.type==="expense"&&t.category===C_FIN&&t.subcategory===S_DIV);  // дивиденды
               // разбивка дивидендов по получателям для ОПиУ
               const divByRecOpu = {};
-              financeTx.filter(t=>t.included!==false&&t.type==="expense"&&t.subcategory===S_DIV&&t.recipient).forEach(t=>{
+              financeTx.filter(t=>!t.deletedAt&&t.included!==false&&t.type==="expense"&&t.subcategory===S_DIV&&t.recipient).forEach(t=>{
                 const r=t.recipient; const m=opMonth(t); if(!inPM(m)) return;
                 if(!divByRecOpu[r]){divByRecOpu[r]={byM:{},tot:0}; months.forEach(mo=>{divByRecOpu[r].byM[mo]=0;});}
                 divByRecOpu[r].byM[m]=(divByRecOpu[r].byM[m]||0)+(Number(t.amount)||0);
@@ -8249,10 +8249,10 @@ function MainApp({ currentUser, setCurrentUser }) {
               // Дебиторка (денежная — клиенты должны оплатить деньгами по проектам)
               const receivablesMoney = finProjects.filter(p=>(p.rawStatus||p.status)!=="отменен").reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projInc[p.contractNo]||0)),0);
               // Авансы клиентов (обязательство)
-              const advances = financeTx.filter(t=>t.included!==false&&t.type==="income"&&t.isAdvance).reduce((s,t)=>s+(Number(t.amount)||0),0);
+              const advances = financeTx.filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&t.isAdvance).reduce((s,t)=>s+(Number(t.amount)||0),0);
 
               // ── Авто-расчёт из операций (все статьи баланса — только из транзакций) ──
-              const sumTx = pred => financeTx.filter(t=>t.included!==false&&pred(t)).reduce((s,t)=>s+(Number(t.amount)||0),0);
+              const sumTx = pred => financeTx.filter(t=>!t.deletedAt&&t.included!==false&&pred(t)).reduce((s,t)=>s+(Number(t.amount)||0),0);
               const subEq = (t,name) => t.subcategory===name;
               // полученные займы (до года) = получено − возвращено
               const autoLoanShort = sumTx(t=>t.type==="income"&&subEq(t,"Полученный заём (до 1 года)")) - sumTx(t=>t.type==="expense"&&subEq(t,"Возврат займа (до 1 года)"));
@@ -8264,8 +8264,8 @@ function MainApp({ currentUser, setCurrentUser }) {
               Object.entries(FA_SUB_MAP).forEach(([sub,key])=>{ autoFA[key]=sumTx(t=>t.type==="expense"&&subEq(t,sub)); });
               // прочие активы из C_ASSET_OUT минус возвраты из C_ASSET_INC
               const autoAsset = {};
-              financeTx.filter(t=>t.included!==false&&t.type==="expense"&&t.category===C_ASSET_OUT).forEach(t=>{ const k=ASSET_OUT_KEYS[t.subcategory]; if(k) autoAsset[k]=(autoAsset[k]||0)+(Number(t.amount)||0); });
-              financeTx.filter(t=>t.included!==false&&t.type==="income"&&t.category===C_ASSET_INC).forEach(t=>{ const k=ASSET_INC_KEYS[t.subcategory]; if(k) autoAsset[k]=(autoAsset[k]||0)-(Number(t.amount)||0); });
+              financeTx.filter(t=>!t.deletedAt&&t.included!==false&&t.type==="expense"&&t.category===C_ASSET_OUT).forEach(t=>{ const k=ASSET_OUT_KEYS[t.subcategory]; if(k) autoAsset[k]=(autoAsset[k]||0)+(Number(t.amount)||0); });
+              financeTx.filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&t.category===C_ASSET_INC).forEach(t=>{ const k=ASSET_INC_KEYS[t.subcategory]; if(k) autoAsset[k]=(autoAsset[k]||0)-(Number(t.amount)||0); });
               const ag = k => Math.max(0, autoAsset[k]||0);
 
               // ── АКТИВЫ ──
