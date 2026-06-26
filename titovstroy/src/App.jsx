@@ -5865,10 +5865,9 @@ function MainApp({ currentUser, setCurrentUser }) {
             max-height:62vh!important;
             border-radius:10px!important;
           }
-          .rep-table{font-size:11px!important;min-width:480px!important}
-          .rep-table th,.rep-table td{padding:6px 7px!important;white-space:nowrap!important}
-          /* sticky первая колонка на мобиле — важно */
-          .rep-table tbody td:first-child,.rep-table tbody th:first-child{position:sticky!important;left:0!important;z-index:2!important;background:#fff!important;min-width:130px!important;max-width:160px!important;white-space:normal!important;word-break:break-word!important}
+          .rep-table{font-size:11.5px!important;min-width:480px!important}
+          .rep-table th,.rep-table td{padding:7px 8px!important;white-space:nowrap!important}
+          .rep-table tbody td:first-child,.rep-table tbody th:first-child{position:sticky!important;left:0!important;z-index:2!important;background:#fff!important;min-width:130px!important;max-width:170px!important;white-space:normal!important;word-break:break-word!important}
           .rep-table thead th:first-child{position:sticky!important;left:0!important;z-index:6!important;min-width:130px!important}
         }
         @media(max-width:380px){
@@ -5879,19 +5878,38 @@ function MainApp({ currentUser, setCurrentUser }) {
         .mob-nav-item.active{border-top-color:#2563eb;background:rgba(37,99,235,.06)}
         .fin-row:hover{background:#f8fafc}
         .fin-row:hover{box-shadow:0 8px 24px rgba(15,23,42,.10)!important;transform:translateY(-2px)}
-        .rep-wrap{width:100%;overflow:auto;max-height:calc(100vh - 230px);border:1px solid #eef2f7;border-radius:12px}
-        .rep-table{border-collapse:separate;border-spacing:0;font-size:12.5px;width:100%;min-width:680px}
-        .rep-table th,.rep-table td{padding:9px 13px;white-space:nowrap}
-        .rep-table thead th{position:sticky;top:0;z-index:5;background:#f1f5f9;color:#475569;font-size:11.5px;font-weight:700;border-bottom:2px solid #e2e8f0}
-        .rep-table thead th:first-child{left:0;z-index:6;text-align:left}
+        /* ── rep-table: ДДС и ОПУ ─────────────────────────────── */
+        .rep-wrap{width:100%;overflow:auto;max-height:calc(100vh - 200px);border:1px solid #dde3ed;border-radius:14px;box-shadow:0 2px 12px rgba(15,23,42,.07)}
+        .rep-table{border-collapse:collapse;font-size:13px;width:100%;min-width:700px}
+        /* Заголовок */
+        .rep-table thead th{
+          position:sticky;top:0;z-index:5;
+          background:#1e293b;color:#e2e8f0;
+          font-size:12px;font-weight:700;letter-spacing:.3px;
+          padding:11px 14px;white-space:nowrap;
+          border-bottom:2px solid #334155;
+          text-align:right
+        }
+        .rep-table thead th:first-child{left:0;z-index:6;text-align:left;min-width:200px;max-width:260px}
+        .rep-table thead th.colTot{background:#0f172a;color:#f8fafc;border-left:2px solid #334155}
+        /* Тело */
+        .rep-table td{padding:8px 14px;white-space:nowrap;font-size:13px;border-bottom:1px solid #f1f5f9;text-align:right}
+        .rep-table td:first-child{text-align:left;white-space:normal;word-break:break-word;min-width:200px;max-width:260px}
+        /* sticky первая колонка */
         .rep-table tbody td:first-child,.rep-table tbody th:first-child{position:sticky;left:0;z-index:2;background:#fff}
-        .rep-table tbody tr:hover td{background:#f8fafc}
-        .rep-table tbody tr:hover td:first-child{background:#f1f5f9}
-        .rep-table .colTot{background:#fafbfc;border-left:1px solid #eef2f7}
-        .rep-table thead th.colTot{background:#e8eef6;color:#0f172a}
+        /* zebra */
+        .rep-table tbody tr:nth-child(even) td{background:#f8fafc}
+        .rep-table tbody tr:nth-child(even) td:first-child{background:#f8fafc}
+        .rep-table tbody tr:hover td{background:#eff6ff!important}
+        .rep-table tbody tr:hover td:first-child{background:#eff6ff!important}
+        /* итоговая колонка */
+        .rep-table .colTot{background:#f1f5f9;border-left:2px solid #dde3ed;font-weight:700}
+        .rep-table tbody tr:nth-child(even) .colTot{background:#e9eef6}
+        .rep-table tbody tr:hover .colTot{background:#dbeafe!important}
+        /* nostick */
         .rep-table.nostick tbody td:first-child{position:static;background:transparent}
         .rep-table.nostick thead th:first-child{left:auto}
-        .rep-table.nostick tbody tr:hover td:first-child{background:transparent}
+        .rep-table.nostick tbody tr:hover td:first-child{background:#eff6ff!important}
       `}</style>
 
       {/* ── SIDEBAR (десктоп) ── */}
@@ -8164,10 +8182,39 @@ function MainApp({ currentUser, setCurrentUser }) {
               const fpct=v=>v===null?"—":v+"%";
               const HCell={padding:"7px 9px",textAlign:"right",color:"#64748b",fontWeight:700,whiteSpace:"nowrap",fontSize:11.5};
               // строка-метрика (subtotal) и строка-процент
-              const MetricRow=({label,ser,color,bg})=>(<tr style={{borderTop:"2px solid #e2e8f0",background:bg}}><td style={{padding:"9px 9px",fontWeight:900,color,background:bg}}>{label}</td>{months.map(m=><td key={m} style={{padding:"9px 9px",textAlign:"right",fontWeight:800,color:(ser.byM[m]||0)>=0?color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(ser.byM[m])}</td>)}<td style={{padding:"9px 9px",textAlign:"right",fontWeight:900,color:ser.tot>=0?color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(ser.tot)}</td></tr>);
-              const PctRow=({label,ser,color})=>(<tr><td style={{padding:"3px 9px 6px 22px",color,fontSize:11,fontStyle:"italic"}}>{label}</td>{months.map(m=><td key={m} style={{padding:"3px 9px 6px",textAlign:"right",color,fontSize:11,fontStyle:"italic",whiteSpace:"nowrap"}}>{fpct(ser.byM[m])}</td>)}<td style={{padding:"3px 9px 6px",textAlign:"right",color,fontSize:11,fontStyle:"italic",fontWeight:700,whiteSpace:"nowrap"}}>{fpct(ser.tot)}</td></tr>);
+              // строка итога секции (крупная, цветной фон)
+              const MetricRow=({label,ser,color,bg})=>(<tr style={{borderTop:"3px solid "+color+"44",background:bg||color+"11"}}>
+                <td style={{padding:"11px 14px",fontWeight:900,fontSize:14,color,background:bg||color+"11",letterSpacing:"-.2px"}}>{label}</td>
+                {months.map(m=>{const v=ser.byM[m]||0;return <td key={m} style={{padding:"11px 14px",textAlign:"right",fontWeight:800,fontSize:13.5,color:v>=0?color:"#dc2626"}}>{v?fM(v):"—"}</td>;})}
+                <td className="colTot" style={{padding:"11px 14px",textAlign:"right",fontWeight:900,fontSize:14,color:ser.tot>=0?color:"#dc2626"}}>{ser.tot?fM(ser.tot):"—"}</td>
+              </tr>);
+              // строка процента (курсив под MetricRow)
+              const PctRow=({label,ser,color})=>(<tr style={{background:color+"08"}}>
+                <td style={{padding:"2px 14px 8px 22px",color,fontSize:11.5,fontStyle:"italic"}}>{label}</td>
+                {months.map(m=><td key={m} style={{padding:"2px 14px 8px",textAlign:"right",color,fontSize:11.5,fontStyle:"italic"}}>{fpct(ser.byM[m])}</td>)}
+                <td className="colTot" style={{padding:"2px 14px 8px",textAlign:"right",color,fontSize:11.5,fontStyle:"italic",fontWeight:700}}>{fpct(ser.tot)}</td>
+              </tr>);
               const goOps=(cat,sub)=>{ navigate(undefined,"ops",{finFilterCat:cat||"",finFilterCategory:sub||"",finFilterContract:""}); };
-              const ExpGroupRows=({cat,exclude=[]})=>{ const meta=(financeMeta.expense||[]).find(c=>c.cat===cat); if(!meta)return null; const gt=agg(t=>t.type==="expense"&&t.category===cat&&!exclude.includes(t.subcategory)); if(gt.tot===0)return null; return (<Fragment><tr onClick={()=>goOps(cat,"")} style={{borderBottom:"1px solid #f8fafc",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}><td style={{padding:"6px 9px",fontWeight:700,color:"#334155"}}>{cat} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>{months.map(m=><td key={m} style={{padding:"6px 9px",textAlign:"right",color:"#dc2626",fontWeight:600,whiteSpace:"nowrap"}}>{fmt(gt.byM[m])}</td>)}<td style={{padding:"6px 9px",textAlign:"right",fontWeight:800,color:"#dc2626",whiteSpace:"nowrap"}}>{fmt(gt.tot)}</td></tr>{(meta.subs||[]).filter(s2=>!exclude.includes(s2)).map(s2=>{ const s=agg(t=>t.type==="expense"&&t.category===cat&&t.subcategory===s2); if(s.tot===0)return null; return (<tr key={s2} onClick={()=>goOps(cat,s2)} style={{cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{s2} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>);})}</Fragment>); };
+              // группа расходов: категория + подкатегории
+              const ExpGroupRows=({cat,exclude=[]})=>{
+                const meta=(financeMeta.expense||[]).find(c=>c.cat===cat); if(!meta)return null;
+                const gt=agg(t=>t.type==="expense"&&t.category===cat&&!exclude.includes(t.subcategory)); if(gt.tot===0)return null;
+                return (<Fragment>
+                  <tr onClick={()=>goOps(cat,"")} style={{cursor:"pointer",borderTop:"1px solid #e2e8f0"}} onMouseEnter={e=>e.currentTarget.style.background="#fff7ed"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+                    <td style={{padding:"8px 14px",fontWeight:700,color:"#1e293b",fontSize:13}}>{cat} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>
+                    {months.map(m=><td key={m} style={{padding:"8px 14px",textAlign:"right",color:"#dc2626",fontWeight:600}}>{gt.byM[m]?fM(gt.byM[m]):"—"}</td>)}
+                    <td className="colTot" style={{padding:"8px 14px",textAlign:"right",fontWeight:800,color:"#dc2626"}}>{gt.tot?fM(gt.tot):"—"}</td>
+                  </tr>
+                  {(meta.subs||[]).filter(s2=>!exclude.includes(s2)).map(s2=>{
+                    const s=agg(t=>t.type==="expense"&&t.category===cat&&t.subcategory===s2); if(s.tot===0)return null;
+                    return (<tr key={s2} onClick={()=>goOps(cat,s2)} style={{cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#fef9f0"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+                      <td style={{padding:"5px 14px 5px 28px",color:"#64748b",fontSize:12}}>· {s2} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>
+                      {months.map(m=><td key={m} style={{padding:"5px 14px",textAlign:"right",color:"#94a3b8",fontSize:12}}>{s.byM[m]?fM(s.byM[m]):"—"}</td>)}
+                      <td className="colTot" style={{padding:"5px 14px",textAlign:"right",color:"#64748b",fontSize:12}}>{s.tot?fM(s.tot):"—"}</td>
+                    </tr>);
+                  })}
+                </Fragment>);
+              };
               return (
                 <div className="card" style={{padding:"18px 20px",width:"100%",boxSizing:"border-box"}}>
                   <div style={{fontSize:15,fontWeight:800,color:"#0f172a",marginBottom:4}}>📈 Отчёт о прибылях и убытках (ОПУ / P&L)</div>
@@ -8181,29 +8228,38 @@ function MainApp({ currentUser, setCurrentUser }) {
                       <th className="colTot" style={{textAlign:"right"}}>Итого</th>
                     </tr></thead>
                     <tbody>
-                      <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#059669"}}>▼ ДОХОДЫ</td></tr>
+                      {/* ── секционный заголовок ── */}
+                      <tr><td colSpan={months.length+2} style={{padding:"10px 14px 5px",fontWeight:800,fontSize:11,letterSpacing:".8px",textTransform:"uppercase",color:"#fff",background:"#059669",borderTop:"2px solid #047857"}}>▼ Доходы</td></tr>
                       {incGroups.filter(g=>g.tot!==0).map(g=>(<Fragment key={g.cat}>
-                        <tr onClick={()=>goOps(g.cat,"")} style={{borderBottom:"1px solid #f8fafc",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}><td style={{padding:"6px 9px",fontWeight:700,color:"#334155"}}>{g.cat} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>{months.map(m=><td key={m} style={{padding:"6px 9px",textAlign:"right",color:"#059669",fontWeight:600,whiteSpace:"nowrap"}}>{fmt(g.byM[m])}</td>)}<td style={{padding:"6px 9px",textAlign:"right",fontWeight:800,color:"#059669",whiteSpace:"nowrap"}}>{fmt(g.tot)}</td></tr>
+                        <tr onClick={()=>goOps(g.cat,"")} style={{cursor:"pointer",borderTop:"1px solid #e2e8f0"}} onMouseEnter={e=>e.currentTarget.style.background="#f0fdf4"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+                          <td style={{padding:"8px 14px",fontWeight:700,color:"#1e293b",fontSize:13}}>{g.cat} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>
+                          {months.map(m=><td key={m} style={{padding:"8px 14px",textAlign:"right",color:"#059669",fontWeight:600}}>{g.byM[m]?fM(g.byM[m]):"—"}</td>)}
+                          <td className="colTot" style={{padding:"8px 14px",textAlign:"right",fontWeight:800,color:"#059669"}}>{g.tot?fM(g.tot):"—"}</td>
+                        </tr>
                         {g.subs.map(sub=>{ const s=agg(t=>t.type==="income"&&t.category===g.cat&&t.subcategory===sub); if(s.tot===0)return null; return (
-                          <tr key={sub} onClick={()=>goOps(g.cat,sub)} style={{cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}><td style={{padding:"4px 9px 4px 22px",color:"#64748b",fontSize:11.5}}>{sub} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#94a3b8",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#64748b",fontSize:11.5,whiteSpace:"nowrap"}}>{fmt(s.tot)}</td></tr>
+                          <tr key={sub} onClick={()=>goOps(g.cat,sub)} style={{cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f0fdf4"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+                            <td style={{padding:"5px 14px 5px 28px",color:"#64748b",fontSize:12}}>· {sub} <span style={{fontSize:9,color:"#cbd5e1"}}>↗</span></td>
+                            {months.map(m=><td key={m} style={{padding:"5px 14px",textAlign:"right",color:"#94a3b8",fontSize:12}}>{s.byM[m]?fM(s.byM[m]):"—"}</td>)}
+                            <td className="colTot" style={{padding:"5px 14px",textAlign:"right",color:"#64748b",fontSize:12}}>{s.tot?fM(s.tot):"—"}</td>
+                          </tr>
                         );})}
                       </Fragment>))}
-                      <tr style={{borderTop:"1px solid #e2e8f0"}}><td style={{padding:"7px 9px",fontWeight:800,color:"#059669"}}>Выручка (Revenue)</td>{months.map(m=><td key={m} style={{padding:"7px 9px",textAlign:"right",fontWeight:800,color:"#059669",whiteSpace:"nowrap"}}>{fmt(income.byM[m])}</td>)}<td style={{padding:"7px 9px",textAlign:"right",fontWeight:900,color:"#059669",whiteSpace:"nowrap"}}>{fmt(income.tot)}</td></tr>
-                      {adv.tot!==0 && (<tr style={{background:"#fffbeb"}}><td style={{padding:"4px 9px 4px 22px",color:"#b45309",fontSize:11.5,fontStyle:"italic",background:"#fffbeb"}} title="Авансы — обязательство, не входят в выручку и прибыль">Справочно: авансы полученные (обязательство)</td>{months.map(m=><td key={m} style={{padding:"4px 9px",textAlign:"right",color:"#d97706",fontSize:11.5,fontStyle:"italic",whiteSpace:"nowrap"}}>{fmt(adv.byM[m])}</td>)}<td style={{padding:"4px 9px",textAlign:"right",color:"#b45309",fontSize:11.5,fontStyle:"italic",fontWeight:700,whiteSpace:"nowrap"}}>{fmt(adv.tot)}</td></tr>)}
-                      {/* Себестоимость → Валовая прибыль */}
-                      <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#dc2626"}}>▼ СЕБЕСТОИМОСТЬ (COGS / прямые расходы)</td></tr>
+                      <tr style={{borderTop:"2px solid #059669"}}><td style={{padding:"9px 14px",fontWeight:800,fontSize:13.5,color:"#059669",background:"#f0fdf4"}}>Выручка (Revenue)</td>{months.map(m=><td key={m} style={{padding:"9px 14px",textAlign:"right",fontWeight:800,fontSize:13.5,color:"#059669",background:"#f0fdf4"}}>{income.byM[m]?fM(income.byM[m]):"—"}</td>)}<td className="colTot" style={{padding:"9px 14px",textAlign:"right",fontWeight:900,fontSize:14,color:"#059669",background:"#dcfce7"}}>{income.tot?fM(income.tot):"—"}</td></tr>
+                      {adv.tot!==0 && (<tr style={{background:"#fffbeb"}}><td style={{padding:"4px 14px 4px 28px",color:"#b45309",fontSize:11.5,fontStyle:"italic",background:"#fffbeb"}} title="Авансы — обязательство, не входят в выручку и прибыль">· Справочно: авансы полученные (обязательство)</td>{months.map(m=><td key={m} style={{padding:"4px 14px",textAlign:"right",color:"#d97706",fontSize:11.5,fontStyle:"italic"}}>{adv.byM[m]?fM(adv.byM[m]):"—"}</td>)}<td className="colTot" style={{padding:"4px 14px",textAlign:"right",color:"#b45309",fontSize:11.5,fontStyle:"italic",fontWeight:700}}>{adv.tot?fM(adv.tot):"—"}</td></tr>)}
+                      {/* ── Себестоимость ── */}
+                      <tr><td colSpan={months.length+2} style={{padding:"10px 14px 5px",fontWeight:800,fontSize:11,letterSpacing:".8px",textTransform:"uppercase",color:"#fff",background:"#dc2626",borderTop:"2px solid #b91c1c"}}>▼ Себестоимость (COGS)</td></tr>
                       <ExpGroupRows cat={C_COGS}/>
-                      <MetricRow label="ВАЛОВАЯ ПРИБЫЛЬ" ser={gross} color="#0891b2" bg="#ecfeff"/>
+                      <MetricRow label="ВАЛОВАЯ ПРИБЫЛЬ" ser={gross} color="#0891b2"/>
                       <PctRow label="Валовая маржинальность" ser={grossM} color="#0891b2"/>
-                      {/* OPEX → EBITDA */}
-                      <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#dc2626"}}>▼ ОПЕРАЦИОННЫЕ РАСХОДЫ (OPEX)</td></tr>
+                      {/* ── OPEX ── */}
+                      <tr><td colSpan={months.length+2} style={{padding:"10px 14px 5px",fontWeight:800,fontSize:11,letterSpacing:".8px",textTransform:"uppercase",color:"#fff",background:"#b45309",borderTop:"2px solid #92400e"}}>▼ Операционные расходы (OPEX)</td></tr>
                       <ExpGroupRows cat={C_OPEX}/>
-                      <MetricRow label="EBITDA / Операционная прибыль" ser={ebitda} color="#7c3aed" bg="#f5f3ff"/>
+                      <MetricRow label="EBITDA / Операционная прибыль" ser={ebitda} color="#7c3aed"/>
                       <PctRow label="Операционная рентабельность" ser={ebitdaM} color="#7c3aed"/>
-                      {/* Финансовые → Чистая прибыль */}
-                      <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#dc2626"}}>▼ ФИНАНСОВЫЕ РАСХОДЫ (налоги, комиссии, %)</td></tr>
+                      {/* ── Финансовые расходы ── */}
+                      <tr><td colSpan={months.length+2} style={{padding:"10px 14px 5px",fontWeight:800,fontSize:11,letterSpacing:".8px",textTransform:"uppercase",color:"#fff",background:"#7c3aed",borderTop:"2px solid #5b21b6"}}>▼ Финансовые расходы (налоги, комиссии)</td></tr>
                       <ExpGroupRows cat={C_FIN} exclude={[S_DIV]}/>
-                      <MetricRow label="ЧИСТАЯ ПРИБЫЛЬ" ser={net} color="#2563eb" bg="#eff6ff"/>
+                      <MetricRow label="ЧИСТАЯ ПРИБЫЛЬ" ser={net} color="#2563eb"/>
                       <PctRow label="Рентабельность по чистой прибыли" ser={netM} color="#2563eb"/>
                       {div.tot!==0 && (<>
                         <tr><td colSpan={months.length+2} style={{padding:"8px 9px 4px",fontWeight:800,color:"#94a3b8"}}>▼ РАСПРЕДЕЛЕНИЕ ПРИБЫЛИ</td></tr>
