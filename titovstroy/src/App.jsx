@@ -8033,18 +8033,18 @@ function MainApp({ currentUser, setCurrentUser }) {
               const mLabel = k => { const [y,m]=k.split("-"); return MN[parseInt(m)-1]+" "+y.slice(2); };
               // месяцы внутри выбранного периода
               const monthsSet={};
-              financeTx.forEach(t=>{ if(t.included===false)return; const ts=t.date||t.createdAt||0; if(inPeriod(ts)) monthsSet[tsKey(ts)]=true; });
+              financeTx.forEach(t=>{ if(t.deletedAt||t.included===false)return; const ts=t.date||t.createdAt||0; if(inPeriod(ts)) monthsSet[tsKey(ts)]=true; });
               const months=Object.keys(monthsSet).sort();
               // САЛЬДО НАЧАЛЬНОЕ на старте периода = opening + чистый поток всех операций до первого месяца
               const startBal0 = accounts.reduce((s,a)=>s+(Number(a.opening)||0),0);
               const firstMonth = months[0];
               let saldoStart = startBal0;
               if(firstMonth){
-                financeTx.forEach(t=>{ if(t.included===false)return; const ts=t.date||t.createdAt||0; if(tsKey(ts) < firstMonth){ if(t.type==="income") saldoStart+=Number(t.amount)||0; else if(t.type==="expense") saldoStart-=Number(t.amount)||0; } });
+                financeTx.forEach(t=>{ if(t.deletedAt||t.included===false)return; const ts=t.date||t.createdAt||0; if(tsKey(ts) < firstMonth){ if(t.type==="income") saldoStart+=Number(t.amount)||0; else if(t.type==="expense") saldoStart-=Number(t.amount)||0; } });
               }
               // агрегатор: по типу/категории/подкатегории и по месяцам
               const agg = (pred) => { const byM={}; let tot=0; months.forEach(m=>byM[m]=0);
-                financeTx.forEach(t=>{ if(t.included===false)return; const ts=t.date||t.createdAt||0; if(!inPeriod(ts)||!pred(t))return; const m=tsKey(ts); if(m in byM){byM[m]+=Number(t.amount)||0; tot+=Number(t.amount)||0;} });
+                financeTx.forEach(t=>{ if(t.deletedAt||t.included===false)return; const ts=t.date||t.createdAt||0; if(!inPeriod(ts)||!pred(t))return; const m=tsKey(ts); if(m in byM){byM[m]+=Number(t.amount)||0; tot+=Number(t.amount)||0;} });
                 return {byM,tot};
               };
               const incTotal = agg(t=>t.type==="income");
