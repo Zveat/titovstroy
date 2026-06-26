@@ -3878,11 +3878,10 @@ function MainApp({ currentUser, setCurrentUser }) {
     window.alert(`Восстановлено смет: ${list.length}\n• в объектах: ${inObjects}\n• в общем списке «Сметы»: ${standalone}`);
   };
 
-  // ── Единый бэкап рабочего пространства: объекты + их сметы + их договора ──
+  // ── Единый бэкап рабочего пространства: объекты + сметы + договора + финансовые операции ──
   const _wsSnapTimer = useRef(null);
   useEffect(() => {
-    // снимок делаем только когда всё загружено (иначе запишем пустоту)
-    if (!_estimatesLoaded.current || !_contractsLoaded.current) return;
+    if (!_estimatesLoaded.current || !_contractsLoaded.current || !_financeLoaded.current) return;
     if (_wsSnapTimer.current) clearTimeout(_wsSnapTimer.current);
     _wsSnapTimer.current = setTimeout(async () => {
       try {
@@ -3892,22 +3891,27 @@ function MainApp({ currentUser, setCurrentUser }) {
           objects: objectsRef.current,
           estimates: estimatesRef.current,
           contracts: contractsRef.current,
-          counts: { o: objectsRef.current.length, e: estimatesRef.current.length, c: contractsRef.current.length },
+          financeTx: financeTxRef.current,
+          counts: {
+            o: objectsRef.current.length,
+            e: estimatesRef.current.length,
+            c: contractsRef.current.length,
+            f: financeTxRef.current.length,
+          },
         };
         const raw = await storage.get(WORKSPACE_BACKUPS_KEY);
         let arr = []; try { if (raw?.value) arr = JSON.parse(raw.value); } catch {}
         if (!Array.isArray(arr)) arr = [];
-        // не плодим одинаковые подряд снимки
         const prev = arr[0];
-        const sig = JSON.stringify(snap.counts) + "|" + JSON.stringify(snap.objects).length + JSON.stringify(snap.estimates).length;
+        const sig = `${snap.counts.o}|${snap.counts.e}|${snap.counts.c}|${snap.counts.f}`;
         if (prev && prev._sig === sig) return;
         snap._sig = sig;
-        arr = [snap, ...arr].slice(0, 20);
+        arr = [snap, ...arr].slice(0, 30);
         await storage.set(WORKSPACE_BACKUPS_KEY, JSON.stringify(arr));
       } catch (e) { console.warn("ws snapshot err", e); }
     }, 8000);
     return () => { if (_wsSnapTimer.current) clearTimeout(_wsSnapTimer.current); };
-  }, [objects, estimates, contracts]);
+  }, [objects, estimates, contracts, financeTx]);
 
   const openWorkspaceBackups = async () => {
     try {
@@ -3922,17 +3926,20 @@ function MainApp({ currentUser, setCurrentUser }) {
     const o = Array.isArray(snap.objects) ? snap.objects : [];
     const e = Array.isArray(snap.estimates) ? snap.estimates : [];
     const c = Array.isArray(snap.contracts) ? snap.contracts : [];
-    if (!window.confirm(`Восстановить рабочее пространство на ${new Date(snap.ts).toLocaleString("ru-RU")}?\n\nОбъектов: ${o.length}\nСмет: ${e.length}\nДоговоров: ${c.length}\n\nТекущее состояние уйдёт в бэкап.`)) return;
+    const f = Array.isArray(snap.financeTx) ? snap.financeTx : [];
+    if (!window.confirm(`Восстановить рабочее пространство на ${new Date(snap.ts).toLocaleString("ru-RU")}?\n\nОбъектов: ${o.length}\nСмет: ${e.length}\nДоговоров: ${c.length}\nФин. операций: ${f.length}\n\nТекущее состояние уйдёт в бэкап.`)) return;
     _allowEmptySave.current = true;
     objectsRef.current = o; setObjects(o);
     estimatesRef.current = e; setEstimates(e);
     contractsRef.current = c; setContracts(c);
+    if (f.length > 0) { financeTxRef.current = f; setFinanceTx(f); }
     await saveObjects(o, { replace: true, allowEmpty: true });
     await saveEstimates(e, { replace: true });
     await saveContracts(c, { replace: true, allowEmpty: true });
+    if (f.length > 0) await saveFinanceTx(f, { replace: true });
     setTimeout(() => { _allowEmptySave.current = false; }, 1500);
     setWsBackupsModal(null);
-    window.alert(`Восстановлено ✓\nОбъектов: ${o.length} · Смет: ${e.length} · Договоров: ${c.length}`);
+    window.alert(`Восстановлено ✓\nОбъектов: ${o.length} · Смет: ${e.length} · Договоров: ${c.length} · Фин. операций: ${f.length}`);
   };
 
   // ── Импорт смет из JSON (восстановление из PDF) ──
@@ -7152,14 +7159,14 @@ function MainApp({ currentUser, setCurrentUser }) {
               <div style={{fontWeight:800,fontSize:16,color:"#0f172a"}}>🕘 Бэкапы рабочего пространства</div>
               <button onClick={()=>setWsBackupsModal(null)} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#94a3b8"}}>✕</button>
             </div>
-            <div style={{fontSize:12,color:"#94a3b8",marginBottom:14}}>Каждый снимок — объекты вместе со сметами и договорами (последние 20). Восстановление вернёт всё целиком.</div>
+            <div style={{fontSize:12,color:"#94a3b8",marginBottom:14}}>Каждый снимок — объекты, сметы, договоры + финансовые операции (последние 30). Восстановление вернёт всё целиком.</div>
             {wsBackupsModal.length===0 && <div style={{textAlign:"center",padding:"30px 0",color:"#94a3b8",fontSize:13}}>Снимков пока нет — появятся автоматически после изменений</div>}
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
               {wsBackupsModal.map((snap,i)=>(
                 <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"10px 12px",background:"#f9fafb",border:"1px solid #e2e8f0",borderRadius:8}}>
                   <div>
                     <div style={{fontSize:13,fontWeight:600,color:"#0f172a"}}>{new Date(snap.ts).toLocaleString("ru-RU")}</div>
-                    <div style={{fontSize:11,color:"#94a3b8"}}>📦 {snap.counts?.o??(snap.objects?.length||0)} · 📋 {snap.counts?.e??(snap.estimates?.length||0)} · 📄 {snap.counts?.c??(snap.contracts?.length||0)}{snap.by?` · ${snap.by}`:""}{i===0?" · последний":""}</div>
+                    <div style={{fontSize:11,color:"#94a3b8"}}>📦 {snap.counts?.o??(snap.objects?.length||0)} · 📋 {snap.counts?.e??(snap.estimates?.length||0)} · 📄 {snap.counts?.c??(snap.contracts?.length||0)} · 💰 {snap.counts?.f??(snap.financeTx?.length||0)} оп.{snap.by?` · ${snap.by}`:""}{i===0?" · последний":""}</div>
                   </div>
                   <button onClick={()=>restoreWorkspace(snap)}
                     style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(37,99,235,.2)",borderRadius:8,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
