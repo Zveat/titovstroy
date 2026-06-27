@@ -22,10 +22,10 @@ const stByKey = (k) => STAGE_STATUSES.find(s => s.key === k) || STAGE_STATUSES[0
 
 // Превратить строки из сметы в объекты-этапы
 const estToStages = (fromEst, genId) => fromEst.map(s => ({
-  id: genId(), cat: s.cat || "Прочее", name: s.name || "",
+  id: genId(), cat: s.cat || "Прочее", sub: s.sub || s.name || "", name: s.name || "",
   planStart: "", planEnd: "", factStart: "", factEnd: "",
-  status: "todo", responsible: "", note: "",
-  priceClient: s.priceClient || 0, costPlan: s.costPlan || 0,
+  status: "todo", responsible: "", note: "", paid: false,
+  priceClient: s.priceClient || 0, costPlan: s.costPlan || 0, works: s.works || [],
 }));
 
 // Группировка этапов по категории с сохранением порядка
@@ -92,19 +92,54 @@ export default function ProductionModule({
   // ─── СПИСОК ОБЪЕКТОВ ───
   if (!openObj) {
     const q = search.toLowerCase().trim();
-    // Реальные объекты в производстве
-    const objEntries = objects.map(o => ({
-      id: o.id, name: o.clientName || "Без названия", address: o.address || "—",
-      updatedAt: o.updatedAt || 0,
-    }));
-    // Виртуальные карточки из проектов Финансов (objectId = "fp:...") без реального объекта
+    const num = v => Number(v) || 0;
+    const today = _dayStart(new Date());
+    const nowD = new Date();
     const objIdSet = new Set(objects.map(o => o.id));
-    const orphanEntries = (productions || [])
-      .filter(p => String(p.objectId).startsWith("fp:") && !objIdSet.has(p.objectId))
-      .map(p => ({ id: p.objectId, name: p.title || "Проект", address: p.address || "—", updatedAt: p.updatedAt || 0 }));
-    const list = [...objEntries, ...orphanEntries]
+    const baseEntries = [
+      ...objects.map(o => ({ id: o.id, name: o.clientName || "Без названия", address: o.address || "—", updatedAt: o.updatedAt || 0 })),
+      ...(productions || []).filter(p => String(p.objectId).startsWith("fp:") && !objIdSet.has(p.objectId)).map(p => ({ id: p.objectId, name: p.title || "Проект", address: p.address || "—", updatedAt: p.updatedAt || 0 })),
+    ];
+    // Метрики объекта для светофора и сводки (тянутся из этапов/смет/производства)
+    const metricsOf = (id) => {
+      const p = prodByObj[id];
+      const sts = p?.stages || [];
+      const pc = sts.reduce((s, x) => s + num(x.priceClient), 0);
+      const cp = sts.reduce((s, x) => s + num(x.costPlan), 0);
+      const cf = sts.reduce((s, x) => s + num(x.costFact), 0);
+      const mPlan = pc ? Math.round((pc - cp) / pc * 100) : null;
+      const mFact = (pc && cf) ? Math.round((pc - cf) / pc * 100) : null;
+      const debt = Math.max(0, pc - num(p?.clientPaid));
+      const doneStages = sts.filter(s => s.status === "done").length;
+      const prog = sts.length ? Math.round(doneStages / sts.length * 100) : launchProgress(p);
+      const defectsOpen = (p?.defects || []).filter(d => !d.done).length;
+      const finished = !!p?.factEndDate;
+      let daysLeft = null, overdue = false;
+      if (!finished && p?.planEndDate) { daysLeft = Math.round((_dayStart(p.planEndDate) - today) / 864e5); if (daysLeft < 0) overdue = true; }
+      const overdueStages = sts.some(s => s.status !== "done" && s.planEnd && _dayStart(s.planEnd) < today);
+      let sev, color, label;
+      if (finished) { sev = 0; color = "#94a3b8"; label = "Сдан ✓"; }
+      else if (overdue || overdueStages) { sev = 3; color = "#dc2626"; label = "Просрочка"; }
+      else if ((daysLeft != null && daysLeft <= 5) || defectsOpen > 0) { sev = 2; color = "#d97706"; label = "Внимание"; }
+      else { sev = 1; color = "#059669"; label = "В норме"; }
+      const fd = finished ? new Date(p.factEndDate) : null;
+      const finishedThisMonth = !!(fd && fd.getMonth() === nowD.getMonth() && fd.getFullYear() === nowD.getFullYear());
+      return { pc, cp, cf, mPlan, mFact, debt, prog, defectsOpen, finished, daysLeft, sev, color, label, responsible: p?.responsible || "", stagesCount: sts.length, doneStages, finishedThisMonth };
+    };
+    const rows = baseEntries
       .filter(o => !q || [o.name, o.address].some(v => v && v.toLowerCase().includes(q)))
-      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      .map(o => ({ ...o, m: metricsOf(o.id) }))
+      .sort((a, b) => (b.m.sev - a.m.sev) || ((a.m.daysLeft == null ? 999 : a.m.daysLeft) - (b.m.daysLeft == null ? 999 : b.m.daysLeft)) || (b.updatedAt - a.updatedAt));
+    const sum = rows.reduce((a, r) => { a.pc += r.m.pc; a.cp += r.m.cp; a.cf += r.m.cf; a.debt += r.m.debt; a.defects += r.m.defectsOpen; if (r.m.finished) { a.done++; if (r.m.finishedThisMonth) a.doneMonth++; } else a.inWork++; if (r.m.sev === 3) a.overdue++; return a; }, { pc: 0, cp: 0, cf: 0, debt: 0, defects: 0, done: 0, doneMonth: 0, inWork: 0, overdue: 0 });
+    const compMPlan = sum.pc ? Math.round((sum.pc - sum.cp) / sum.pc * 100) : null;
+    const compMFact = (sum.pc && sum.cf) ? Math.round((sum.pc - sum.cf) / sum.pc * 100) : null;
+    const sumCard = (label, value, sub, color) => (
+      <div key={label} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px" }}>
+        <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 4, textTransform: "uppercase", letterSpacing: ".03em", fontWeight: 700 }}>{label}</div>
+        <div style={{ fontSize: 19, fontWeight: 800, color: color || "#0f172a", lineHeight: 1.1, overflowWrap: "anywhere" }}>{value}</div>
+        {sub && <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 2 }}>{sub}</div>}
+      </div>
+    );
     return (
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 4px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
@@ -151,32 +186,45 @@ export default function ProductionModule({
             </div>
           );
         })()}
-        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 12 }}>Объектов: {list.length}</div>
-        {list.length === 0 && <div style={{ textAlign: "center", color: "#94a3b8", padding: "50px 0", fontSize: 14 }}>Нет объектов. Объекты создаются в разделе «Объекты».</div>}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 12 }}>
-          {list.map(o => {
-            const p = prodByObj[o.id];
-            const prog = launchProgress(p);
-            const stages = p?.stages || [];
-            const doneStages = stages.filter(s => s.status === "done").length;
-            const estCount = estimates.filter(e => e.objectId === o.id).length;
+        {/* ── Сводка собственника ── */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(135px,1fr))", gap: 10, marginBottom: 16 }}>
+          {sumCard("В работе", sum.inWork)}
+          {sumCard("Сдано за месяц", sum.doneMonth)}
+          {sumCard("Маржа компании", compMPlan != null ? `${compMPlan}%` : "—", compMFact != null ? `факт ${compMFact}%` : "план", "#059669")}
+          {sumCard("Дебиторка", `${fmt(sum.debt)} ₸`, "клиенты должны", sum.debt > 0 ? "#dc2626" : "#059669")}
+          {sumCard("Просрочено", sum.overdue, "объектов", sum.overdue ? "#dc2626" : "#059669")}
+          {sumCard("Замечаний", sum.defects, "открыто", sum.defects ? "#d97706" : "#059669")}
+        </div>
+        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>Объектов: {rows.length} · сверху — что горит 🔴</div>
+        {rows.length === 0 && <div style={{ textAlign: "center", color: "#94a3b8", padding: "50px 0", fontSize: 14 }}>Нет объектов в производстве.</div>}
+        {/* ── Светофор ── */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 12 }}>
+          {rows.map(o => {
+            const m = o.m;
             return (
               <div key={o.id} onClick={() => { setOpenId(o.id); setTab("info"); }}
-                style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 16, cursor: "pointer", transition: "box-shadow .15s, transform .1s" }}
+                style={{ background: "#fff", border: "1px solid #e2e8f0", borderLeft: `4px solid ${m.color}`, borderRadius: 14, padding: 16, cursor: "pointer", transition: "box-shadow .15s, transform .1s" }}
                 onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 8px 24px rgba(0,0,0,.08)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
                 onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#0f172a", marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.name || "Без названия"}</div>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.address || "—"}</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                  <div style={{ flex: 1, height: 8, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}>
-                    <div style={{ width: `${prog}%`, height: "100%", background: prog === 100 ? "#059669" : "#2563eb", transition: "width .3s" }} />
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.name}</div>
+                    <div style={{ fontSize: 12, color: "#64748b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.address}</div>
                   </div>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: prog === 100 ? "#059669" : "#2563eb", minWidth: 34, textAlign: "right" }}>{prog}%</span>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: m.color, background: m.color + "18", borderRadius: 6, padding: "3px 8px", whiteSpace: "nowrap", flexShrink: 0 }}>{m.label}{(m.daysLeft != null && !m.finished) ? (m.daysLeft < 0 ? ` ${-m.daysLeft}д` : ` ${m.daysLeft}д`) : ""}</span>
                 </div>
-                <div style={{ display: "flex", gap: 12, fontSize: 11, color: "#94a3b8" }}>
-                  <span>📋 запуск {prog}%</span>
-                  {stages.length > 0 && <span>🔨 этапы {doneStages}/{stages.length}</span>}
-                  {estCount > 0 && <span>📐 смет {estCount}</span>}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "12px 0 10px" }}>
+                  <div style={{ flex: 1, height: 8, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}>
+                    <div style={{ width: `${m.prog}%`, height: "100%", background: m.prog === 100 ? "#059669" : "#2563eb", transition: "width .3s" }} />
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#64748b", minWidth: 34, textAlign: "right" }}>{m.prog}%</span>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px", fontSize: 11, color: "#64748b" }}>
+                  {m.stagesCount > 0 && <span>🔨 {m.doneStages}/{m.stagesCount}</span>}
+                  {m.mPlan != null && <span>📊 маржа {m.mFact != null ? `${m.mFact}% факт` : `${m.mPlan}% план`}</span>}
+                  {m.debt > 0 && <span style={{ color: "#dc2626" }}>💸 {fmt(m.debt)} ₸</span>}
+                  {m.defectsOpen > 0 && <span style={{ color: "#d97706" }}>⚠ {m.defectsOpen}</span>}
+                  {m.responsible && <span>👷 {m.responsible}</span>}
                 </div>
               </div>
             );
@@ -193,6 +241,8 @@ export default function ProductionModule({
     { key: "stages", label: "Этапы и сроки", icon: "🔨" },
     { key: "tasks", label: "Задачи", icon: "✅" },
     { key: "finance", label: "Финансы", icon: "💰" },
+    { key: "journal", label: "Журнал", icon: "📖" },
+    { key: "defects", label: "Замечания", icon: "⚠️" },
     { key: "handover", label: "Сдача", icon: "🏁" },
   ];
 
@@ -221,12 +271,16 @@ export default function ProductionModule({
       {tab === "stages" && <StagesTab prod={openProd} patch={patchProd} genId={genId} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} />}
       {tab === "tasks" && <TasksTab prod={openProd} patch={patchProd} genId={genId} />}
       {tab === "finance" && <FinanceTab prod={openProd} patch={patchProd} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} />}
+      {tab === "journal" && <JournalTab prod={openProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
+      {tab === "defects" && <DefectsTab prod={openProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
     </div>
   );
 }
 
 // ─── ВКЛАДКА: ИНФОРМАЦИЯ ───
 const _dayStart = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); };
+// Телефон → формат для wa.me (КЗ: 8XXXXXXXXXX → 7XXXXXXXXXX)
+const _waPhone = (p) => { let d = (p || "").replace(/\D/g, ""); if (d.length === 11 && d[0] === "8") d = "7" + d.slice(1); else if (d.length === 10) d = "7" + d; return d; };
 function InfoTab({ prod, obj, estimates, contracts, fmt, patch }) {
   const objEstimates = estimates.filter(e => e.objectId === obj.id);
   const objContracts = contracts.filter(c => c.objectId === obj.id && !c.deletedAt);
@@ -248,6 +302,20 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch }) {
     else if (left === 0) deadline = { text: "Сегодня", color: "#d97706", sub: "плановая сдача" };
     else deadline = { text: left + " дн", color: "#2563eb", sub: "до плановой сдачи" };
   }
+  // Напоминания / просрочки
+  const todayMs = _dayStart(new Date());
+  const alerts = [];
+  if (!prod.factEndDate && prod.planEndDate && _dayStart(prod.planEndDate) < todayMs)
+    alerts.push("Плановая сдача просрочена на " + Math.round((todayMs - _dayStart(prod.planEndDate)) / 864e5) + " дн");
+  stages.forEach(s => {
+    if (s.status !== "done" && s.planEnd && _dayStart(s.planEnd) < todayMs)
+      alerts.push("Этап «" + (s.name || "без названия") + "» просрочен на " + Math.round((todayMs - _dayStart(s.planEnd)) / 864e5) + " дн");
+  });
+  if (!prod.factEndDate && prod.planEndDate) {
+    const lt = Math.round((_dayStart(prod.planEndDate) - todayMs) / 864e5);
+    if (lt >= 0 && lt <= 3) alerts.push("Плановая сдача " + (lt === 0 ? "сегодня" : ("через " + lt + " дн")));
+  }
+  const cBtn = { display: "inline-flex", alignItems: "center", gap: 6, textDecoration: "none", border: "none", borderRadius: 9, padding: "10px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" };
   const fld = (label, key, type = "text") => (
     <div>
       <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>{label}</div>
@@ -264,6 +332,13 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch }) {
   );
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Напоминания / просрочки */}
+      {alerts.length > 0 && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 12, padding: "12px 15px" }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#dc2626", marginBottom: 6 }}>⚠ Требует внимания</div>
+          {alerts.map((a, i) => <div key={i} style={{ fontSize: 12.5, color: "#b91c1c", padding: "2px 0" }}>• {a}</div>)}
+        </div>
+      )}
       {/* Шапка объекта */}
       <div style={{ background: "linear-gradient(135deg,#0f172a,#1e293b)", borderRadius: 16, padding: "20px 22px", color: "#fff" }}>
         <div style={{ fontSize: 21, fontWeight: 900, marginBottom: 6, lineHeight: 1.15 }}>{obj.clientName || "Без названия"}</div>
@@ -272,6 +347,22 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch }) {
           {obj.clientPhone && <span>📞 {obj.clientPhone}</span>}
           {obj.objType && <span>🏠 {obj.objType}</span>}
           {obj.area && <span>📐 {obj.area} м²</span>}
+        </div>
+      </div>
+      {/* Связь в один тап */}
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px" }}>
+        <div style={{ fontSize: 10.5, color: "#94a3b8", marginBottom: 10, textTransform: "uppercase", letterSpacing: ".03em", fontWeight: 700 }}>Связь</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          {obj.clientPhone ? (<>
+            <a href={"tel:" + obj.clientPhone} style={{ ...cBtn, background: "#eff6ff", color: "#2563eb" }}>📞 Позвонить</a>
+            <a href={"https://wa.me/" + _waPhone(obj.clientPhone)} target="_blank" rel="noopener" style={{ ...cBtn, background: "#25D366", color: "#fff" }}>📲 WhatsApp клиенту</a>
+          </>) : <span style={{ fontSize: 12, color: "#94a3b8" }}>Телефон клиента не указан</span>}
+          {prod.waGroup && <a href={prod.waGroup} target="_blank" rel="noopener" style={{ ...cBtn, background: "#f0fdf4", color: "#059669", border: "1px solid #bbf7d0" }}>🔗 Рабочая группа</a>}
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Ссылка на рабочую группу WhatsApp</div>
+          <input value={prod.waGroup || ""} onChange={e => patch({ waGroup: e.target.value })} placeholder="https://chat.whatsapp.com/…"
+            style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
         </div>
       </div>
       {/* Ключевые метрики */}
@@ -372,7 +463,7 @@ function StagesTab({ prod, patch, genId, buildStagesFromEstimate, objId }) {
     const exist = new Set(stages.map(s => ((s.cat || "") + "|" + (s.name || "")).toLowerCase()));
     const toAdd = fromEst
       .filter(s => !exist.has(((s.cat || "") + "|" + (s.name || "")).toLowerCase()))
-      .map(s => ({ id: genId(), cat: s.cat || "Прочее", name: s.name, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", priceClient: s.priceClient || 0, costPlan: s.costPlan || 0 }));
+      .map(s => ({ id: genId(), cat: s.cat || "Прочее", sub: s.sub || s.name || "", name: s.name, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: s.priceClient || 0, costPlan: s.costPlan || 0, works: s.works || [] }));
     if (!toAdd.length) { alert("Все этапы из сметы уже добавлены."); return; }
     patch({ stages: [...stages, ...toAdd] });
   };
@@ -526,6 +617,85 @@ function TasksTab({ prod, patch, genId }) {
   );
 }
 
+// Дата+время для журнала/замечаний
+const _fmtTs = (ts) => ts ? new Date(ts).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+
+// ─── ВКЛАДКА: ЖУРНАЛ ОБЪЕКТА (лента событий) ───
+function JournalTab({ prod, patch, genId, currentUser }) {
+  const entries = prod.journal || [];
+  const [text, setText] = useState("");
+  const add = () => { if (!text.trim()) return; patch({ journal: [{ id: genId(), ts: Date.now(), author: currentUser?.name || "—", text: text.trim() }, ...entries] }); setText(""); };
+  const del = (id) => { if (window.confirm("Удалить запись?")) patch({ journal: entries.filter(e => e.id !== id) }); };
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 14 }}>📖 Журнал объекта ({entries.length})</div>
+      <div style={{ marginBottom: 16 }}>
+        <textarea value={text} onChange={e => setText(e.target.value)} rows={2} placeholder="Что произошло на объекте? («залили стяжку», «клиент перенёс розетку», «привезли плитку»…)"
+          style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "9px 12px", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box", resize: "vertical" }} />
+        <div style={{ textAlign: "right", marginTop: 8 }}>
+          <button onClick={add} disabled={!text.trim()} style={{ background: text.trim() ? "#2563eb" : "#cbd5e1", color: "#fff", border: "none", borderRadius: 8, padding: "8px 20px", fontSize: 13, fontWeight: 700, cursor: text.trim() ? "pointer" : "default", fontFamily: "inherit" }}>+ Запись в журнал</button>
+        </div>
+      </div>
+      {entries.length === 0 ? (
+        <div style={{ textAlign: "center", color: "#94a3b8", padding: "20px 0", fontSize: 13 }}>Записей пока нет. Фиксируйте всё важное — пригодится при спорах и передаче объекта.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {entries.map(e => (
+            <div key={e.id} style={{ display: "flex", gap: 10, padding: "10px 4px", borderBottom: "1px solid #f1f5f9" }}>
+              <div style={{ width: 3, borderRadius: 3, background: "#bfdbfe", flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 3 }}>{_fmtTs(e.ts)} · {e.author}</div>
+                <div style={{ fontSize: 13, color: "#0f172a", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{e.text}</div>
+              </div>
+              <button onClick={() => del(e.id)} style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 15, flexShrink: 0, alignSelf: "flex-start" }}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ВКЛАДКА: ЗАМЕЧАНИЯ / ДЕФЕКТЫ ───
+function DefectsTab({ prod, patch, genId, currentUser }) {
+  const items = prod.defects || [];
+  const [text, setText] = useState("");
+  const add = () => { if (!text.trim()) return; patch({ defects: [{ id: genId(), text: text.trim(), done: false, ts: Date.now(), author: currentUser?.name || "—" }, ...items] }); setText(""); };
+  const upd = (id, p) => patch({ defects: items.map(i => i.id === id ? { ...i, ...p } : i) });
+  const del = (id) => patch({ defects: items.filter(i => i.id !== id) });
+  const open = items.filter(i => !i.done).length;
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>⚠️ Замечания и дефекты</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: open ? "#dc2626" : "#059669" }}>{open ? `${open} открыто` : (items.length ? "всё устранено ✓" : "—")}</div>
+      </div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && add()} placeholder="Новое замечание (что исправить)…"
+          style={{ flex: "1 1 200px", border: "1px solid #e2e8f0", borderRadius: 8, padding: "9px 12px", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
+        <button onClick={add} disabled={!text.trim()} style={{ background: text.trim() ? "#dc2626" : "#cbd5e1", color: "#fff", border: "none", borderRadius: 8, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: text.trim() ? "pointer" : "default", fontFamily: "inherit" }}>+ Добавить</button>
+      </div>
+      {items.length === 0 ? (
+        <div style={{ textAlign: "center", color: "#94a3b8", padding: "20px 0", fontSize: 13 }}>Замечаний нет. Сюда вносите недочёты к устранению (свои и от клиента).</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {items.map(it => (
+            <div key={it.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "9px 4px", borderBottom: "1px solid #f1f5f9" }}>
+              <input type="checkbox" checked={!!it.done} onChange={e => upd(it.id, { done: e.target.checked })} style={{ width: 18, height: 18, cursor: "pointer", flexShrink: 0, marginTop: 2 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <input value={it.text} onChange={e => upd(it.id, { text: e.target.value })}
+                  style={{ width: "100%", border: "none", fontSize: 13, fontFamily: "inherit", outline: "none", color: it.done ? "#94a3b8" : "#0f172a", textDecoration: it.done ? "line-through" : "none", background: "transparent" }} />
+                <div style={{ fontSize: 10.5, color: "#cbd5e1", marginTop: 2 }}>{_fmtTs(it.ts)} · {it.author}{it.done ? " · устранено" : ""}</div>
+              </div>
+              <button onClick={() => del(it.id)} style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 15, flexShrink: 0, marginTop: 2 }}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── ВКЛАДКА: ФИНАНСОВЫЙ БЛОК (по этапам, группировка категория › подкатегория) ───
 function FinanceTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) {
   const stages = prod.stages || [];
@@ -536,7 +706,7 @@ function FinanceTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId })
     const exist = new Set(stages.map(s => ((s.cat || "") + "|" + (s.name || "")).toLowerCase()));
     const toAdd = fromEst
       .filter(s => !exist.has(((s.cat || "") + "|" + (s.name || "")).toLowerCase()))
-      .map(s => ({ id: genId(), cat: s.cat || "Прочее", name: s.name, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", priceClient: s.priceClient || 0, costPlan: s.costPlan || 0 }));
+      .map(s => ({ id: genId(), cat: s.cat || "Прочее", sub: s.sub || s.name || "", name: s.name, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: s.priceClient || 0, costPlan: s.costPlan || 0, works: s.works || [] }));
     const merged = stages.map(s => {
       const m = fromEst.find(f => ((f.cat || "") + "|" + (f.name || "")).toLowerCase() === ((s.cat || "") + "|" + (s.name || "")).toLowerCase());
       return m ? { ...s, priceClient: s.priceClient || m.priceClient || 0, costPlan: s.costPlan || m.costPlan || 0 } : s;
@@ -544,72 +714,79 @@ function FinanceTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId })
     patch({ stages: [...merged, ...toAdd] });
   };
   const num = (v) => Number(v) || 0;
-  const tot = stages.reduce((a, s) => { a.priceClient += num(s.priceClient); a.costPlan += num(s.costPlan); a.costFact += num(s.costFact); return a; }, { priceClient: 0, costPlan: 0, costFact: 0 });
-  const marginPlan = tot.priceClient ? (tot.priceClient - tot.costPlan) / tot.priceClient : 0;
-  const marginFact = tot.priceClient ? (tot.priceClient - tot.costFact) / tot.priceClient : 0;
+  const tot = stages.reduce((a, s) => { a.priceClient += num(s.priceClient); a.costPlan += num(s.costPlan); a.costFact += num(s.costFact); a.paid += s.paid ? num(s.priceClient) : 0; return a; }, { priceClient: 0, costPlan: 0, costFact: 0, paid: 0 });
+  const profitPlan = tot.priceClient - tot.costPlan;
+  const profitFact = tot.priceClient - tot.costFact;
+  const clientPaid = num(prod.clientPaid);
+  const debt = tot.priceClient - clientPaid;
   const grouped = groupByCat(stages);
-
-  const cell = { padding: "8px 10px", fontSize: 12, textAlign: "right", borderBottom: "1px solid #f1f5f9" };
-  const inpC = { width: 90, border: "1px solid #e2e8f0", borderRadius: 6, padding: "4px 6px", fontSize: 12, textAlign: "right", fontFamily: "inherit", outline: "none" };
+  const moneyInp = { width: "100%", border: "1px solid #e2e8f0", borderRadius: 6, padding: "6px 8px", fontSize: 12, textAlign: "right", fontFamily: "inherit", outline: "none", boxSizing: "border-box" };
+  const mColor = (p) => p >= 30 ? "#059669" : p >= 0 ? "#d97706" : "#dc2626";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Сводка по объекту */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12 }}>
         <Stat label="Цена клиенту" value={`${fmt(tot.priceClient)} ₸`} />
-        <Stat label="Себест. план" value={`${fmt(tot.costPlan)} ₸`} />
-        <Stat label="Себест. факт" value={`${fmt(tot.costFact)} ₸`} />
-        <MarginStat label="Маржа план" pct={marginPlan} amt={tot.priceClient - tot.costPlan} fmt={fmt} />
-        <MarginStat label="Маржа факт" pct={marginFact} amt={tot.priceClient - tot.costFact} fmt={fmt} />
+        <Stat label="Себестоимость план" value={`${fmt(tot.costPlan)} ₸`} />
+        <Stat label="Себестоимость факт" value={`${fmt(tot.costFact)} ₸`} />
+        <MarginStat label="Маржа план" pct={tot.priceClient ? profitPlan / tot.priceClient : 0} amt={profitPlan} fmt={fmt} />
+        <MarginStat label="Маржа факт" pct={tot.priceClient ? profitFact / tot.priceClient : 0} amt={profitFact} fmt={fmt} />
       </div>
 
-      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18, overflowX: "auto" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+      {/* Деньги клиента / дебиторка */}
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 12 }}>💵 Деньги клиента</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, alignItems: "end" }}>
+          <div><div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>К оплате (по работам)</div><div style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>{fmt(tot.priceClient)} ₸</div></div>
+          <div><div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Получено от клиента</div><input type="number" value={prod.clientPaid ?? ""} onChange={e => patch({ clientPaid: e.target.value === "" ? undefined : Number(e.target.value) })} placeholder="0" style={{ ...moneyInp, textAlign: "left", fontSize: 15, fontWeight: 700, padding: "8px 10px" }} /></div>
+          <div><div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Дебиторка (остаток)</div><div style={{ fontSize: 18, fontWeight: 800, color: debt > 0 ? "#dc2626" : "#059669" }}>{fmt(Math.max(0, debt))} ₸</div></div>
+        </div>
+        <div style={{ marginTop: 10, fontSize: 11.5, color: "#94a3b8" }}>Этапов оплачено: {fmt(tot.paid)} ₸ из {fmt(tot.priceClient)} ₸{debt < 0 ? " · переплата " + fmt(-debt) + " ₸" : ""}</div>
+      </div>
+
+      {/* Финансы по этапам: Заголовок (категория) → Подзаголовок (этап) → наименования */}
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Финансы по этапам</div>
           <button onClick={syncFromEstimate} style={{ background: "#f0f9ff", color: "#0369a1", border: "1px solid #bae6fd", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>↻ Обновить из сметы</button>
         </div>
         {stages.length === 0 ? (
-          <div style={{ textAlign: "center", color: "#94a3b8", padding: "30px 0", fontSize: 13 }}>Этапы подтянутся из сметы автоматически.</div>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
-            <thead>
-              <tr style={{ fontSize: 11, color: "#94a3b8", textAlign: "right" }}>
-                <th style={{ textAlign: "left", padding: "8px 10px" }}>Этап</th>
-                <th style={{ padding: "8px 10px" }}>Цена клиенту</th>
-                <th style={{ padding: "8px 10px" }}>Себест. план</th>
-                <th style={{ padding: "8px 10px" }}>Себест. факт</th>
-                <th style={{ padding: "8px 10px" }}>Маржа факт</th>
-              </tr>
-            </thead>
-            <tbody>
-              {grouped.map(([cat, list]) => (
-                <Fragment key={cat}>
-                  <tr><td colSpan={5} style={{ padding: "10px 10px 4px", fontSize: 11, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em" }}>{cat}</td></tr>
-                  {list.map(s => {
-                    const m = num(s.priceClient) ? (num(s.priceClient) - num(s.costFact)) / num(s.priceClient) : 0;
-                    return (
-                      <tr key={s.id}>
-                        <td style={{ ...cell, textAlign: "left", fontWeight: 600, color: "#0f172a", paddingLeft: 20 }}>{s.name || "—"}</td>
-                        <td style={cell}><input type="number" value={s.priceClient ?? ""} onChange={e => upd(s.id, { priceClient: e.target.value === "" ? undefined : Number(e.target.value) })} style={inpC} /></td>
-                        <td style={cell}><input type="number" value={s.costPlan ?? ""} onChange={e => upd(s.id, { costPlan: e.target.value === "" ? undefined : Number(e.target.value) })} style={inpC} /></td>
-                        <td style={cell}><input type="number" value={s.costFact ?? ""} onChange={e => upd(s.id, { costFact: e.target.value === "" ? undefined : Number(e.target.value) })} style={inpC} /></td>
-                        <td style={{ ...cell, fontWeight: 700, color: m >= 0 ? "#059669" : "#dc2626" }}>{num(s.costFact) ? `${Math.round(m * 100)}%` : "—"}</td>
-                      </tr>
-                    );
-                  })}
-                </Fragment>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr style={{ fontWeight: 800, color: "#0f172a", borderTop: "2px solid #e2e8f0" }}>
-                <td style={{ padding: "10px", textAlign: "left" }}>ИТОГО</td>
-                <td style={{ padding: "10px", textAlign: "right" }}>{fmt(tot.priceClient)}</td>
-                <td style={{ padding: "10px", textAlign: "right" }}>{fmt(tot.costPlan)}</td>
-                <td style={{ padding: "10px", textAlign: "right" }}>{fmt(tot.costFact)}</td>
-                <td style={{ padding: "10px", textAlign: "right", color: marginFact >= 0 ? "#059669" : "#dc2626" }}>{Math.round(marginFact * 100)}%</td>
-              </tr>
-            </tfoot>
-          </table>
-        )}
+          <div style={{ textAlign: "center", color: "#94a3b8", padding: "30px 0", fontSize: 13 }}>Нажмите «Обновить из сметы» — этапы и суммы подтянутся.</div>
+        ) : grouped.map(([cat, list]) => (
+          <div key={cat} style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 8 }}>{cat}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {list.map(s => {
+                const pc = num(s.priceClient), cf = num(s.costFact);
+                const ppl = pc - num(s.costPlan), pft = pc - cf;
+                const mpl = pc ? Math.round(ppl / pc * 100) : 0, mft = pc ? Math.round(pft / pc * 100) : 0;
+                return (
+                  <div key={s.id} style={{ border: "1px solid #f1f5f9", borderRadius: 10, padding: 12, background: s.paid ? "#f0fdf4" : "#fff" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                      <div style={{ fontWeight: 700, fontSize: 13.5, color: "#0f172a" }}>{s.sub || s.name || "—"}</div>
+                      <button onClick={() => upd(s.id, { paid: !s.paid })} style={{ border: "1px solid", borderColor: s.paid ? "#059669" : "#e2e8f0", background: s.paid ? "#059669" : "#fff", color: s.paid ? "#fff" : "#94a3b8", borderRadius: 7, padding: "5px 12px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{s.paid ? "✓ Оплачено" : "Не оплачено"}</button>
+                    </div>
+                    {Array.isArray(s.works) && s.works.length > 0 && (
+                      <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 8, lineHeight: 1.5 }}>{s.works.map(w => w.name).filter(Boolean).join(" · ")}</div>
+                    )}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(115px,1fr))", gap: 8 }}>
+                      <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Цена клиенту</div><input type="number" value={s.priceClient ?? ""} onChange={e => upd(s.id, { priceClient: e.target.value === "" ? undefined : Number(e.target.value) })} style={moneyInp} /></div>
+                      <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Себест. план</div><input type="number" value={s.costPlan ?? ""} onChange={e => upd(s.id, { costPlan: e.target.value === "" ? undefined : Number(e.target.value) })} style={moneyInp} /></div>
+                      <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Себест. факт</div><input type="number" value={s.costFact ?? ""} onChange={e => upd(s.id, { costFact: e.target.value === "" ? undefined : Number(e.target.value) })} style={moneyInp} /></div>
+                    </div>
+                    <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 12, flexWrap: "wrap" }}>
+                      <span>Маржа план: <b style={{ color: mColor(mpl) }}>{mpl}%</b> <span style={{ color: "#94a3b8" }}>({fmt(ppl)} ₸)</span></span>
+                      <span>Маржа факт: {cf ? (<><b style={{ color: mColor(mft) }}>{mft}%</b> <span style={{ color: "#94a3b8" }}>({fmt(pft)} ₸)</span></>) : <span style={{ color: "#cbd5e1" }}>—</span>}</span>
+                    </div>
+                    <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="Примечание к этапу…"
+                      style={{ width: "100%", border: "1px solid #f1f5f9", borderRadius: 6, padding: "6px 9px", fontSize: 12, fontFamily: "inherit", outline: "none", marginTop: 8, boxSizing: "border-box" }} />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
