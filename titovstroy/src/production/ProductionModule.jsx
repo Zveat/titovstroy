@@ -226,10 +226,28 @@ export default function ProductionModule({
 }
 
 // ─── ВКЛАДКА: ИНФОРМАЦИЯ ───
+const _dayStart = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); };
 function InfoTab({ prod, obj, estimates, contracts, fmt, patch }) {
   const objEstimates = estimates.filter(e => e.objectId === obj.id);
   const objContracts = contracts.filter(c => c.objectId === obj.id && !c.deletedAt);
   const totalEst = objEstimates.reduce((s, e) => s + (Number(e.total) || 0), 0);
+  const totalCon = objContracts.reduce((s, c) => s + (c.works || []).reduce((ss, w) => ss + (Number(w.quantity) || 0) * (Number(w.price) || 0), 0), 0);
+  const stages = prod.stages || [];
+  const doneStages = stages.filter(s => s.status === "done").length;
+  const stageProg = stages.length ? Math.round(doneStages / stages.length * 100) : 0;
+  const launch = prod.checklistLaunch || [];
+  const launchDone = launch.filter(i => i.done).length;
+  // Дней в работе: от даты старта до факта сдачи (или до сегодня, если ещё в работе)
+  const daysInWork = prod.startDate ? Math.max(0, Math.round((_dayStart(prod.factEndDate || new Date()) - _dayStart(prod.startDate)) / 864e5)) : null;
+  // Срок: сдан / до плановой сдачи / просрочка
+  let deadline = { text: "—", color: "#94a3b8", sub: "срок не задан" };
+  if (prod.factEndDate) deadline = { text: "Сдан ✓", color: "#059669", sub: new Date(prod.factEndDate).toLocaleDateString("ru-RU") };
+  else if (prod.planEndDate) {
+    const left = Math.round((_dayStart(prod.planEndDate) - _dayStart(new Date())) / 864e5);
+    if (left < 0) deadline = { text: (-left) + " дн", color: "#dc2626", sub: "просрочка" };
+    else if (left === 0) deadline = { text: "Сегодня", color: "#d97706", sub: "плановая сдача" };
+    else deadline = { text: left + " дн", color: "#2563eb", sub: "до плановой сдачи" };
+  }
   const fld = (label, key, type = "text") => (
     <div>
       <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>{label}</div>
@@ -237,8 +255,42 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch }) {
         style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
     </div>
   );
+  const Metric = ({ label, value, sub, color = "#0f172a" }) => (
+    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "13px 15px" }}>
+      <div style={{ fontSize: 10.5, color: "#94a3b8", marginBottom: 5, textTransform: "uppercase", letterSpacing: ".03em", fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 800, color, lineHeight: 1.1, overflowWrap: "anywhere" }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Шапка объекта */}
+      <div style={{ background: "linear-gradient(135deg,#0f172a,#1e293b)", borderRadius: 16, padding: "20px 22px", color: "#fff" }}>
+        <div style={{ fontSize: 21, fontWeight: 900, marginBottom: 6, lineHeight: 1.15 }}>{obj.clientName || "Без названия"}</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "5px 16px", fontSize: 13, color: "rgba(255,255,255,.82)" }}>
+          {obj.address && <span>📍 {obj.address}</span>}
+          {obj.clientPhone && <span>📞 {obj.clientPhone}</span>}
+          {obj.objType && <span>🏠 {obj.objType}</span>}
+          {obj.area && <span>📐 {obj.area} м²</span>}
+        </div>
+      </div>
+      {/* Ключевые метрики */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(148px,1fr))", gap: 12 }}>
+        <Metric label="Дней в работе" value={daysInWork == null ? "—" : daysInWork} sub={daysInWork == null ? "не начато" : (prod.factEndDate ? "по факту сдачи" : "идёт сейчас")} color="#2563eb" />
+        <Metric label="Срок" value={deadline.text} sub={deadline.sub} color={deadline.color} />
+        <Metric label="Этапы" value={stages.length ? `${doneStages} / ${stages.length}` : "—"} sub={stages.length ? `выполнено ${stageProg}%` : "нет этапов"} color="#059669" />
+        <Metric label="Запуск объекта" value={launch.length ? `${launchDone} / ${launch.length}` : "—"} sub="чек-лист запуска" color="#7c3aed" />
+        <Metric label="Сумма смет" value={`${fmt(totalEst)} ₸`} sub={`${objEstimates.length} смет(ы)`} />
+        <Metric label="Договоры" value={totalCon ? `${fmt(totalCon)} ₸` : (objContracts.length || "—")} sub={`${objContracts.length} шт`} />
+      </div>
+      {/* Прогресс по этапам */}
+      {stages.length > 0 && (
+        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 7 }}><span style={{ fontWeight: 600 }}>Прогресс по этапам</span><span style={{ fontWeight: 800, color: "#059669" }}>{stageProg}%</span></div>
+          <div style={{ height: 8, background: "#f1f5f9", borderRadius: 5, overflow: "hidden" }}><div style={{ width: stageProg + "%", height: "100%", background: "#059669", borderRadius: 5, transition: "width .3s" }} /></div>
+        </div>
+      )}
+      {/* Производственные поля */}
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 14 }}>Производственная информация</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
@@ -253,11 +305,6 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch }) {
           <textarea value={prod.note || ""} onChange={e => patch({ note: e.target.value })} rows={2}
             style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box", resize: "vertical" }} />
         </div>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12 }}>
-        <Stat label="Смет по объекту" value={objEstimates.length} />
-        <Stat label="Сумма смет" value={`${fmt(totalEst)} ₸`} />
-        <Stat label="Договоров" value={objContracts.length} />
       </div>
     </div>
   );
