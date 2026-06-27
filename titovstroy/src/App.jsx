@@ -3686,12 +3686,14 @@ function MainApp({ currentUser, setCurrentUser }) {
         const cat = w.cat || "Прочее";
         const sub = w.sub || cat;
         const k = cat + "|" + sub;
-        if (!map[k]) { map[k] = { cat, sub, priceClient: 0, costPlan: 0 }; order.push(k); }
+        if (!map[k]) { map[k] = { cat, sub, priceClient: 0, costPlan: 0, works: [] }; order.push(k); }
         map[k].priceClient += priceClient;
         map[k].costPlan += costPlan;
+        map[k].works.push({ name: w.name || "", unit: w.unit || "", qty, priceClient: Math.round(priceClient), costPlan: Math.round(costPlan) });
       }
     }
-    return order.map(k => ({ cat: map[k].cat, name: map[k].sub, priceClient: Math.round(map[k].priceClient), costPlan: Math.round(map[k].costPlan) }));
+    // Каждый «этап» = подкатегория сметы (Заголовок=cat, Подзаголовок=sub) + список работ (наименования) внутри
+    return order.map(k => ({ cat: map[k].cat, sub: map[k].sub, name: map[k].sub, priceClient: Math.round(map[k].priceClient), costPlan: Math.round(map[k].costPlan), works: map[k].works }));
   }, [estimates]);
 
   // ── ФИНАНСЫ: загрузка/сохранение ──
