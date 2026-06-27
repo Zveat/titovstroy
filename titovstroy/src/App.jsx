@@ -314,6 +314,14 @@ const fmtDate = (ts) => {
   if (isYesterday) return `Вчера ${time}`;
   return d.toLocaleDateString("ru-RU", {day:"numeric",month:"short"}) + " " + time;
 };
+// Дата + точное время (для статуса онлайн-КП: просмотр/принятие)
+const fmtDateTime = (ts) => ts ? new Date(ts).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
+// Текст статуса онлайн-КП по снимку: просмотры (+ время последнего) и принятие (+ время)
+const kpStatusText = (d) => {
+  if (!d) return "";
+  const v = d.viewCount ? ("👁 просмотров: " + d.viewCount + (d.viewedAt ? (" · последний " + fmtDateTime(d.viewedAt)) : "")) : "👁 ещё не открыто клиентом";
+  return v + (d.acceptedAt ? (" · ✅ ПРИНЯТО " + fmtDateTime(d.acceptedAt)) : "");
+};
 
 const EMPTY_PROJ = { name:"", type:"Вторичка", area:"", address:"", phone:"", manager:"" };
 
@@ -2978,6 +2986,7 @@ function PublicKP({ id }) {
   const [snap, setSnap] = useState(null);
   const [accepted, setAccepted] = useState(false);
   const [accepting, setAccepting] = useState(false);
+  const [confirming, setConfirming] = useState(false); // подтверждение перед принятием
   // Адаптив: КП свёрстано под «бумажную» ширину; на узком экране вписываем масштабом
   const outerRef = useRef(null), innerRef = useRef(null);
   const [fit, setFit] = useState({ scale: 1, h: 0 });
@@ -3054,10 +3063,19 @@ function PublicKP({ id }) {
       <div style={{marginTop:16,textAlign:"center"}}>
         {accepted ? (
           <div style={{background:"#ecfdf5",border:"1px solid #a7f3d0",borderRadius:12,padding:"16px 18px",color:"#059669",fontWeight:700,fontSize:15}}>✅ Спасибо! Предложение принято — менеджер свяжется с вами.</div>
+        ) : confirming ? (
+          <div style={{background:"#fff",border:"1px solid #e7e1d4",borderRadius:14,padding:"18px 18px",maxWidth:420,margin:"0 auto",boxShadow:"0 6px 18px rgba(26,26,40,.1)"}}>
+            <div style={{fontSize:15,fontWeight:800,color:"#1a1a28",marginBottom:6}}>Принять это предложение?</div>
+            <div style={{fontSize:12,color:"#8a8472",marginBottom:14}}>Менеджер получит уведомление, что вы согласны. Это не договор — он свяжется для оформления.</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setConfirming(false)} disabled={accepting} style={{flex:1,background:"#f1ede4",color:"#6b6452",border:"none",borderRadius:10,padding:"13px 12px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Отмена</button>
+              <button onClick={accept} disabled={accepting} style={{flex:2,background:"#b8904a",color:"#fff",border:"none",borderRadius:10,padding:"13px 12px",fontSize:14,fontWeight:800,cursor:accepting?"default":"pointer",fontFamily:"inherit"}}>{accepting?"Отправляем…":"✅ Да, принять"}</button>
+            </div>
+          </div>
         ) : (
           <>
-            <button onClick={accept} disabled={accepting} style={{background:"#b8904a",color:"#fff",border:"none",borderRadius:12,padding:"15px 30px",fontSize:16,fontWeight:800,cursor:accepting?"default":"pointer",fontFamily:"inherit",boxShadow:"0 6px 18px rgba(184,144,74,.35)",width:"100%",maxWidth:380}}>{accepting?"Отправляем…":"✅ Принять предложение"}</button>
-            <div style={{marginTop:10,fontSize:11.5,color:"#8a8472"}}>Нажимая «Принять», вы подтверждаете согласие с предложением. Это не договор — менеджер свяжется для оформления.</div>
+            <button onClick={()=>setConfirming(true)} style={{background:"#b8904a",color:"#fff",border:"none",borderRadius:12,padding:"15px 30px",fontSize:16,fontWeight:800,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 6px 18px rgba(184,144,74,.35)",width:"100%",maxWidth:380}}>✅ Принять предложение</button>
+            <div style={{marginTop:10,fontSize:11.5,color:"#8a8472"}}>Нажав «Принять», вы подтвердите согласие с предложением. Это не договор — менеджер свяжется для оформления.</div>
           </>
         )}
         <div style={{marginTop:18,fontSize:11.5,color:"#a39e8e"}}>TitovStroy · ремонт и отделка · WA +7 707 982 4915</div>
@@ -3243,10 +3261,11 @@ function MainApp({ currentUser, setCurrentUser }) {
   const [kpPublishing, setKpPublishing] = useState(false);
   const [kpMsg, setKpMsg] = useState("");
   const [kpStat, setKpStat] = useState("");        // статус: открыл/принял ли клиент
+  const [kpStale, setKpStale] = useState(false);   // смета изменена после публикации ссылки
   // При открытии модалки КП — подтянуть ссылку и статус, если КП уже публиковалось
   useEffect(() => {
     if (!showKP) return;
-    setKpLink(""); setKpStat(""); setKpMsg(""); // сброс от предыдущей сметы (ссылка/статус строго своей сметы)
+    setKpLink(""); setKpStat(""); setKpMsg(""); setKpStale(false); // сброс от предыдущей сметы (всё строго своей сметы)
     if (!currentId) return;
     let stop = false;
     (async () => {
@@ -3257,7 +3276,9 @@ function MainApp({ currentUser, setCurrentUser }) {
         if (d.publishedAt) {
           setKpLink(window.location.origin + window.location.pathname + "#/kp/" + currentId);
           setKpMsg("Ссылка активна");
-          setKpStat((d.viewCount?("👁 открыто "+d.viewCount+" раз"):"ещё не открыто клиентом")+(d.acceptedAt?(" · ✅ ПРИНЯТО "+new Date(d.acceptedAt).toLocaleDateString("ru-RU")):""));
+          setKpStat(kpStatusText(d));
+          // смета изменена после публикации? (сравниваем итог/позиции/скидку со снимком)
+          setKpStale(d.final !== final || (d.kpItems||[]).length !== kpItems.length || d.discount !== discount);
         }
       } catch {}
     })();
@@ -7358,12 +7379,12 @@ function MainApp({ currentUser, setCurrentUser }) {
         <>
           {/* Overlay + modal для экрана */}
           <div className="kp-no-print" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.78)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:16}}
-            onClick={()=>{ setShowKP(false); setKpLink(""); setKpStat(""); setKpMsg(""); }}>
+            onClick={()=>{ setShowKP(false); setKpLink(""); setKpStat(""); setKpMsg(""); setKpStale(false); }}>
             <div style={{background:"#ffffff",color:"#0f172a",borderRadius:8,padding:"24px 28px",maxWidth:700,width:"100%",maxHeight:"90vh",overflowY:"auto",fontFamily:"'Inter','Segoe UI',sans-serif"}}
               onClick={e=>e.stopPropagation()}>
               <KPContent proj={proj} kpItems={kpItems} fromItems={kpFromItems} discount={discount} discAmt={discAmt} final={final} note={note}/>
               <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:20,flexWrap:"wrap"}}>
-                <button style={{background:"#e2e8f0",color:"#94a3b8",border:"none",cursor:"pointer",padding:"10px 18px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:600}} onClick={()=>{ setShowKP(false); setKpLink(""); setKpMsg(""); setKpStat(""); }}>Закрыть</button>
+                <button style={{background:"#e2e8f0",color:"#94a3b8",border:"none",cursor:"pointer",padding:"10px 18px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:600}} onClick={()=>{ setShowKP(false); setKpLink(""); setKpMsg(""); setKpStat(""); setKpStale(false); }}>Закрыть</button>
                 <button disabled={kpPublishing||!currentId} title="Опубликовать КП и получить ссылку для клиента" style={{background:"#b8904a",color:"#fff",border:"none",cursor:(kpPublishing||!currentId)?"default":"pointer",opacity:!currentId?0.6:1,padding:"10px 18px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:700}} onClick={async ()=>{
                   if(!currentId){ setKpMsg("Сначала сохраните смету"); return; }
                   setKpPublishing(true); setKpMsg("");
@@ -7376,7 +7397,8 @@ function MainApp({ currentUser, setCurrentUser }) {
                     setKpLink(link);
                     try { await navigator.clipboard.writeText(link); } catch {}
                     setKpMsg(res && res.fbOk===false ? "⚠ Опубликовано локально (облако недоступно)" : "✓ Ссылка скопирована");
-                    if (prev.viewCount || prev.acceptedAt) setKpStat((prev.viewCount?("👁 открыто "+prev.viewCount+" раз"):"ещё не открыто клиентом")+(prev.acceptedAt?(" · ✅ ПРИНЯТО "+new Date(prev.acceptedAt).toLocaleDateString("ru-RU")):""));
+                    setKpStale(false);
+                    if (prev.viewCount || prev.acceptedAt) setKpStat(kpStatusText(prev));
                   } catch(e) { setKpMsg("Ошибка публикации — проверьте интернет"); }
                   setKpPublishing(false);
                 }}>{kpPublishing?"Публикуем…":"🔗 Ссылка клиенту"}</button>
@@ -7417,10 +7439,11 @@ function MainApp({ currentUser, setCurrentUser }) {
                     <a href={"https://wa.me/?text="+encodeURIComponent("Ценовое предложение от TitovStroy: "+kpLink)} target="_blank" rel="noopener" style={{background:"#25D366",color:"#fff",textDecoration:"none",padding:"9px 14px",borderRadius:6,fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>📲 WhatsApp</a>
                   </div>
                   <div style={{display:"flex",gap:8,alignItems:"center",marginTop:9,flexWrap:"wrap"}}>
-                    <button onClick={async ()=>{ setKpStat("проверяю…"); try { const r=await storage.getResult("titovstroy-kp-"+currentId); let d={}; try{ if(r.status==="found"&&r.value) d=JSON.parse(r.value); }catch{} setKpStat((d.viewCount?("👁 открыто "+d.viewCount+" раз"):"ещё не открыто клиентом")+(d.acceptedAt?(" · ✅ ПРИНЯТО "+new Date(d.acceptedAt).toLocaleDateString("ru-RU")):"")); } catch { setKpStat("не удалось проверить"); } }}
+                    <button onClick={async ()=>{ setKpStat("проверяю…"); try { const r=await storage.getResult("titovstroy-kp-"+currentId); let d={}; try{ if(r.status==="found"&&r.value) d=JSON.parse(r.value); }catch{} setKpStat(kpStatusText(d)); } catch { setKpStat("не удалось проверить"); } }}
                       style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:6,padding:"7px 12px",fontSize:11.5,fontWeight:600,color:"#475569",cursor:"pointer",fontFamily:"inherit"}}>🔄 Статус у клиента</button>
                     {kpStat && <span style={{fontSize:11.5,color:kpStat.includes("ПРИНЯТО")?"#059669":"#475569",fontWeight:kpStat.includes("ПРИНЯТО")?700:400}}>{kpStat}</span>}
                   </div>
+                  {kpStale && <div style={{marginTop:9,background:"#fffbeb",border:"1px solid #fde68a",borderRadius:6,padding:"8px 10px",fontSize:11.5,color:"#b45309",fontWeight:600}}>⚠ Смета изменена после публикации — клиент по ссылке видит старую версию. Нажмите «🔗 Ссылка клиенту», чтобы обновить.</div>}
                   <div style={{fontSize:10.5,color:"#94a3b8",marginTop:7}}>Клиент откроет КП по ссылке и сможет нажать «Принять». При правках сметы опубликуйте заново.</div>
                 </div>
               )}
