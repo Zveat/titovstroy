@@ -3245,7 +3245,9 @@ function MainApp({ currentUser, setCurrentUser }) {
   const [kpStat, setKpStat] = useState("");        // статус: открыл/принял ли клиент
   // При открытии модалки КП — подтянуть ссылку и статус, если КП уже публиковалось
   useEffect(() => {
-    if (!showKP || !currentId) return;
+    if (!showKP) return;
+    setKpLink(""); setKpStat(""); setKpMsg(""); // сброс от предыдущей сметы (ссылка/статус строго своей сметы)
+    if (!currentId) return;
     let stop = false;
     (async () => {
       try {
@@ -7356,7 +7358,7 @@ function MainApp({ currentUser, setCurrentUser }) {
         <>
           {/* Overlay + modal для экрана */}
           <div className="kp-no-print" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.78)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:16}}
-            onClick={()=>setShowKP(false)}>
+            onClick={()=>{ setShowKP(false); setKpLink(""); setKpStat(""); setKpMsg(""); }}>
             <div style={{background:"#ffffff",color:"#0f172a",borderRadius:8,padding:"24px 28px",maxWidth:700,width:"100%",maxHeight:"90vh",overflowY:"auto",fontFamily:"'Inter','Segoe UI',sans-serif"}}
               onClick={e=>e.stopPropagation()}>
               <KPContent proj={proj} kpItems={kpItems} fromItems={kpFromItems} discount={discount} discAmt={discAmt} final={final} note={note}/>
