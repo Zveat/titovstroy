@@ -280,7 +280,13 @@ const openOrPrintHtml = (html, revokeMs = 30000) => {
     setTimeout(()=>URL.revokeObjectURL(url), revokeMs);
     return;
   }
-  // PWA: печать через скрытый iframe
+  // PWA: печать через скрытый iframe.
+  // iOS/Safari в режиме приложения берёт имя PDF из заголовка ВЕРХНЕЙ страницы
+  // (а не из iframe), поэтому временно подменяем document.title — чтобы в имя
+  // файла попали клиент/адрес/телефон, как на ПК. После печати возвращаем обратно.
+  const _tm = html.match(/<title>([\s\S]*?)<\/title>/i);
+  const _wantTitle = _tm ? _tm[1].trim() : null;
+  const _prevTitle = document.title;
   const iframe = document.createElement("iframe");
   iframe.setAttribute("aria-hidden","true");
   iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none";
@@ -288,8 +294,10 @@ const openOrPrintHtml = (html, revokeMs = 30000) => {
   const doc = iframe.contentWindow.document;
   doc.open(); doc.write(html); doc.close();
   const triggerPrint = () => {
+    if (_wantTitle) document.title = _wantTitle;
     try { iframe.contentWindow.focus(); iframe.contentWindow.print(); }
     catch(e) { /* ignore */ }
+    setTimeout(()=>{ document.title = _prevTitle; }, 8000);
     setTimeout(()=>{ try{ document.body.removeChild(iframe);}catch(e){} }, 60000);
   };
   // Дать времени отрисоваться картинкам (печать/штамп) перед вызовом печати
@@ -501,6 +509,7 @@ const _TIMEOUT = Symbol("timeout");
 const _race = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(_TIMEOUT), ms))]);
 const _fbKey = (k) => k.replace(/[^a-zA-Z0-9_]/g, "_"); // Firebase: только буквы/цифры/_
 const _TS_SUFFIX = "__wts"; // timestamp последней локальной записи
+const _DIRTY_SUFFIX = "__dirty"; // флаг: последняя запись в облако НЕ прошла — локальная копия новее
 const storage = {
   // Расширенное чтение: { value, status: 'found'|'empty'|'unavailable' }
   // 'found' — данные есть; 'empty' — источник точно ответил, данных нет;
@@ -510,6 +519,15 @@ const storage = {
     try {
       const ts = parseInt(localStorage.getItem(key + _TS_SUFFIX) || "0");
       if (Date.now() - ts < 30000) {
+        const v = localStorage.getItem(key);
+        if (v) return { value: v, status: "found" };
+      }
+    } catch(e) {}
+    // Незасинхронизированные локальные правки: если последняя запись в облако
+    // упала — доверяем локальной копии, иначе старое облако перетрёт свежую
+    // правку при перезаходе (потеря только что сохранённой сметы/операции).
+    try {
+      if (localStorage.getItem(key + _DIRTY_SUFFIX)) {
         const v = localStorage.getItem(key);
         if (v) return { value: v, status: "found" };
       }
@@ -577,6 +595,13 @@ const storage = {
     } else {
       fbError = "firebase not configured";
     }
+    // Помечаем ключ «грязным», если в облако записать не удалось — тогда при
+    // следующей загрузке предпочтём локальную копию (см. getResult). При
+    // успешной записи флаг снимаем.
+    try {
+      if (fbOk) localStorage.removeItem(key + _DIRTY_SUFFIX);
+      else if (_fbDb) localStorage.setItem(key + _DIRTY_SUFFIX, Date.now().toString());
+    } catch(e) {}
     return { value, fbOk, fbError };
   },
 };
