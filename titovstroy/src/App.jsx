@@ -5819,7 +5819,7 @@ function MainApp({ currentUser, setCurrentUser }) {
         .page{max-width:960px;margin:0 auto;padding:32px 36px 80px}
         @media(min-width:900px){.main-grid{grid-template-columns:minmax(0,1fr) 295px!important}}
         @media(max-width:700px){
-          .editor-header{gap:6px!important;padding:8px 12px!important}
+          .editor-header{gap:6px!important;padding:8px 12px!important;top:env(safe-area-inset-top,0px)!important;flex-wrap:wrap!important;row-gap:6px!important}
           .editor-header-right .proj-name{display:none}
           .tab-btn{padding:5px 10px;font-size:12px}
           .sub-btn{padding:4px 8px;font-size:11px}
@@ -5855,10 +5855,10 @@ function MainApp({ currentUser, setCurrentUser }) {
         .sidebar-content.collapsed{margin-left:64px}
         @media(max-width:700px){
           .sidebar{display:none!important}
-          .sidebar-content{margin-left:0!important;padding-bottom:calc(68px + env(safe-area-inset-bottom,0px))!important}
+          .sidebar-content{margin-left:0!important;padding-top:env(safe-area-inset-top,0px)!important;padding-bottom:calc(68px + env(safe-area-inset-bottom,0px))!important}
           .mob-nav{display:flex!important}
           .page{padding:18px 14px 84px!important}
-          .list-header,.contracts-header{padding:10px 14px!important}
+          .list-header,.contracts-header{padding:10px 14px!important;top:env(safe-area-inset-top,0px)!important}
           .list-pad{padding:16px 14px 0!important}
           .contracts-pad{padding:16px 14px!important}
           .an-filters{padding:14px!important}
@@ -9325,10 +9325,12 @@ function MainApp({ currentUser, setCurrentUser }) {
               <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                 <input value={objectSearch} onChange={e=>setObjectSearch(e.target.value)} placeholder="🔍 Поиск по клиенту, телефону, адресу..."
                   style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:13,flex:1,minWidth:200,boxSizing:"border-box",outline:"none",fontFamily:"inherit"}}/>
-                <input type="date" value={objectDateFrom} onChange={e=>setObjectDateFrom(e.target.value)} title="Дата от"
-                  style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 10px",fontSize:12,outline:"none",fontFamily:"inherit",color:objectDateFrom?"#0f172a":"#94a3b8"}}/>
-                <input type="date" value={objectDateTo} onChange={e=>setObjectDateTo(e.target.value)} title="Дата до"
-                  style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 10px",fontSize:12,outline:"none",fontFamily:"inherit",color:objectDateTo?"#0f172a":"#94a3b8"}}/>
+                <label style={{display:"flex",alignItems:"center",gap:4,border:"1px solid #e2e8f0",borderRadius:8,padding:"0 6px 0 9px",fontSize:11,fontWeight:600,color:"#94a3b8",background:"#fff",whiteSpace:"nowrap",flexShrink:0,fontFamily:"inherit"}} title="Дата от">с
+                  <input type="date" value={objectDateFrom} onChange={e=>setObjectDateFrom(e.target.value)}
+                    style={{border:"none",padding:"8px 0",fontSize:12,outline:"none",fontFamily:"inherit",background:"transparent",color:objectDateFrom?"#0f172a":"#94a3b8"}}/></label>
+                <label style={{display:"flex",alignItems:"center",gap:4,border:"1px solid #e2e8f0",borderRadius:8,padding:"0 6px 0 9px",fontSize:11,fontWeight:600,color:"#94a3b8",background:"#fff",whiteSpace:"nowrap",flexShrink:0,fontFamily:"inherit"}} title="Дата до">по
+                  <input type="date" value={objectDateTo} onChange={e=>setObjectDateTo(e.target.value)}
+                    style={{border:"none",padding:"8px 0",fontSize:12,outline:"none",fontFamily:"inherit",background:"transparent",color:objectDateTo?"#0f172a":"#94a3b8"}}/></label>
                 {(objectDateFrom||objectDateTo) && <button onClick={()=>{setObjectDateFrom("");setObjectDateTo("");}} style={{background:"none",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 10px",fontSize:12,cursor:"pointer",color:"#94a3b8",fontFamily:"inherit"}}>✕ дата</button>}
                 <button onClick={()=>downloadCSV(
                   "objects_"+new Date().toISOString().slice(0,10)+".csv",
