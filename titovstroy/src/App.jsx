@@ -2971,6 +2971,80 @@ function BalanceSheet({ assetsSections, liabSections, capitalSection, totalAsset
 // Обёртка авторизации. MainApp монтируется ТОЛЬКО при наличии currentUser,
 // поэтому при входе/выходе он целиком монтируется/размонтируется и порядок
 // хуков внутри него всегда стабилен (иначе React падал в белый экран).
+// ─── ПУБЛИЧНАЯ СТРАНИЦА КП (по ссылке #/kp/<id>, без входа) ───────────────────
+const KP_NODE = (id) => "titovstroy-kp-" + id;
+function PublicKP({ id }) {
+  const [state, setState] = useState("loading"); // loading | notfound | ok
+  const [snap, setSnap] = useState(null);
+  const [accepted, setAccepted] = useState(false);
+  const [accepting, setAccepting] = useState(false);
+  useEffect(() => {
+    let stop = false;
+    (async () => {
+      try {
+        const r = await storage.getResult(KP_NODE(id));
+        if (stop) return;
+        if (r.status === "found" && r.value) {
+          let data = null; try { data = JSON.parse(r.value); } catch {}
+          if (data && Array.isArray(data.kpItems)) {
+            setSnap(data); setAccepted(!!data.acceptedAt); setState("ok");
+            // отметка просмотра — best-effort, остальные поля сохраняем
+            try { storage.set(KP_NODE(id), JSON.stringify({ ...data, viewedAt: Date.now(), viewCount: (data.viewCount || 0) + 1 })); } catch {}
+            return;
+          }
+        }
+        setState("notfound");
+      } catch { if (!stop) setState("notfound"); }
+    })();
+    return () => { stop = true; };
+  }, [id]);
+
+  const accept = async () => {
+    if (!snap || accepting || accepted) return;
+    setAccepting(true);
+    setAccepted(true); // оптимистично: localStorage пишется синхронно, ответа облака не ждём
+    try {
+      const r = await storage.getResult(KP_NODE(id));
+      let cur = snap; try { if (r.status === "found" && r.value) cur = JSON.parse(r.value); } catch {}
+      storage.set(KP_NODE(id), JSON.stringify({ ...cur, acceptedAt: Date.now() })); // в фоне, без await
+    } catch {}
+    setAccepting(false);
+  };
+
+  const wrap = (children) => (
+    <div style={{minHeight:"100vh",background:"#e9e4da",padding:"calc(16px + env(safe-area-inset-top,0px)) 12px 40px",boxSizing:"border-box",fontFamily:"'Golos Text','Segoe UI',sans-serif"}}>
+      <div style={{maxWidth:760,margin:"0 auto"}}>{children}</div>
+    </div>
+  );
+
+  if (state === "loading") return wrap(<div style={{textAlign:"center",padding:"90px 0",color:"#8a8472"}}>Загрузка предложения…</div>);
+  if (state === "notfound") return wrap(
+    <div style={{background:"#fff",borderRadius:14,padding:"44px 24px",textAlign:"center"}}>
+      <div style={{fontSize:42,marginBottom:10}}>🔍</div>
+      <div style={{fontWeight:800,fontSize:18,color:"#1a1a28",marginBottom:6}}>Предложение не найдено</div>
+      <div style={{fontSize:13,color:"#888"}}>Ссылка устарела или КП ещё не опубликовано.<br/>Свяжитесь с менеджером TitovStroy: WA +7 707 982 4915</div>
+    </div>
+  );
+  return wrap(
+    <>
+      <div style={{background:"#f5f2ec",borderRadius:14,padding:"22px 20px",boxShadow:"0 8px 30px rgba(26,26,40,.14)"}}>
+        <KPContent proj={snap.proj||{}} kpItems={snap.kpItems||[]} fromItems={snap.fromItems||[]} discount={snap.discount||0} discAmt={snap.discAmt||0} final={snap.final||0} note={snap.note||""}/>
+      </div>
+      <div style={{marginTop:16,textAlign:"center"}}>
+        {accepted ? (
+          <div style={{background:"#ecfdf5",border:"1px solid #a7f3d0",borderRadius:12,padding:"16px 18px",color:"#059669",fontWeight:700,fontSize:15}}>✅ Спасибо! Предложение принято — менеджер свяжется с вами.</div>
+        ) : (
+          <>
+            <button onClick={accept} disabled={accepting} style={{background:"#b8904a",color:"#fff",border:"none",borderRadius:12,padding:"15px 30px",fontSize:16,fontWeight:800,cursor:accepting?"default":"pointer",fontFamily:"inherit",boxShadow:"0 6px 18px rgba(184,144,74,.35)",width:"100%",maxWidth:380}}>{accepting?"Отправляем…":"✅ Принять предложение"}</button>
+            <div style={{marginTop:10,fontSize:11.5,color:"#8a8472"}}>Нажимая «Принять», вы подтверждаете согласие с предложением. Это не договор — менеджер свяжется для оформления.</div>
+          </>
+        )}
+        <div style={{marginTop:18,fontSize:11.5,color:"#a39e8e"}}>TitovStroy · ремонт и отделка · WA +7 707 982 4915</div>
+      </div>
+    </>
+  );
+}
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     try {
@@ -2989,6 +3063,9 @@ export default function App() {
     if (!currentUser?.id) return;
     try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: currentUser, savedAt: Date.now() })); } catch(e) {}
   }, [currentUser?.id]);
+  // Публичная страница КП по ссылке #/kp/<id> — открывается без входа
+  const _kpId = (() => { const m = (typeof window !== "undefined" ? (window.location.hash || "") : "").match(/^#\/kp\/(.+)$/); return m ? decodeURIComponent(m[1]) : null; })();
+  if (_kpId) return <PublicKP id={_kpId} />;
   if (!currentUser) return <LoginScreen onLogin={setCurrentUser} />;
   return <MainApp key={currentUser.id} currentUser={currentUser} setCurrentUser={setCurrentUser} />;
 }
@@ -3141,6 +3218,10 @@ function MainApp({ currentUser, setCurrentUser }) {
   const [markup, setMarkup] = useState(0); // внутреннее повышение цены — клиенту не показывается
   const [note, setNote] = useState("");
   const [showKP, setShowKP] = useState(false);
+  const [kpLink, setKpLink] = useState("");        // онлайн-КП: ссылка для клиента
+  const [kpPublishing, setKpPublishing] = useState(false);
+  const [kpMsg, setKpMsg] = useState("");
+  const [kpStat, setKpStat] = useState("");        // статус: открыл/принял ли клиент
   const [editPrices, setEditPrices] = useState(false);
   const [editingPriceRow, setEditingPriceRow] = useState(null);
   const [showFinancial, setShowFinancial] = useState(true);
@@ -7240,8 +7321,21 @@ function MainApp({ currentUser, setCurrentUser }) {
             <div style={{background:"#ffffff",color:"#0f172a",borderRadius:8,padding:"24px 28px",maxWidth:700,width:"100%",maxHeight:"90vh",overflowY:"auto",fontFamily:"'Inter','Segoe UI',sans-serif"}}
               onClick={e=>e.stopPropagation()}>
               <KPContent proj={proj} kpItems={kpItems} fromItems={kpFromItems} discount={discount} discAmt={discAmt} final={final} note={note}/>
-              <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:20}}>
-                <button style={{background:"#e2e8f0",color:"#94a3b8",border:"none",cursor:"pointer",padding:"10px 18px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:600}} onClick={()=>setShowKP(false)}>Закрыть</button>
+              <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:20,flexWrap:"wrap"}}>
+                <button style={{background:"#e2e8f0",color:"#94a3b8",border:"none",cursor:"pointer",padding:"10px 18px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:600}} onClick={()=>{ setShowKP(false); setKpLink(""); setKpMsg(""); setKpStat(""); }}>Закрыть</button>
+                <button disabled={kpPublishing||!currentId} title="Опубликовать КП и получить ссылку для клиента" style={{background:"#b8904a",color:"#fff",border:"none",cursor:(kpPublishing||!currentId)?"default":"pointer",opacity:!currentId?0.6:1,padding:"10px 18px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:700}} onClick={async ()=>{
+                  if(!currentId){ setKpMsg("Сначала сохраните смету"); return; }
+                  setKpPublishing(true); setKpMsg("");
+                  try {
+                    const snap = { proj, kpItems, fromItems:kpFromItems, discount, discAmt, final, note, publishedAt:Date.now() };
+                    const res = await storage.set("titovstroy-kp-"+currentId, JSON.stringify(snap));
+                    const link = window.location.origin + window.location.pathname + "#/kp/" + currentId;
+                    setKpLink(link);
+                    try { await navigator.clipboard.writeText(link); } catch {}
+                    setKpMsg(res && res.fbOk===false ? "⚠ Опубликовано локально (облако недоступно)" : "✓ Ссылка скопирована");
+                  } catch(e) { setKpMsg("Ошибка публикации — проверьте интернет"); }
+                  setKpPublishing(false);
+                }}>{kpPublishing?"Публикуем…":"🔗 Ссылка клиенту"}</button>
                 <button style={{background:"#2563eb",color:"#f3f4f6",border:"none",cursor:"pointer",padding:"10px 20px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:700}} onClick={async ()=>{
                 const el = document.getElementById("kp-print-portal");
                 // Конвертируем /stamp.jpg в base64 чтобы работало в blob-окне
@@ -7271,6 +7365,21 @@ function MainApp({ currentUser, setCurrentUser }) {
                 openOrPrintHtml(html, 30000);
               }}>Печать / PDF</button>
               </div>
+              {kpLink && (
+                <div style={{marginTop:14,background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"12px 14px"}}>
+                  <div style={{fontSize:12,color:"#059669",fontWeight:700,marginBottom:7}}>{kpMsg||"Ссылка готова"} — отправьте клиенту:</div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                    <input readOnly value={kpLink} onFocus={e=>e.target.select()} style={{flex:1,minWidth:160,border:"1px solid #cbd5e1",borderRadius:6,padding:"8px 10px",fontSize:12,fontFamily:"inherit",color:"#0f172a",background:"#fff"}}/>
+                    <a href={"https://wa.me/?text="+encodeURIComponent("Ценовое предложение от TitovStroy: "+kpLink)} target="_blank" rel="noopener" style={{background:"#25D366",color:"#fff",textDecoration:"none",padding:"9px 14px",borderRadius:6,fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>📲 WhatsApp</a>
+                  </div>
+                  <div style={{display:"flex",gap:8,alignItems:"center",marginTop:9,flexWrap:"wrap"}}>
+                    <button onClick={async ()=>{ setKpStat("проверяю…"); try { const r=await storage.getResult("titovstroy-kp-"+currentId); let d={}; try{ if(r.status==="found"&&r.value) d=JSON.parse(r.value); }catch{} setKpStat((d.viewCount?("👁 открыто "+d.viewCount+" раз"):"ещё не открыто клиентом")+(d.acceptedAt?(" · ✅ ПРИНЯТО "+new Date(d.acceptedAt).toLocaleDateString("ru-RU")):"")); } catch { setKpStat("не удалось проверить"); } }}
+                      style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:6,padding:"7px 12px",fontSize:11.5,fontWeight:600,color:"#475569",cursor:"pointer",fontFamily:"inherit"}}>🔄 Статус у клиента</button>
+                    {kpStat && <span style={{fontSize:11.5,color:kpStat.includes("ПРИНЯТО")?"#059669":"#475569",fontWeight:kpStat.includes("ПРИНЯТО")?700:400}}>{kpStat}</span>}
+                  </div>
+                  <div style={{fontSize:10.5,color:"#94a3b8",marginTop:7}}>Клиент откроет КП по ссылке и сможет нажать «Принять». При правках сметы опубликуйте заново.</div>
+                </div>
+              )}
             </div>
           </div>
           {/* Портал для печати — точная копия, отображается только при print */}
