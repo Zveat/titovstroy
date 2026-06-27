@@ -2978,6 +2978,23 @@ function PublicKP({ id }) {
   const [snap, setSnap] = useState(null);
   const [accepted, setAccepted] = useState(false);
   const [accepting, setAccepting] = useState(false);
+  // Адаптив: КП свёрстано под «бумажную» ширину; на узком экране вписываем масштабом
+  const outerRef = useRef(null), innerRef = useRef(null);
+  const [fit, setFit] = useState({ scale: 1, h: 0 });
+  const DESIGN_W = 680; // ширина, при которой таблицы КП не обрезаются
+  useEffect(() => {
+    if (state !== "ok" || !innerRef.current || !outerRef.current) return;
+    const calc = () => {
+      const ow = outerRef.current ? outerRef.current.clientWidth : 0;
+      if (!ow || !innerRef.current) return;
+      const s = Math.min(1, ow / DESIGN_W);
+      setFit({ scale: s, h: Math.ceil(innerRef.current.scrollHeight * s) });
+    };
+    calc();
+    let ro; try { ro = new ResizeObserver(calc); ro.observe(innerRef.current); } catch {}
+    window.addEventListener("resize", calc);
+    return () => { try { ro && ro.disconnect(); } catch {} window.removeEventListener("resize", calc); };
+  }, [state, snap]);
   useEffect(() => {
     let stop = false;
     (async () => {
@@ -3027,8 +3044,12 @@ function PublicKP({ id }) {
   );
   return wrap(
     <>
-      <div style={{background:"#f5f2ec",borderRadius:14,padding:"22px 20px",boxShadow:"0 8px 30px rgba(26,26,40,.14)"}}>
-        <KPContent proj={snap.proj||{}} kpItems={snap.kpItems||[]} fromItems={snap.fromItems||[]} discount={snap.discount||0} discAmt={snap.discAmt||0} final={snap.final||0} note={snap.note||""}/>
+      <div ref={outerRef} style={{width:"100%",overflow:"hidden",height:fit.h||undefined}}>
+        <div ref={innerRef} style={{width:DESIGN_W,transform:`scale(${fit.scale})`,transformOrigin:"top left"}}>
+          <div style={{background:"#f5f2ec",borderRadius:14,padding:"22px 20px",boxShadow:"0 8px 30px rgba(26,26,40,.14)"}}>
+            <KPContent proj={snap.proj||{}} kpItems={snap.kpItems||[]} fromItems={snap.fromItems||[]} discount={snap.discount||0} discAmt={snap.discAmt||0} final={snap.final||0} note={snap.note||""}/>
+          </div>
+        </div>
       </div>
       <div style={{marginTop:16,textAlign:"center"}}>
         {accepted ? (
@@ -3222,6 +3243,24 @@ function MainApp({ currentUser, setCurrentUser }) {
   const [kpPublishing, setKpPublishing] = useState(false);
   const [kpMsg, setKpMsg] = useState("");
   const [kpStat, setKpStat] = useState("");        // статус: открыл/принял ли клиент
+  // При открытии модалки КП — подтянуть ссылку и статус, если КП уже публиковалось
+  useEffect(() => {
+    if (!showKP || !currentId) return;
+    let stop = false;
+    (async () => {
+      try {
+        const r = await storage.getResult("titovstroy-kp-"+currentId);
+        if (stop || !(r.status==="found" && r.value)) return;
+        let d = {}; try { d = JSON.parse(r.value); } catch {}
+        if (d.publishedAt) {
+          setKpLink(window.location.origin + window.location.pathname + "#/kp/" + currentId);
+          setKpMsg("Ссылка активна");
+          setKpStat((d.viewCount?("👁 открыто "+d.viewCount+" раз"):"ещё не открыто клиентом")+(d.acceptedAt?(" · ✅ ПРИНЯТО "+new Date(d.acceptedAt).toLocaleDateString("ru-RU")):""));
+        }
+      } catch {}
+    })();
+    return () => { stop = true; };
+  }, [showKP, currentId]);
   const [editPrices, setEditPrices] = useState(false);
   const [editingPriceRow, setEditingPriceRow] = useState(null);
   const [showFinancial, setShowFinancial] = useState(true);
@@ -7327,12 +7366,15 @@ function MainApp({ currentUser, setCurrentUser }) {
                   if(!currentId){ setKpMsg("Сначала сохраните смету"); return; }
                   setKpPublishing(true); setKpMsg("");
                   try {
-                    const snap = { proj, kpItems, fromItems:kpFromItems, discount, discAmt, final, note, publishedAt:Date.now() };
+                    // сохраняем отметки клиента (просмотры/принятие) при переотправке
+                    let prev = {}; try { const pr = await storage.getResult("titovstroy-kp-"+currentId); if (pr.status==="found" && pr.value) prev = JSON.parse(pr.value); } catch {}
+                    const snap = { proj, kpItems, fromItems:kpFromItems, discount, discAmt, final, note, publishedAt:Date.now(), viewedAt:prev.viewedAt, viewCount:prev.viewCount, acceptedAt:prev.acceptedAt };
                     const res = await storage.set("titovstroy-kp-"+currentId, JSON.stringify(snap));
                     const link = window.location.origin + window.location.pathname + "#/kp/" + currentId;
                     setKpLink(link);
                     try { await navigator.clipboard.writeText(link); } catch {}
                     setKpMsg(res && res.fbOk===false ? "⚠ Опубликовано локально (облако недоступно)" : "✓ Ссылка скопирована");
+                    if (prev.viewCount || prev.acceptedAt) setKpStat((prev.viewCount?("👁 открыто "+prev.viewCount+" раз"):"ещё не открыто клиентом")+(prev.acceptedAt?(" · ✅ ПРИНЯТО "+new Date(prev.acceptedAt).toLocaleDateString("ru-RU")):""));
                   } catch(e) { setKpMsg("Ошибка публикации — проверьте интернет"); }
                   setKpPublishing(false);
                 }}>{kpPublishing?"Публикуем…":"🔗 Ссылка клиенту"}</button>
