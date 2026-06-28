@@ -3667,10 +3667,9 @@ function MainApp({ currentUser, setCurrentUser }) {
     const objEsts = estimates.filter(e => e.objectId === objectId);
     if (!objEsts.length) return [];
     const catalog = getEffectiveCatalog();
-    // Группируем ТОЛЬКО по Заголовку сметы (категории): Черновые, Чистовые и т.д.
-    // Подзаголовки (подкатегории) не выделяем — внутри каждого заголовка просто
-    // список наименований работ. Сохраняем порядок появления.
-    const map = {}; // "cat" -> { cat, priceClient, costPlan, works }
+    // Одна строка = одно НАИМЕНОВАНИЕ работы. Заголовок (cat: Черновые/Чистовые) —
+    // это блок для группировки. Одинаковые работы (cat+name) суммируем по qty/сумме.
+    const map = {}; // "cat|name" -> { cat, name, unit, qty, priceClient, costPlan }
     const order = [];
     for (const est of objEsts) {
       const mk = 1 + (Number(est.markup) || 0) / 100;
@@ -3685,14 +3684,16 @@ function MainApp({ currentUser, setCurrentUser }) {
         const priceClient = (Number(raw) || 0) * mk * disc * qty;
         const costPlan = rowCostPerUnit(r, w) * qty;
         const cat = w.cat || "Прочее";
-        if (!map[cat]) { map[cat] = { cat, priceClient: 0, costPlan: 0, works: [] }; order.push(cat); }
-        map[cat].priceClient += priceClient;
-        map[cat].costPlan += costPlan;
-        map[cat].works.push({ name: w.name || "", unit: w.unit || "", qty, priceClient: Math.round(priceClient), costPlan: Math.round(costPlan) });
+        const name = w.name || "";
+        const k = (cat + "|" + name).toLowerCase();
+        if (!map[k]) { map[k] = { cat, name, unit: w.unit || "", qty: 0, priceClient: 0, costPlan: 0 }; order.push(k); }
+        map[k].qty += qty;
+        map[k].priceClient += priceClient;
+        map[k].costPlan += costPlan;
       }
     }
-    // Каждый «этап» = Заголовок сметы + список наименований работ (works) внутри
-    return order.map(cat => ({ cat: map[cat].cat, name: map[cat].cat, priceClient: Math.round(map[cat].priceClient), costPlan: Math.round(map[cat].costPlan), works: map[cat].works }));
+    // Каждая строка = конкретная работа (наименование), cat = блок-заголовок
+    return order.map(k => ({ cat: map[k].cat, name: map[k].name, unit: map[k].unit, qty: Math.round(map[k].qty * 100) / 100, priceClient: Math.round(map[k].priceClient), costPlan: Math.round(map[k].costPlan) }));
   }, [estimates]);
 
   // ── ФИНАНСЫ: загрузка/сохранение ──
