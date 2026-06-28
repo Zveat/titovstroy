@@ -109,7 +109,10 @@ export default function ProductionModule({
       const cf = sts.reduce((s, x) => s + num(x.costFact), 0);
       const mPlan = pc ? Math.round((pc - cp) / pc * 100) : null;
       const mFact = (pc && cf) ? Math.round((pc - cf) / pc * 100) : null;
-      const debt = Math.max(0, pc - num(p?.clientPaid));
+      const received = (p?.clientPayments && p.clientPayments.length)
+        ? p.clientPayments.reduce((s, x) => s + num(x.amount), 0)
+        : num(p?.clientPaid);
+      const debt = Math.max(0, pc - received);
       const doneStages = sts.filter(s => s.status === "done").length;
       const prog = sts.length ? Math.round(doneStages / sts.length * 100) : launchProgress(p);
       const defectsOpen = (p?.defects || []).filter(d => !d.done).length;
@@ -473,6 +476,9 @@ function StagesTab({ prod, patch, genId, buildStagesFromEstimate, objId }) {
     : ((estStages.find(f => ((f.cat || "") + "|" + (f.name || "")).toLowerCase() === ((s.cat || "") + "|" + (s.name || "")).toLowerCase())?.works) || []);
   const daysIncl = (a, b) => (a && b) ? Math.max(0, Math.round((_dayStart(b) - _dayStart(a)) / 864e5)) + 1 : null;
   const inWorkDays = (s) => s.factStart ? Math.max(0, Math.round((_dayStart(s.factEnd || new Date()) - _dayStart(s.factStart)) / 864e5)) + 1 : null;
+  const thS = { padding: "6px 8px", fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: ".03em", whiteSpace: "nowrap", textAlign: "left" };
+  const tdS = { padding: "5px 8px", verticalAlign: "top" };
+  const dInp = { width: "100%", minWidth: 118, border: "1px solid #e2e8f0", borderRadius: 6, padding: "4px 6px", fontSize: 11.5, fontFamily: "inherit", outline: "none", boxSizing: "border-box", color: "#0f172a" };
 
   const grouped = groupByCat(stages);
 
@@ -495,59 +501,75 @@ function StagesTab({ prod, patch, genId, buildStagesFromEstimate, objId }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Этапы работ ({stages.length})</div>
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, overflowX: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Этапы и сроки ({stages.length})</div>
           <button onClick={syncFromEstimate} style={{ background: "#f0f9ff", color: "#0369a1", border: "1px solid #bae6fd", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>↻ Обновить из сметы</button>
         </div>
-        {stages.length === 0 && <div style={{ textAlign: "center", color: "#94a3b8", padding: "20px 0", fontSize: 13 }}>Этапы подтянутся из сметы автоматически. Можно добавить и вручную ниже.</div>}
-
-        {grouped.map(([cat, list]) => (
-          <div key={cat} style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 8 }}>{cat}</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {list.map(s => {
-                const st = stByKey(s.status);
-                return (
-                  <div key={s.id} style={{ border: "1px solid #f1f5f9", borderRadius: 10, padding: 12, borderLeft: `4px solid ${st.color}` }}>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
-                      <input value={s.name} onChange={e => upd(s.id, { name: e.target.value })} placeholder="Этап (подкатегория)"
-                        style={{ flex: "1 1 200px", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", outline: "none" }} />
-                      <select value={s.status} onChange={e => upd(s.id, { status: e.target.value })}
-                        style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px", fontSize: 12, fontFamily: "inherit", color: st.color, background: st.bg, fontWeight: 700, cursor: "pointer" }}>
-                        {STAGE_STATUSES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
-                      </select>
-                      {inWorkDays(s) != null && <span style={{ fontSize: 11, fontWeight: 700, color: "#2563eb", background: "#eff6ff", borderRadius: 6, padding: "4px 8px", whiteSpace: "nowrap" }}>🔨 {inWorkDays(s)} дн в работе</span>}
-                      <button onClick={() => del(s.id)} style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 15 }}>✕</button>
-                    </div>
-                    {(() => { const ws = worksFor(s).filter(w => w.name); return ws.length > 0 && (
-                      <div style={{ marginBottom: 10, paddingLeft: 2 }}>
-                        {ws.map((w, i) => <div key={i} style={{ fontSize: 11.5, color: "#64748b", lineHeight: 1.7 }}>• {w.name}</div>)}
-                      </div>
-                    ); })()}
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(125px,1fr))", gap: 8 }}>
-                      <DateF label="План старт" v={s.planStart} on={v => upd(s.id, { planStart: v })} />
-                      <DateF label="План конец" v={s.planEnd} on={v => upd(s.id, { planEnd: v })} />
-                      <DateF label="Факт старт" v={s.factStart} on={v => upd(s.id, { factStart: v })} />
-                      <DateF label="Факт конец" v={s.factEnd} on={v => upd(s.id, { factEnd: v })} />
-                      <div>
-                        <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Ответственный</div>
-                        <input value={s.responsible || ""} onChange={e => upd(s.id, { responsible: e.target.value })}
-                          style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 8px", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
-                      </div>
-                    </div>
-                    {daysIncl(s.planStart, s.planEnd) != null && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>Плановая длительность: {daysIncl(s.planStart, s.planEnd)} дн</div>}
-                    <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="Примечание к этапу…"
-                      style={{ width: "100%", border: "1px solid #f1f5f9", borderRadius: 6, padding: "6px 9px", fontSize: 12, fontFamily: "inherit", outline: "none", marginTop: 8, boxSizing: "border-box" }} />
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-
+        {stages.length === 0 ? (
+          <div style={{ textAlign: "center", color: "#94a3b8", padding: "20px 0", fontSize: 13 }}>Нажмите «Обновить из сметы» или добавьте этап вручную ниже.</div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720, fontSize: 12.5 }}>
+            <thead>
+              <tr>
+                <th style={{ ...thS, minWidth: 170 }}>Этап / работы</th>
+                <th style={thS}>Статус</th>
+                <th style={thS}>План (старт / конец)</th>
+                <th style={thS}>Факт (старт / конец)</th>
+                <th style={thS}>Дней</th>
+                <th style={thS}>Ответств.</th>
+                <th style={thS}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {grouped.map(([cat, list]) => (
+                <Fragment key={cat}>
+                  <tr><td colSpan={7} style={{ padding: "9px 8px 3px", fontSize: 11, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em" }}>{cat}</td></tr>
+                  {list.map(s => {
+                    const st = stByKey(s.status);
+                    const ws = worksFor(s).filter(w => w.name);
+                    const iw = inWorkDays(s), pd = daysIncl(s.planStart, s.planEnd);
+                    return (
+                      <tr key={s.id} style={{ borderTop: "1px solid #f1f5f9" }}>
+                        <td style={{ ...tdS, minWidth: 170, borderLeft: `3px solid ${st.color}` }}>
+                          <input value={s.name} onChange={e => upd(s.id, { name: e.target.value })} placeholder="Этап (подкатегория)" style={{ width: "100%", border: "none", fontSize: 12.5, fontWeight: 600, color: "#0f172a", fontFamily: "inherit", outline: "none", background: "transparent", padding: 0 }} />
+                          {ws.length > 0 && <div style={{ fontSize: 10.5, color: "#94a3b8", lineHeight: 1.4, marginTop: 1 }}>{ws.map(w => w.name).join(", ")}</div>}
+                          <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="+ примечание" style={{ width: "100%", maxWidth: 220, border: "none", borderBottom: "1px dashed #e2e8f0", fontSize: 11, color: "#64748b", fontFamily: "inherit", outline: "none", marginTop: 3, padding: "1px 0", background: "transparent" }} />
+                        </td>
+                        <td style={tdS}>
+                          <select value={s.status} onChange={e => upd(s.id, { status: e.target.value })} style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 6px", fontSize: 11.5, fontFamily: "inherit", color: st.color, background: st.bg, fontWeight: 700, cursor: "pointer", maxWidth: 116 }}>
+                            {STAGE_STATUSES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                          </select>
+                        </td>
+                        <td style={tdS}>
+                          <input type="date" value={s.planStart || ""} onChange={e => upd(s.id, { planStart: e.target.value })} style={dInp} />
+                          <input type="date" value={s.planEnd || ""} onChange={e => upd(s.id, { planEnd: e.target.value })} style={{ ...dInp, marginTop: 3 }} />
+                        </td>
+                        <td style={tdS}>
+                          <input type="date" value={s.factStart || ""} onChange={e => upd(s.id, { factStart: e.target.value })} style={dInp} />
+                          <input type="date" value={s.factEnd || ""} onChange={e => upd(s.id, { factEnd: e.target.value })} style={{ ...dInp, marginTop: 3 }} />
+                        </td>
+                        <td style={{ ...tdS, whiteSpace: "nowrap", fontSize: 11.5 }}>
+                          {iw != null && <div style={{ color: "#2563eb", fontWeight: 700 }}>🔨 {iw}</div>}
+                          {pd != null && <div style={{ color: "#94a3b8" }}>план {pd}</div>}
+                          {iw == null && pd == null && <span style={{ color: "#cbd5e1" }}>—</span>}
+                        </td>
+                        <td style={tdS}>
+                          <input value={s.responsible || ""} onChange={e => upd(s.id, { responsible: e.target.value })} placeholder="—" style={{ width: "100%", minWidth: 80, border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 7px", fontSize: 11.5, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                        </td>
+                        <td style={{ ...tdS, textAlign: "center" }}>
+                          <button onClick={() => del(s.id)} style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 15 }}>✕</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        )}
         {/* Ручное добавление */}
-        <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", borderTop: "1px solid #f1f5f9", paddingTop: 14 }}>
+        <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", borderTop: "1px solid #f1f5f9", paddingTop: 12 }}>
           <input value={newCat} onChange={e => setNewCat(e.target.value)} placeholder="Категория (необяз.)"
             style={{ flex: "1 1 140px", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
           <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === "Enter" && addManual()} placeholder="Название этапа"
@@ -744,6 +766,14 @@ function MoneyInput({ value, onChange, big }) {
   );
 }
 
+// Компактное денежное поле для таблиц: «115 957» с пробелами, ввод только цифр
+function NumCell({ value, onChange, ph = "—" }) {
+  const txt = (value === undefined || value === null || value === "") ? "" : new Intl.NumberFormat("ru-RU").format(value);
+  return <input type="text" inputMode="numeric" value={txt} placeholder={ph}
+    onChange={e => { const d = e.target.value.replace(/[^\d]/g, ""); onChange(d === "" ? undefined : Number(d)); }}
+    style={{ width: "100%", minWidth: 64, border: "1px solid #e2e8f0", borderRadius: 5, padding: "5px 6px", fontSize: 12.5, textAlign: "right", fontFamily: "inherit", outline: "none", boxSizing: "border-box", color: "#0f172a" }} />;
+}
+
 function FinanceTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) {
   const stages = prod.stages || [];
   const upd = (id, p) => patch({ stages: stages.map(s => s.id === id ? { ...s, ...p } : s) });
@@ -765,83 +795,101 @@ function FinanceTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId })
   const worksFor = (s) => (Array.isArray(s.works) && s.works.length) ? s.works
     : ((estStages.find(f => ((f.cat || "") + "|" + (f.name || "")).toLowerCase() === ((s.cat || "") + "|" + (s.name || "")).toLowerCase())?.works) || []);
   const num = (v) => Number(v) || 0;
-  const tot = stages.reduce((a, s) => { a.priceClient += num(s.priceClient); a.costPlan += num(s.costPlan); a.costFact += num(s.costFact); a.paid += s.paid ? num(s.priceClient) : 0; return a; }, { priceClient: 0, costPlan: 0, costFact: 0, paid: 0 });
-  const profitPlan = tot.priceClient - tot.costPlan;
-  const profitFact = tot.priceClient - tot.costFact;
-  const clientPaid = num(prod.clientPaid);
-  const debt = tot.priceClient - clientPaid;
+  const tot = stages.reduce((a, s) => { a.priceClient += num(s.priceClient); a.costPlan += num(s.costPlan); a.costFact += num(s.costFact); return a; }, { priceClient: 0, costPlan: 0, costFact: 0 });
+  // Платежи клиента — удобный список (аванс, этапные платежи) вместо одного поля
+  const payments = (prod.clientPayments && prod.clientPayments.length) ? prod.clientPayments
+    : (num(prod.clientPaid) > 0 ? [{ id: "legacy", date: "", amount: num(prod.clientPaid), note: "" }] : []);
+  const received = payments.reduce((s, p) => s + num(p.amount), 0);
+  const debt = tot.priceClient - received;
+  const savePay = (arr) => patch({ clientPayments: arr, clientPaid: undefined });
   const grouped = groupByCat(stages);
-  const moneyInp = { width: "100%", border: "1px solid #e2e8f0", borderRadius: 6, padding: "6px 8px", fontSize: 12, textAlign: "right", fontFamily: "inherit", outline: "none", boxSizing: "border-box" };
   const mColor = (p) => p >= 30 ? "#059669" : p >= 0 ? "#d97706" : "#dc2626";
+  const mPlanTot = tot.priceClient ? Math.round((tot.priceClient - tot.costPlan) / tot.priceClient * 100) : 0;
+  const mFactTot = (tot.priceClient && tot.costFact) ? Math.round((tot.priceClient - tot.costFact) / tot.priceClient * 100) : null;
+  const th = { padding: "6px 8px", fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: ".03em", whiteSpace: "nowrap" };
+  const tdc = { padding: "4px 6px", verticalAlign: "top" };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* Сводка по объекту */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12 }}>
-        <Stat label="Цена клиенту" value={`${fmt(tot.priceClient)} ₸`} />
-        <Stat label="Себестоимость план" value={`${fmt(tot.costPlan)} ₸`} />
-        <Stat label="Себестоимость факт" value={`${fmt(tot.costFact)} ₸`} />
-        <MarginStat label="Маржа план" pct={tot.priceClient ? profitPlan / tot.priceClient : 0} amt={profitPlan} fmt={fmt} />
-        <MarginStat label="Маржа факт" pct={tot.priceClient ? profitFact / tot.priceClient : 0} amt={profitFact} fmt={fmt} />
-      </div>
-
-      {/* Деньги клиента / дебиторка */}
-      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 16 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 12 }}>💵 Деньги клиента</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, alignItems: "end" }}>
-          <div><div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>К оплате (по работам)</div><div style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>{fmt(tot.priceClient)} ₸</div></div>
-          <div><div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Получено от клиента</div><MoneyInput value={prod.clientPaid} onChange={v => patch({ clientPaid: v })} big /></div>
-          <div><div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Дебиторка (остаток)</div><div style={{ fontSize: 18, fontWeight: 800, color: debt > 0 ? "#dc2626" : "#059669" }}>{fmt(Math.max(0, debt))} ₸</div></div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Деньги клиента + платежи */}
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 22px", marginBottom: 12 }}>
+          <span style={{ fontSize: 12, color: "#64748b" }}>К оплате: <b style={{ fontSize: 14, color: "#0f172a" }}>{fmt(tot.priceClient)} ₸</b></span>
+          <span style={{ fontSize: 12, color: "#64748b" }}>Получено: <b style={{ fontSize: 14, color: "#059669" }}>{fmt(received)} ₸</b></span>
+          <span style={{ fontSize: 12, color: "#64748b" }}>Дебиторка: <b style={{ fontSize: 14, color: debt > 0 ? "#dc2626" : "#059669" }}>{fmt(Math.max(0, debt))} ₸</b>{debt < 0 ? ` (переплата ${fmt(-debt)} ₸)` : ""}</span>
         </div>
-        <div style={{ marginTop: 10, fontSize: 11.5, color: "#94a3b8" }}>Этапов оплачено: {fmt(tot.paid)} ₸ из {fmt(tot.priceClient)} ₸{debt < 0 ? " · переплата " + fmt(-debt) + " ₸" : ""}</div>
+        <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6, fontWeight: 600 }}>Платежи от клиента</div>
+        {payments.length === 0 && <div style={{ fontSize: 12, color: "#cbd5e1", marginBottom: 6 }}>Платежей пока нет</div>}
+        {payments.map(p => (
+          <div key={p.id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
+            <input type="date" value={p.date || ""} onChange={e => savePay(payments.map(x => x.id === p.id ? { ...x, date: e.target.value } : x))} style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 7px", fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+            <div style={{ width: 130 }}><NumCell value={p.amount} onChange={v => savePay(payments.map(x => x.id === p.id ? { ...x, amount: v } : x))} ph="сумма" /></div>
+            <input value={p.note || ""} onChange={e => savePay(payments.map(x => x.id === p.id ? { ...x, note: e.target.value } : x))} placeholder="комментарий (аванс / этап…)" style={{ flex: "1 1 120px", minWidth: 100, border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 8px", fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+            <button onClick={() => savePay(payments.filter(x => x.id !== p.id))} style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 14 }}>✕</button>
+          </div>
+        ))}
+        <button onClick={() => savePay([...payments, { id: genId(), date: new Date().toISOString().slice(0, 10), amount: undefined, note: "" }])} style={{ marginTop: 4, background: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe", borderRadius: 7, padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ Платёж от клиента</button>
       </div>
 
-      {/* Финансы по этапам: Заголовок (категория) → Подзаголовок (этап) → наименования */}
-      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+      {/* Компактная таблица финансов по этапам */}
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, overflowX: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Финансы по этапам</div>
           <button onClick={syncFromEstimate} style={{ background: "#f0f9ff", color: "#0369a1", border: "1px solid #bae6fd", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>↻ Обновить из сметы</button>
         </div>
         {stages.length === 0 ? (
-          <div style={{ textAlign: "center", color: "#94a3b8", padding: "30px 0", fontSize: 13 }}>Нажмите «Обновить из сметы» — этапы и суммы подтянутся.</div>
-        ) : grouped.map(([cat, list]) => (
-          <div key={cat} style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 8 }}>{cat}</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {list.map(s => {
-                const pc = num(s.priceClient), cf = num(s.costFact);
-                const ppl = pc - num(s.costPlan), pft = pc - cf;
-                const mpl = pc ? Math.round(ppl / pc * 100) : 0, mft = pc ? Math.round(pft / pc * 100) : 0;
-                return (
-                  <div key={s.id} style={{ border: "1px solid #f1f5f9", borderRadius: 10, padding: 12, background: s.paid ? "#f0fdf4" : "#fff" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                      <div style={{ fontWeight: 700, fontSize: 13.5, color: "#0f172a" }}>{s.sub || s.name || "—"}</div>
-                      <button onClick={() => upd(s.id, { paid: !s.paid })} style={{ border: "1px solid", borderColor: s.paid ? "#059669" : "#e2e8f0", background: s.paid ? "#059669" : "#fff", color: s.paid ? "#fff" : "#94a3b8", borderRadius: 7, padding: "5px 12px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{s.paid ? "✓ Оплачено" : "Не оплачено"}</button>
-                    </div>
-                    {(() => { const ws = worksFor(s).filter(w => w.name); return ws.length > 0 && (
-                      <div style={{ marginBottom: 10, paddingLeft: 2 }}>
-                        {ws.map((w, i) => (
-                          <div key={i} style={{ fontSize: 11.5, color: "#64748b", lineHeight: 1.7 }}>• {w.name}</div>
-                        ))}
-                      </div>
-                    ); })()}
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(115px,1fr))", gap: 8 }}>
-                      <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Цена клиенту</div><MoneyInput value={s.priceClient} onChange={v => upd(s.id, { priceClient: v })} /></div>
-                      <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Себест. план</div><MoneyInput value={s.costPlan} onChange={v => upd(s.id, { costPlan: v })} /></div>
-                      <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Себест. факт</div><MoneyInput value={s.costFact} onChange={v => upd(s.id, { costFact: v })} /></div>
-                    </div>
-                    <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 12, flexWrap: "wrap" }}>
-                      <span>Маржа план: <b style={{ color: mColor(mpl) }}>{mpl}%</b> <span style={{ color: "#94a3b8" }}>({fmt(ppl)} ₸)</span></span>
-                      <span>Маржа факт: {cf ? (<><b style={{ color: mColor(mft) }}>{mft}%</b> <span style={{ color: "#94a3b8" }}>({fmt(pft)} ₸)</span></>) : <span style={{ color: "#cbd5e1" }}>—</span>}</span>
-                    </div>
-                    <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="Примечание к этапу…"
-                      style={{ width: "100%", border: "1px solid #f1f5f9", borderRadius: 6, padding: "6px 9px", fontSize: 12, fontFamily: "inherit", outline: "none", marginTop: 8, boxSizing: "border-box" }} />
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ))}
+          <div style={{ textAlign: "center", color: "#94a3b8", padding: "26px 0", fontSize: 13 }}>Нажмите «Обновить из сметы» — этапы и суммы подтянутся.</div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 660, fontSize: 12.5 }}>
+            <thead>
+              <tr>
+                <th style={{ ...th, textAlign: "left", minWidth: 160 }}>Этап / работы</th>
+                <th style={{ ...th, textAlign: "right" }}>Цена, ₸</th>
+                <th style={{ ...th, textAlign: "right" }}>Себ. план, ₸</th>
+                <th style={{ ...th, textAlign: "right" }}>Себ. факт, ₸</th>
+                <th style={{ ...th, textAlign: "right" }}>Маржа п/ф</th>
+                <th style={{ ...th, textAlign: "center" }}>Опл.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {grouped.map(([cat, list]) => (
+                <Fragment key={cat}>
+                  <tr><td colSpan={6} style={{ padding: "9px 8px 3px", fontSize: 11, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em" }}>{cat}</td></tr>
+                  {list.map(s => {
+                    const pc = num(s.priceClient), cf = num(s.costFact);
+                    const mpl = pc ? Math.round((pc - num(s.costPlan)) / pc * 100) : 0;
+                    const mft = (pc && cf) ? Math.round((pc - cf) / pc * 100) : null;
+                    const ws = worksFor(s).filter(w => w.name);
+                    return (
+                      <tr key={s.id} style={{ borderTop: "1px solid #f1f5f9", background: s.paid ? "#f0fdf4" : "transparent" }}>
+                        <td style={{ ...tdc, minWidth: 160 }}>
+                          <div style={{ fontWeight: 600, color: "#0f172a", fontSize: 12.5 }}>{s.sub || s.name || "—"}</div>
+                          {ws.length > 0 && <div style={{ fontSize: 10.5, color: "#94a3b8", lineHeight: 1.4, marginTop: 1 }}>{ws.map(w => w.name).join(", ")}</div>}
+                          <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="+ примечание" style={{ width: "100%", maxWidth: 220, border: "none", borderBottom: "1px dashed #e2e8f0", fontSize: 11, color: "#64748b", fontFamily: "inherit", outline: "none", marginTop: 3, padding: "1px 0", background: "transparent" }} />
+                        </td>
+                        <td style={{ ...tdc, minWidth: 92 }}><NumCell value={s.priceClient} onChange={v => upd(s.id, { priceClient: v })} /></td>
+                        <td style={{ ...tdc, minWidth: 92 }}><NumCell value={s.costPlan} onChange={v => upd(s.id, { costPlan: v })} /></td>
+                        <td style={{ ...tdc, minWidth: 92 }}><NumCell value={s.costFact} onChange={v => upd(s.id, { costFact: v })} /></td>
+                        <td style={{ padding: "6px 8px", textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}><b style={{ color: mColor(mpl) }}>{mpl}%</b><span style={{ color: "#cbd5e1" }}> / </span>{mft != null ? <b style={{ color: mColor(mft) }}>{mft}%</b> : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
+                        <td style={{ padding: "6px 8px", textAlign: "center", verticalAlign: "top" }}><input type="checkbox" checked={!!s.paid} onChange={e => upd(s.id, { paid: e.target.checked })} title="Оплачено клиентом" style={{ width: 17, height: 17, cursor: "pointer" }} /></td>
+                      </tr>
+                    );
+                  })}
+                </Fragment>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr style={{ borderTop: "2px solid #e2e8f0", fontWeight: 800, color: "#0f172a" }}>
+                <td style={{ padding: "9px 8px" }}>ИТОГО</td>
+                <td style={{ padding: "9px 8px", textAlign: "right" }}>{fmt(tot.priceClient)}</td>
+                <td style={{ padding: "9px 8px", textAlign: "right" }}>{fmt(tot.costPlan)}</td>
+                <td style={{ padding: "9px 8px", textAlign: "right" }}>{fmt(tot.costFact)}</td>
+                <td style={{ padding: "9px 8px", textAlign: "right", whiteSpace: "nowrap" }}><b style={{ color: mColor(mPlanTot) }}>{mPlanTot}%</b><span style={{ color: "#cbd5e1" }}> / </span>{mFactTot != null ? <b style={{ color: mColor(mFactTot) }}>{mFactTot}%</b> : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        )}
       </div>
     </div>
   );
