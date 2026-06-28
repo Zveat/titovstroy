@@ -1,6 +1,7 @@
-import { useState, useMemo, useEffect, Fragment } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   TASK_CATEGORIES, STAGE_STATUSES, emptyProduction,
+  DEFAULT_CHECKLIST_LAUNCH, DEFAULT_CHECKLIST_HANDOVER, buildChecklistItems,
 } from "./constants.js";
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -27,13 +28,6 @@ const estToStages = (fromEst, genId) => fromEst.map(s => ({
   status: "todo", responsible: "", note: "", paid: false,
   priceClient: s.priceClient || 0, costPlan: s.costPlan || 0, works: s.works || [],
 }));
-
-// Группировка этапов по категории с сохранением порядка
-const groupByCat = (stages) => {
-  const g = {}; const order = [];
-  for (const s of stages) { const c = s.cat || "Прочее"; if (!g[c]) { g[c] = []; order.push(c); } g[c].push(s); }
-  return order.map(c => [c, g[c]]);
-};
 
 // Имя/адрес из проекта Финансов (description = "Клиент | Адрес | Телефон")
 const projTitle = (p) => {
@@ -413,74 +407,96 @@ function Stat({ label, value }) {
   );
 }
 
-// ─── ВКЛАДКА: ЧЕК-ЛИСТ (запуск / сдача) ───
+// ─── ВКЛАДКА: ЧЕК-ЛИСТ (запуск / сдача) с разделами ───
 function ChecklistTab({ kind, prod, patch, genId, title }) {
   const items = prod[kind] || [];
   const [newText, setNewText] = useState("");
   const upd = (id, p) => patch({ [kind]: items.map(it => it.id === id ? { ...it, ...p } : it) });
   const del = (id) => patch({ [kind]: items.filter(it => it.id !== id) });
-  const add = () => { if (!newText.trim()) return; patch({ [kind]: [...items, { id: genId(), text: newText.trim(), done: false, responsible: "", note: "" }] }); setNewText(""); };
+  const add = (section = "") => { if (!newText.trim()) return; patch({ [kind]: [...items, { id: genId(), text: newText.trim(), section, done: false, responsible: "", note: "" }] }); setNewText(""); };
+  const loadTemplate = () => {
+    const tpl = kind === "checklistHandover" ? DEFAULT_CHECKLIST_HANDOVER : DEFAULT_CHECKLIST_LAUNCH;
+    const hasData = items.some(i => i.done || i.responsible || i.note);
+    if (items.length && hasData && !window.confirm("Загрузить чек-лист из шаблона? Текущие отметки и ответственные будут заменены.")) return;
+    patch({ [kind]: buildChecklistItems(tpl, genId) });
+  };
   const doneCount = items.filter(i => i.done).length;
+  // Группируем по разделам с сохранением порядка появления
+  const groups = []; const gmap = {};
+  items.forEach(it => { const s = it.section || ""; if (!(s in gmap)) { gmap[s] = []; groups.push(s); } gmap[s].push(it); });
+  const Row = (it) => (
+    <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 6px", borderBottom: "1px solid #f1f5f9" }}>
+      <input type="checkbox" checked={!!it.done} onChange={e => upd(it.id, { done: e.target.checked })} style={{ width: 18, height: 18, cursor: "pointer", flexShrink: 0 }} />
+      <input value={it.text} onChange={e => upd(it.id, { text: e.target.value })}
+        style={{ flex: 1, border: "none", fontSize: 13, fontFamily: "inherit", outline: "none", color: it.done ? "#94a3b8" : "#0f172a", textDecoration: it.done ? "line-through" : "none", background: "transparent", minWidth: 0 }} />
+      <input value={it.responsible || ""} onChange={e => upd(it.id, { responsible: e.target.value })} placeholder="Кто"
+        style={{ width: 110, border: "1px solid #f1f5f9", borderRadius: 6, padding: "4px 8px", fontSize: 12, fontFamily: "inherit", outline: "none", flexShrink: 0 }} />
+      <button onClick={() => del(it.id)} style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 15, flexShrink: 0 }}>✕</button>
+    </div>
+  );
   return (
     <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{title}</div>
-        <div style={{ fontSize: 13, fontWeight: 700, color: doneCount === items.length && items.length ? "#059669" : "#2563eb" }}>{doneCount} / {items.length}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button onClick={loadTemplate} style={{ background: "#f0f9ff", color: "#0369a1", border: "1px solid #bae6fd", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>↻ Загрузить шаблон</button>
+          <div style={{ fontSize: 13, fontWeight: 700, color: doneCount === items.length && items.length ? "#059669" : "#2563eb" }}>{doneCount} / {items.length}</div>
+        </div>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        {items.map(it => (
-          <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 6px", borderBottom: "1px solid #f1f5f9" }}>
-            <input type="checkbox" checked={!!it.done} onChange={e => upd(it.id, { done: e.target.checked })} style={{ width: 18, height: 18, cursor: "pointer", flexShrink: 0 }} />
-            <input value={it.text} onChange={e => upd(it.id, { text: e.target.value })}
-              style={{ flex: 1, border: "none", fontSize: 13, fontFamily: "inherit", outline: "none", color: it.done ? "#94a3b8" : "#0f172a", textDecoration: it.done ? "line-through" : "none", background: "transparent", minWidth: 0 }} />
-            <input value={it.responsible || ""} onChange={e => upd(it.id, { responsible: e.target.value })} placeholder="Кто"
-              style={{ width: 110, border: "1px solid #f1f5f9", borderRadius: 6, padding: "4px 8px", fontSize: 12, fontFamily: "inherit", outline: "none", flexShrink: 0 }} />
-            <button onClick={() => del(it.id)} style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 15, flexShrink: 0 }}>✕</button>
-          </div>
-        ))}
-      </div>
+      {items.length === 0 && <div style={{ textAlign: "center", color: "#94a3b8", padding: "18px 0", fontSize: 13 }}>Чек-лист пуст. Нажмите «Загрузить шаблон» или добавьте пункты ниже.</div>}
+      {groups.map(sec => (
+        <div key={sec || "_"} style={{ marginBottom: sec ? 14 : 0 }}>
+          {sec && <div style={{ fontSize: 11, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em", margin: "8px 0 4px" }}>{sec}</div>}
+          {gmap[sec].map(Row)}
+        </div>
+      ))}
       <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-        <input value={newText} onChange={e => setNewText(e.target.value)} onKeyDown={e => e.key === "Enter" && add()} placeholder="Добавить пункт…"
+        <input value={newText} onChange={e => setNewText(e.target.value)} onKeyDown={e => e.key === "Enter" && add(groups.length ? groups[groups.length - 1] : "")} placeholder="Добавить пункт…"
           style={{ flex: 1, border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
-        <button onClick={add} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ Добавить</button>
+        <button onClick={() => add(groups.length ? groups[groups.length - 1] : "")} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ Добавить</button>
       </div>
     </div>
   );
 }
 
-// ─── ВКЛАДКА: ЭТАПЫ И СРОКИ (группировка категория › подкатегория + Gantt) ───
+// ─── ВКЛАДКА: ЭТАПЫ И СРОКИ (этап = Заголовок сметы, работы внутри + Gantt) ───
 function StagesTab({ prod, patch, genId, buildStagesFromEstimate, objId }) {
   const stages = prod.stages || [];
-  const [newCat, setNewCat] = useState("");
   const [newName, setNewName] = useState("");
   const upd = (id, p) => patch({ stages: stages.map(s => s.id === id ? { ...s, ...p } : s) });
   const del = (id) => patch({ stages: stages.filter(s => s.id !== id) });
   const addManual = () => {
     if (!newName.trim()) return;
-    patch({ stages: [...stages, { id: genId(), cat: newCat.trim() || "Прочее", name: newName.trim(), planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", priceClient: 0, costPlan: 0 }] });
+    const nm = newName.trim();
+    patch({ stages: [...stages, { id: genId(), cat: nm, name: nm, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", priceClient: 0, costPlan: 0, works: [] }] });
     setNewName("");
   };
   const syncFromEstimate = () => {
-    const fromEst = buildStagesFromEstimate(objId);
+    const fromEst = buildStagesFromEstimate(objId); // по Заголовкам (категориям)
     if (!fromEst.length) { alert("Нет привязанной сметы с позициями."); return; }
-    const exist = new Set(stages.map(s => ((s.cat || "") + "|" + (s.name || "")).toLowerCase()));
-    const toAdd = fromEst
-      .filter(s => !exist.has(((s.cat || "") + "|" + (s.name || "")).toLowerCase()))
-      .map(s => ({ id: genId(), cat: s.cat || "Прочее", sub: s.sub || s.name || "", name: s.name, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: s.priceClient || 0, costPlan: s.costPlan || 0, works: s.works || [] }));
-    if (!toAdd.length) { alert("Все этапы из сметы уже добавлены."); return; }
-    patch({ stages: [...stages, ...toAdd] });
+    const estCats = new Set(fromEst.map(f => (f.cat || "").toLowerCase()));
+    // старая запись по категории (сохраняем введённые даты/факт/статус при пересборке)
+    const oldByCat = {};
+    stages.forEach(s => { const k = (s.cat || "").toLowerCase(); if (estCats.has(k) && (!oldByCat[k] || s.factStart || s.costFact || s.status !== "todo" || s.planStart)) oldByCat[k] = s; });
+    const rebuilt = fromEst.map(f => {
+      const o = oldByCat[(f.cat || "").toLowerCase()];
+      return o
+        ? { ...o, cat: f.cat, name: f.cat, sub: undefined, works: f.works || [], priceClient: o.priceClient || f.priceClient || 0, costPlan: o.costPlan || f.costPlan || 0 }
+        : { id: genId(), cat: f.cat, name: f.cat, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: f.priceClient || 0, costPlan: f.costPlan || 0, works: f.works || [] };
+    });
+    // ручные этапы (категория которых не из сметы) — сохраняем как есть
+    const manual = stages.filter(s => !estCats.has((s.cat || "").toLowerCase()));
+    patch({ stages: [...rebuilt, ...manual] });
   };
-  // наименования работ под этап (из этапа, иначе из сметы), длительности
+  // наименования работ под этап (из этапа, иначе из сметы по Заголовку), длительности
   const estStages = buildStagesFromEstimate(objId) || [];
   const worksFor = (s) => (Array.isArray(s.works) && s.works.length) ? s.works
-    : ((estStages.find(f => ((f.cat || "") + "|" + (f.name || "")).toLowerCase() === ((s.cat || "") + "|" + (s.name || "")).toLowerCase())?.works) || []);
+    : ((estStages.find(f => (f.cat || "").toLowerCase() === (s.cat || "").toLowerCase())?.works) || []);
   const daysIncl = (a, b) => (a && b) ? Math.max(0, Math.round((_dayStart(b) - _dayStart(a)) / 864e5)) + 1 : null;
   const inWorkDays = (s) => s.factStart ? Math.max(0, Math.round((_dayStart(s.factEnd || new Date()) - _dayStart(s.factStart)) / 864e5)) + 1 : null;
   const thS = { padding: "6px 8px", fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: ".03em", whiteSpace: "nowrap", textAlign: "left" };
   const tdS = { padding: "5px 8px", verticalAlign: "top" };
   const dInp = { width: "100%", minWidth: 118, border: "1px solid #e2e8f0", borderRadius: 6, padding: "4px 6px", fontSize: 11.5, fontFamily: "inherit", outline: "none", boxSizing: "border-box", color: "#0f172a" };
-
-  const grouped = groupByCat(stages);
 
   // График (Гантт): шкала дат + линия «сегодня» + бары план/факт
   const dates = stages.flatMap(s => [s.planStart, s.planEnd, s.factStart, s.factEnd]).filter(Boolean).map(d => new Date(d).getTime());
@@ -522,58 +538,51 @@ function StagesTab({ prod, patch, genId, buildStagesFromEstimate, objId }) {
               </tr>
             </thead>
             <tbody>
-              {grouped.map(([cat, list]) => (
-                <Fragment key={cat}>
-                  <tr><td colSpan={7} style={{ padding: "9px 8px 3px", fontSize: 11, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em" }}>{cat}</td></tr>
-                  {list.map(s => {
-                    const st = stByKey(s.status);
-                    const ws = worksFor(s).filter(w => w.name);
-                    const iw = inWorkDays(s), pd = daysIncl(s.planStart, s.planEnd);
-                    return (
-                      <tr key={s.id} style={{ borderTop: "1px solid #f1f5f9" }}>
-                        <td style={{ ...tdS, minWidth: 170, borderLeft: `3px solid ${st.color}` }}>
-                          <input value={s.name} onChange={e => upd(s.id, { name: e.target.value })} placeholder="Этап (подкатегория)" style={{ width: "100%", border: "none", fontSize: 12.5, fontWeight: 600, color: "#0f172a", fontFamily: "inherit", outline: "none", background: "transparent", padding: 0 }} />
-                          {ws.length > 0 && <div style={{ fontSize: 10.5, color: "#94a3b8", lineHeight: 1.4, marginTop: 1 }}>{ws.map(w => w.name).join(", ")}</div>}
-                          <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="+ примечание" style={{ width: "100%", maxWidth: 220, border: "none", borderBottom: "1px dashed #e2e8f0", fontSize: 11, color: "#64748b", fontFamily: "inherit", outline: "none", marginTop: 3, padding: "1px 0", background: "transparent" }} />
-                        </td>
-                        <td style={tdS}>
-                          <select value={s.status} onChange={e => upd(s.id, { status: e.target.value })} style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 6px", fontSize: 11.5, fontFamily: "inherit", color: st.color, background: st.bg, fontWeight: 700, cursor: "pointer", maxWidth: 116 }}>
-                            {STAGE_STATUSES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
-                          </select>
-                        </td>
-                        <td style={tdS}>
-                          <input type="date" value={s.planStart || ""} onChange={e => upd(s.id, { planStart: e.target.value })} style={dInp} />
-                          <input type="date" value={s.planEnd || ""} onChange={e => upd(s.id, { planEnd: e.target.value })} style={{ ...dInp, marginTop: 3 }} />
-                        </td>
-                        <td style={tdS}>
-                          <input type="date" value={s.factStart || ""} onChange={e => upd(s.id, { factStart: e.target.value })} style={dInp} />
-                          <input type="date" value={s.factEnd || ""} onChange={e => upd(s.id, { factEnd: e.target.value })} style={{ ...dInp, marginTop: 3 }} />
-                        </td>
-                        <td style={{ ...tdS, whiteSpace: "nowrap", fontSize: 11.5 }}>
-                          {iw != null && <div style={{ color: "#2563eb", fontWeight: 700 }}>🔨 {iw}</div>}
-                          {pd != null && <div style={{ color: "#94a3b8" }}>план {pd}</div>}
-                          {iw == null && pd == null && <span style={{ color: "#cbd5e1" }}>—</span>}
-                        </td>
-                        <td style={tdS}>
-                          <input value={s.responsible || ""} onChange={e => upd(s.id, { responsible: e.target.value })} placeholder="—" style={{ width: "100%", minWidth: 80, border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 7px", fontSize: 11.5, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
-                        </td>
-                        <td style={{ ...tdS, textAlign: "center" }}>
-                          <button onClick={() => del(s.id)} style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 15 }}>✕</button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </Fragment>
-              ))}
+              {stages.map(s => {
+                const st = stByKey(s.status);
+                const ws = worksFor(s).filter(w => w.name);
+                const iw = inWorkDays(s), pd = daysIncl(s.planStart, s.planEnd);
+                return (
+                  <tr key={s.id} style={{ borderTop: "1px solid #f1f5f9" }}>
+                    <td style={{ ...tdS, minWidth: 180, borderLeft: `3px solid ${st.color}` }}>
+                      <input value={s.name} onChange={e => upd(s.id, { name: e.target.value })} placeholder="Заголовок (категория)" style={{ width: "100%", border: "none", fontSize: 13, fontWeight: 800, color: "#0f172a", fontFamily: "inherit", outline: "none", background: "transparent", padding: 0 }} />
+                      {ws.length > 0 && <div style={{ fontSize: 10.5, color: "#94a3b8", lineHeight: 1.45, marginTop: 2 }}>{ws.map(w => w.name).join(" · ")}</div>}
+                      <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="+ примечание" style={{ width: "100%", maxWidth: 240, border: "none", borderBottom: "1px dashed #e2e8f0", fontSize: 11, color: "#64748b", fontFamily: "inherit", outline: "none", marginTop: 4, padding: "1px 0", background: "transparent" }} />
+                    </td>
+                    <td style={tdS}>
+                      <select value={s.status} onChange={e => upd(s.id, { status: e.target.value })} style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 6px", fontSize: 11.5, fontFamily: "inherit", color: st.color, background: st.bg, fontWeight: 700, cursor: "pointer", maxWidth: 116 }}>
+                        {STAGE_STATUSES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                      </select>
+                    </td>
+                    <td style={tdS}>
+                      <input type="date" value={s.planStart || ""} onChange={e => upd(s.id, { planStart: e.target.value })} style={dInp} />
+                      <input type="date" value={s.planEnd || ""} onChange={e => upd(s.id, { planEnd: e.target.value })} style={{ ...dInp, marginTop: 3 }} />
+                    </td>
+                    <td style={tdS}>
+                      <input type="date" value={s.factStart || ""} onChange={e => upd(s.id, { factStart: e.target.value })} style={dInp} />
+                      <input type="date" value={s.factEnd || ""} onChange={e => upd(s.id, { factEnd: e.target.value })} style={{ ...dInp, marginTop: 3 }} />
+                    </td>
+                    <td style={{ ...tdS, whiteSpace: "nowrap", fontSize: 11.5 }}>
+                      {iw != null && <div style={{ color: "#2563eb", fontWeight: 700 }}>🔨 {iw}</div>}
+                      {pd != null && <div style={{ color: "#94a3b8" }}>план {pd}</div>}
+                      {iw == null && pd == null && <span style={{ color: "#cbd5e1" }}>—</span>}
+                    </td>
+                    <td style={tdS}>
+                      <input value={s.responsible || ""} onChange={e => upd(s.id, { responsible: e.target.value })} placeholder="—" style={{ width: "100%", minWidth: 80, border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 7px", fontSize: 11.5, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                    </td>
+                    <td style={{ ...tdS, textAlign: "center" }}>
+                      <button onClick={() => del(s.id)} style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 15 }}>✕</button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
         {/* Ручное добавление */}
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", borderTop: "1px solid #f1f5f9", paddingTop: 12 }}>
-          <input value={newCat} onChange={e => setNewCat(e.target.value)} placeholder="Категория (необяз.)"
-            style={{ flex: "1 1 140px", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
-          <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === "Enter" && addManual()} placeholder="Название этапа"
-            style={{ flex: "2 1 200px", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
+          <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === "Enter" && addManual()} placeholder="Новый этап (заголовок)…"
+            style={{ flex: "2 1 220px", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
           <button onClick={addManual} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ Этап</button>
         </div>
       </div>
@@ -778,22 +787,24 @@ function FinanceTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId })
   const stages = prod.stages || [];
   const upd = (id, p) => patch({ stages: stages.map(s => s.id === id ? { ...s, ...p } : s) });
   const syncFromEstimate = () => {
-    const fromEst = buildStagesFromEstimate(objId);
+    const fromEst = buildStagesFromEstimate(objId); // по Заголовкам (категориям)
     if (!fromEst.length) { alert("Нет привязанной сметы с позициями."); return; }
-    const exist = new Set(stages.map(s => ((s.cat || "") + "|" + (s.name || "")).toLowerCase()));
-    const toAdd = fromEst
-      .filter(s => !exist.has(((s.cat || "") + "|" + (s.name || "")).toLowerCase()))
-      .map(s => ({ id: genId(), cat: s.cat || "Прочее", sub: s.sub || s.name || "", name: s.name, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: s.priceClient || 0, costPlan: s.costPlan || 0, works: s.works || [] }));
-    const merged = stages.map(s => {
-      const m = fromEst.find(f => ((f.cat || "") + "|" + (f.name || "")).toLowerCase() === ((s.cat || "") + "|" + (s.name || "")).toLowerCase());
-      return m ? { ...s, sub: s.sub || m.sub || s.name, works: (m.works && m.works.length) ? m.works : (s.works || []), priceClient: s.priceClient || m.priceClient || 0, costPlan: s.costPlan || m.costPlan || 0 } : s;
+    const estCats = new Set(fromEst.map(f => (f.cat || "").toLowerCase()));
+    const oldByCat = {};
+    stages.forEach(s => { const k = (s.cat || "").toLowerCase(); if (estCats.has(k) && (!oldByCat[k] || s.costFact || s.paid || s.note)) oldByCat[k] = s; });
+    const rebuilt = fromEst.map(f => {
+      const o = oldByCat[(f.cat || "").toLowerCase()];
+      return o
+        ? { ...o, cat: f.cat, name: f.cat, sub: undefined, works: f.works || [], priceClient: o.priceClient || f.priceClient || 0, costPlan: o.costPlan || f.costPlan || 0 }
+        : { id: genId(), cat: f.cat, name: f.cat, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: f.priceClient || 0, costPlan: f.costPlan || 0, works: f.works || [] };
     });
-    patch({ stages: [...merged, ...toAdd] });
+    const manual = stages.filter(s => !estCats.has((s.cat || "").toLowerCase()));
+    patch({ stages: [...rebuilt, ...manual] });
   };
-  // Наименования работ под этап: из самого этапа, иначе подтягиваем из сметы на лету (без сохранения)
+  // Наименования работ под этап: из самого этапа, иначе подтягиваем из сметы по Заголовку (без сохранения)
   const estStages = buildStagesFromEstimate(objId) || [];
   const worksFor = (s) => (Array.isArray(s.works) && s.works.length) ? s.works
-    : ((estStages.find(f => ((f.cat || "") + "|" + (f.name || "")).toLowerCase() === ((s.cat || "") + "|" + (s.name || "")).toLowerCase())?.works) || []);
+    : ((estStages.find(f => (f.cat || "").toLowerCase() === (s.cat || "").toLowerCase())?.works) || []);
   const num = (v) => Number(v) || 0;
   const tot = stages.reduce((a, s) => { a.priceClient += num(s.priceClient); a.costPlan += num(s.costPlan); a.costFact += num(s.costFact); return a; }, { priceClient: 0, costPlan: 0, costFact: 0 });
   // Платежи клиента — удобный список (аванс, этапные платежи) вместо одного поля
@@ -802,10 +813,15 @@ function FinanceTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId })
   const received = payments.reduce((s, p) => s + num(p.amount), 0);
   const debt = tot.priceClient - received;
   const savePay = (arr) => patch({ clientPayments: arr, clientPaid: undefined });
-  const grouped = groupByCat(stages);
   const mColor = (p) => p >= 30 ? "#059669" : p >= 0 ? "#d97706" : "#dc2626";
-  const mPlanTot = tot.priceClient ? Math.round((tot.priceClient - tot.costPlan) / tot.priceClient * 100) : 0;
+  const mPlanSumTot = tot.priceClient - tot.costPlan;
+  const mFactSumTot = tot.costFact ? tot.priceClient - tot.costFact : null;
+  const mPlanTot = tot.priceClient ? Math.round(mPlanSumTot / tot.priceClient * 100) : 0;
   const mFactTot = (tot.priceClient && tot.costFact) ? Math.round((tot.priceClient - tot.costFact) / tot.priceClient * 100) : null;
+  // ячейка маржи: сумма ₸ сверху, % снизу
+  const margCell = (sum, pct) => pct == null
+    ? <span style={{ color: "#cbd5e1" }}>—</span>
+    : <><b style={{ color: mColor(pct), fontSize: 12.5 }}>{fmt(sum)} ₸</b><div style={{ fontSize: 11, fontWeight: 700, color: mColor(pct) }}>{pct}%</div></>;
   const th = { padding: "6px 8px", fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: ".03em", whiteSpace: "nowrap" };
   const tdc = { padding: "4px 6px", verticalAlign: "top" };
 
@@ -840,43 +856,40 @@ function FinanceTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId })
         {stages.length === 0 ? (
           <div style={{ textAlign: "center", color: "#94a3b8", padding: "26px 0", fontSize: 13 }}>Нажмите «Обновить из сметы» — этапы и суммы подтянутся.</div>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 660, fontSize: 12.5 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760, fontSize: 12.5 }}>
             <thead>
               <tr>
-                <th style={{ ...th, textAlign: "left", minWidth: 160 }}>Этап / работы</th>
+                <th style={{ ...th, textAlign: "left", minWidth: 180 }}>Этап / работы</th>
                 <th style={{ ...th, textAlign: "right" }}>Цена, ₸</th>
                 <th style={{ ...th, textAlign: "right" }}>Себ. план, ₸</th>
                 <th style={{ ...th, textAlign: "right" }}>Себ. факт, ₸</th>
-                <th style={{ ...th, textAlign: "right" }}>Маржа п/ф</th>
+                <th style={{ ...th, textAlign: "right" }}>Маржа план</th>
+                <th style={{ ...th, textAlign: "right" }}>Маржа факт</th>
                 <th style={{ ...th, textAlign: "center" }}>Опл.</th>
               </tr>
             </thead>
             <tbody>
-              {grouped.map(([cat, list]) => (
-                <Fragment key={cat}>
-                  <tr><td colSpan={6} style={{ padding: "9px 8px 3px", fontSize: 11, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em" }}>{cat}</td></tr>
-                  {list.map(s => {
-                    const pc = num(s.priceClient), cf = num(s.costFact);
-                    const mpl = pc ? Math.round((pc - num(s.costPlan)) / pc * 100) : 0;
-                    const mft = (pc && cf) ? Math.round((pc - cf) / pc * 100) : null;
-                    const ws = worksFor(s).filter(w => w.name);
-                    return (
-                      <tr key={s.id} style={{ borderTop: "1px solid #f1f5f9", background: s.paid ? "#f0fdf4" : "transparent" }}>
-                        <td style={{ ...tdc, minWidth: 160 }}>
-                          <div style={{ fontWeight: 600, color: "#0f172a", fontSize: 12.5 }}>{s.sub || s.name || "—"}</div>
-                          {ws.length > 0 && <div style={{ fontSize: 10.5, color: "#94a3b8", lineHeight: 1.4, marginTop: 1 }}>{ws.map(w => w.name).join(", ")}</div>}
-                          <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="+ примечание" style={{ width: "100%", maxWidth: 220, border: "none", borderBottom: "1px dashed #e2e8f0", fontSize: 11, color: "#64748b", fontFamily: "inherit", outline: "none", marginTop: 3, padding: "1px 0", background: "transparent" }} />
-                        </td>
-                        <td style={{ ...tdc, minWidth: 92 }}><NumCell value={s.priceClient} onChange={v => upd(s.id, { priceClient: v })} /></td>
-                        <td style={{ ...tdc, minWidth: 92 }}><NumCell value={s.costPlan} onChange={v => upd(s.id, { costPlan: v })} /></td>
-                        <td style={{ ...tdc, minWidth: 92 }}><NumCell value={s.costFact} onChange={v => upd(s.id, { costFact: v })} /></td>
-                        <td style={{ padding: "6px 8px", textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}><b style={{ color: mColor(mpl) }}>{mpl}%</b><span style={{ color: "#cbd5e1" }}> / </span>{mft != null ? <b style={{ color: mColor(mft) }}>{mft}%</b> : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
-                        <td style={{ padding: "6px 8px", textAlign: "center", verticalAlign: "top" }}><input type="checkbox" checked={!!s.paid} onChange={e => upd(s.id, { paid: e.target.checked })} title="Оплачено клиентом" style={{ width: 17, height: 17, cursor: "pointer" }} /></td>
-                      </tr>
-                    );
-                  })}
-                </Fragment>
-              ))}
+              {stages.map(s => {
+                const pc = num(s.priceClient), cf = num(s.costFact);
+                const mPlanSum = pc - num(s.costPlan), mpl = pc ? Math.round(mPlanSum / pc * 100) : 0;
+                const mFactSum = cf ? pc - cf : null, mft = (pc && cf) ? Math.round((pc - cf) / pc * 100) : null;
+                const ws = worksFor(s).filter(w => w.name);
+                return (
+                  <tr key={s.id} style={{ borderTop: "1px solid #f1f5f9", background: s.paid ? "#f0fdf4" : "transparent" }}>
+                    <td style={{ ...tdc, minWidth: 180 }}>
+                      <div style={{ fontWeight: 800, color: "#0f172a", fontSize: 13 }}>{s.name || "—"}</div>
+                      {ws.length > 0 && <div style={{ fontSize: 10.5, color: "#94a3b8", lineHeight: 1.45, marginTop: 2 }}>{ws.map(w => w.name).join(" · ")}</div>}
+                      <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="+ примечание" style={{ width: "100%", maxWidth: 240, border: "none", borderBottom: "1px dashed #e2e8f0", fontSize: 11, color: "#64748b", fontFamily: "inherit", outline: "none", marginTop: 4, padding: "1px 0", background: "transparent" }} />
+                    </td>
+                    <td style={{ ...tdc, minWidth: 92 }}><NumCell value={s.priceClient} onChange={v => upd(s.id, { priceClient: v })} /></td>
+                    <td style={{ ...tdc, minWidth: 92 }}><NumCell value={s.costPlan} onChange={v => upd(s.id, { costPlan: v })} /></td>
+                    <td style={{ ...tdc, minWidth: 92 }}><NumCell value={s.costFact} onChange={v => upd(s.id, { costFact: v })} /></td>
+                    <td style={{ padding: "6px 8px", textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}>{margCell(mPlanSum, mpl)}</td>
+                    <td style={{ padding: "6px 8px", textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}>{margCell(mFactSum, mft)}</td>
+                    <td style={{ padding: "6px 8px", textAlign: "center", verticalAlign: "top" }}><input type="checkbox" checked={!!s.paid} onChange={e => upd(s.id, { paid: e.target.checked })} title="Оплачено клиентом" style={{ width: 17, height: 17, cursor: "pointer" }} /></td>
+                  </tr>
+                );
+              })}
             </tbody>
             <tfoot>
               <tr style={{ borderTop: "2px solid #e2e8f0", fontWeight: 800, color: "#0f172a" }}>
@@ -884,7 +897,8 @@ function FinanceTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId })
                 <td style={{ padding: "9px 8px", textAlign: "right" }}>{fmt(tot.priceClient)}</td>
                 <td style={{ padding: "9px 8px", textAlign: "right" }}>{fmt(tot.costPlan)}</td>
                 <td style={{ padding: "9px 8px", textAlign: "right" }}>{fmt(tot.costFact)}</td>
-                <td style={{ padding: "9px 8px", textAlign: "right", whiteSpace: "nowrap" }}><b style={{ color: mColor(mPlanTot) }}>{mPlanTot}%</b><span style={{ color: "#cbd5e1" }}> / </span>{mFactTot != null ? <b style={{ color: mColor(mFactTot) }}>{mFactTot}%</b> : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
+                <td style={{ padding: "9px 8px", textAlign: "right", whiteSpace: "nowrap" }}>{margCell(mPlanSumTot, mPlanTot)}</td>
+                <td style={{ padding: "9px 8px", textAlign: "right", whiteSpace: "nowrap" }}>{margCell(mFactSumTot, mFactTot)}</td>
                 <td></td>
               </tr>
             </tfoot>
