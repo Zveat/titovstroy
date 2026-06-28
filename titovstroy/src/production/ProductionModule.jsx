@@ -467,20 +467,30 @@ function StagesTab({ prod, patch, genId, buildStagesFromEstimate, objId }) {
     if (!toAdd.length) { alert("Все этапы из сметы уже добавлены."); return; }
     patch({ stages: [...stages, ...toAdd] });
   };
+  // наименования работ под этап (из этапа, иначе из сметы), длительности
+  const estStages = buildStagesFromEstimate(objId) || [];
+  const worksFor = (s) => (Array.isArray(s.works) && s.works.length) ? s.works
+    : ((estStages.find(f => ((f.cat || "") + "|" + (f.name || "")).toLowerCase() === ((s.cat || "") + "|" + (s.name || "")).toLowerCase())?.works) || []);
+  const daysIncl = (a, b) => (a && b) ? Math.max(0, Math.round((_dayStart(b) - _dayStart(a)) / 864e5)) + 1 : null;
+  const inWorkDays = (s) => s.factStart ? Math.max(0, Math.round((_dayStart(s.factEnd || new Date()) - _dayStart(s.factStart)) / 864e5)) + 1 : null;
 
   const grouped = groupByCat(stages);
 
-  // Gantt
+  // График (Гантт): шкала дат + линия «сегодня» + бары план/факт
   const dates = stages.flatMap(s => [s.planStart, s.planEnd, s.factStart, s.factEnd]).filter(Boolean).map(d => new Date(d).getTime());
-  const minD = dates.length ? Math.min(...dates) : 0;
-  const maxD = dates.length ? Math.max(...dates) : 0;
+  const ganttStages = stages.filter(s => s.name && (s.planStart || s.factStart));
+  const todayMs = _dayStart(new Date());
+  const allDates = dates.length ? [...dates, todayMs] : [];
+  const minD = allDates.length ? Math.min(...allDates) : 0;
+  const maxD = allDates.length ? Math.max(...allDates) : 0;
   const span = maxD - minD || 1;
-  const bar = (start, end, color, top) => {
+  const fmtD = (ts) => new Date(ts).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+  const pctOf = (ts) => ((ts - minD) / span) * 100;
+  const todayPct = (todayMs >= minD && todayMs <= maxD) ? pctOf(todayMs) : null;
+  const bar = (start, end, color, top, h) => {
     if (!start || !end) return null;
     const s = new Date(start).getTime(), e = new Date(end).getTime();
-    const left = ((s - minD) / span) * 100;
-    const width = Math.max(2, ((e - s) / span) * 100);
-    return <div style={{ position: "absolute", left: `${left}%`, width: `${width}%`, height: 7, borderRadius: 4, background: color, top }} />;
+    return <div title={`${fmtD(s)} – ${fmtD(e)}`} style={{ position: "absolute", left: `${pctOf(s)}%`, width: `${Math.max(1.5, ((e - s) / span) * 100)}%`, height: h, borderRadius: 4, background: color, top }} />;
   };
 
   return (
@@ -499,17 +509,23 @@ function StagesTab({ prod, patch, genId, buildStagesFromEstimate, objId }) {
               {list.map(s => {
                 const st = stByKey(s.status);
                 return (
-                  <div key={s.id} style={{ border: "1px solid #f1f5f9", borderRadius: 10, padding: 12 }}>
+                  <div key={s.id} style={{ border: "1px solid #f1f5f9", borderRadius: 10, padding: 12, borderLeft: `4px solid ${st.color}` }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
-                      <input value={s.name} onChange={e => upd(s.id, { name: e.target.value })} placeholder="Название этапа"
+                      <input value={s.name} onChange={e => upd(s.id, { name: e.target.value })} placeholder="Этап (подкатегория)"
                         style={{ flex: "1 1 200px", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", outline: "none" }} />
                       <select value={s.status} onChange={e => upd(s.id, { status: e.target.value })}
                         style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px", fontSize: 12, fontFamily: "inherit", color: st.color, background: st.bg, fontWeight: 700, cursor: "pointer" }}>
                         {STAGE_STATUSES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
                       </select>
+                      {inWorkDays(s) != null && <span style={{ fontSize: 11, fontWeight: 700, color: "#2563eb", background: "#eff6ff", borderRadius: 6, padding: "4px 8px", whiteSpace: "nowrap" }}>🔨 {inWorkDays(s)} дн в работе</span>}
                       <button onClick={() => del(s.id)} style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 15 }}>✕</button>
                     </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8 }}>
+                    {(() => { const ws = worksFor(s).filter(w => w.name); return ws.length > 0 && (
+                      <div style={{ marginBottom: 10, paddingLeft: 2 }}>
+                        {ws.map((w, i) => <div key={i} style={{ fontSize: 11.5, color: "#64748b", lineHeight: 1.7 }}>• {w.name}</div>)}
+                      </div>
+                    ); })()}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(125px,1fr))", gap: 8 }}>
                       <DateF label="План старт" v={s.planStart} on={v => upd(s.id, { planStart: v })} />
                       <DateF label="План конец" v={s.planEnd} on={v => upd(s.id, { planEnd: v })} />
                       <DateF label="Факт старт" v={s.factStart} on={v => upd(s.id, { factStart: v })} />
@@ -520,6 +536,9 @@ function StagesTab({ prod, patch, genId, buildStagesFromEstimate, objId }) {
                           style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 8px", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
                       </div>
                     </div>
+                    {daysIncl(s.planStart, s.planEnd) != null && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>Плановая длительность: {daysIncl(s.planStart, s.planEnd)} дн</div>}
+                    <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="Примечание к этапу…"
+                      style={{ width: "100%", border: "1px solid #f1f5f9", borderRadius: 6, padding: "6px 9px", fontSize: 12, fontFamily: "inherit", outline: "none", marginTop: 8, boxSizing: "border-box" }} />
                   </div>
                 );
               })}
@@ -540,25 +559,40 @@ function StagesTab({ prod, patch, genId, buildStagesFromEstimate, objId }) {
       {/* Gantt */}
       {stages.length > 0 && (
         <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18, overflowX: "auto" }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 14 }}>График работ (план / факт)</div>
-          {dates.length === 0 ? (
-            <div style={{ textAlign: "center", color: "#94a3b8", padding: "20px 0", fontSize: 13 }}>Укажите даты этапов выше — здесь появится график.</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 14 }}>График работ (Гантт)</div>
+          {ganttStages.length === 0 ? (
+            <div style={{ textAlign: "center", color: "#94a3b8", padding: "20px 0", fontSize: 13 }}>Укажите план/факт даты у этапов выше — здесь появится график.</div>
           ) : (
-            <>
-              <div style={{ display: "flex", gap: 16, marginBottom: 10, fontSize: 11, color: "#64748b" }}>
-                <span><span style={{ display: "inline-block", width: 14, height: 7, background: "#93c5fd", borderRadius: 3, marginRight: 4, verticalAlign: "middle" }} />План</span>
-                <span><span style={{ display: "inline-block", width: 14, height: 7, background: "#059669", borderRadius: 3, marginRight: 4, verticalAlign: "middle" }} />Факт</span>
+            <div style={{ minWidth: 480 }}>
+              <div style={{ display: "flex", gap: 16, marginBottom: 8, fontSize: 11, color: "#64748b", flexWrap: "wrap" }}>
+                <span><span style={{ display: "inline-block", width: 14, height: 8, background: "#93c5fd", borderRadius: 3, marginRight: 4, verticalAlign: "middle" }} />План</span>
+                <span><span style={{ display: "inline-block", width: 14, height: 8, background: "#059669", borderRadius: 3, marginRight: 4, verticalAlign: "middle" }} />Факт</span>
+                {todayPct != null && <span><span style={{ display: "inline-block", width: 2, height: 12, background: "#ef4444", marginRight: 5, verticalAlign: "middle" }} />Сегодня</span>}
               </div>
-              {stages.filter(s => s.name).map(s => (
-                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                  <div style={{ width: 180, fontSize: 12, color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flexShrink: 0 }}>{s.name}</div>
-                  <div style={{ position: "relative", flex: 1, height: 24, background: "#f8fafc", borderRadius: 6, minWidth: 200 }}>
-                    {bar(s.planStart, s.planEnd, "#93c5fd", 6)}
-                    {bar(s.factStart, s.factEnd, "#059669", 13)}
-                  </div>
+              {/* ось дат */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                <div style={{ width: 160, flexShrink: 0 }} />
+                <div style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "#94a3b8" }}>
+                  <span>{fmtD(minD)}</span><span>{fmtD((minD + maxD) / 2)}</span><span>{fmtD(maxD)}</span>
                 </div>
-              ))}
-            </>
+              </div>
+              {ganttStages.map(s => {
+                const st = stByKey(s.status);
+                return (
+                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
+                    <div style={{ width: 160, flexShrink: 0, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, color: "#0f172a", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name}</div>
+                      <div style={{ fontSize: 9.5, color: st.color }}>{st.label}</div>
+                    </div>
+                    <div style={{ position: "relative", flex: 1, height: 28, background: "#f8fafc", borderRadius: 6, minWidth: 240, border: "1px solid #f1f5f9" }}>
+                      {todayPct != null && <div style={{ position: "absolute", left: `${todayPct}%`, top: 0, bottom: 0, width: 2, background: "#ef4444", zIndex: 2 }} />}
+                      {bar(s.planStart, s.planEnd, "#93c5fd", 5, 8)}
+                      {bar(s.factStart, s.factEnd, "#059669", 16, 8)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}
@@ -697,6 +731,19 @@ function DefectsTab({ prod, patch, genId, currentUser }) {
 }
 
 // ─── ВКЛАДКА: ФИНАНСОВЫЙ БЛОК (по этапам, группировка категория › подкатегория) ───
+// Денежное поле: показывает «115 957 ₸» с пробелами, парсит только цифры
+function MoneyInput({ value, onChange, big }) {
+  const txt = (value === undefined || value === null || value === "") ? "" : new Intl.NumberFormat("ru-RU").format(value);
+  return (
+    <div style={{ position: "relative", width: "100%" }}>
+      <input type="text" inputMode="numeric" value={txt} placeholder="0"
+        onChange={e => { const d = e.target.value.replace(/[^\d]/g, ""); onChange(d === "" ? undefined : Number(d)); }}
+        style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 6, padding: big ? "8px 24px 8px 10px" : "6px 22px 6px 8px", fontSize: big ? 15 : 12, fontWeight: big ? 700 : 500, textAlign: "right", fontFamily: "inherit", outline: "none", boxSizing: "border-box", color: "#0f172a" }} />
+      <span style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", fontSize: big ? 12 : 11, color: "#94a3b8", pointerEvents: "none" }}>₸</span>
+    </div>
+  );
+}
+
 function FinanceTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) {
   const stages = prod.stages || [];
   const upd = (id, p) => patch({ stages: stages.map(s => s.id === id ? { ...s, ...p } : s) });
@@ -709,10 +756,14 @@ function FinanceTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId })
       .map(s => ({ id: genId(), cat: s.cat || "Прочее", sub: s.sub || s.name || "", name: s.name, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: s.priceClient || 0, costPlan: s.costPlan || 0, works: s.works || [] }));
     const merged = stages.map(s => {
       const m = fromEst.find(f => ((f.cat || "") + "|" + (f.name || "")).toLowerCase() === ((s.cat || "") + "|" + (s.name || "")).toLowerCase());
-      return m ? { ...s, priceClient: s.priceClient || m.priceClient || 0, costPlan: s.costPlan || m.costPlan || 0 } : s;
+      return m ? { ...s, sub: s.sub || m.sub || s.name, works: (m.works && m.works.length) ? m.works : (s.works || []), priceClient: s.priceClient || m.priceClient || 0, costPlan: s.costPlan || m.costPlan || 0 } : s;
     });
     patch({ stages: [...merged, ...toAdd] });
   };
+  // Наименования работ под этап: из самого этапа, иначе подтягиваем из сметы на лету (без сохранения)
+  const estStages = buildStagesFromEstimate(objId) || [];
+  const worksFor = (s) => (Array.isArray(s.works) && s.works.length) ? s.works
+    : ((estStages.find(f => ((f.cat || "") + "|" + (f.name || "")).toLowerCase() === ((s.cat || "") + "|" + (s.name || "")).toLowerCase())?.works) || []);
   const num = (v) => Number(v) || 0;
   const tot = stages.reduce((a, s) => { a.priceClient += num(s.priceClient); a.costPlan += num(s.costPlan); a.costFact += num(s.costFact); a.paid += s.paid ? num(s.priceClient) : 0; return a; }, { priceClient: 0, costPlan: 0, costFact: 0, paid: 0 });
   const profitPlan = tot.priceClient - tot.costPlan;
@@ -739,7 +790,7 @@ function FinanceTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId })
         <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 12 }}>💵 Деньги клиента</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, alignItems: "end" }}>
           <div><div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>К оплате (по работам)</div><div style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>{fmt(tot.priceClient)} ₸</div></div>
-          <div><div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Получено от клиента</div><input type="number" value={prod.clientPaid ?? ""} onChange={e => patch({ clientPaid: e.target.value === "" ? undefined : Number(e.target.value) })} placeholder="0" style={{ ...moneyInp, textAlign: "left", fontSize: 15, fontWeight: 700, padding: "8px 10px" }} /></div>
+          <div><div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Получено от клиента</div><MoneyInput value={prod.clientPaid} onChange={v => patch({ clientPaid: v })} big /></div>
           <div><div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Дебиторка (остаток)</div><div style={{ fontSize: 18, fontWeight: 800, color: debt > 0 ? "#dc2626" : "#059669" }}>{fmt(Math.max(0, debt))} ₸</div></div>
         </div>
         <div style={{ marginTop: 10, fontSize: 11.5, color: "#94a3b8" }}>Этапов оплачено: {fmt(tot.paid)} ₸ из {fmt(tot.priceClient)} ₸{debt < 0 ? " · переплата " + fmt(-debt) + " ₸" : ""}</div>
@@ -767,13 +818,17 @@ function FinanceTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId })
                       <div style={{ fontWeight: 700, fontSize: 13.5, color: "#0f172a" }}>{s.sub || s.name || "—"}</div>
                       <button onClick={() => upd(s.id, { paid: !s.paid })} style={{ border: "1px solid", borderColor: s.paid ? "#059669" : "#e2e8f0", background: s.paid ? "#059669" : "#fff", color: s.paid ? "#fff" : "#94a3b8", borderRadius: 7, padding: "5px 12px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{s.paid ? "✓ Оплачено" : "Не оплачено"}</button>
                     </div>
-                    {Array.isArray(s.works) && s.works.length > 0 && (
-                      <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 8, lineHeight: 1.5 }}>{s.works.map(w => w.name).filter(Boolean).join(" · ")}</div>
-                    )}
+                    {(() => { const ws = worksFor(s).filter(w => w.name); return ws.length > 0 && (
+                      <div style={{ marginBottom: 10, paddingLeft: 2 }}>
+                        {ws.map((w, i) => (
+                          <div key={i} style={{ fontSize: 11.5, color: "#64748b", lineHeight: 1.7 }}>• {w.name}</div>
+                        ))}
+                      </div>
+                    ); })()}
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(115px,1fr))", gap: 8 }}>
-                      <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Цена клиенту</div><input type="number" value={s.priceClient ?? ""} onChange={e => upd(s.id, { priceClient: e.target.value === "" ? undefined : Number(e.target.value) })} style={moneyInp} /></div>
-                      <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Себест. план</div><input type="number" value={s.costPlan ?? ""} onChange={e => upd(s.id, { costPlan: e.target.value === "" ? undefined : Number(e.target.value) })} style={moneyInp} /></div>
-                      <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Себест. факт</div><input type="number" value={s.costFact ?? ""} onChange={e => upd(s.id, { costFact: e.target.value === "" ? undefined : Number(e.target.value) })} style={moneyInp} /></div>
+                      <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Цена клиенту</div><MoneyInput value={s.priceClient} onChange={v => upd(s.id, { priceClient: v })} /></div>
+                      <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Себест. план</div><MoneyInput value={s.costPlan} onChange={v => upd(s.id, { costPlan: v })} /></div>
+                      <div><div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 3 }}>Себест. факт</div><MoneyInput value={s.costFact} onChange={v => upd(s.id, { costFact: v })} /></div>
                     </div>
                     <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 12, flexWrap: "wrap" }}>
                       <span>Маржа план: <b style={{ color: mColor(mpl) }}>{mpl}%</b> <span style={{ color: "#94a3b8" }}>({fmt(ppl)} ₸)</span></span>
