@@ -132,6 +132,14 @@ export default function ProductionModule({
     return { budget, income, expense, debt, margin, contractNo: finProj.contractNo, status: finProj.rawStatus || finProj.status };
   }, [finProj, financeTx]);
 
+  const contractByObj = useMemo(() => {
+    const m = {};
+    for (const c of (contracts || [])) {
+      if (c.objectId && !c.deletedAt && !m[c.objectId]) m[c.objectId] = c.number;
+    }
+    return m;
+  }, [contracts]);
+
   // ─── СПИСОК ОБЪЕКТОВ ───
   if (!openObj) {
     const q = search.toLowerCase().trim();
@@ -251,35 +259,44 @@ export default function ProductionModule({
         <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>Объектов: {rows.length} · сверху — что горит 🔴</div>
         {rows.length === 0 && <div style={{ textAlign: "center", color: "#94a3b8", padding: "50px 0", fontSize: 14 }}>Нет объектов в производстве.</div>}
         {/* ── Светофор ── */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 14 }}>
           {rows.map(o => {
             const m = o.m;
+            const ps = psByKey(m.prodStatus);
+            const cn = contractByObj[o.id];
             return (
               <div key={o.id} onClick={() => { setOpenId(o.id); setTab("info"); }}
-                style={{ background: "#fff", border: "1px solid #e2e8f0", borderLeft: `4px solid ${m.color}`, borderRadius: 14, padding: 16, cursor: "pointer", transition: "box-shadow .15s, transform .1s" }}
+                style={{ background: "#fff", border: "1px solid #eef2f7", borderRadius: 16, cursor: "pointer", boxShadow: "0 1px 3px rgba(15,23,42,.07)", transition: "box-shadow .15s,transform .15s", overflow: "hidden", display: "flex", flexDirection: "column" }}
                 onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 8px 24px rgba(0,0,0,.08)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
                 onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 15, color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.name}</div>
-                    <div style={{ fontSize: 12, color: "#64748b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.address}</div>
+                <div style={{ height: 4, background: `linear-gradient(90deg,${m.color},${m.color}99)`, flexShrink: 0 }} />
+                <div style={{ padding: "14px 16px", flex: 1, display: "flex", flexDirection: "column" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: "#0f172a", lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{o.name}</div>
+                      {cn && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{cn}</div>}
+                      {o.address && <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.address}</div>}
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: ps.color, background: ps.bg, borderRadius: 20, padding: "3px 9px", whiteSpace: "nowrap" }}>{ps.label}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: m.color, background: m.color + "18", borderRadius: 6, padding: "2px 7px", whiteSpace: "nowrap" }}>{m.label}{m.daysLeft != null && !m.finished ? (m.daysLeft < 0 ? ` ${-m.daysLeft}д` : ` ${m.daysLeft}д`) : ""}</span>
+                    </div>
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-                    <span style={{ fontSize: 10.5, fontWeight: 700, color: m.color, background: m.color + "18", borderRadius: 6, padding: "3px 8px", whiteSpace: "nowrap" }}>{m.label}{(m.daysLeft != null && !m.finished) ? (m.daysLeft < 0 ? ` ${-m.daysLeft}д` : ` ${m.daysLeft}д`) : ""}</span>
-                    {(() => { const ps = psByKey(m.prodStatus); return <span style={{ fontSize: 10, fontWeight: 700, color: ps.color, background: ps.bg, borderRadius: 6, padding: "2px 7px", whiteSpace: "nowrap" }}>{ps.label}</span>; })()}
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5, fontSize: 11, color: "#64748b" }}>
+                      <span>Выполнено</span>
+                      <span style={{ fontWeight: 700 }}>{m.prog}%</span>
+                    </div>
+                    <div style={{ height: 6, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}>
+                      <div style={{ width: `${m.prog}%`, height: "100%", background: m.prog === 100 ? "#059669" : "#2563eb", borderRadius: 4, transition: "width .3s" }} />
+                    </div>
                   </div>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "12px 0 10px" }}>
-                  <div style={{ flex: 1, height: 8, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}>
-                    <div style={{ width: `${m.prog}%`, height: "100%", background: m.prog === 100 ? "#059669" : "#2563eb", transition: "width .3s" }} />
+                  <div style={{ marginTop: "auto", display: "flex", flexWrap: "wrap", gap: "4px 12px", fontSize: 11, color: "#64748b", borderTop: "1px solid #f1f5f9", paddingTop: 10 }}>
+                    {m.stagesCount > 0 && <span>🔨 {m.doneStages}/{m.stagesCount} эт.</span>}
+                    {m.mPlan != null && <span>📊 {m.mFact != null ? `${m.mFact}% факт` : `${m.mPlan}% план`}</span>}
+                    {m.defectsOpen > 0 && <span style={{ color: "#d97706" }}>⚠ {m.defectsOpen} замеч.</span>}
+                    {m.responsible && <span>👷 {m.responsible}</span>}
                   </div>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: "#64748b", minWidth: 34, textAlign: "right" }}>{m.prog}%</span>
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px", fontSize: 11, color: "#64748b" }}>
-                  {m.stagesCount > 0 && <span>🔨 {m.doneStages}/{m.stagesCount}</span>}
-                  {m.mPlan != null && <span>📊 маржа {m.mFact != null ? `${m.mFact}% факт` : `${m.mPlan}% план`}</span>}
-                  {m.defectsOpen > 0 && <span style={{ color: "#d97706" }}>⚠ {m.defectsOpen}</span>}
-                  {m.responsible && <span>👷 {m.responsible}</span>}
                 </div>
               </div>
             );
@@ -446,7 +463,7 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch }) {
             })}
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           {fld("Ответственный прораб / менеджер", "responsible")}
           {fld("Доступ (ключ, код, пропуск)", "access")}
           {fld("Дата продажи (подписание договора)", "saleDate", "date")}
@@ -857,7 +874,7 @@ function FinanceTab({ prod, patch, fmt, finSummary }) {
       {/* Данные из Финансов (бюджет, оплаты, расходы) */}
       {finSummary && (
         <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>💰 Финансовый проект{finSummary.contractNo ? ` №${finSummary.contractNo}` : ""}</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>💰 Финансовый проект{finSummary.contractNo ? ` ${String(finSummary.contractNo).replace(/^№+/, "№")}` : ""}</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8 }}>
             {[
               ["Бюджет (договор)", finSummary.budget > 0 ? fmt(finSummary.budget) + " ₸" : "—", "#0f172a", "#f8fafc"],
