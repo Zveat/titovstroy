@@ -140,6 +140,43 @@ export default function ProductionModule({
     return m;
   }, [contracts]);
 
+  // Финансовая сводка для каждого объекта в списке (бюджет, оплата, долг, маржа)
+  const finSummaryMap = useMemo(() => {
+    const map = {};
+    if (!finProjects?.length) return map;
+    const txByContract = {};
+    for (const t of (financeTx || [])) {
+      if (t.deletedAt || t.included === false) continue;
+      const cn = _normCN(t.contractNo);
+      if (!txByContract[cn]) txByContract[cn] = [];
+      txByContract[cn].push(t);
+    }
+    const objList = [
+      ...objects,
+      ...(productions || []).filter(p => String(p.objectId).startsWith("fp:")).map(p => ({ id: p.objectId, clientName: p.title || "", address: p.address || "" })),
+    ];
+    for (const obj of objList) {
+      let fp = finProjects.find(p => p.objectId === obj.id);
+      if (!fp) {
+        const objContracts = (contracts || []).filter(c => c.objectId === obj.id && !c.deletedAt);
+        for (const c of objContracts) { fp = finProjects.find(p => _normCN(p.contractNo) === _normCN(c.number)); if (fp) break; }
+      }
+      if (!fp && obj.clientName?.length > 2) {
+        fp = finProjects.find(p => { const d = ((p.description || "") + " " + (p.comment || "")).toLowerCase(); return d.includes(obj.clientName.toLowerCase()); });
+      }
+      if (!fp) continue;
+      const cn = _normCN(fp.contractNo);
+      const txList = txByContract[cn] || [];
+      const income = txList.filter(t => t.type === "income").reduce((s, t) => s + (Number(t.amount) || 0), 0);
+      const expense = txList.filter(t => t.type === "expense").reduce((s, t) => s + (Number(t.amount) || 0), 0);
+      const budget = Number(fp.budget) || 0;
+      const debt = Math.max(0, budget - income);
+      const margin = income > 0 ? Math.round((income - expense) / income * 100) : null;
+      map[obj.id] = { budget, income, expense, debt, margin, contractNo: fp.contractNo };
+    }
+    return map;
+  }, [finProjects, financeTx, objects, productions, contracts]);
+
   // ─── СПИСОК ОБЪЕКТОВ ───
   if (!openObj) {
     const q = search.toLowerCase().trim();
@@ -264,39 +301,87 @@ export default function ProductionModule({
             const m = o.m;
             const ps = psByKey(m.prodStatus);
             const cn = contractByObj[o.id];
+            const fs = finSummaryMap[o.id];
+            const budgetFill = fs?.budget > 0 ? Math.min(100, Math.round(fs.income / fs.budget * 100)) : 0;
+            const mCol = fs?.margin == null ? "#94a3b8" : fs.margin >= 30 ? "#059669" : fs.margin >= 0 ? "#f59e0b" : "#dc2626";
+            const mBg  = fs?.margin == null ? "#f8fafc" : fs.margin >= 30 ? "#f0fdf4" : fs.margin >= 0 ? "#fffbeb" : "#fef2f2";
             return (
               <div key={o.id} onClick={() => { setOpenId(o.id); setTab("info"); }}
                 style={{ background: "#fff", border: "1px solid #eef2f7", borderRadius: 16, cursor: "pointer", boxShadow: "0 1px 3px rgba(15,23,42,.07)", transition: "box-shadow .15s,transform .15s", overflow: "hidden", display: "flex", flexDirection: "column" }}
                 onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 8px 24px rgba(0,0,0,.08)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
                 onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}>
+                {/* Цветная полоса */}
                 <div style={{ height: 4, background: `linear-gradient(90deg,${m.color},${m.color}99)`, flexShrink: 0 }} />
                 <div style={{ padding: "14px 16px", flex: 1, display: "flex", flexDirection: "column" }}>
+                  {/* Шапка */}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 14, fontWeight: 800, color: "#0f172a", lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{o.name}</div>
-                      {cn && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{cn}</div>}
-                      {o.address && <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.address}</div>}
+                      {(fs?.contractNo || cn) && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{String(fs?.contractNo || cn || "").replace(/^№+/, "№")}</div>}
+                      {o.address && o.address !== "—" && <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.address}</div>}
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
                       <span style={{ fontSize: 10, fontWeight: 700, color: ps.color, background: ps.bg, borderRadius: 20, padding: "3px 9px", whiteSpace: "nowrap" }}>{ps.label}</span>
                       <span style={{ fontSize: 10, fontWeight: 700, color: m.color, background: m.color + "18", borderRadius: 6, padding: "2px 7px", whiteSpace: "nowrap" }}>{m.label}{m.daysLeft != null && !m.finished ? (m.daysLeft < 0 ? ` ${-m.daysLeft}д` : ` ${m.daysLeft}д`) : ""}</span>
                     </div>
                   </div>
-                  <div style={{ marginBottom: 10 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5, fontSize: 11, color: "#64748b" }}>
-                      <span>Выполнено</span>
-                      <span style={{ fontWeight: 700 }}>{m.prog}%</span>
+                  {/* Финансы (если есть данные из Finance) */}
+                  {fs ? <>
+                    <div style={{ marginBottom: 12 }}>
+                      {fs.budget > 0 ? <>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 5 }}>
+                          <span style={{ fontSize: 16, fontWeight: 800, color: "#059669" }}>{fmt(fs.income)} <span style={{ fontSize: 11, fontWeight: 600, color: "#94a3b8" }}>из {fmt(fs.budget)} ₸</span></span>
+                          <span style={{ fontSize: 12, fontWeight: 800, color: budgetFill >= 100 ? "#059669" : "#2563eb" }}>{budgetFill}%</span>
+                        </div>
+                        <div style={{ height: 6, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}>
+                          <div style={{ width: budgetFill + "%", height: "100%", background: budgetFill >= 100 ? "linear-gradient(90deg,#059669,#34d399)" : "linear-gradient(90deg,#2563eb,#60a5fa)", borderRadius: 4, transition: "width .3s" }} />
+                        </div>
+                      </> : <div>
+                        <span style={{ fontSize: 16, fontWeight: 800, color: "#059669" }}>{fs.income > 0 ? fmt(fs.income) + " ₸" : "—"}</span>
+                        <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: 7 }}>бюджет не указан</span>
+                      </div>}
                     </div>
-                    <div style={{ height: 6, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}>
-                      <div style={{ width: `${m.prog}%`, height: "100%", background: m.prog === 100 ? "#059669" : "#2563eb", borderRadius: 4, transition: "width .3s" }} />
+                    <div style={{ borderTop: "1px solid #f1f5f9" }}>
+                      {[["Долг", fs.debt > 0 ? fmt(fs.debt) + " ₸" : "—", fs.debt > 0 ? "#dc2626" : "#94a3b8"],
+                        ["Расходы", fs.expense > 0 ? fmt(fs.expense) + " ₸" : "—", fs.expense > 0 ? "#dc2626" : "#94a3b8"]
+                      ].map(([l, v, c]) => (
+                        <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #f1f5f9" }}>
+                          <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>{l}</span>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: c }}>{v}</span>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                  <div style={{ marginTop: "auto", display: "flex", flexWrap: "wrap", gap: "4px 12px", fontSize: 11, color: "#64748b", borderTop: "1px solid #f1f5f9", paddingTop: 10 }}>
-                    {m.stagesCount > 0 && <span>🔨 {m.doneStages}/{m.stagesCount} эт.</span>}
-                    {m.mPlan != null && <span>📊 {m.mFact != null ? `${m.mFact}% факт` : `${m.mPlan}% план`}</span>}
-                    {m.defectsOpen > 0 && <span style={{ color: "#d97706" }}>⚠ {m.defectsOpen} замеч.</span>}
-                    {m.responsible && <span>👷 {m.responsible}</span>}
-                  </div>
+                    <div style={{ marginTop: "auto", paddingTop: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: mBg, borderRadius: 10, padding: "8px 12px", marginBottom: 8 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#475569" }}>Маржа</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                          <span style={{ fontSize: 14, fontWeight: 800, color: mCol }}>{fs.income > 0 ? fmt(fs.income - fs.expense) + " ₸" : "—"}</span>
+                          {fs.margin != null && <span style={{ fontSize: 10, fontWeight: 800, color: "#fff", background: mCol, borderRadius: 6, padding: "2px 7px" }}>{fs.margin}%</span>}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 10px", fontSize: 11, color: "#64748b" }}>
+                        {m.stagesCount > 0 && <span>🔨 {m.doneStages}/{m.stagesCount} эт. · {m.prog}%</span>}
+                        {m.defectsOpen > 0 && <span style={{ color: "#d97706" }}>⚠ {m.defectsOpen}</span>}
+                        {m.responsible && <span>👷 {m.responsible}</span>}
+                      </div>
+                    </div>
+                  </> : <>
+                    {/* Нет финансовых данных — показываем прогресс по этапам */}
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5, fontSize: 11, color: "#64748b" }}>
+                        <span>Выполнено</span><span style={{ fontWeight: 700 }}>{m.prog}%</span>
+                      </div>
+                      <div style={{ height: 6, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}>
+                        <div style={{ width: `${m.prog}%`, height: "100%", background: m.prog === 100 ? "#059669" : "#2563eb", borderRadius: 4, transition: "width .3s" }} />
+                      </div>
+                    </div>
+                    <div style={{ marginTop: "auto", display: "flex", flexWrap: "wrap", gap: "4px 12px", fontSize: 11, color: "#64748b", borderTop: "1px solid #f1f5f9", paddingTop: 10 }}>
+                      {m.stagesCount > 0 && <span>🔨 {m.doneStages}/{m.stagesCount} эт.</span>}
+                      {m.mPlan != null && <span>📊 {m.mFact != null ? `${m.mFact}% факт` : `${m.mPlan}% план`}</span>}
+                      {m.defectsOpen > 0 && <span style={{ color: "#d97706" }}>⚠ {m.defectsOpen}</span>}
+                      {m.responsible && <span>👷 {m.responsible}</span>}
+                    </div>
+                  </>}
                 </div>
               </div>
             );
