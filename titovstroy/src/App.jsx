@@ -8868,7 +8868,7 @@ function MainApp({ currentUser, setCurrentUser }) {
                     </div>;
                   })()}
                   {/* Карточки проектов */}
-                  <div className="fin-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>
+                  <div className="fin-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(380px,1fr))",gap:14}}>
                     {filtered.map(p=>{
                       const st = projStats[p.contractNo]||{income:0,expense:0};
                       const income = st.income;
@@ -8893,7 +8893,7 @@ function MainApp({ currentUser, setCurrentUser }) {
                             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8}}>
                               <div style={{flex:1,minWidth:0}}>
                                 <div style={{fontSize:14,fontWeight:800,color:"#0f172a",letterSpacing:"-.2px",lineHeight:1.3,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{p.description||p.comment||"—"}</div>
-                                <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>№{p.contractNo}</div>
+                                <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>{String(p.contractNo||"").replace(/^№+/,"№")}</div>
                               </div>
                               <span style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:20,background:col+"18",color:col,whiteSpace:"nowrap",flexShrink:0,lineHeight:1.6}}>{p.rawStatus||p.status}</span>
                             </div>
