@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useCallback, useRef, Fragment } from "rea
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, get, set } from "firebase/database";
 import ProductionModule from "./production/ProductionModule.jsx";
+import { emptyProduction } from "./production/constants.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
@@ -3662,6 +3663,33 @@ function MainApp({ currentUser, setCurrentUser }) {
     const list = exists ? cur.map(p => p.objectId === record.objectId ? record : p) : [...cur, record];
     await saveProductions(list, { replace: true });
   }, []);
+
+  // Миграция: перенести все проекты из Финансов в Производство (один раз)
+  const migrateFinanceToProd = useCallback(async () => {
+    if (!window.confirm(`Это заменит все записи в Производстве (${productionsRef.current.length} шт.) на записи из Финансов. Продолжить?`)) return;
+    const finStatMap = { "новый":"new","активен":"active","в работе":"active","приостановлен":"paused","выполнен":"done","отменен":"cancel" };
+    const newProds = [];
+    const seen = new Set();
+    for (const fp of finProjectsRef.current) {
+      const st = fp.rawStatus || fp.status || "";
+      if (st === "отменен") continue;
+      // Найти связанный объект
+      let objId = fp.objectId || "";
+      if (!objId && fp.contractNo) {
+        const link = contractLinkMap[normCN(fp.contractNo)];
+        if (link?.object) objId = link.object.id;
+      }
+      if (!objId || seen.has(objId)) continue;
+      seen.add(objId);
+      const prod = emptyProduction(objId, genId);
+      prod.prodStatus = finStatMap[st] || "active";
+      if (fp.createdAt) prod.startDate = fp.createdAt;
+      if (fp.closedAt) prod.factEndDate = fp.closedAt;
+      newProds.push(prod);
+    }
+    await saveProductions(newProds, { replace: true });
+    alert(`Перенесено ${newProds.length} объектов в Производство.`);
+  }, [contractLinkMap, genId]);
   // Построить этапы из привязанной к объекту сметы: группировка по категориям сметы
   const buildStagesFromEstimate = useCallback((objectId) => {
     const objEsts = estimates.filter(e => e.objectId === objectId);
@@ -8830,8 +8858,8 @@ function MainApp({ currentUser, setCurrentUser }) {
                             {/* Шапка */}
                             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:9,gap:8}}>
                               <div style={{flex:1,minWidth:0}}>
-                                <div style={{fontSize:15,fontWeight:800,color:"#0f172a",letterSpacing:"-.2px"}}>№{p.contractNo}</div>
-                                <div style={{fontSize:11.5,color:"#64748b",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.description||p.comment||"—"}</div>
+                                <div style={{fontSize:15,fontWeight:800,color:"#0f172a",letterSpacing:"-.2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.description||p.comment||"—"}</div>
+                                <div style={{fontSize:11.5,color:"#94a3b8",marginTop:2}}>№{p.contractNo}</div>
                               </div>
                               <span style={{fontSize:10.5,fontWeight:700,padding:"4px 11px",borderRadius:20,background:col+"15",color:col,whiteSpace:"nowrap",flexShrink:0}}>{p.rawStatus||p.status}</span>
                             </div>
@@ -9462,8 +9490,15 @@ function MainApp({ currentUser, setCurrentUser }) {
               const contract = contractsRef.current.find(c => c.objectId === obj.id) || null;
               const estTotal = estimates.filter(e => e.objectId === obj.id).reduce((s, e) => s + (Number(e.total) || 0), 0);
               const draft = finProjDraftFromObject(updated, contract);
-              const proj = { ...draft, id: genId(), budget: draft.budget || estTotal || 0 };
+              const proj = { ...draft, id: genId(), budget: draft.budget || estTotal || 0, status: "новый", rawStatus: "новый" };
               await saveFinanceProjects([...cur, proj]);
+            }
+            // Авто-создать карточку производства со статусом «новый»
+            const hasProd = productionsRef.current.some(p => p.objectId === obj.id);
+            if (!hasProd) {
+              const prod = emptyProduction(obj.id, genId);
+              prod.prodStatus = "new";
+              await saveProductions([...productionsRef.current, prod], { replace: true });
             }
           }
         };
@@ -10197,6 +10232,14 @@ function MainApp({ currentUser, setCurrentUser }) {
       {/* ── ЭКРАН: ПРОИЗВОДСТВО ── */}
       {effScreen === "production" && (
         <div style={{padding:"20px 16px 90px"}}>
+          {currentUser.role === "admin" && (
+            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
+              <button onClick={migrateFinanceToProd}
+                style={{background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                ↓ Импортировать из Финансов
+              </button>
+            </div>
+          )}
           <ProductionModule
             objects={productionObjects}
             allObjects={objects}
