@@ -8900,7 +8900,9 @@ function MainApp({ currentUser, setCurrentUser }) {
                             {/* Мета-чипы */}
                             <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14,fontSize:10.5,alignItems:"center"}}>
                               {[p.client,p.category].filter(Boolean).map((m,i)=><span key={i} style={{color:"#64748b",background:"#f1f5f9",borderRadius:6,padding:"2px 8px",fontWeight:600}}>{m}</span>)}
-                              {p.createdAt&&<span style={{color:"#94a3b8"}}>📅 {p.createdAt}{p.closedAt?" → "+p.closedAt:""}{dur!==null?` · ${dur} дн.`:""}</span>}
+                              {p.createdAt&&<span style={{color:"#94a3b8"}}>🤝 продажа: {p.createdAt}</span>}
+                              {p.startDate&&<span style={{color:"#94a3b8"}}>🔨 начало: {p.startDate}</span>}
+                              {p.closedAt&&<span style={{color:"#94a3b8"}}>✓ закрыт: {p.closedAt}{dur!==null?` · ${dur} дн.`:""}</span>}
                               {link?.object && <button onClick={e=>{ e.stopPropagation(); openObjectFromFinance(link.object); }} title="Открыть объект" style={{background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↗ объект</button>}
                             </div>
                             {/* Прогресс оплаты — крупный */}
@@ -9046,8 +9048,9 @@ function MainApp({ currentUser, setCurrentUser }) {
                             </div>
                             <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Описание работ</div><input className="fi" value={mp.description||""} onChange={e=>setp("description",e.target.value)}/></div>
                             <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Стоимость проекта, ₸</div><input type="number" className="fi" value={mp.budget||0} onChange={e=>setp("budget",e.target.value)}/></div>
-                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                              <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Дата заказа</div><input type="date" className="fi" value={mp.createdAt||""} onChange={e=>setp("createdAt",e.target.value)}/></div>
+                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                              <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Дата продажи</div><input type="date" className="fi" value={mp.createdAt||""} onChange={e=>setp("createdAt",e.target.value)}/></div>
+                              <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Дата начала работ</div><input type="date" className="fi" value={mp.startDate||""} onChange={e=>setp("startDate",e.target.value)}/></div>
                               <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Дата закрытия</div><input type="date" className="fi" value={mp.closedAt||""} onChange={e=>setp("closedAt",e.target.value)}/></div>
                             </div>
                             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
@@ -10283,6 +10286,8 @@ function MainApp({ currentUser, setCurrentUser }) {
             productions={productions}
             onSaveProduction={onSaveProduction}
             buildStagesFromEstimate={buildStagesFromEstimate}
+            finProjects={finProjects}
+            financeTx={financeTx}
             fmt={fmt}
             genId={genId}
             currentUser={currentUser}
