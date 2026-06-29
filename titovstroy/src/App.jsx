@@ -6220,7 +6220,7 @@ function MainApp({ currentUser, setCurrentUser }) {
         const _estByObjId = {}; for(const e of estimates){ if(e.objectId){ (_estByObjId[e.objectId]||(_estByObjId[e.objectId]=[])).push(e); } }
         const _objVal = o => (_estByObjId[o.id]||[]).reduce((s,e)=>s+(e.total||0),0);
         const _objCost = o => { const cat = getEffectiveCatalog(); const lk = new Map(); for(const w of cat){ if(w?.name)lk.set(w.name,w); if(w?.code)lk.set(w.code,w); } let c=0; for(const e of (_estByObjId[o.id]||[])){ for(const [k,r] of Object.entries(e.rows||{})){ const q=Number(r?.qty||0); if(!q) continue; const w=lk.get(k); if(w)c+=rowCostPerUnit(r,w)*q; } } return c; };
-        const objectsThisMonth = liveObjects.filter(o=>_inMonth(o.updatedAt||o.createdAt||0));
+        const objectsThisMonth = liveObjects.filter(o=>o.status!=="archive"&&_inMonth(o.createdAt||o.updatedAt||0));
         const objectsWithSum = objectsThisMonth.filter(o=>_objVal(o)>0);
         const totalSumMonth = objectsWithSum.reduce((s,o)=>s+_objVal(o), 0);
         const signedMonth = objectsThisMonth.filter(o=>o.status==="signed"&&_objVal(o)>0);
