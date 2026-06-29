@@ -579,46 +579,110 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) 
         </div>
       </div>
 
-      {/* Gantt */}
-      {stages.length > 0 && (
-        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18, overflowX: "auto" }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 14 }}>График работ (Гантт)</div>
-          {ganttStages.length === 0 ? (
-            <div style={{ textAlign: "center", color: "#94a3b8", padding: "20px 0", fontSize: 13 }}>Укажите план/факт даты у этапов выше — здесь появится график.</div>
-          ) : (
-            <div style={{ minWidth: 480 }}>
-              <div style={{ display: "flex", gap: 16, marginBottom: 8, fontSize: 11, color: "#64748b", flexWrap: "wrap" }}>
-                <span><span style={{ display: "inline-block", width: 14, height: 8, background: "#93c5fd", borderRadius: 3, marginRight: 4, verticalAlign: "middle" }} />План</span>
-                <span><span style={{ display: "inline-block", width: 14, height: 8, background: "#059669", borderRadius: 3, marginRight: 4, verticalAlign: "middle" }} />Факт</span>
-                {todayPct != null && <span><span style={{ display: "inline-block", width: 2, height: 12, background: "#ef4444", marginRight: 5, verticalAlign: "middle" }} />Сегодня</span>}
+      {/* Gantt — полноценный график */}
+      {stages.length > 0 && (() => {
+        const gantt = stages.filter(s => s.planStart || s.factStart);
+        if (!gantt.length) return (
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 8 }}>График работ</div>
+            <div style={{ textAlign: "center", color: "#94a3b8", padding: "20px 0", fontSize: 13 }}>Укажите плановые даты у работ выше — появится график.</div>
+          </div>
+        );
+        const todayMs = _dayStart(new Date());
+        const allMs = gantt.flatMap(s => [s.planStart, s.planEnd, s.factStart, s.factEnd].filter(Boolean).map(d => +new Date(d)));
+        allMs.push(todayMs);
+        const pad = 3 * 864e5;
+        const startMs = Math.min(...allMs) - pad;
+        const endMs = Math.max(...allMs) + pad;
+        const totalDays = Math.max(1, Math.round((endMs - startMs) / 864e5));
+        const PX = Math.min(28, Math.max(14, Math.round(900 / totalDays)));
+        const chartW = totalDays * PX;
+        const NAME_W = 164;
+        const ROW_H = 46;
+        const xOf = (ms) => Math.round((ms - startMs) / 864e5) * PX;
+        const wOf = (a, b) => Math.max(PX, xOf(b) - xOf(a) + PX);
+        const todayX = xOf(todayMs);
+        // Месячные метки
+        const months = [];
+        const mc = new Date(startMs); mc.setDate(1); mc.setHours(0, 0, 0, 0);
+        while (+mc <= endMs) { months.push({ label: mc.toLocaleDateString("ru-RU", { month: "short", year: "2-digit" }), x: xOf(+mc) }); mc.setMonth(mc.getMonth() + 1); }
+        const ganttGrouped = groupByCat(gantt);
+        return (
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, overflowX: "auto" }}>
+            {/* Шапка */}
+            <div style={{ display: "flex", alignItems: "center", gap: 18, padding: "14px 16px 10px", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>График работ</span>
+              <div style={{ display: "flex", gap: 14, fontSize: 11, color: "#64748b", flexWrap: "wrap" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ display: "inline-block", width: 22, height: 10, background: "#bfdbfe", border: "1.5px solid #3b82f6", borderRadius: 3 }} />план</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ display: "inline-block", width: 22, height: 9, background: "#6ee7b7", borderRadius: 3 }} />факт</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ display: "inline-block", width: 2, height: 14, background: "#ef4444", borderRadius: 1 }} />сегодня</span>
               </div>
-              {/* ось дат */}
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                <div style={{ width: 160, flexShrink: 0 }} />
-                <div style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "#94a3b8" }}>
-                  <span>{fmtD(minD)}</span><span>{fmtD((minD + maxD) / 2)}</span><span>{fmtD(maxD)}</span>
+            </div>
+            <div style={{ minWidth: NAME_W + chartW + 16, paddingBottom: 8 }}>
+              {/* Ось месяцев */}
+              <div style={{ display: "flex", borderBottom: "2px solid #e2e8f0" }}>
+                <div style={{ width: NAME_W, flexShrink: 0 }} />
+                <div style={{ position: "relative", width: chartW, height: 26, flexShrink: 0 }}>
+                  {months.map((m, i) => (
+                    <div key={i} style={{ position: "absolute", left: m.x, top: 0, bottom: 0, borderLeft: "1px solid #e2e8f0" }}>
+                      <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 700, paddingLeft: 4, lineHeight: "26px", whiteSpace: "nowrap" }}>{m.label}</span>
+                    </div>
+                  ))}
+                  <div style={{ position: "absolute", left: todayX, top: 0, bottom: 0, width: 2, background: "#ef4444", borderRadius: 1 }} />
                 </div>
               </div>
-              {ganttStages.map(s => {
-                const st = stByKey(s.status);
-                return (
-                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
-                    <div style={{ width: 160, flexShrink: 0, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, color: "#0f172a", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name}</div>
-                      <div style={{ fontSize: 9.5, color: st.color }}>{st.label}</div>
-                    </div>
-                    <div style={{ position: "relative", flex: 1, height: 28, background: "#f8fafc", borderRadius: 6, minWidth: 240, border: "1px solid #f1f5f9" }}>
-                      {todayPct != null && <div style={{ position: "absolute", left: `${todayPct}%`, top: 0, bottom: 0, width: 2, background: "#ef4444", zIndex: 2 }} />}
-                      {bar(s.planStart, s.planEnd, "#93c5fd", 5, 8)}
-                      {bar(s.factStart, s.factEnd, "#059669", 16, 8)}
+              {/* Строки по категориям */}
+              {ganttGrouped.map(([cat, list]) => (
+                <Fragment key={cat}>
+                  <div style={{ display: "flex", background: "#fffdf7" }}>
+                    <div style={{ width: NAME_W, flexShrink: 0, padding: "5px 12px 3px", fontSize: 10, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em" }}>{cat}</div>
+                    <div style={{ position: "relative", width: chartW, height: 20, flexShrink: 0 }}>
+                      {months.map((m, i) => <div key={i} style={{ position: "absolute", left: m.x, top: 0, bottom: 0, width: 1, background: "#f0ece0" }} />)}
+                      <div style={{ position: "absolute", left: todayX, top: 0, bottom: 0, width: 2, background: "rgba(239,68,68,.2)" }} />
                     </div>
                   </div>
-                );
-              })}
+                  {list.map(s => {
+                    const st = stByKey(s.status);
+                    const pS = s.planStart ? +new Date(s.planStart) : null;
+                    const pE = s.planEnd ? +new Date(s.planEnd) : null;
+                    const fS = s.factStart ? +new Date(s.factStart) : null;
+                    const fE = s.factEnd ? +new Date(s.factEnd) : null;
+                    const overdue = s.status !== "done" && pE && pE < todayMs;
+                    return (
+                      <div key={s.id} style={{ display: "flex", alignItems: "center", borderBottom: "1px solid #f1f5f9", minHeight: ROW_H }}>
+                        <div style={{ width: NAME_W, flexShrink: 0, padding: "6px 12px", minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: overdue ? "#dc2626" : "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</div>
+                          <div style={{ fontSize: 10, color: st.color, fontWeight: 600 }}>{st.label}{overdue ? " ⚠" : ""}</div>
+                        </div>
+                        <div style={{ position: "relative", width: chartW, height: ROW_H, flexShrink: 0 }}>
+                          {months.map((m, i) => <div key={i} style={{ position: "absolute", left: m.x, top: 0, bottom: 0, width: 1, background: "#f1f5f9" }} />)}
+                          <div style={{ position: "absolute", left: todayX, top: 0, bottom: 0, width: 2, background: "rgba(239,68,68,.18)", zIndex: 1 }} />
+                          {/* Плановый бар */}
+                          {pS && pE && (
+                            <div title={`План: ${new Date(pS).toLocaleDateString("ru-RU")} — ${new Date(pE).toLocaleDateString("ru-RU")}`}
+                              style={{ position: "absolute", left: xOf(pS), width: wOf(pS, pE), top: 8, height: 14, borderRadius: 4, background: overdue ? "#fee2e2" : st.bg, border: `1.5px solid ${overdue ? "#f87171" : st.color}`, zIndex: 2, overflow: "hidden", display: "flex", alignItems: "center" }}>
+                              <span style={{ fontSize: 9, fontWeight: 700, color: overdue ? "#dc2626" : st.color, paddingLeft: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{wOf(pS, pE) > 50 ? s.name : ""}</span>
+                            </div>
+                          )}
+                          {/* Фактический бар */}
+                          {fS && (
+                            <div title={`Факт: ${new Date(fS).toLocaleDateString("ru-RU")}${fE ? " — " + new Date(fE).toLocaleDateString("ru-RU") : " (идёт)"}`}
+                              style={{ position: "absolute", left: xOf(fS), width: wOf(fS, fE || todayMs), top: 26, height: 12, borderRadius: 3, background: s.status === "done" ? "#34d399" : "#6ee7b7", zIndex: 2 }} />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </Fragment>
+              ))}
+              {/* Метка «сегодня» внизу */}
+              <div style={{ position: "relative", height: 16, marginTop: 2 }}>
+                <div style={{ position: "absolute", left: NAME_W + todayX - 16, top: 0, fontSize: 9, color: "#ef4444", fontWeight: 700, whiteSpace: "nowrap" }}>▲ сегодня</div>
+              </div>
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
