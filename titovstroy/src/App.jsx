@@ -5993,7 +5993,7 @@ function MainApp({ currentUser, setCurrentUser }) {
         ::-webkit-scrollbar-track{background:#f1f5f9}
         ::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:4px}
         ::-webkit-scrollbar-thumb:hover{background:#94a3b8}
-        .fi{background:#ffffff;border:1px solid #e2e8f0;color:#0f172a;border-radius:8px;padding:9px 13px;font-family:inherit;font-size:14px;width:100%;transition:border-color .15s,box-shadow .15s;outline:none}
+        .fi{background:#ffffff;border:1px solid #e2e8f0;color:#0f172a;border-radius:8px;padding:9px 13px;font-family:inherit;font-size:14px;width:100%;box-sizing:border-box;transition:border-color .15s,box-shadow .15s;outline:none}
         .fi:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12)}
         .fi::placeholder{color:#94a3b8}
         .tab-btn{background:none;border:none;cursor:pointer;padding:7px 16px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:500;color:#64748b;transition:all .15s;white-space:nowrap}
@@ -8868,7 +8868,7 @@ function MainApp({ currentUser, setCurrentUser }) {
                     </div>;
                   })()}
                   {/* Карточки проектов */}
-                  <div className="fin-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(380px,1fr))",gap:14}}>
+                  <div className="fin-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>
                     {filtered.map(p=>{
                       const st = projStats[p.contractNo]||{income:0,expense:0};
                       const income = st.income;
@@ -8972,7 +8972,7 @@ function MainApp({ currentUser, setCurrentUser }) {
                     };
                     return (
                       <div onClick={()=>setFinProjModal(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.55)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-                        <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:16,padding:"22px 24px",width:"100%",maxWidth:480,maxHeight:"92vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+                        <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:16,padding:"22px 24px",width:"100%",maxWidth:720,maxHeight:"92vh",overflowY:"auto",overflowX:"hidden",boxSizing:"border-box",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
                             <h3 style={{margin:0,fontSize:17,fontWeight:800,color:"#0f172a"}}>{mp.id?"Редактировать":"Новый"} проект</h3>
                             <button onClick={()=>setFinProjModal(null)} style={{background:"none",border:"none",fontSize:20,color:"#94a3b8",cursor:"pointer"}}>✕</button>
@@ -9051,12 +9051,12 @@ function MainApp({ currentUser, setCurrentUser }) {
                             </div>
                             <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Описание работ</div><input className="fi" value={mp.description||""} onChange={e=>setp("description",e.target.value)}/></div>
                             <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Стоимость проекта, ₸</div><input type="number" className="fi" value={mp.budget||0} onChange={e=>setp("budget",e.target.value)}/></div>
-                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
                               <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Дата продажи</div><input type="date" className="fi" value={mp.createdAt||""} onChange={e=>setp("createdAt",e.target.value)}/></div>
                               <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Дата начала работ</div><input type="date" className="fi" value={mp.startDate||""} onChange={e=>setp("startDate",e.target.value)}/></div>
                               <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Дата закрытия</div><input type="date" className="fi" value={mp.closedAt||""} onChange={e=>setp("closedAt",e.target.value)}/></div>
                             </div>
-                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
                               {[["b24","B24 внесён?"],["contractSigned","Договор заключён?"],["avr","АВР?"]].map(([k,l])=>(
                                 <div key={k}><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>{l}</div>
                                   <select className="fi" value={mp[k]||"нет"} onChange={e=>setp(k,e.target.value)}>
