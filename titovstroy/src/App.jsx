@@ -3666,30 +3666,67 @@ function MainApp({ currentUser, setCurrentUser }) {
 
   // Миграция: перенести все проекты из Финансов в Производство (один раз)
   const migrateFinanceToProd = useCallback(async () => {
-    if (!window.confirm(`Это заменит все записи в Производстве (${productionsRef.current.length} шт.) на записи из Финансов. Продолжить?`)) return;
+    const total = finProjectsRef.current.filter(p => (p.rawStatus||p.status) !== "отменен").length;
+    if (!window.confirm(`Перенести ${total} проектов из Финансов в Производство? Текущие записи производства будут заменены.`)) return;
     const finStatMap = { "новый":"new","активен":"active","в работе":"active","приостановлен":"paused","выполнен":"done","отменен":"cancel" };
+    // inline версия estToStages из ProductionModule: строим этапы из сметы сразу с финансами
+    const stagesFromEst = (objId) => buildStagesFromEstimate(objId).map(s => ({
+      id: genId(), cat: s.cat||"Прочее", name: s.name||"", unit: s.unit||"", qty: s.qty||0,
+      planStart:"", planEnd:"", factStart:"", factEnd:"",
+      status:"todo", responsible:"", note:"", paid:false,
+      priceClient: s.priceClient||0, costPlan: s.costPlan||0,
+    }));
     const newProds = [];
+    const extraObjs = [];
     const seen = new Set();
+    const curObjs = objectsRef.current.filter(o => !o.deletedAt);
     for (const fp of finProjectsRef.current) {
       const st = fp.rawStatus || fp.status || "";
       if (st === "отменен") continue;
-      // Найти связанный объект
+      // 1) прямая связь по objectId
       let objId = fp.objectId || "";
+      // 2) через contractLinkMap (договор → объект)
       if (!objId && fp.contractNo) {
         const link = contractLinkMap[normCN(fp.contractNo)];
         if (link?.object) objId = link.object.id;
       }
-      if (!objId || seen.has(objId)) continue;
+      // 3) нечёткий матч по имени/телефону из описания
+      if (!objId) {
+        const desc = ((fp.description||"")+" "+(fp.comment||"")).toLowerCase();
+        const matched = curObjs.find(o =>
+          (o.clientName && o.clientName.length > 2 && desc.includes(o.clientName.toLowerCase())) ||
+          (o.clientPhone && o.clientPhone.length > 4 && desc.includes(o.clientPhone.toLowerCase())));
+        if (matched) objId = matched.id;
+      }
+      // 4) создать новый объект если совсем нет совпадения
+      if (!objId) {
+        const parts = (fp.description||"").split("|").map(s=>s.trim());
+        const newObj = {
+          id: genId(),
+          clientName: parts[0] || `Проект №${fp.contractNo}`,
+          address: parts[1]||"", clientPhone: parts[2]||"",
+          clientType: fp.client==="Юр лицо"?"юр":"физ",
+          objType: fp.category||"Вторичка",
+          area:"", status:"signed", note:`Договор №${fp.contractNo}`,
+          manager:"", createdBy:"migration",
+          createdAt: fp.createdAt ? new Date(fp.createdAt).getTime() : Date.now(),
+          updatedAt: Date.now(),
+        };
+        extraObjs.push(newObj); curObjs.push(newObj); objId = newObj.id;
+      }
+      if (seen.has(objId)) continue;
       seen.add(objId);
       const prod = emptyProduction(objId, genId);
-      prod.prodStatus = finStatMap[st] || "active";
+      prod.prodStatus = finStatMap[st]||"active";
+      prod.stages = stagesFromEst(objId); // этапы + финансы из сметы
       if (fp.createdAt) prod.startDate = fp.createdAt;
       if (fp.closedAt) prod.factEndDate = fp.closedAt;
       newProds.push(prod);
     }
+    if (extraObjs.length > 0) await saveObjects([...objectsRef.current, ...extraObjs], { replace: true });
     await saveProductions(newProds, { replace: true });
-    alert(`Перенесено ${newProds.length} объектов в Производство.`);
-  }, [contractLinkMap, genId]);
+    alert(`Перенесено ${newProds.length} объектов.${extraObjs.length ? ` Создано ${extraObjs.length} новых объектов.`:""}`);
+  }, [contractLinkMap, genId, buildStagesFromEstimate]);
   // Построить этапы из привязанной к объекту сметы: группировка по категориям сметы
   const buildStagesFromEstimate = useCallback((objectId) => {
     const objEsts = estimates.filter(e => e.objectId === objectId);
