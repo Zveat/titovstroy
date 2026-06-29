@@ -18,6 +18,16 @@ import { STAGE_STATUSES, emptyProduction } from "./constants.js";
 
 const stByKey = (k) => STAGE_STATUSES.find(s => s.key === k) || STAGE_STATUSES[0];
 
+// Статусы производственных объектов (жизненный цикл)
+const PROD_STATUSES = [
+  { key: "new",     label: "Новый",          color: "#7c3aed", bg: "rgba(124,58,237,.1)"  },
+  { key: "active",  label: "В работе",       color: "#2563eb", bg: "#eff6ff"               },
+  { key: "paused",  label: "Приостановлен",  color: "#f59e0b", bg: "rgba(245,158,11,.1)"  },
+  { key: "done",    label: "Выполнен",       color: "#059669", bg: "rgba(5,150,105,.1)"   },
+  { key: "cancel",  label: "Отменён",        color: "#94a3b8", bg: "#f3f4f6"               },
+];
+const psByKey = (k) => PROD_STATUSES.find(s => s.key === k) || PROD_STATUSES[1];
+
 // Превратить строки сметы в строки-работы (наименования). cat = блок-заголовок.
 const estToStages = (fromEst, genId) => fromEst.map(s => ({
   id: genId(), cat: s.cat || "Прочее", name: s.name || "", unit: s.unit || "", qty: s.qty || 0,
@@ -51,6 +61,7 @@ export default function ProductionModule({
   const [openId, setOpenId] = useState(null);
   const [tab, setTab] = useState("info");
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [addOpen, setAddOpen] = useState(false);
 
   const prodByObj = useMemo(() => {
@@ -121,9 +132,11 @@ export default function ProductionModule({
       else { sev = 1; color = "#059669"; label = "В норме"; }
       const fd = finished ? new Date(p.factEndDate) : null;
       const finishedThisMonth = !!(fd && fd.getMonth() === nowD.getMonth() && fd.getFullYear() === nowD.getFullYear());
-      return { pc, cp, cf, mPlan, mFact, prog, defectsOpen, finished, daysLeft, sev, color, label, responsible: p?.responsible || "", stagesCount: sts.length, doneStages, finishedThisMonth };
+      const prodStatus = p?.prodStatus || "active";
+      return { pc, cp, cf, mPlan, mFact, prog, defectsOpen, finished, daysLeft, sev, color, label, responsible: p?.responsible || "", stagesCount: sts.length, doneStages, finishedThisMonth, prodStatus };
     };
     const rows = baseEntries
+      .filter(o => !statusFilter || (prodByObj[o.id]?.prodStatus || "active") === statusFilter)
       .filter(o => !q || [o.name, o.address].some(v => v && v.toLowerCase().includes(q)))
       .map(o => ({ ...o, m: metricsOf(o.id) }))
       .sort((a, b) => (b.m.sev - a.m.sev) || ((a.m.daysLeft == null ? 999 : a.m.daysLeft) - (b.m.daysLeft == null ? 999 : b.m.daysLeft)) || (b.updatedAt - a.updatedAt));
@@ -139,13 +152,23 @@ export default function ProductionModule({
     );
     return (
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 4px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+        {/* Заголовок + кнопка */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
           <h2 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a", margin: 0 }}>🏗 Производство</h2>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск по клиенту, адресу…"
-              style={{ flex: "1 1 200px", minWidth: 180, border: "1px solid #e2e8f0", borderRadius: 10, padding: "9px 14px", fontSize: 14, fontFamily: "inherit", outline: "none" }} />
-            <button onClick={() => setAddOpen(v => !v)} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 10, padding: "9px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>+ Добавить объект</button>
-          </div>
+          <button onClick={() => setAddOpen(v => !v)} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 10, padding: "9px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>+ Добавить объект</button>
+        </div>
+        {/* Поиск */}
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск по клиенту, адресу…"
+          style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 10, padding: "9px 14px", fontSize: 14, fontFamily: "inherit", outline: "none", boxSizing: "border-box", marginBottom: 10 }} />
+        {/* Фильтр по статусу */}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+          <button onClick={() => setStatusFilter("")} style={{ border: "1px solid", borderColor: !statusFilter ? "#0f172a" : "#e2e8f0", background: !statusFilter ? "#0f172a" : "#fff", color: !statusFilter ? "#fff" : "#64748b", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Все</button>
+          {PROD_STATUSES.map(s => (
+            <button key={s.key} onClick={() => setStatusFilter(f => f === s.key ? "" : s.key)}
+              style={{ border: `1px solid ${statusFilter === s.key ? s.color : "#e2e8f0"}`, background: statusFilter === s.key ? s.bg : "#fff", color: statusFilter === s.key ? s.color : "#64748b", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+              {s.label}
+            </button>
+          ))}
         </div>
         {addOpen && (() => {
           const prodIds = new Set((productions || []).map(p => p.objectId));
@@ -207,7 +230,10 @@ export default function ProductionModule({
                     <div style={{ fontWeight: 700, fontSize: 15, color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.name}</div>
                     <div style={{ fontSize: 12, color: "#64748b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.address}</div>
                   </div>
-                  <span style={{ fontSize: 10.5, fontWeight: 700, color: m.color, background: m.color + "18", borderRadius: 6, padding: "3px 8px", whiteSpace: "nowrap", flexShrink: 0 }}>{m.label}{(m.daysLeft != null && !m.finished) ? (m.daysLeft < 0 ? ` ${-m.daysLeft}д` : ` ${m.daysLeft}д`) : ""}</span>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: m.color, background: m.color + "18", borderRadius: 6, padding: "3px 8px", whiteSpace: "nowrap" }}>{m.label}{(m.daysLeft != null && !m.finished) ? (m.daysLeft < 0 ? ` ${-m.daysLeft}д` : ` ${m.daysLeft}д`) : ""}</span>
+                    {(() => { const ps = psByKey(m.prodStatus); return <span style={{ fontSize: 10, fontWeight: 700, color: ps.color, background: ps.bg, borderRadius: 6, padding: "2px 7px", whiteSpace: "nowrap" }}>{ps.label}</span>; })()}
+                  </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "12px 0 10px" }}>
                   <div style={{ flex: 1, height: 8, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}>
@@ -263,7 +289,7 @@ export default function ProductionModule({
       {tab === "launch" && <ChecklistTab kind="checklistLaunch" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист запуска объекта" />}
       {tab === "handover" && <ChecklistTab kind="checklistHandover" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист сдачи объекта" />}
       {tab === "stages" && <StagesTab prod={openProd} patch={patchProd} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} />}
-      {tab === "finance" && <FinanceTab prod={openProd} patch={patchProd} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} />}
+      {tab === "finance" && <FinanceTab prod={openProd} patch={patchProd} fmt={fmt} />}
       {tab === "journal" && <JournalTab prod={openProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
       {tab === "defects" && <DefectsTab prod={openProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
     </div>
@@ -376,7 +402,16 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch }) {
       )}
       {/* Производственные поля */}
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 14 }}>Производственная информация</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>Производственная информация</div>
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            {PROD_STATUSES.map(s => {
+              const active = (prod.prodStatus || "active") === s.key;
+              return <button key={s.key} onClick={() => patch({ prodStatus: s.key })}
+                style={{ border: `1px solid ${active ? s.color : "#e2e8f0"}`, background: active ? s.bg : "#fff", color: active ? s.color : "#94a3b8", borderRadius: 20, padding: "4px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", transition: "all .1s" }}>{s.label}</button>;
+            })}
+          </div>
+        </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
           {fld("Ответственный прораб / менеджер", "responsible")}
           {fld("Доступ (ключ, код, пропуск)", "access")}
@@ -444,7 +479,7 @@ function ChecklistTab({ kind, prod, patch, genId, title }) {
   );
 }
 
-// ─── ВКЛАДКА: ЭТАПЫ И СРОКИ (этап = Заголовок сметы, работы внутри + Gantt) ───
+// ─── ВКЛАДКА: ЭТАПЫ И СРОКИ ───
 function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) {
   const stages = prod.stages || [];
   const [newName, setNewName] = useState("");
@@ -455,31 +490,10 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) 
     patch({ stages: [...stages, { id: genId(), cat: newCat.trim() || "Прочее", name: newName.trim(), unit: "", qty: 0, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: 0, costPlan: 0 }] });
     setNewName("");
   };
-  const syncFromEstimate = () => {
-    const fromEst = buildStagesFromEstimate(objId); // строки = наименования работ
-    if (!fromEst.length) { alert("Нет привязанной сметы с позициями."); return; }
-    const keyOf = s => ((s.cat || "") + "|" + (s.name || "")).toLowerCase();
-    const estKeys = new Set(fromEst.map(keyOf));
-    const estCats = new Set(fromEst.map(f => (f.cat || "").toLowerCase()));
-    const oldByKey = {};
-    stages.forEach(s => { oldByKey[keyOf(s)] = s; });
-    const rebuilt = fromEst.map(f => {
-      const o = oldByKey[keyOf(f)];
-      return o
-        ? { ...o, cat: f.cat, name: f.name, unit: f.unit, qty: f.qty, sub: undefined, works: undefined, priceClient: o.priceClient || f.priceClient || 0, costPlan: o.costPlan || f.costPlan || 0 }
-        : { id: genId(), cat: f.cat, name: f.name, unit: f.unit, qty: f.qty, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: f.priceClient || 0, costPlan: f.costPlan || 0 };
-    });
-    // ручные строки (нет в смете), кроме старых строк-категорий (name = заголовок сметы)
-    const manual = stages.filter(s => !estKeys.has(keyOf(s)) && !estCats.has((s.name || "").toLowerCase()));
-    patch({ stages: [...rebuilt, ...manual] });
-  };
-  const daysIncl = (a, b) => (a && b) ? Math.max(0, Math.round((_dayStart(b) - _dayStart(a)) / 864e5)) + 1 : null;
   const inWorkDays = (s) => s.factStart ? Math.max(0, Math.round((_dayStart(s.factEnd || new Date()) - _dayStart(s.factStart)) / 864e5)) + 1 : null;
-  const thS = { padding: "6px 8px", fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: ".03em", whiteSpace: "nowrap", textAlign: "left" };
-  const tdS = { padding: "5px 8px", verticalAlign: "top" };
-  const dInp = { width: "100%", minWidth: 118, border: "1px solid #e2e8f0", borderRadius: 6, padding: "4px 6px", fontSize: 11.5, fontFamily: "inherit", outline: "none", boxSizing: "border-box", color: "#0f172a" };
+  const dInp = { border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 7px", fontSize: 12, fontFamily: "inherit", outline: "none", color: "#0f172a", width: "100%", boxSizing: "border-box" };
 
-  // График (Гантт): шкала дат + линия «сегодня» + бары план/факт
+  // График (Гантт)
   const dates = stages.flatMap(s => [s.planStart, s.planEnd, s.factStart, s.factEnd]).filter(Boolean).map(d => new Date(d).getTime());
   const ganttStages = stages.filter(s => s.name && (s.planStart || s.factStart));
   const todayMs = _dayStart(new Date());
@@ -499,74 +513,68 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) 
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, overflowX: "auto" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Этапы и сроки ({stages.length})</div>
-          <button onClick={syncFromEstimate} style={{ background: "#f0f9ff", color: "#0369a1", border: "1px solid #bae6fd", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>↻ Обновить из сметы</button>
-        </div>
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 12 }}>Этапы и сроки ({stages.length})</div>
         {stages.length === 0 ? (
-          <div style={{ textAlign: "center", color: "#94a3b8", padding: "20px 0", fontSize: 13 }}>Нажмите «Обновить из сметы» или добавьте работу вручную ниже.</div>
+          <div style={{ textAlign: "center", color: "#94a3b8", padding: "20px 0", fontSize: 13 }}>Добавьте работу вручную ниже.</div>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720, fontSize: 12.5 }}>
-            <thead>
-              <tr>
-                <th style={{ ...thS, minWidth: 200 }}>Наименование работы</th>
-                <th style={thS}>Статус</th>
-                <th style={thS}>План (старт / конец)</th>
-                <th style={thS}>Факт (старт / конец)</th>
-                <th style={thS}>Дней</th>
-                <th style={thS}>Ответств.</th>
-              </tr>
-            </thead>
-            <tbody>
-              {grouped.map(([cat, list]) => (
-                <Fragment key={cat}>
-                  <tr><td colSpan={6} style={{ padding: "10px 8px 4px", fontSize: 11.5, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em", background: "#fffdf7" }}>{cat}</td></tr>
-                  {list.map(s => {
-                    const st = stByKey(s.status);
-                    const iw = inWorkDays(s), pd = daysIncl(s.planStart, s.planEnd);
-                    return (
-                      <tr key={s.id} style={{ borderTop: "1px solid #f1f5f9" }}>
-                        <td style={{ ...tdS, minWidth: 200, borderLeft: `3px solid ${st.color}` }}>
-                          <input value={s.name} onChange={e => upd(s.id, { name: e.target.value })} placeholder="Наименование работы" style={{ width: "100%", border: "none", fontSize: 12.5, fontWeight: 600, color: "#0f172a", fontFamily: "inherit", outline: "none", background: "transparent", padding: 0 }} />
-                          {(s.qty > 0 || s.unit) && <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 1 }}>{s.qty > 0 ? fmt(s.qty) : ""} {s.unit || ""}</div>}
-                          <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="+ примечание" style={{ width: "100%", maxWidth: 240, border: "none", borderBottom: "1px dashed #e2e8f0", fontSize: 11, color: "#64748b", fontFamily: "inherit", outline: "none", marginTop: 3, padding: "1px 0", background: "transparent" }} />
-                        </td>
-                        <td style={tdS}>
-                          <select value={s.status} onChange={e => upd(s.id, { status: e.target.value })} style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 6px", fontSize: 11.5, fontFamily: "inherit", color: st.color, background: st.bg, fontWeight: 700, cursor: "pointer", maxWidth: 116 }}>
+          <div>
+            {grouped.map(([cat, list]) => (
+              <Fragment key={cat}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em", padding: "10px 0 5px", borderBottom: "1px solid #fdf3e3" }}>{cat}</div>
+                {list.map(s => {
+                  const st = stByKey(s.status);
+                  const iw = inWorkDays(s);
+                  return (
+                    <div key={s.id} style={{ display: "flex", gap: 10, padding: "10px 0", borderBottom: "1px solid #f1f5f9" }}>
+                      <div style={{ width: 3, borderRadius: 3, background: st.color, flexShrink: 0, minHeight: 36 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <input value={s.name} onChange={e => upd(s.id, { name: e.target.value })} placeholder="Наименование работы"
+                          style={{ width: "100%", border: "none", fontSize: 13, fontWeight: 600, color: "#0f172a", fontFamily: "inherit", outline: "none", background: "transparent", padding: 0 }} />
+                        {(s.qty > 0 || s.unit) && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 1 }}>{s.qty > 0 ? fmt(s.qty) : ""} {s.unit || ""}</div>}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8, alignItems: "center" }}>
+                          <select value={s.status} onChange={e => upd(s.id, { status: e.target.value })}
+                            style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 6px", fontSize: 11.5, fontFamily: "inherit", color: st.color, background: st.bg, fontWeight: 700, cursor: "pointer" }}>
                             {STAGE_STATUSES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
                           </select>
-                        </td>
-                        <td style={tdS}>
-                          <input type="date" value={s.planStart || ""} onChange={e => upd(s.id, { planStart: e.target.value })} style={dInp} />
-                          <input type="date" value={s.planEnd || ""} onChange={e => upd(s.id, { planEnd: e.target.value })} style={{ ...dInp, marginTop: 3 }} />
-                        </td>
-                        <td style={tdS}>
-                          <input type="date" value={s.factStart || ""} onChange={e => upd(s.id, { factStart: e.target.value })} style={dInp} />
-                          <input type="date" value={s.factEnd || ""} onChange={e => upd(s.id, { factEnd: e.target.value })} style={{ ...dInp, marginTop: 3 }} />
-                        </td>
-                        <td style={{ ...tdS, whiteSpace: "nowrap", fontSize: 11.5 }}>
-                          {iw != null && <div style={{ color: "#2563eb", fontWeight: 700 }}>🔨 {iw}</div>}
-                          {pd != null && <div style={{ color: "#94a3b8" }}>план {pd}</div>}
-                          {iw == null && pd == null && <span style={{ color: "#cbd5e1" }}>—</span>}
-                        </td>
-                        <td style={tdS}>
-                          <input value={s.responsible || ""} onChange={e => upd(s.id, { responsible: e.target.value })} placeholder="—" style={{ width: "100%", minWidth: 80, border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 7px", fontSize: 11.5, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
+                          <input value={s.responsible || ""} onChange={e => upd(s.id, { responsible: e.target.value })} placeholder="Ответств."
+                            style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 8px", fontSize: 12, fontFamily: "inherit", outline: "none", width: 100 }} />
+                          {iw != null && <span style={{ fontSize: 11, color: "#2563eb", fontWeight: 700 }}>🔨 {iw} дн</span>}
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, marginTop: 8 }}>
+                          <div>
+                            <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 2 }}>Старт план</div>
+                            <input type="date" value={s.planStart || ""} onChange={e => upd(s.id, { planStart: e.target.value })} style={dInp} />
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 2 }}>Конец план</div>
+                            <input type="date" value={s.planEnd || ""} onChange={e => upd(s.id, { planEnd: e.target.value })} style={dInp} />
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 2 }}>Старт факт</div>
+                            <input type="date" value={s.factStart || ""} onChange={e => upd(s.id, { factStart: e.target.value })} style={dInp} />
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 2 }}>Конец факт</div>
+                            <input type="date" value={s.factEnd || ""} onChange={e => upd(s.id, { factEnd: e.target.value })} style={dInp} />
+                          </div>
+                        </div>
+                        <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="+ примечание"
+                          style={{ marginTop: 6, width: "100%", border: "none", borderBottom: "1px dashed #e2e8f0", fontSize: 11, color: "#64748b", fontFamily: "inherit", outline: "none", padding: "1px 0", background: "transparent" }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </Fragment>
+            ))}
+          </div>
         )}
         {/* Ручное добавление работы */}
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", borderTop: "1px solid #f1f5f9", paddingTop: 12 }}>
           <input value={newCat} onChange={e => setNewCat(e.target.value)} placeholder="Заголовок (Черновые…)"
-            style={{ flex: "1 1 150px", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
+            style={{ flex: "1 1 140px", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
           <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === "Enter" && addManual()} placeholder="Наименование работы"
-            style={{ flex: "2 1 200px", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
+            style={{ flex: "2 1 180px", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
           <button onClick={addManual} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ Работа</button>
         </div>
       </div>
@@ -726,27 +734,9 @@ function NumCell({ value, onChange, ph = "—" }) {
     style={{ width: "100%", minWidth: 64, border: "1px solid #e2e8f0", borderRadius: 5, padding: "5px 6px", fontSize: 12.5, textAlign: "right", fontFamily: "inherit", outline: "none", boxSizing: "border-box", color: "#0f172a" }} />;
 }
 
-function FinanceTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) {
+function FinanceTab({ prod, patch, fmt }) {
   const stages = prod.stages || [];
   const upd = (id, p) => patch({ stages: stages.map(s => s.id === id ? { ...s, ...p } : s) });
-  const syncFromEstimate = () => {
-    const fromEst = buildStagesFromEstimate(objId); // строки = наименования работ
-    if (!fromEst.length) { alert("Нет привязанной сметы с позициями."); return; }
-    const keyOf = s => ((s.cat || "") + "|" + (s.name || "")).toLowerCase();
-    const estKeys = new Set(fromEst.map(keyOf));
-    const estCats = new Set(fromEst.map(f => (f.cat || "").toLowerCase()));
-    const oldByKey = {};
-    stages.forEach(s => { oldByKey[keyOf(s)] = s; });
-    const rebuilt = fromEst.map(f => {
-      const o = oldByKey[keyOf(f)];
-      return o
-        ? { ...o, cat: f.cat, name: f.name, unit: f.unit, qty: f.qty, sub: undefined, works: undefined, priceClient: o.priceClient || f.priceClient || 0, costPlan: o.costPlan || f.costPlan || 0 }
-        : { id: genId(), cat: f.cat, name: f.name, unit: f.unit, qty: f.qty, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: f.priceClient || 0, costPlan: f.costPlan || 0 };
-    });
-    // ручные строки (нет в смете), кроме старых строк-категорий (name = заголовок сметы)
-    const manual = stages.filter(s => !estKeys.has(keyOf(s)) && !estCats.has((s.name || "").toLowerCase()));
-    patch({ stages: [...rebuilt, ...manual] });
-  };
   const num = (v) => Number(v) || 0;
   const tot = stages.reduce((a, s) => { a.priceClient += num(s.priceClient); a.costPlan += num(s.costPlan); a.costFact += num(s.costFact); return a; }, { priceClient: 0, costPlan: 0, costFact: 0 });
   const mColor = (p) => p >= 30 ? "#059669" : p >= 0 ? "#d97706" : "#dc2626";
@@ -766,12 +756,9 @@ function FinanceTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId })
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {/* Компактная таблица финансов по этапам */}
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, overflowX: "auto" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Финансы по этапам</div>
-          <button onClick={syncFromEstimate} style={{ background: "#f0f9ff", color: "#0369a1", border: "1px solid #bae6fd", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>↻ Обновить из сметы</button>
-        </div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>Финансы по этапам</div>
         {stages.length === 0 ? (
-          <div style={{ textAlign: "center", color: "#94a3b8", padding: "26px 0", fontSize: 13 }}>Нажмите «Обновить из сметы» — этапы и суммы подтянутся.</div>
+          <div style={{ textAlign: "center", color: "#94a3b8", padding: "26px 0", fontSize: 13 }}>Этапы появятся автоматически при открытии объекта со сметой.</div>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760, fontSize: 12.5 }}>
             <thead>
