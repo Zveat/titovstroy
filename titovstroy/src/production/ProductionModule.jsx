@@ -53,9 +53,12 @@ const projAddress = (p) => {
   return d[1] || "";
 };
 
+const _normCN = (s) => String(s||"").trim().toLowerCase().replace(/\s+/g,"");
+
 export default function ProductionModule({
   objects, allObjects, unlinkedProjects, estimates, contracts, productions,
   onSaveProduction, buildStagesFromEstimate,
+  finProjects, financeTx,
   fmt, genId, currentUser,
 }) {
   const [openId, setOpenId] = useState(null);
@@ -256,6 +259,40 @@ export default function ProductionModule({
   }
 
   // ─── КАРТОЧКА ОБЪЕКТА ───
+  // Данные из Финансов для текущего объекта
+  const finProj = useMemo(() => {
+    if (!openObj || !finProjects?.length) return null;
+    // 1) прямая привязка по objectId
+    let fp = finProjects.find(p => p.objectId === openObj.id);
+    if (fp) return fp;
+    // 2) через договор объекта
+    const objContracts = (contracts||[]).filter(c => c.objectId === openObj.id);
+    for (const c of objContracts) {
+      fp = finProjects.find(p => _normCN(p.contractNo) === _normCN(c.number));
+      if (fp) return fp;
+    }
+    // 3) нечёткий матч по имени клиента
+    if (openObj.clientName && openObj.clientName.length > 2) {
+      fp = finProjects.find(p => {
+        const d = ((p.description||"")+" "+(p.comment||"")).toLowerCase();
+        return d.includes(openObj.clientName.toLowerCase());
+      });
+    }
+    return fp || null;
+  }, [openObj, finProjects, contracts]);
+
+  const finSummary = useMemo(() => {
+    if (!finProj) return null;
+    const cn = _normCN(finProj.contractNo);
+    const txList = (financeTx||[]).filter(t => !t.deletedAt && t.included !== false && _normCN(t.contractNo) === cn);
+    const income = txList.filter(t => t.type === "income").reduce((s,t) => s+(Number(t.amount)||0), 0);
+    const expense = txList.filter(t => t.type === "expense").reduce((s,t) => s+(Number(t.amount)||0), 0);
+    const budget = Number(finProj.budget) || 0;
+    const debt = Math.max(0, budget - income);
+    const margin = income > 0 ? Math.round((income - expense) / income * 100) : null;
+    return { budget, income, expense, debt, margin, contractNo: finProj.contractNo, status: finProj.rawStatus || finProj.status };
+  }, [finProj, financeTx]);
+
   const TABS = [
     { key: "info", label: "Информация", icon: "ℹ️" },
     { key: "launch", label: "Запуск", icon: "🚀" },
@@ -289,7 +326,7 @@ export default function ProductionModule({
       {tab === "launch" && <ChecklistTab kind="checklistLaunch" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист запуска объекта" />}
       {tab === "handover" && <ChecklistTab kind="checklistHandover" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист сдачи объекта" />}
       {tab === "stages" && <StagesTab prod={openProd} patch={patchProd} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} />}
-      {tab === "finance" && <FinanceTab prod={openProd} patch={patchProd} fmt={fmt} />}
+      {tab === "finance" && <FinanceTab prod={openProd} patch={patchProd} fmt={fmt} finSummary={finSummary} />}
       {tab === "journal" && <JournalTab prod={openProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
       {tab === "defects" && <DefectsTab prod={openProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
     </div>
@@ -415,6 +452,7 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch }) {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
           {fld("Ответственный прораб / менеджер", "responsible")}
           {fld("Доступ (ключ, код, пропуск)", "access")}
+          {fld("Дата продажи (подписание договора)", "saleDate", "date")}
           {fld("Дата начала работ", "startDate", "date")}
           {fld("Плановая дата окончания", "planEndDate", "date")}
           {fld("Фактическая дата окончания", "factEndDate", "date")}
@@ -798,7 +836,7 @@ function NumCell({ value, onChange, ph = "—" }) {
     style={{ width: "100%", minWidth: 64, border: "1px solid #e2e8f0", borderRadius: 5, padding: "5px 6px", fontSize: 12.5, textAlign: "right", fontFamily: "inherit", outline: "none", boxSizing: "border-box", color: "#0f172a" }} />;
 }
 
-function FinanceTab({ prod, patch, fmt }) {
+function FinanceTab({ prod, patch, fmt, finSummary }) {
   const stages = prod.stages || [];
   const upd = (id, p) => patch({ stages: stages.map(s => s.id === id ? { ...s, ...p } : s) });
   const num = (v) => Number(v) || 0;
@@ -816,8 +854,29 @@ function FinanceTab({ prod, patch, fmt }) {
   const tdc = { padding: "4px 6px", verticalAlign: "top" };
   const grouped = groupByCat(stages);
 
+  const mCol = (p) => p >= 30 ? "#059669" : p >= 0 ? "#d97706" : "#dc2626";
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Данные из Финансов (бюджет, оплаты, расходы) */}
+      {finSummary && (
+        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>💰 Финансовый проект{finSummary.contractNo ? ` №${finSummary.contractNo}` : ""}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8 }}>
+            {[
+              ["Бюджет (договор)", finSummary.budget > 0 ? fmt(finSummary.budget) + " ₸" : "—", "#0f172a", "#f8fafc"],
+              ["Оплачено", finSummary.income > 0 ? fmt(finSummary.income) + " ₸" : "—", "#059669", "#f0fdf4"],
+              ["Долг", finSummary.debt > 0 ? fmt(finSummary.debt) + " ₸" : "—", finSummary.debt > 0 ? "#dc2626" : "#94a3b8", finSummary.debt > 0 ? "#fef2f2" : "#f8fafc"],
+              ["Расходы", finSummary.expense > 0 ? fmt(finSummary.expense) + " ₸" : "—", "#dc2626", "#fef2f2"],
+              ["Маржа", finSummary.margin != null ? (fmt(finSummary.income - finSummary.expense) + " ₸ / " + finSummary.margin + "%") : "—", finSummary.margin != null ? mCol(finSummary.margin) : "#94a3b8", "#f0fdf4"],
+            ].map(([l, v, c, bg]) => (
+              <div key={l} style={{ background: bg, borderRadius: 10, padding: "10px 12px", border: `1px solid ${c}22` }}>
+                <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".03em", marginBottom: 3 }}>{l}</div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: c }}>{v}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {/* Компактная таблица финансов по этапам */}
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, overflowX: "auto" }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>Финансы по этапам</div>
