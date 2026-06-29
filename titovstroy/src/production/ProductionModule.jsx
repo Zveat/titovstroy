@@ -64,7 +64,7 @@ export default function ProductionModule({
   const [openId, setOpenId] = useState(null);
   const [tab, setTab] = useState("info");
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("active");
   const [addOpen, setAddOpen] = useState(false);
 
   const prodByObj = useMemo(() => {
@@ -100,6 +100,37 @@ export default function ProductionModule({
   }, [openId]);
 
   const patchProd = (patch) => onSaveProduction({ ...openProd, ...patch, updatedAt: Date.now() });
+
+  // Данные из Финансов для текущего объекта — ДОЛЖНЫ быть до if(!openObj), иначе нарушение Rules of Hooks
+  const finProj = useMemo(() => {
+    if (!openObj || !finProjects?.length) return null;
+    let fp = finProjects.find(p => p.objectId === openObj.id);
+    if (fp) return fp;
+    const objContracts = (contracts||[]).filter(c => c.objectId === openObj.id);
+    for (const c of objContracts) {
+      fp = finProjects.find(p => _normCN(p.contractNo) === _normCN(c.number));
+      if (fp) return fp;
+    }
+    if (openObj.clientName && openObj.clientName.length > 2) {
+      fp = finProjects.find(p => {
+        const d = ((p.description||"")+" "+(p.comment||"")).toLowerCase();
+        return d.includes(openObj.clientName.toLowerCase());
+      });
+    }
+    return fp || null;
+  }, [openObj, finProjects, contracts]);
+
+  const finSummary = useMemo(() => {
+    if (!finProj) return null;
+    const cn = _normCN(finProj.contractNo);
+    const txList = (financeTx||[]).filter(t => !t.deletedAt && t.included !== false && _normCN(t.contractNo) === cn);
+    const income = txList.filter(t => t.type === "income").reduce((s,t) => s+(Number(t.amount)||0), 0);
+    const expense = txList.filter(t => t.type === "expense").reduce((s,t) => s+(Number(t.amount)||0), 0);
+    const budget = Number(finProj.budget) || 0;
+    const debt = Math.max(0, budget - income);
+    const margin = income > 0 ? Math.round((income - expense) / income * 100) : null;
+    return { budget, income, expense, debt, margin, contractNo: finProj.contractNo, status: finProj.rawStatus || finProj.status };
+  }, [finProj, financeTx]);
 
   // ─── СПИСОК ОБЪЕКТОВ ───
   if (!openObj) {
@@ -259,40 +290,6 @@ export default function ProductionModule({
   }
 
   // ─── КАРТОЧКА ОБЪЕКТА ───
-  // Данные из Финансов для текущего объекта
-  const finProj = useMemo(() => {
-    if (!openObj || !finProjects?.length) return null;
-    // 1) прямая привязка по objectId
-    let fp = finProjects.find(p => p.objectId === openObj.id);
-    if (fp) return fp;
-    // 2) через договор объекта
-    const objContracts = (contracts||[]).filter(c => c.objectId === openObj.id);
-    for (const c of objContracts) {
-      fp = finProjects.find(p => _normCN(p.contractNo) === _normCN(c.number));
-      if (fp) return fp;
-    }
-    // 3) нечёткий матч по имени клиента
-    if (openObj.clientName && openObj.clientName.length > 2) {
-      fp = finProjects.find(p => {
-        const d = ((p.description||"")+" "+(p.comment||"")).toLowerCase();
-        return d.includes(openObj.clientName.toLowerCase());
-      });
-    }
-    return fp || null;
-  }, [openObj, finProjects, contracts]);
-
-  const finSummary = useMemo(() => {
-    if (!finProj) return null;
-    const cn = _normCN(finProj.contractNo);
-    const txList = (financeTx||[]).filter(t => !t.deletedAt && t.included !== false && _normCN(t.contractNo) === cn);
-    const income = txList.filter(t => t.type === "income").reduce((s,t) => s+(Number(t.amount)||0), 0);
-    const expense = txList.filter(t => t.type === "expense").reduce((s,t) => s+(Number(t.amount)||0), 0);
-    const budget = Number(finProj.budget) || 0;
-    const debt = Math.max(0, budget - income);
-    const margin = income > 0 ? Math.round((income - expense) / income * 100) : null;
-    return { budget, income, expense, debt, margin, contractNo: finProj.contractNo, status: finProj.rawStatus || finProj.status };
-  }, [finProj, financeTx]);
-
   const TABS = [
     { key: "info", label: "Информация", icon: "ℹ️" },
     { key: "launch", label: "Запуск", icon: "🚀" },
