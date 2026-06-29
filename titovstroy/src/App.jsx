@@ -3356,7 +3356,7 @@ function MainApp({ currentUser, setCurrentUser }) {
   useEffect(() => { finProjectsRef.current = finProjects; }, [finProjects]);
   const [finProjModal, setFinProjModal] = useState(null);
   const [finProjSearch, setFinProjSearch] = useState("");
-  const [finProjStatusFilter, setFinProjStatusFilter] = useState("");
+  const [finProjStatusFilter, setFinProjStatusFilter] = useState("в работе");
   const [finProjCatFilter, setFinProjCatFilter] = useState("");
 
   // ── Связь фин-проектов с объектами (по номеру договора) ──
@@ -3418,7 +3418,7 @@ function MainApp({ currentUser, setCurrentUser }) {
   const [objectTab, setObjectTab] = useState("list"); // list | workspace
   const [objInfoCollapsed, setObjInfoCollapsed] = useState(false); // свёрнут ли блок инфо клиента/объекта
   const [currentObject, setCurrentObject] = useState(null);
-  const [objectFilterStatus, setObjectFilterStatus] = useState("");
+  const [objectFilterStatus, setObjectFilterStatus] = useState("approval");
   const [objectFilterType, setObjectFilterType] = useState("");
   const [objectFilterManager, setObjectFilterManager] = useState("");
   const [objectDateSort, setObjectDateSort] = useState("new"); // new = сначала новые, old = сначала старые
@@ -8868,7 +8868,7 @@ function MainApp({ currentUser, setCurrentUser }) {
                     </div>;
                   })()}
                   {/* Карточки проектов */}
-                  <div className="fin-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(340px,1fr))",gap:12}}>
+                  <div className="fin-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>
                     {filtered.map(p=>{
                       const st = projStats[p.contractNo]||{income:0,expense:0};
                       const income = st.income;
@@ -8887,63 +8887,66 @@ function MainApp({ currentUser, setCurrentUser }) {
                           style={{background:"#fff",border:"1px solid #eef2f7",borderRadius:16,cursor:finReadonly?"default":"pointer",boxShadow:"0 1px 3px rgba(15,23,42,.07)",transition:"box-shadow .15s,transform .15s",overflow:"hidden",display:"flex",flexDirection:"column"}}
                           className="fin-row">
                           {/* Цветная полоса статуса */}
-                          <div style={{height:4,background:`linear-gradient(90deg,${col},${col}99)`}}/>
-                          <div style={{padding:"15px 18px 16px"}}>
+                          <div style={{height:4,background:`linear-gradient(90deg,${col},${col}99)`,flexShrink:0}}/>
+                          <div style={{padding:"14px 16px 16px",flex:1,display:"flex",flexDirection:"column"}}>
                             {/* Шапка */}
-                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:9,gap:8}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8}}>
                               <div style={{flex:1,minWidth:0}}>
-                                <div style={{fontSize:15,fontWeight:800,color:"#0f172a",letterSpacing:"-.2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.description||p.comment||"—"}</div>
-                                <div style={{fontSize:11.5,color:"#94a3b8",marginTop:2}}>№{p.contractNo}</div>
+                                <div style={{fontSize:14,fontWeight:800,color:"#0f172a",letterSpacing:"-.2px",lineHeight:1.3,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{p.description||p.comment||"—"}</div>
+                                <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>№{p.contractNo}</div>
                               </div>
-                              <span style={{fontSize:10.5,fontWeight:700,padding:"4px 11px",borderRadius:20,background:col+"15",color:col,whiteSpace:"nowrap",flexShrink:0}}>{p.rawStatus||p.status}</span>
+                              <span style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:20,background:col+"18",color:col,whiteSpace:"nowrap",flexShrink:0,lineHeight:1.6}}>{p.rawStatus||p.status}</span>
                             </div>
                             {/* Мета-чипы */}
-                            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14,fontSize:10.5,alignItems:"center"}}>
-                              {[p.client,p.category].filter(Boolean).map((m,i)=><span key={i} style={{color:"#64748b",background:"#f1f5f9",borderRadius:6,padding:"2px 8px",fontWeight:600}}>{m}</span>)}
-                              {p.createdAt&&<span style={{color:"#94a3b8"}}>🤝 продажа: {p.createdAt}</span>}
-                              {p.startDate&&<span style={{color:"#94a3b8"}}>🔨 начало: {p.startDate}</span>}
-                              {p.closedAt&&<span style={{color:"#94a3b8"}}>✓ закрыт: {p.closedAt}{dur!==null?` · ${dur} дн.`:""}</span>}
-                              {link?.object && <button onClick={e=>{ e.stopPropagation(); openObjectFromFinance(link.object); }} title="Открыть объект" style={{background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↗ объект</button>}
+                            <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:12,fontSize:10,alignItems:"center",minHeight:22}}>
+                              {[p.client,p.category].filter(Boolean).map((m,i)=><span key={i} style={{color:"#64748b",background:"#f1f5f9",borderRadius:6,padding:"2px 7px",fontWeight:600}}>{m}</span>)}
+                              {p.createdAt&&<span style={{color:"#94a3b8"}}>🤝 {p.createdAt}</span>}
+                              {p.startDate&&<span style={{color:"#94a3b8"}}>🔨 {p.startDate}</span>}
+                              {p.closedAt&&<span style={{color:"#94a3b8"}}>✓ {p.closedAt}{dur!==null?` · ${dur}д.`:""}</span>}
+                              {link?.object && <button onClick={e=>{ e.stopPropagation(); openObjectFromFinance(link.object); }} title="Открыть объект" style={{background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:6,padding:"2px 7px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↗</button>}
                             </div>
-                            {/* Прогресс оплаты — крупный */}
-                            {p.budget>0 ? <div style={{marginBottom:14}}>
-                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
-                                <span style={{fontSize:18,fontWeight:800,color:"#059669"}}>{fM(income)} <span style={{fontSize:12,fontWeight:600,color:"#94a3b8"}}>из {fM(p.budget)} ₸</span></span>
-                                <span style={{fontSize:13,fontWeight:800,color:budgetFill>=100?"#059669":"#2563eb"}}>{budgetFill}%</span>
-                              </div>
-                              <div style={{height:8,background:"#f1f5f9",borderRadius:5,overflow:"hidden"}}>
-                                <div style={{height:"100%",width:budgetFill+"%",background:budgetFill>=100?"linear-gradient(90deg,#059669,#34d399)":"linear-gradient(90deg,#2563eb,#60a5fa)",borderRadius:5,transition:"width .3s"}}/>
-                              </div>
-                            </div> : <div style={{marginBottom:14}}>
-                              <span style={{fontSize:18,fontWeight:800,color:"#059669"}}>{income>0?fM(income)+" ₸":"—"}</span>
-                              <span style={{fontSize:11,color:"#94a3b8",marginLeft:8}}>оплачено · стоимость не указана</span>
-                            </div>}
+                            {/* Прогресс оплаты */}
+                            <div style={{marginBottom:12}}>
+                              {p.budget>0 ? <>
+                                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
+                                  <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{fM(income)} <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>из {fM(p.budget)} ₸</span></span>
+                                  <span style={{fontSize:12,fontWeight:800,color:budgetFill>=100?"#059669":"#2563eb"}}>{budgetFill}%</span>
+                                </div>
+                                <div style={{height:6,background:"#f1f5f9",borderRadius:4,overflow:"hidden"}}>
+                                  <div style={{height:"100%",width:budgetFill+"%",background:budgetFill>=100?"linear-gradient(90deg,#059669,#34d399)":"linear-gradient(90deg,#2563eb,#60a5fa)",borderRadius:4,transition:"width .3s"}}/>
+                                </div>
+                              </> : <div>
+                                <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{income>0?fM(income)+" ₸":"—"}</span>
+                                <span style={{fontSize:10,color:"#94a3b8",marginLeft:7}}>бюджет не указан</span>
+                              </div>}
+                            </div>
                             {/* Финансовые строки */}
                             <div style={{borderTop:"1px solid #f1f5f9"}}>
                               {[
                                 ["Долг", debt>0?fM(debt)+" ₸":"—", debt>0?"#dc2626":"#94a3b8"],
                                 ["Расходы", expense>0?fM(expense)+" ₸":"—", expense>0?"#dc2626":"#94a3b8"],
                               ].map(([l,v,c])=>(
-                                <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #f1f5f9"}}>
-                                  <span style={{fontSize:11.5,color:"#64748b",fontWeight:600}}>{l}</span>
-                                  <span style={{fontSize:13.5,fontWeight:700,color:c}}>{v}</span>
+                                <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f1f5f9"}}>
+                                  <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>{l}</span>
+                                  <span style={{fontSize:13,fontWeight:700,color:c}}>{v}</span>
                                 </div>
                               ))}
                             </div>
-                            {/* Маржа — выделенный блок */}
-                            <div style={{marginTop:11,display:"flex",alignItems:"center",justifyContent:"space-between",background:mBg,borderRadius:11,padding:"10px 14px"}}>
-                              <span style={{fontSize:12,fontWeight:700,color:"#475569"}}>Маржа</span>
-                              <span style={{display:"flex",alignItems:"center",gap:8}}>
-                                <span style={{fontSize:15,fontWeight:800,color:mCol}}>{income>0?fM(marginVal)+" ₸":"—"}</span>
-                                {marginPct!==null&&<span style={{fontSize:11,fontWeight:800,color:"#fff",background:mCol,borderRadius:7,padding:"2px 8px"}}>{marginPct}%</span>}
-                              </span>
-                            </div>
-                            {/* Флаги + кнопка операций */}
-                            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:12,alignItems:"center"}}>
-                              {[["Б24",p.b24],["Договор",p.contractSigned],["АВР",p.avr]].map(([l,v])=>(
-                                <span key={l} style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:7,background:yesno(v)?"#f0fdf4":"#fef2f2",color:yesno(v)?"#059669":"#dc2626",display:"inline-flex",alignItems:"center",gap:4}}>{yesno(v)?"✓":"✗"} {l}</span>
-                              ))}
-                              {p.contractNo && <button onClick={e=>{ e.stopPropagation(); navigate(undefined,"ops",{finFilterContract:p.contractNo}); }} style={{marginLeft:"auto",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:7,padding:"4px 10px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📋 Операции</button>}
+                            {/* Нижняя часть: маржа + флаги — прижата к низу карточки */}
+                            <div style={{marginTop:"auto",paddingTop:10}}>
+                              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:mBg,borderRadius:10,padding:"8px 12px",marginBottom:10}}>
+                                <span style={{fontSize:11,fontWeight:700,color:"#475569"}}>Маржа</span>
+                                <span style={{display:"flex",alignItems:"center",gap:7}}>
+                                  <span style={{fontSize:14,fontWeight:800,color:mCol}}>{income>0?fM(marginVal)+" ₸":"—"}</span>
+                                  {marginPct!==null&&<span style={{fontSize:10,fontWeight:800,color:"#fff",background:mCol,borderRadius:6,padding:"2px 7px"}}>{marginPct}%</span>}
+                                </span>
+                              </div>
+                              <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
+                                {[["Б24",p.b24],["Договор",p.contractSigned],["АВР",p.avr]].map(([l,v])=>(
+                                  <span key={l} style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:6,background:yesno(v)?"#f0fdf4":"#fef2f2",color:yesno(v)?"#059669":"#dc2626",display:"inline-flex",alignItems:"center",gap:3}}>{yesno(v)?"✓":"✗"} {l}</span>
+                                ))}
+                                {p.contractNo && <button onClick={e=>{ e.stopPropagation(); navigate(undefined,"ops",{finFilterContract:p.contractNo}); }} style={{marginLeft:"auto",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:7,padding:"4px 9px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📋 Операции</button>}
+                              </div>
                             </div>
                           </div>
                         </div>
