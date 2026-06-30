@@ -57,14 +57,14 @@ const _normCN = (s) => String(s||"").trim().toLowerCase().replace(/\s+/g,"");
 
 export default function ProductionModule({
   objects, allObjects, unlinkedProjects, estimates, contracts, productions,
-  onSaveProduction, buildStagesFromEstimate,
+  onSaveProduction, onDeleteProduction, buildStagesFromEstimate,
   finProjects, financeTx,
   fmt, genId, currentUser,
 }) {
   const [openId, setOpenId] = useState(null);
   const [tab, setTab] = useState("info");
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("active");
+  const [statusFilter, setStatusFilter] = useState(""); // «Все» — иначе новые карточки (статус «new») прячутся под «В работе»
   const [addOpen, setAddOpen] = useState(false);
 
   const prodByObj = useMemo(() => {
@@ -323,6 +323,10 @@ export default function ProductionModule({
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
                       <span style={{ fontSize: 10, fontWeight: 700, color: ps.color, background: ps.bg, borderRadius: 20, padding: "3px 9px", whiteSpace: "nowrap" }}>{ps.label}</span>
                       <span style={{ fontSize: 10, fontWeight: 700, color: m.color, background: m.color + "18", borderRadius: 6, padding: "2px 7px", whiteSpace: "nowrap" }}>{m.label}{m.daysLeft != null && !m.finished ? (m.daysLeft < 0 ? ` ${-m.daysLeft}д` : ` ${m.daysLeft}д`) : ""}</span>
+                      {currentUser?.role === "admin" && onDeleteProduction && (
+                        <button title="Удалить производственную карточку" onClick={e => { e.stopPropagation(); if (window.confirm(`Удалить производственную карточку «${o.name}»? (объект и смета не удаляются)`)) onDeleteProduction(o.id); }}
+                          style={{ background: "rgba(220,38,38,.08)", color: "#dc2626", border: "1px solid rgba(220,38,38,.15)", borderRadius: 6, padding: "2px 7px", fontSize: 11, cursor: "pointer", fontFamily: "inherit", marginTop: 2 }}>🗑</button>
+                      )}
                     </div>
                   </div>
                   {/* Финансы (если есть данные из Finance) */}
