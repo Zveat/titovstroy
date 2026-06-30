@@ -6263,10 +6263,11 @@ function MainApp({ currentUser, setCurrentUser }) {
         })() : null;
         // ── Production KPIs (только для admin/manager) ──
         const _prodKpi = (_isAdmin||_isMgr) ? (() => {
+          const _ds = d => { const x=new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
           const prods = productions||[];
-          const today = _dayStart(new Date());
+          const today = _ds(new Date());
           const inWork = prods.filter(p=>p.prodStatus==="active").length;
-          const overdue = prods.filter(p=>p.prodStatus==="active"&&p.planEndDate&&_dayStart(p.planEndDate)<today&&!p.factEndDate).length;
+          const overdue = prods.filter(p=>p.prodStatus==="active"&&p.planEndDate&&_ds(p.planEndDate)<today&&!p.factEndDate).length;
           const doneMonth = prods.filter(p=>p.factEndDate&&_inMonth(new Date(p.factEndDate).getTime())).length;
           const defects = prods.reduce((s,p)=>s+((p.defects||[]).filter(d=>!d.done).length),0);
           return {inWork,overdue,doneMonth,defects};
