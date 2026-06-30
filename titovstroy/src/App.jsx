@@ -3626,46 +3626,43 @@ function MainApp({ currentUser, setCurrentUser }) {
 
   // Объекты «в работе» для раздела «Производство»: только те, по которым заведён
   // проект в Финансах (связь по objectId, либо по номеру договора).
+  // Сопоставить финпроект с объектом: по objectId → договору → имени/адресу/телефону (двунаправленно)
+  const matchFpToObject = useCallback((p) => {
+    if (p.objectId) { const o = liveObjects.find(x => x.id === p.objectId); if (o) return o; }
+    const link = p.contractNo ? contractLinkMap[normCN(p.contractNo)] : null;
+    if (link?.object) return link.object;
+    const _n = s => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const hay = _n((p.description || "") + " " + (p.client || "") + " " + (p.comment || ""));
+    const hayDigits = hay.replace(/\D/g, "");
+    const pd = _n(p.description);
+    return liveObjects.find(o => {
+      const nm = _n(o.clientName), ad = _n(o.address), ph = String(o.clientPhone || "").replace(/\D/g, "");
+      if (nm && nm.length >= 3 && hay.includes(nm)) return true;            // описание содержит имя объекта
+      if (ad && ad.length >= 4 && hay.includes(ad)) return true;            // описание содержит адрес объекта
+      if (ph && ph.length >= 6 && hayDigits.includes(ph)) return true;      // телефон
+      if (pd && pd.length >= 4 && (nm.includes(pd) || ad.includes(pd))) return true; // имя/адрес объекта содержит описание проекта
+      return false;
+    }) || null;
+  }, [liveObjects, contractLinkMap]);
+
   const productionObjects = useMemo(() => {
     const ids = new Set();
     for (const p of (finProjects || [])) {
       if ((p.rawStatus || p.status) === "отменен") continue; // отменённые не показываем
-      // 1) прямая связь по objectId
-      if (p.objectId) { ids.add(p.objectId); continue; }
-      // 2) связь через договор (contractLinkMap — то же, что в Финансах)
-      const link = p.contractNo ? contractLinkMap[normCN(p.contractNo)] : null;
-      if (link?.object) { ids.add(link.object.id); continue; }
-      // 3) запасной матч по имени/телефону клиента в описании проекта
-      const desc = ((p.description || "") + " " + (p.client || "") + " " + (p.comment || "")).toLowerCase();
-      const obj = liveObjects.find(o =>
-        (o.clientName && desc.includes(o.clientName.toLowerCase())) ||
-        (o.clientPhone && o.clientPhone.length > 4 && desc.includes(o.clientPhone.toLowerCase())));
-      if (obj) ids.add(obj.id);
+      const o = matchFpToObject(p);
+      if (o) ids.add(o.id);
     }
     // объекты, по которым уже создана карточка производства (в т.ч. добавленные вручную)
     const prodIds = new Set((productions || []).map(p => p.objectId));
     // «В работе» = договор подписан (статус «Заключён») / есть фин-проект / есть карточка
     return liveObjects.filter(o => o.status === "signed" || ids.has(o.id) || prodIds.has(o.id));
-  }, [liveObjects, finProjects, contractLinkMap, productions]);
+  }, [liveObjects, finProjects, productions, matchFpToObject]);
 
   // Проекты из Финансов, которые НЕ привязаны ни к одному объекту — их тоже можно
   // добавить в производство вручную (разовая миграция текущих работ из Google-таблиц).
   const unlinkedFinProjects = useMemo(() => {
-    const out = [];
-    for (const p of (finProjects || [])) {
-      if ((p.rawStatus || p.status) === "отменен") continue;
-      if (p.objectId) continue;
-      const link = p.contractNo ? contractLinkMap[normCN(p.contractNo)] : null;
-      if (link?.object) continue;
-      const desc = ((p.description || "") + " " + (p.client || "") + " " + (p.comment || "")).toLowerCase();
-      const obj = liveObjects.find(o =>
-        (o.clientName && desc.includes(o.clientName.toLowerCase())) ||
-        (o.clientPhone && o.clientPhone.length > 4 && desc.includes(o.clientPhone.toLowerCase())));
-      if (obj) continue;
-      out.push(p);
-    }
-    return out;
-  }, [finProjects, contractLinkMap, liveObjects]);
+    return (finProjects || []).filter(p => (p.rawStatus || p.status) !== "отменен" && !matchFpToObject(p));
+  }, [finProjects, matchFpToObject]);
 
   // Мемоизированный фильтрованный/сортированный список смет
   const filteredEstimates = useMemo(() => {
@@ -4132,6 +4129,11 @@ ${reqBlock}`;
     const exists = cur.some(p => p.objectId === record.objectId);
     const list = exists ? cur.map(p => p.objectId === record.objectId ? record : p) : [...cur, record];
     await saveProductions(list, { replace: true });
+  }, []);
+  // Удалить производственную карточку по objectId (replace:true — карточки ключуются по objectId, без id)
+  const onDeleteProduction = useCallback(async (objectId) => {
+    const list = productionsRef.current.filter(p => p.objectId !== objectId);
+    await saveProductions(list, { replace: true, allowEmpty: true });
   }, []);
 
   // Построить этапы из привязанной к объекту сметы: группировка по категориям сметы
@@ -11034,14 +11036,8 @@ ${reqBlock}`;
       {/* ── ЭКРАН: ПРОИЗВОДСТВО ── */}
       {effScreen === "production" && (
         <div style={{padding:"20px 16px 90px"}}>
-          {currentUser.role === "admin" && (
-            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
-              <button onClick={migrateFinanceToProd}
-                style={{background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                ↓ Импортировать из Финансов
-              </button>
-            </div>
-          )}
+          {/* Производство обновляется автоматически: показываются объекты с подписанным договором /
+              финпроектом / карточкой. Ручной массовый импорт убран — он заменял все карточки и плодил дубли. */}
           <ProductionModule
             objects={productionObjects}
             allObjects={objects}
@@ -11050,6 +11046,7 @@ ${reqBlock}`;
             contracts={contracts}
             productions={productions}
             onSaveProduction={onSaveProduction}
+            onDeleteProduction={onDeleteProduction}
             buildStagesFromEstimate={buildStagesFromEstimate}
             finProjects={finProjects}
             financeTx={financeTx}
