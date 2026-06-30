@@ -3370,6 +3370,7 @@ function MainApp({ currentUser, setCurrentUser }) {
   const podryadsRef = useRef([]);
   useEffect(() => { podryadsRef.current = podryads; }, [podryads]);
   const [podryadModal, setPodryadModal] = useState(null); // черновик договора/приложения подряда
+  const [newDocMenu, setNewDocMenu] = useState(false); // выпадающий выбор типа документа на «+ Новый»
 
   // ── ФИНАНСЫ ──
   const [financeTx, setFinanceTx] = useState([]);
@@ -10659,8 +10660,33 @@ ${podBlock}`;
                 const trashedCount = contracts.filter(c=>c.deletedAt).length;
                 return (<>
                   {trashedCount>0 && <button onClick={()=>setContractTab("trash")} style={{background:"rgba(220,38,38,.12)",color:"#ef4444",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"8px 13px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>🗑 Корзина ({trashedCount})</button>}
-                  {currentUser.role !== "viewer" && <button className="btn" style={{fontSize:13,padding:"9px 16px",background:"rgba(124,58,237,.1)",color:"#7c3aed",border:"1px solid rgba(124,58,237,.25)",borderRadius:8,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>openPodryadBuilder({kind:"podryad"})}>+ Договор подряда</button>}
-                  {currentUser.role !== "viewer" && <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:"",createdBy:currentUser.name,createdById:currentUser.id}); setContractTab("editor"); }}>+ Новый</button>}
+                  {currentUser.role !== "viewer" && (
+                    <div style={{position:"relative"}}>
+                      <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>setNewDocMenu(v=>!v)}>+ Новый ▾</button>
+                      {newDocMenu && (<>
+                        <div onClick={()=>setNewDocMenu(false)} style={{position:"fixed",inset:0,zIndex:60}}/>
+                        <div style={{position:"absolute",top:"calc(100% + 6px)",right:0,zIndex:61,background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,boxShadow:"0 12px 40px rgba(0,0,0,.18)",overflow:"hidden",minWidth:240}}>
+                          {[...DOC_TYPES, { value:"podryad", label:"Договор подряда (с рабочим)" }, { value:"podryad_annex", label:"Доп. приложение к договору подряда (№2, 3…)" }].map(dt=>{
+                            const isPod = dt.value==="podryad"||dt.value==="podryad_annex";
+                            return (
+                            <button key={dt.value} onClick={()=>{
+                              setNewDocMenu(false);
+                              if(dt.value==="podryad"){ openPodryadBuilder({kind:"podryad"}); return; }
+                              if(dt.value==="podryad_annex"){ openPodryadBuilder({kind:"annex"}); return; }
+                              setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],type:dt.value,clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:dt.value==="annex"?2:1,note:"",createdBy:currentUser.name,createdById:currentUser.id});
+                              setContractTab("editor");
+                            }}
+                              style={{display:"block",width:"100%",textAlign:"left",padding:"10px 14px",background:isPod?"rgba(124,58,237,.06)":"#fff",border:"none",borderTop:dt.value==="podryad"?"1px solid #eef2f7":"none",fontSize:13,color:isPod?"#7c3aed":"#0f172a",fontWeight:isPod?700:500,cursor:"pointer",fontFamily:"inherit"}}
+                              onMouseEnter={e=>e.currentTarget.style.background=isPod?"rgba(124,58,237,.12)":"#f8fafc"}
+                              onMouseLeave={e=>e.currentTarget.style.background=isPod?"rgba(124,58,237,.06)":"#fff"}>
+                              {isPod?"👷 ":""}{dt.label}
+                            </button>
+                            );
+                          })}
+                        </div>
+                      </>)}
+                    </div>
+                  )}
                 </>);
               })()}
             </div>
@@ -11021,6 +11047,14 @@ ${podBlock}`;
             </div>
             <div style={{overflowY:"auto",flex:1,padding:"14px 20px",display:"flex",flexDirection:"column",gap:14}}>
               {/* Реквизиты */}
+              {isAnnex && (
+                <label style={{fontSize:11,color:"#64748b",fontWeight:600,display:"block"}}>Договор подряда (родитель)
+                  <select style={{...fih,marginTop:4}} value={m._parentId||""} onChange={e=>{ const par=podryads.find(x=>x.id===e.target.value); if(par){ upd({_parentId:par.id, mainNumber:par.number||"", mainDate:par.date||"", contragentId:par.contragentId||m.contragentId, objectId:par.objectId||m.objectId, objectAddress:par.objectAddress||m.objectAddress, worker:(m.worker?.name?m.worker:(par.worker||m.worker)), workerId:(m.workerId||par.workerId||"")}); } else upd({_parentId:""}); }}>
+                    <option value="">— выбрать из существующих —</option>
+                    {podryads.filter(p=>p.kind==="podryad"&&!p.deletedAt).map(p=>(<option key={p.id} value={p.id}>Договор подряда №{p.number} · {p.worker?.name||"—"}</option>))}
+                  </select>
+                </label>
+              )}
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
                 {!isAnnex && <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>№ договора<input style={{...fih,marginTop:4}} value={m.number} onChange={e=>upd({number:e.target.value})}/></label>}
                 {isAnnex && <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>№ приложения<input style={{...fih,marginTop:4}} value={m.annexNo} onChange={e=>upd({annexNo:e.target.value})}/></label>}
