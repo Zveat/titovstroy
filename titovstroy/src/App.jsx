@@ -2819,6 +2819,31 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
           </div>
         </div>
       </div>}
+      {/* Способ указания цены — для договоров подряда */}
+      {isPod && (
+        <div style={{background:"#faf5ff",border:"1px solid #ede9fe",borderRadius:8,padding:"12px 14px"}}>
+          <div style={{fontSize:11,color:"#7c3aed",fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>Способ указания цены</div>
+          <div style={{display:"flex",gap:18,flexWrap:"wrap",marginBottom:(contract.priceMode==="lump")?10:0}}>
+            <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:"#334155",cursor:"pointer"}}>
+              <input type="radio" name="podPriceMode" checked={(contract.priceMode||"perline")==="perline"} onChange={()=>upd({priceMode:"perline"})}/> Цена за каждую позицию (за объём)
+            </label>
+            <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:"#334155",cursor:"pointer"}}>
+              <input type="radio" name="podPriceMode" checked={contract.priceMode==="lump"} onChange={()=>upd({priceMode:"lump"})}/> Одна сумма за все работы
+            </label>
+          </div>
+          {contract.priceMode==="lump" ? (
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,alignItems:"end"}}>
+              <div>
+                <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Общая сумма работ (₸)</div>
+                <input className="fi" type="number" value={contract.manualTotal||""} onChange={e=>upd({manualTotal:e.target.value})} placeholder="800000"/>
+              </div>
+              <div style={{fontSize:12,color:"#64748b",paddingBottom:8}}>В документе цены по позициям не печатаются — только итоговая сумма и перечень работ.</div>
+            </div>
+          ) : (
+            <div style={{fontSize:12,color:"#64748b"}}>Итог считается по строкам: <b style={{color:"#0f172a"}}>{fmt(total)} ₸</b></div>
+          )}
+        </div>
+      )}
       {/* Предоплата для ремонтных договоров */}
       {isRepair && (
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
@@ -5656,9 +5681,11 @@ ${podBlock}`;
     worker: { name: worker?.name||"", iin: worker?.iin||"", doc: worker?.doc||"", docIssuer: worker?.docIssuer||"Выдан МВД РК", address: worker?.address||"", phone: worker?.phone||"", email: worker?.email||"" },
     contragentId: c.contragentId || "",
     objectAddress: c.objectAddress || "",
-    format: "table", showLinePrice: (c.works||[]).some(w=>Number(w.price)>0),
+    // режим цены: per-line (за объём, цена в каждой строке) или lump (одна общая сумма за все работы)
+    format: "table", showLinePrice: c.priceMode!=="lump",
     sections: [{ title:"", lumpSum:"", items:(c.works||[]).map(w=>({ name:w.name, qty:w.quantity, unit:w.unit, price:w.price })) }],
-    manualTotal:"", avans: c.avans||"", termDays: c.termDays||"", withStamp,
+    manualTotal: c.priceMode==="lump" ? (c.manualTotal||"") : "",
+    avans: c.avans||"", termDays: c.termDays||"", withStamp,
   });
   const generateContractPdf = (c, client, ca, withStamp=true) => {
     if (c.type==="podryad" || c.type==="podryad_annex") {
