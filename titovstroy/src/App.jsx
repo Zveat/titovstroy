@@ -3731,24 +3731,26 @@ function MainApp({ currentUser, setCurrentUser }) {
       clientIin: obj.clientIin || "", address: obj.address || "",
       actNo: String(existingNo), actDate: new Date().toISOString().slice(0, 10),
       contractNo: con?.number || "", contractDate: con?.date || "",
-      lines,
+      withStamp: false, lines,
     });
   };
   // HTML формы Р-1 (без НДС)
   const buildAvrHtml = (m) => {
     const esc = s => String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-    const items = (m.lines || []).filter(l => l.included && Number(l.doneQty) > 0);
+    const P = l => Number(l.price) || 0, Q = l => Number(l.doneQty) || 0;
+    const items = (m.lines || []).filter(l => l.included && Q(l) > 0);
     const money = n => Math.round(Number(n) || 0).toLocaleString("ru-RU");
-    const total = items.reduce((s, l) => s + Math.round(l.price * Number(l.doneQty)), 0);
+    const total = items.reduce((s, l) => s + Math.round(P(l) * Q(l)), 0);
     const dateStr = m.actDate ? new Date(m.actDate).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" }) : "";
     const rowsHtml = items.map((l, i) => `<tr>
       <td class="c">${i + 1}</td>
       <td>${esc(l.name)}</td>
       <td class="c">${esc(l.unit)}</td>
-      <td class="c">${(+l.doneQty).toLocaleString("ru-RU")}</td>
-      <td class="r">${money(l.price)}</td>
-      <td class="r">${money(l.price * Number(l.doneQty))}</td>
+      <td class="c">${Q(l).toLocaleString("ru-RU")}</td>
+      <td class="r">${money(P(l))}</td>
+      <td class="r">${money(P(l) * Q(l))}</td>
     </tr>`).join("");
+    const stampImg = m.withStamp ? `<img src="${window.location.origin}/stamp.jpg" alt="Печать" style="position:absolute;left:60px;bottom:-18px;width:120px;height:120px;object-fit:contain;opacity:.85;mix-blend-mode:multiply;pointer-events:none"/>` : "";
     return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>АВР №${esc(m.actNo)}</title>
 <style>
@@ -3789,8 +3791,8 @@ tfoot td{font-weight:700}
 </table>
 <div class="total-words">Всего выполнено работ (оказано услуг) на сумму: <b>${money(total)} ₸</b><br/>(${tengeInWords(total)})</div>
 <div class="muted">Сумма указана без НДС. Работы выполнены в полном объёме, заказчик претензий по объёму, качеству и срокам не имеет.</div>
-<div class="sign">
-  <div class="col"><div><b>Сдал (Исполнитель)</b></div><div class="line"></div><div class="muted">TitovStroy · подпись, дата</div></div>
+<div class="sign" style="${m.withStamp ? "margin-bottom:60px" : ""}">
+  <div class="col" style="position:relative"><div><b>Сдал (Исполнитель)</b></div><div class="line"></div><div class="muted">TitovStroy · подпись, дата</div>${stampImg}</div>
   <div class="col"><div><b>Принял (Заказчик)</b></div><div class="line"></div><div class="muted">${esc(m.clientName) || "подпись"} · подпись, дата</div></div>
 </div>
 <div class="np"><button onclick="window.print()" style="padding:12px 32px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:Arial,sans-serif">🖨 Печать / Сохранить PDF</button></div>
@@ -3800,14 +3802,15 @@ tfoot td{font-weight:700}
   const saveAndPrintAvr = async (m) => {
     const items = (m.lines || []).filter(l => l.included && Number(l.doneQty) > 0);
     if (items.length === 0) { alert("Отметьте хотя бы одну позицию с количеством."); return; }
-    const total = items.reduce((s, l) => s + Math.round(l.price * Number(l.doneQty)), 0);
+    const total = items.reduce((s, l) => s + Math.round((Number(l.price) || 0) * (Number(l.doneQty) || 0)), 0);
     const id = m.id || genId();
     const record = {
       id, objectId: m.objectId, estId: m.estId, type: "avr",
       actNo: m.actNo || "", actDate: m.actDate || new Date().toISOString().slice(0, 10),
       contractNo: m.contractNo || "", contractDate: m.contractDate || "",
       clientName: m.clientName || "", clientType: m.clientType || "физ", clientIin: m.clientIin || "", address: m.address || "",
-      lines: items.map(l => ({ name: l.name, unit: l.unit, price: l.price, doneQty: Number(l.doneQty) })),
+      withStamp: !!m.withStamp,
+      lines: items.map(l => ({ name: l.name, unit: l.unit, price: Number(l.price) || 0, doneQty: Number(l.doneQty) || 0 })),
       total, createdAt: m.createdAt || Date.now(), updatedAt: Date.now(), createdBy: currentUser?.name || "",
     };
     const cur = reportsRef.current;
@@ -10715,8 +10718,9 @@ tfoot td{font-weight:700}
         const upd = patch => setAvrModal(p=>({...p,...patch}));
         const updLine = (i,patch) => setAvrModal(p=>({...p, lines:p.lines.map((l,idx)=>idx===i?{...l,...patch}:l)}));
         const selected = m.lines.filter(l=>l.included && Number(l.doneQty)>0);
-        const total = selected.reduce((s,l)=>s+Math.round(l.price*Number(l.doneQty)),0);
-        const allOn = m.lines.every(l=>l.included);
+        const total = selected.reduce((s,l)=>s+Math.round((Number(l.price)||0)*(Number(l.doneQty)||0)),0);
+        const allOn = m.lines.length>0 && m.lines.every(l=>l.included);
+        const addLine = ()=>setAvrModal(p=>({...p, lines:[...p.lines, {cat:"",name:"",unit:"",qty:0,price:0,included:true,doneQty:1}]}));
         return (
         <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setAvrModal(null)}>
           <div style={{background:"#fff",borderRadius:14,width:"100%",maxWidth:760,maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 24px 70px rgba(0,0,0,.3)",overflow:"hidden"}} onClick={e=>e.stopPropagation()}>
@@ -10735,6 +10739,10 @@ tfoot td{font-weight:700}
               <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Договор №<input className="fi" style={{marginTop:4}} value={m.contractNo} onChange={e=>upd({contractNo:e.target.value})} placeholder="—"/></label>
               <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Дата договора<input type="date" className="fi" style={{marginTop:4}} value={m.contractDate||""} onChange={e=>upd({contractDate:e.target.value})}/></label>
               <label style={{fontSize:11,color:"#64748b",fontWeight:600,gridColumn:"1 / -1"}}>Заказчик<input className="fi" style={{marginTop:4}} value={m.clientName} onChange={e=>upd({clientName:e.target.value})} placeholder="ФИО / Название"/></label>
+              <label style={{fontSize:12.5,color:"#475569",fontWeight:600,gridColumn:"1 / -1",display:"flex",alignItems:"center",gap:8,cursor:"pointer",marginTop:2}}>
+                <input type="checkbox" checked={!!m.withStamp} onChange={e=>upd({withStamp:e.target.checked})} style={{width:16,height:16,cursor:"pointer"}}/>
+                🔖 Вставить печать ТОО в акт
+              </label>
             </div>
             {/* список работ */}
             <div style={{padding:"8px 20px",borderBottom:"1px solid #f1f5f9",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -10746,19 +10754,29 @@ tfoot td{font-weight:700}
             </div>
             <div style={{overflowY:"auto",flex:1,padding:"6px 12px"}}>
               {m.lines.map((l,i)=>(
-                <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 8px",borderBottom:"1px solid #f8fafc",opacity:l.included?1:.45}}>
-                  <input type="checkbox" checked={l.included} onChange={e=>updLine(i,{included:e.target.checked})} style={{width:16,height:16,flexShrink:0,cursor:"pointer"}}/>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:13,color:"#0f172a",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{l.name}</div>
-                    <div style={{fontSize:11,color:"#94a3b8"}}>{l.cat?l.cat+" · ":""}{fmt(l.price)} ₸/{l.unit||"ед."}</div>
+                <div key={i} style={{padding:"10px 8px",borderBottom:"1px solid #f1f5f9",opacity:l.included?1:.5}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                    <input type="checkbox" checked={l.included} onChange={e=>updLine(i,{included:e.target.checked})} style={{width:16,height:16,flexShrink:0,cursor:"pointer"}}/>
+                    <input value={l.name} onChange={e=>updLine(i,{name:e.target.value})} placeholder="Наименование работ"
+                      style={{flex:1,minWidth:0,padding:"6px 8px",border:"1px solid #e2e8f0",borderRadius:7,fontSize:13,fontFamily:"inherit",fontWeight:500}}/>
+                    <div style={{width:92,textAlign:"right",fontSize:13,fontWeight:700,color:l.included?"#0f172a":"#cbd5e1",flexShrink:0}}>{fmt(Math.round((Number(l.price)||0)*(Number(l.doneQty)||0)))} ₸</div>
+                    <button title="Удалить строку" onClick={()=>setAvrModal(p=>({...p,lines:p.lines.filter((_,idx)=>idx!==i)}))}
+                      style={{background:"none",border:"none",color:"#cbd5e1",cursor:"pointer",fontSize:18,flexShrink:0,lineHeight:1,padding:0}}>×</button>
                   </div>
-                  <input type="number" min="0" step="any" value={l.doneQty} disabled={!l.included}
-                    onChange={e=>updLine(i,{doneQty:e.target.value})}
-                    style={{width:78,padding:"6px 8px",border:"1px solid #e2e8f0",borderRadius:7,fontSize:13,textAlign:"right",fontFamily:"inherit"}}/>
-                  <span style={{fontSize:11,color:"#94a3b8",width:30,flexShrink:0}}>{l.unit||"ед."}</span>
-                  <div style={{width:96,textAlign:"right",fontSize:13,fontWeight:700,color:l.included?"#0f172a":"#cbd5e1",flexShrink:0}}>{fmt(Math.round(l.price*(Number(l.doneQty)||0)))} ₸</div>
+                  <div style={{display:"flex",alignItems:"center",gap:7,paddingLeft:24,flexWrap:"wrap"}}>
+                    <span style={{fontSize:11,color:"#94a3b8"}}>Кол-во</span>
+                    <input type="number" min="0" step="any" value={l.doneQty} disabled={!l.included} onChange={e=>updLine(i,{doneQty:e.target.value})}
+                      style={{width:70,padding:"5px 7px",border:"1px solid #e2e8f0",borderRadius:6,fontSize:12,textAlign:"right",fontFamily:"inherit"}}/>
+                    <input value={l.unit} onChange={e=>updLine(i,{unit:e.target.value})} placeholder="ед."
+                      style={{width:58,padding:"5px 7px",border:"1px solid #e2e8f0",borderRadius:6,fontSize:12,fontFamily:"inherit"}}/>
+                    <span style={{fontSize:11,color:"#94a3b8",marginLeft:6}}>Цена</span>
+                    <input type="number" min="0" step="any" value={l.price} disabled={!l.included} onChange={e=>updLine(i,{price:e.target.value})}
+                      style={{width:98,padding:"5px 7px",border:"1px solid #e2e8f0",borderRadius:6,fontSize:12,textAlign:"right",fontFamily:"inherit"}}/>
+                    <span style={{fontSize:11,color:"#94a3b8"}}>₸/{l.unit||"ед."}</span>
+                  </div>
                 </div>
               ))}
+              <button onClick={addLine} style={{margin:"10px 8px 4px",background:"rgba(124,58,237,.06)",color:"#7c3aed",border:"1px dashed rgba(124,58,237,.35)",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Добавить строку</button>
             </div>
             {/* подвал */}
             <div style={{padding:"14px 20px",borderTop:"1px solid #eef2f7",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
