@@ -4359,7 +4359,9 @@ function MainApp({ currentUser, setCurrentUser }) {
     const objType = (o) => o.objType || "—";
 
     const baseObjsAll = liveObjects
-      .filter(o => inRange(o.createdAt||o.updatedAt||0))   // когорта по дате СОЗДАНИЯ — архивация не тянет старый объект в текущий период
+      // импортированные миграцией объекты не имеют реальной даты создания (финансы→объекты) — учитываем их только во «Всё время»
+      .filter(o => statsPeriod==="all" || o.createdBy!=="migration")
+      .filter(o => inRange(o.createdAt||0))   // когорта строго по дате СОЗДАНИЯ (без отката на updatedAt — иначе правка/архивация тянет объект в период)
       .filter(o => !statsManager || (o.manager||"")===statsManager);
     // Рабочее множество — БЕЗ архива (как на дашборде); архив виден только в разбивке «по статусам»
     const baseObjs = baseObjsAll.filter(o => o.status!=="archive");
@@ -6244,12 +6246,13 @@ function MainApp({ currentUser, setCurrentUser }) {
         const _estByObjId = {}; for(const e of estimates){ if(e.objectId){ (_estByObjId[e.objectId]||(_estByObjId[e.objectId]=[])).push(e); } }
         const _objVal = o => (_estByObjId[o.id]||[]).reduce((s,e)=>s+(e.total||0),0);
         const _objCost = o => { const cat = getEffectiveCatalog(); const lk = new Map(); for(const w of cat){ if(w?.name)lk.set(w.name,w); if(w?.code)lk.set(w.code,w); } let c=0; for(const e of (_estByObjId[o.id]||[])){ for(const [k,r] of Object.entries(e.rows||{})){ const q=Number(r?.qty||0); if(!q) continue; const w=lk.get(k); if(w)c+=rowCostPerUnit(r,w)*q; } } return c; };
-        const objectsThisMonth = liveObjects.filter(o=>o.status!=="archive"&&_inMonth(o.createdAt||o.updatedAt||0));
+        // Только реально созданные в этом месяце объекты (импортированные миграцией исключаем — у них дата создания искусственная)
+        const objectsThisMonth = liveObjects.filter(o=>o.status!=="archive"&&o.createdBy!=="migration"&&_inMonth(o.createdAt||0));
         const objectsWithSum = objectsThisMonth.filter(o=>_objVal(o)>0);
         const totalSumMonth = objectsWithSum.reduce((s,o)=>s+_objVal(o), 0);
-        // Прибыль/маржа — по сделкам, ПОДПИСАННЫМ в этом месяце (updatedAt ≈ дата подписания),
-        // независимо от того, когда объект был создан
-        const signedMonth = liveObjects.filter(o=>o.status==="signed"&&_inMonth(o.updatedAt||o.createdAt||0)&&_objVal(o)>0);
+        // Прибыль/маржа — по сделкам, ПОДПИСАННЫМ в этом месяце (updatedAt ≈ дата подписания);
+        // импортированные миграцией исключаем — их updatedAt = дата импорта, а не реального подписания
+        const signedMonth = liveObjects.filter(o=>o.status==="signed"&&o.createdBy!=="migration"&&_inMonth(o.updatedAt||o.createdAt||0)&&_objVal(o)>0);
         const signedRevMonth = signedMonth.reduce((s,o)=>s+_objVal(o), 0);
         const signedCostMonth = signedMonth.reduce((s,o)=>s+_objCost(o), 0);
         const profitMonth = signedRevMonth - signedCostMonth;
