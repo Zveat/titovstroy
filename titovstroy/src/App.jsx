@@ -3989,11 +3989,11 @@ tfoot td{font-weight:700}
     const dt = m.date ? new Date(m.date) : new Date();
     const dd = String(dt.getDate()).padStart(2, "0"), mm = String(dt.getMonth() + 1).padStart(2, "0"), yy = dt.getFullYear();
     const total = podTotal(m);
-    const stampBlock = m.withStamp ? `<div style="margin-top:6px"><img src="${window.location.origin}/stamp.jpg" alt="Печать" style="width:170px;height:170px;object-fit:contain;opacity:.85;mix-blend-mode:multiply"/></div>` : "";
+    const stampBlock = m.withStamp ? `<div style="margin-top:6px"><img src="${window.location.origin}/${esc(ca.stampFile||"stamp.jpg")}" alt="Печать" style="width:170px;height:170px;object-fit:contain;opacity:.85;mix-blend-mode:multiply"/></div>` : "";
     // Реквизиты — в два столбца: слева Заказчик (наше ТОО), справа Подрядчик; печать — под подписью директора (не на тексте)
     const zakBody = `<p class="b">Заказчик:</p>
 <p>${esc(ca.name || 'ТОО "TITOVSTROY"')}<br/>БИН ${esc(ca.bin || "231040002769")}<br/>Банк: ${esc(ca.bank || 'АО "Kaspi Bank"')}<br/>БИК: ${esc(ca.bik || "CASPKZKA")}<br/>Номер счёта: ${esc(ca.account || "KZ38722S000030058973")}<br/>Юр.Адрес: ${esc(ca.address || "Казахстан, улица Кирпичная, дом 8г")}<br/>Тел.: ${esc(ca.phone || "8707 667 8766")}<br/>Email: ${esc(ca.email || "titovstroy@mail.ru")}<br/>Генеральный директор:</p>
-<p>${esc(ca.director || "Титов В.Е.")}  ______________ М.П.</p>${stampBlock}`;
+<p>${esc(ca.director || "________")}  ______________ М.П.</p>${stampBlock}`;
     const podBody = `<p class="b">Подрядчик:</p>
 <p>ФИО: ${esc(w.name || "___________________")}<br/>ИИН: ${esc(w.iin || "___________")}<br/>№ документа: ${esc(w.doc || "___________")}<br/>Адрес: ${esc(w.address || "")}<br/>Тел.: ${esc(w.phone || "")}<br/>Почта: ${esc(w.email || "")}<br/>Подпись ___________</p>`;
     const reqBlock = `<table class="req"><tr><td>${zakBody}</td><td>${podBody}</td></tr></table>`;
@@ -4032,7 +4032,7 @@ tfoot td{font-weight:700}
     const mainBody = m.kind !== "podryad" ? "" : `
 <h1>Договор подряда №${esc(m.number || "____")}<br/>на выполнение ремонтно-отделочных работ</h1>
 <p class="c">г. ${esc(m.city || "Караганда")} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; "${dd}" ${["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"][dt.getMonth()]} ${yy} г.</p>
-<p>${esc(w.name || "___________________")} ИИН ${esc(w.iin || "___________")}, № документа: ${esc(w.doc || "___________")}., ${esc(w.docIssuer || "Выдан МВД РК")}, (далее - "подрядчик") с одной стороны, и ${esc(ca.name || "ТОО TITOVSTROY")}, БИН ${esc(ca.bin || "231040002769")} (далее - "заказчик"), в лице директора ${esc(ca.directorFull || "Василия Титова")}, действующего на основании Устава, с одной стороны, совместно именуемые "Стороны", а по отдельности – "Сторона", заключили настоящий Договор о нижеследующем:</p>
+<p>${esc(w.name || "___________________")} ИИН ${esc(w.iin || "___________")}, № документа: ${esc(w.doc || "___________")}., ${esc(w.docIssuer || "Выдан МВД РК")}, (далее - "подрядчик") с одной стороны, и ${esc(ca.name || "ТОО TITOVSTROY")}, БИН ${esc(ca.bin || "231040002769")} (далее - "заказчик"), в лице директора ${esc(ca.directorFull || ca.director || "________")}, действующего на основании Устава, с одной стороны, совместно именуемые "Стороны", а по отдельности – "Сторона", заключили настоящий Договор о нижеследующем:</p>
 <p class="s">1. Предмет договора</p>
 <p>1.1. Подрядчик обязуется выполнить по заданию Заказчика работу, и сдать ее результат Заказчику, а Заказчик обязуется принять результат работы и оплатить его. Подробный перечень работ, сроки их выполнения, стоимость и иные условия указываются в Приложении №1 к настоящему договору, которое является его неотъемлемой частью. В случае противоречий между условиями договора и Приложения — применяются условия Приложения.</p>
 <p>1.3. Работу Подрядчик выполняет на своем оборудовании и своими инструментами, если иное не оговорено и не утверждено сторонами с отметкой в приложение №1</p>
