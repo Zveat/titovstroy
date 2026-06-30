@@ -3989,13 +3989,14 @@ tfoot td{font-weight:700}
     const dt = m.date ? new Date(m.date) : new Date();
     const dd = String(dt.getDate()).padStart(2, "0"), mm = String(dt.getMonth() + 1).padStart(2, "0"), yy = dt.getFullYear();
     const total = podTotal(m);
-    const stampImg = m.withStamp ? `<img src="${window.location.origin}/stamp.jpg" alt="" style="position:absolute;left:30px;bottom:-150px;width:190px;height:190px;object-fit:contain;opacity:.85;mix-blend-mode:multiply"/>` : "";
-    // Реквизиты заказчика (наше ТОО)
-    const zakBlock = `<p class="b">Заказчик:</p>
+    const stampBlock = m.withStamp ? `<div style="margin-top:6px"><img src="${window.location.origin}/stamp.jpg" alt="Печать" style="width:170px;height:170px;object-fit:contain;opacity:.85;mix-blend-mode:multiply"/></div>` : "";
+    // Реквизиты — в два столбца: слева Заказчик (наше ТОО), справа Подрядчик; печать — под подписью директора (не на тексте)
+    const zakBody = `<p class="b">Заказчик:</p>
 <p>${esc(ca.name || 'ТОО "TITOVSTROY"')}<br/>БИН ${esc(ca.bin || "231040002769")}<br/>Банк: ${esc(ca.bank || 'АО "Kaspi Bank"')}<br/>БИК: ${esc(ca.bik || "CASPKZKA")}<br/>Номер счёта: ${esc(ca.account || "KZ38722S000030058973")}<br/>Юр.Адрес: ${esc(ca.address || "Казахстан, улица Кирпичная, дом 8г")}<br/>Тел.: ${esc(ca.phone || "8707 667 8766")}<br/>Email: ${esc(ca.email || "titovstroy@mail.ru")}<br/>Генеральный директор:</p>
-<p style="position:relative">${esc(ca.director || "Титов В.Е.")}  ______________ М.П.${stampImg}</p>`;
-    const podBlock = `<p class="b">Подрядчик:</p>
+<p>${esc(ca.director || "Титов В.Е.")}  ______________ М.П.</p>${stampBlock}`;
+    const podBody = `<p class="b">Подрядчик:</p>
 <p>ФИО: ${esc(w.name || "___________________")}<br/>ИИН: ${esc(w.iin || "___________")}<br/>№ документа: ${esc(w.doc || "___________")}<br/>Адрес: ${esc(w.address || "")}<br/>Тел.: ${esc(w.phone || "")}<br/>Почта: ${esc(w.email || "")}<br/>Подпись ___________</p>`;
+    const reqBlock = `<table class="req"><tr><td>${zakBody}</td><td>${podBody}</td></tr></table>`;
     // Перечень работ — таблица (как Прил.1) или разделы (как Прил.2)
     const worksBlock = (() => {
       if ((m.format || "table") === "sections") {
@@ -4021,6 +4022,8 @@ tfoot td{font-weight:700}
   table{width:100%;border-collapse:collapse;margin:6pt 0;font-size:9pt;table-layout:fixed}
   th,td{border:1px solid #000;padding:3pt 5pt;word-wrap:break-word}
   th{background:#e5e7eb;font-weight:bold;text-align:center;font-size:9pt}.tc{text-align:center}.tr{text-align:right}
+  table.req{table-layout:fixed;margin-top:10pt}
+  table.req td{border:none;width:50%;vertical-align:top;padding:0 14pt 0 0;font-size:9pt}
   .pb{page-break-before:always}
   .np{margin-top:20px;text-align:center}
   @media print{.np{display:none}@page{size:A4;margin:0}body{padding:12mm 12mm 12mm 18mm}tr{page-break-inside:avoid}}`;
@@ -4093,8 +4096,7 @@ tfoot td{font-weight:700}
 <p>7.4. Договор вступает в силу с даты подписания Сторонами и действует в течение 1 года, а в части взаиморасчетов и предоставления гарантии – до их полного завершения.</p>
 <p>7.5. Настоящий Договор подписан в двух экземплярах, по одному для каждой Стороны. Экземпляры идентичны и имеют равную юридическую силу.</p>
 <p class="s">8. Юридические адреса сторон и банковские реквизиты</p>
-${zakBlock}
-${podBlock}`;
+${reqBlock}`;
     // Приложение (для kind==="podryad" — №1 в составе договора; для kind==="annex" — отдельный документ)
     const annexNo = m.kind === "podryad" ? "1" : (m.annexNo || "");
     const annexRefNo = m.kind === "podryad" ? m.number : (m.mainNumber || "");
@@ -4117,8 +4119,7 @@ ${worksBlock}
 ${(m.avans !== "" && m.avans != null && Number(m.avans) > 0) ? `<p>4.2. Заказчик оплачивает подрядчику аванс в размере ${money(m.avans)} тг, аванс является возвратным в случае если подрядчик не приступил к выполнению работ в день получения или на следующий день после получения авансового платежа.</p>` : ""}
 <p class="b">Общая стоимость работ составляет ${money(total)} ₸</p>
 ${(m.termDays !== "" && m.termDays != null) ? `<p class="b">Срок выполнения работ составляет ${esc(m.termDays)} календарных дней</p>` : ""}
-${zakBlock}
-${podBlock}`;
+${reqBlock}`;
     return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${m.kind === "annex" ? "Приложение №" + esc(m.annexNo) : "Договор подряда №" + esc(m.number)}</title><style>${CSS}</style></head><body>${mainBody}${annexBody}
 <div class="np"><button onclick="window.print()" style="padding:12px 32px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:Arial,sans-serif">🖨 Печать / Сохранить PDF</button></div>
 </body></html>`;
