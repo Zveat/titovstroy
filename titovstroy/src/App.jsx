@@ -4405,7 +4405,8 @@ function MainApp({ currentUser, setCurrentUser }) {
     });
     const sentB   = funnel.find(f=>f.key==="sent")   || {count:0,sum:0,profit:0};
     const agreedB = funnel.find(f=>f.key==="agreed") || {count:0,sum:0,profit:0};
-    const winRateOverall = baseEstimates.length>0 ? Math.round(agreedB.count/baseEstimates.length*100) : 0;
+    const activeEsts = baseEstimates.filter(e=>(e.status||"new")!=="archive");
+    const winRateOverall = activeEsts.length>0 ? Math.round(agreedB.count/activeEsts.length*100) : 0;
     const winRateSent    = (sentB.count+agreedB.count)>0 ? Math.round(agreedB.count/(sentB.count+agreedB.count)*100) : 0;
 
     // ── D. Рентабельность по категориям (по сметам объектов в периоде) ──
@@ -4476,9 +4477,10 @@ function MainApp({ currentUser, setCurrentUser }) {
     const signedObjs = baseObjs.filter(o=>o.status==="signed"&&o.createdAt&&o.updatedAt&&o.updatedAt>o.createdAt);
     const avgDealDays = signedObjs.length>0 ? Math.round(signedObjs.reduce((s,o)=>s+Math.floor((o.updatedAt-o.createdAt)/864e5),0)/signedObjs.length) : null;
 
-    // ── H. Конверсия по типу объекта ──
+    // ── H. Конверсия по типу объекта (архив не в знаменателе — искажал бы конверсию) ──
     const convByType = {};
     for(const o of baseObjs){
+      if(o.status==="archive") continue;
       const t = o.objType||"Вторичка";
       if(!convByType[t]) convByType[t]={total:0,signed:0,sumAll:0,sumSigned:0};
       convByType[t].total++;
@@ -6257,7 +6259,9 @@ function MainApp({ currentUser, setCurrentUser }) {
           const totalInc = Object.values(txMap).reduce((s,v)=>s+v.inc,0);
           const totalDebt = active.reduce((s,p)=>{const inc=txMap[normCN(p.contractNo)]?.inc||0; return s+Math.max(0,(Number(p.budget)||0)-inc);},0);
           const totalExp = Object.values(txMap).reduce((s,v)=>s+v.exp,0);
-          const margin = totalInc>0?Math.round((totalInc-totalExp)/totalInc*100):null;
+          // маржа по бюджету: (бюджет - расходы) / бюджет — показывает ожидаемую рентабельность
+          const totalBudget = active.reduce((s,p)=>s+(Number(p.budget)||0),0);
+          const margin = totalBudget>0?Math.round((totalBudget-totalExp)/totalBudget*100):null;
           const incMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&_inMonth(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
           return {count:active.length,totalInc,totalDebt,margin,incMonth};
         })() : null;
@@ -6349,7 +6353,7 @@ function MainApp({ currentUser, setCurrentUser }) {
                   {label:"Активных проектов", value:_finKpi.count, sub:"не отменены", icon:"📁", accent:"#2563eb"},
                   {label:"Выручка за "+monthName, value:fmt(_finKpi.incMonth)+" ₸", sub:"оплачено факт", icon:"💵", accent:"#059669"},
                   {label:"Дебиторка", value:fmt(_finKpi.totalDebt)+" ₸", sub:"долги клиентов", icon:"⏳", accent:_finKpi.totalDebt>0?"#dc2626":"#059669"},
-                  {label:"Маржа факт", value:_finKpi.margin!=null?_finKpi.margin+"%":"—", sub:"по всем проектам", icon:"📊", accent:_finKpi.margin!=null&&_finKpi.margin>=30?"#059669":_finKpi.margin!=null&&_finKpi.margin>=0?"#d97706":"#dc2626"},
+                  {label:"Маржа план", value:_finKpi.margin!=null?_finKpi.margin+"%":"—", sub:"бюджет минус расходы", icon:"📊", accent:_finKpi.margin!=null&&_finKpi.margin>=30?"#059669":_finKpi.margin!=null&&_finKpi.margin>=0?"#d97706":"#dc2626"},
                 ].map((s,i)=>(
                   <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden",cursor:"pointer"}}
                     onClick={()=>setScreen("finance")}
