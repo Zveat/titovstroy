@@ -10707,31 +10707,7 @@ ${podBlock}`;
                 const trashedCount = contracts.filter(c=>c.deletedAt).length;
                 return (<>
                   {trashedCount>0 && <button onClick={()=>setContractTab("trash")} style={{background:"rgba(220,38,38,.12)",color:"#ef4444",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"8px 13px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>🗑 Корзина ({trashedCount})</button>}
-                  {currentUser.role !== "viewer" && (
-                    <div style={{position:"relative"}}>
-                      <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>setNewDocMenu(v=>!v)}>+ Новый ▾</button>
-                      {newDocMenu && (<>
-                        <div onClick={()=>setNewDocMenu(false)} style={{position:"fixed",inset:0,zIndex:60}}/>
-                        <div style={{position:"absolute",top:"calc(100% + 6px)",right:0,zIndex:61,background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,boxShadow:"0 12px 40px rgba(0,0,0,.18)",overflow:"hidden",minWidth:260}}>
-                          {DOC_TYPES.map(dt=>{
-                            const isPod = dt.value==="podryad"||dt.value==="podryad_annex";
-                            return (
-                            <button key={dt.value} onClick={()=>{
-                              setNewDocMenu(false);
-                              setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],type:dt.value,city:"Караганда",clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:(dt.value==="annex"||dt.value==="podryad_annex")?2:1,note:"",createdBy:currentUser.name,createdById:currentUser.id});
-                              setContractTab("editor");
-                            }}
-                              style={{display:"block",width:"100%",textAlign:"left",padding:"10px 14px",background:isPod?"rgba(124,58,237,.06)":"#fff",border:"none",borderTop:dt.value==="podryad"?"1px solid #eef2f7":"none",fontSize:13,color:isPod?"#7c3aed":"#0f172a",fontWeight:isPod?700:500,cursor:"pointer",fontFamily:"inherit"}}
-                              onMouseEnter={e=>e.currentTarget.style.background=isPod?"rgba(124,58,237,.12)":"#f8fafc"}
-                              onMouseLeave={e=>e.currentTarget.style.background=isPod?"rgba(124,58,237,.06)":"#fff"}>
-                              {isPod?"👷 ":""}{dt.label}
-                            </button>
-                            );
-                          })}
-                        </div>
-                      </>)}
-                    </div>
-                  )}
+                  {currentUser.role !== "viewer" && <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:"",createdBy:currentUser.name,createdById:currentUser.id}); setContractTab("editor"); }}>+ Новый</button>}
                 </>);
               })()}
             </div>
