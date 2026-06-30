@@ -268,6 +268,30 @@ const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2
 const rowCostPerUnit = (r, w) => (r && r.manualCost !== undefined && r.manualCost !== "" && !isNaN(Number(r.manualCost))) ? Number(r.manualCost) : (Number(w?.cost) || 0);
 // Надёжное приведение updatedAt к числу: поддерживает и число (Date.now()), и ISO-строку
 const _ts = v => { if (typeof v === "number") return v; const n = new Date(v).getTime(); return isNaN(n) ? 0 : n; };
+// Сумма прописью (целые тенге) — для актов выполненных работ
+function tengeInWords(num){
+  num = Math.round(Math.abs(Number(num)||0));
+  if(num===0) return "Ноль тенге";
+  const ones=["","один","два","три","четыре","пять","шесть","семь","восемь","девять","десять","одиннадцать","двенадцать","тринадцать","четырнадцать","пятнадцать","шестнадцать","семнадцать","восемнадцать","девятнадцать"];
+  const onesF=["","одна","две","три","четыре","пять","шесть","семь","восемь","девять","десять","одиннадцать","двенадцать","тринадцать","четырнадцать","пятнадцать","шестнадцать","семнадцать","восемнадцать","девятнадцать"];
+  const tens=["","","двадцать","тридцать","сорок","пятьдесят","шестьдесят","семьдесят","восемьдесят","девяносто"];
+  const hund=["","сто","двести","триста","четыреста","пятьсот","шестьсот","семьсот","восемьсот","девятьсот"];
+  const triplet=(n,fem)=>{ const s=[]; const h=Math.floor(n/100), t=Math.floor((n%100)/10), o=n%10;
+    if(h) s.push(hund[h]);
+    if(t>=2){ s.push(tens[t]); if(o) s.push((fem?onesF:ones)[o]); }
+    else { const v=t*10+o; if(v) s.push((fem?onesF:ones)[v]); }
+    return s.join(" "); };
+  const plural=(n,f)=>{ const a=n%10, b=n%100; if(a===1&&b!==11)return f[0]; if(a>=2&&a<=4&&(b<10||b>=20))return f[1]; return f[2]; };
+  const res=[];
+  const mlrd=Math.floor(num/1e9)%1000, mln=Math.floor(num/1e6)%1000, ths=Math.floor(num/1e3)%1000, rest=num%1000;
+  if(mlrd){ res.push(triplet(mlrd,false), plural(mlrd,["миллиард","миллиарда","миллиардов"])); }
+  if(mln){ res.push(triplet(mln,false), plural(mln,["миллион","миллиона","миллионов"])); }
+  if(ths){ res.push(triplet(ths,true), plural(ths,["тысяча","тысячи","тысяч"])); }
+  if(rest){ res.push(triplet(rest,false)); }
+  res.push("тенге");
+  const str=res.join(" ").replace(/\s+/g," ").trim();
+  return str.charAt(0).toUpperCase()+str.slice(1);
+}
 // Открыть/распечатать готовый HTML-документ. В обычном браузере открываем новую вкладку,
 // в PWA (standalone) на iOS новые окна не открываются — печатаем через скрытый iframe.
 const openOrPrintHtml = (html, revokeMs = 30000) => {
@@ -351,6 +375,8 @@ const OBJECTS_KEY         = "titovstroy-objects";
 const OBJECTS_BACKUPS_KEY = "titovstroy-objects-backups";
 const PRODUCTIONS_KEY         = "titovstroy-productions";   // производственные карточки объектов
 const PRODUCTIONS_BACKUPS_KEY = "titovstroy-productions-backups";
+const REPORTS_KEY         = "titovstroy-reports";          // отчёты по объектам (АВР, форма Р-1)
+const REPORTS_BACKUPS_KEY = "titovstroy-reports-backups";
 // единый снимок рабочего пространства: объекты + их сметы + их договора
 const WORKSPACE_BACKUPS_KEY = "titovstroy-workspace-backups";
 // legacy ключ для миграции старых сделок
@@ -3326,6 +3352,12 @@ function MainApp({ currentUser, setCurrentUser }) {
   const productionsRef = useRef([]);
   useEffect(() => { productionsRef.current = productions; }, [productions]);
 
+  // Отчёты по объектам (АВР, форма Р-1)
+  const [reports, setReports] = useState([]);
+  const reportsRef = useRef([]);
+  useEffect(() => { reportsRef.current = reports; }, [reports]);
+  const [avrModal, setAvrModal] = useState(null); // черновик акта в построителе
+
   // ── ФИНАНСЫ ──
   const [financeTx, setFinanceTx] = useState([]);
   const financeTxRef = useRef([]);
@@ -3611,7 +3643,7 @@ function MainApp({ currentUser, setCurrentUser }) {
   const loadContracts = useCallback(async () => {
     let ok = true;
     try {
-      const [cr, cl, ca, ob, pd] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY), storage.getResult(OBJECTS_KEY), storage.getResult(PRODUCTIONS_KEY)]);
+      const [cr, cl, ca, ob, pd, rp] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY), storage.getResult(OBJECTS_KEY), storage.getResult(PRODUCTIONS_KEY), storage.getResult(REPORTS_KEY)]);
       // Договоры
       if (cr.status === "found" && cr.value) { try { const p = JSON.parse(cr.value); if (Array.isArray(p)) { setContracts(p); contractsRef.current = p; } } catch {} }
       else if (cr.status === "empty") { setContracts([]); contractsRef.current = []; }
@@ -3623,6 +3655,9 @@ function MainApp({ currentUser, setCurrentUser }) {
       // Производственные карточки
       if (pd.status === "found" && pd.value) { try { const p = JSON.parse(pd.value); if (Array.isArray(p)) { setProductions(p); productionsRef.current = p; } } catch {} }
       else if (pd.status === "empty") { setProductions([]); productionsRef.current = []; }
+      // Отчёты (АВР)
+      if (rp.status === "found" && rp.value) { try { const p = JSON.parse(rp.value); if (Array.isArray(p)) { setReports(p); reportsRef.current = p; } } catch {} }
+      else if (rp.status === "empty") { setReports([]); reportsRef.current = []; }
       // Клиенты
       if (cl.status === "found" && cl.value) { try { const p = JSON.parse(cl.value); if (Array.isArray(p)) { const cls = p.map(c=>({...c, createdAt:c.createdAt||Date.now()})); setContractClients(cls); clientsRef.current = cls; } } catch {} }
       else if (cl.status === "empty") { setContractClients([]); clientsRef.current = []; }
@@ -3657,6 +3692,129 @@ function MainApp({ currentUser, setCurrentUser }) {
   };
   const saveProductions = async (list, opts = {}) => {
     return await saveListProtected(PRODUCTIONS_KEY, PRODUCTIONS_BACKUPS_KEY, list, (fl)=>{ productionsRef.current = fl; setProductions(fl); }, { loadedRef: _contractsLoaded, ...opts });
+  };
+  const saveReports = async (list, opts = {}) => {
+    return await saveListProtected(REPORTS_KEY, REPORTS_BACKUPS_KEY, list, (fl)=>{ reportsRef.current = fl; setReports(fl); }, { loadedRef: _contractsLoaded, ...opts });
+  };
+
+  // ── АВР (форма Р-1): построитель и печать ──
+  // Собрать строки акта из позиций сметы (цена с учётом наценки, без НДС)
+  const buildAvrLinesFromEst = (est) => {
+    const cat = getEffectiveCatalog();
+    const lk = new Map();
+    for (const w of cat) { if (w?.name) lk.set(w.name, w); if (w?.code) lk.set(w.code, w); }
+    const mm = 1 + (Number(est.markup) || 0) / 100;
+    const lines = [];
+    for (const [key, r] of Object.entries(est.rows || {})) {
+      const qty = Number(r?.qty || 0); if (qty <= 0) continue;
+      const w = lk.get(key); if (!w) continue;
+      let price;
+      if (r.manualPrice !== undefined && r.manualPrice !== "") { const n = Number(r.manualPrice); price = isNaN(n) ? 0 : n; }
+      else { const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined; price = getPrice(w, qty, r.complexity || "std", cpxPct) || 0; }
+      if (!price) continue; // позиции «цена от» в акт не берём
+      const name = r.manualName !== undefined ? r.manualName : w.name;
+      const unit = r.manualUnit !== undefined ? r.manualUnit : w.unit;
+      lines.push({ cat: w.cat || "", name, unit: unit || "", qty, price: Math.round(price * mm), included: true, doneQty: qty });
+    }
+    return lines;
+  };
+  // Открыть построитель акта по объекту и его смете
+  const openAvrBuilder = (obj, est) => {
+    const lines = buildAvrLinesFromEst(est);
+    if (lines.length === 0) { alert("В этой смете нет позиций с точной ценой для акта."); return; }
+    const cons = contractsRef.current.filter(c => c.objectId === obj.id && (c.type || "repair_fiz") !== "annex").sort((a, b) => (b.id || 0) - (a.id || 0));
+    const con = cons[0];
+    const existingNo = reportsRef.current.filter(r => r.objectId === obj.id).length + 1;
+    setAvrModal({
+      id: null, objectId: obj.id, estId: est.id,
+      clientName: obj.clientName || "", clientType: obj.clientType || "физ",
+      clientIin: obj.clientIin || "", address: obj.address || "",
+      actNo: String(existingNo), actDate: new Date().toISOString().slice(0, 10),
+      contractNo: con?.number || "", contractDate: con?.date || "",
+      lines,
+    });
+  };
+  // HTML формы Р-1 (без НДС)
+  const buildAvrHtml = (m) => {
+    const esc = s => String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const items = (m.lines || []).filter(l => l.included && Number(l.doneQty) > 0);
+    const money = n => Math.round(Number(n) || 0).toLocaleString("ru-RU");
+    const total = items.reduce((s, l) => s + Math.round(l.price * Number(l.doneQty)), 0);
+    const dateStr = m.actDate ? new Date(m.actDate).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" }) : "";
+    const rowsHtml = items.map((l, i) => `<tr>
+      <td class="c">${i + 1}</td>
+      <td>${esc(l.name)}</td>
+      <td class="c">${esc(l.unit)}</td>
+      <td class="c">${(+l.doneQty).toLocaleString("ru-RU")}</td>
+      <td class="r">${money(l.price)}</td>
+      <td class="r">${money(l.price * Number(l.doneQty))}</td>
+    </tr>`).join("");
+    return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>АВР №${esc(m.actNo)}</title>
+<style>
+*{box-sizing:border-box} body{font-family:'Times New Roman',Georgia,serif;color:#000;background:#fff;margin:0;padding:18mm 14mm}
+.form{text-align:right;font-size:10px;color:#444;margin-bottom:4px}
+h1{font-size:16px;text-align:center;margin:6px 0 2px;text-transform:uppercase}
+.sub{text-align:center;font-size:12px;margin-bottom:14px}
+.meta{font-size:12.5px;line-height:1.7;margin-bottom:12px}
+.meta b{font-weight:700}
+table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
+th,td{border:1px solid #000;padding:5px 7px;vertical-align:top}
+th{background:#f0f0f0;font-weight:700;text-align:center;font-size:11px}
+td.c{text-align:center} td.r{text-align:right;white-space:nowrap}
+tfoot td{font-weight:700}
+.total-words{font-size:12.5px;margin:12px 0 4px} .total-words b{font-weight:700}
+.sign{display:flex;justify-content:space-between;gap:40px;margin-top:34px;font-size:12.5px}
+.sign .col{flex:1}
+.sign .line{border-bottom:1px solid #000;height:30px;margin-bottom:3px}
+.muted{color:#555;font-size:11px}
+.np{margin-top:24px;text-align:center}
+@media print{.np{display:none}@page{size:A4;margin:0}body{padding:14mm 12mm}}
+</style></head><body>
+<div class="form">Форма Р-1</div>
+<h1>Акт выполненных работ (оказанных услуг)</h1>
+<div class="sub">№ ${esc(m.actNo) || "____"} от ${dateStr || "«____» __________ 20__ г."}</div>
+<div class="meta">
+  <div><b>Исполнитель:</b> TitovStroy, БИН 231040002769, WhatsApp +7 707 982 4915</div>
+  <div><b>Заказчик:</b> ${esc(m.clientName) || "—"}${m.clientIin ? ", ИИН/БИН " + esc(m.clientIin) : ""}${m.address ? ", " + esc(m.address) : ""}</div>
+  <div><b>Основание (договор):</b> ${m.contractNo ? "№ " + esc(m.contractNo) : "—"}${m.contractDate ? " от " + esc(new Date(m.contractDate).toLocaleDateString("ru-RU")) : ""}</div>
+</div>
+<table>
+  <thead><tr>
+    <th style="width:36px">№</th><th>Наименование работ (услуг)</th><th style="width:64px">Ед. изм.</th>
+    <th style="width:70px">Кол-во</th><th style="width:104px">Цена, ₸</th><th style="width:120px">Стоимость, ₸</th>
+  </tr></thead>
+  <tbody>${rowsHtml}</tbody>
+  <tfoot><tr><td colspan="5" class="r">ИТОГО:</td><td class="r">${money(total)}</td></tr></tfoot>
+</table>
+<div class="total-words">Всего выполнено работ (оказано услуг) на сумму: <b>${money(total)} ₸</b><br/>(${tengeInWords(total)})</div>
+<div class="muted">Сумма указана без НДС. Работы выполнены в полном объёме, заказчик претензий по объёму, качеству и срокам не имеет.</div>
+<div class="sign">
+  <div class="col"><div><b>Сдал (Исполнитель)</b></div><div class="line"></div><div class="muted">TitovStroy · подпись, дата</div></div>
+  <div class="col"><div><b>Принял (Заказчик)</b></div><div class="line"></div><div class="muted">${esc(m.clientName) || "подпись"} · подпись, дата</div></div>
+</div>
+<div class="np"><button onclick="window.print()" style="padding:12px 32px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:Arial,sans-serif">🖨 Печать / Сохранить PDF</button></div>
+</body></html>`;
+  };
+  // Сохранить акт в список отчётов объекта и распечатать
+  const saveAndPrintAvr = async (m) => {
+    const items = (m.lines || []).filter(l => l.included && Number(l.doneQty) > 0);
+    if (items.length === 0) { alert("Отметьте хотя бы одну позицию с количеством."); return; }
+    const total = items.reduce((s, l) => s + Math.round(l.price * Number(l.doneQty)), 0);
+    const id = m.id || genId();
+    const record = {
+      id, objectId: m.objectId, estId: m.estId, type: "avr",
+      actNo: m.actNo || "", actDate: m.actDate || new Date().toISOString().slice(0, 10),
+      contractNo: m.contractNo || "", contractDate: m.contractDate || "",
+      clientName: m.clientName || "", clientType: m.clientType || "физ", clientIin: m.clientIin || "", address: m.address || "",
+      lines: items.map(l => ({ name: l.name, unit: l.unit, price: l.price, doneQty: Number(l.doneQty) })),
+      total, createdAt: m.createdAt || Date.now(), updatedAt: Date.now(), createdBy: currentUser?.name || "",
+    };
+    const cur = reportsRef.current;
+    const next = cur.some(r => r.id === id) ? cur.map(r => r.id === id ? record : r) : [record, ...cur];
+    await saveReports(next, { replace: true });
+    setAvrModal(null);
+    openOrPrintHtml(buildAvrHtml({ ...m, lines: items }));
   };
   // upsert одной производственной карточки (ключ — objectId)
   const onSaveProduction = useCallback(async (record) => {
@@ -10110,6 +10268,10 @@ function MainApp({ currentUser, setCurrentUser }) {
                               <div style={{display:"flex",gap:4}} onClick={e=>e.stopPropagation()}>
                                 <button title={isChild?"Создать доп. соглашение из этой доп. сметы":"Создать договор из сметы"} onClick={()=>openObjectContract(obj,est)}
                                   style={{background:"rgba(184,144,74,.08)",color:"#2563eb",border:"1px solid #eff6ff",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄 {isChild?"Доп. соглашение":"Договор"}</button>
+                                {currentUser.role!=="viewer" && (
+                                  <button title="Сформировать акт выполненных работ (Р-1) по этой смете" onClick={()=>openAvrBuilder(obj,est)}
+                                    style={{background:"rgba(124,58,237,.08)",color:"#7c3aed",border:"1px solid rgba(124,58,237,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>📋 Акт</button>
+                                )}
                                 {currentUser.role!=="viewer" && !isChild && (
                                   <button title="Создать доп. смету к этой смете" onClick={()=>{ setObjectReturnId(obj.id); newSupplementaryEstimate(est); }}
                                     style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>+ Доп. смета</button>
@@ -10188,6 +10350,65 @@ function MainApp({ currentUser, setCurrentUser }) {
                     })}
                   </div>
                 </div>
+
+                {/* Отчёты объекта (АВР, форма Р-1) */}
+                {(()=>{
+                  const objReports = reports.filter(r=>r.objectId===obj.id).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+                  const mainEst = objEsts.find(_estIsMain) || objEsts[0];
+                  return (
+                    <div style={{marginTop:24}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                        <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>📑 Отчёты ({objReports.length})</div>
+                        {currentUser.role!=="viewer" && (
+                          <button className="btn btn-g" style={{fontSize:12,padding:"6px 14px"}}
+                            onClick={()=>{ if(!mainEst){ alert("Сначала создайте смету — акт формируется из её позиций."); return; } openAvrBuilder(obj,mainEst); }}>
+                            + Сформировать АВР
+                          </button>
+                        )}
+                      </div>
+                      {objReports.length===0 && (
+                        <div style={{textAlign:"center",padding:"28px 0",color:"#94a3b8",background:"#f9fafb",borderRadius:8,border:"1px dashed #e5e7eb",fontSize:13}}>
+                          Отчётов пока нет<br/>
+                          <span style={{fontSize:11,color:"#d1d5db"}}>Нажмите <b>📋 Акт</b> на карточке сметы или «+ Сформировать АВР» — выберите работы и распечатайте акт по форме Р-1</span>
+                        </div>
+                      )}
+                      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                        {objReports.map(r=>(
+                          <div key={r.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 16px",borderLeft:"3px solid #ede9fe"}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                              <div style={{minWidth:0,flex:1}}>
+                                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                                  <span style={{fontSize:10,fontWeight:700,color:"#7c3aed",background:"rgba(124,58,237,.08)",borderRadius:3,padding:"1px 6px"}}>АВР · Р-1</span>
+                                  <span style={{fontWeight:600,fontSize:13,color:"#0f172a"}}>Акт №{r.actNo||"б/н"}</span>
+                                </div>
+                                <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>
+                                  {new Date(r.actDate||r.createdAt||0).toLocaleDateString("ru-RU")}
+                                  {r.contractNo?` · договор №${r.contractNo}`:""} · {(r.lines||[]).length} позиций
+                                  {r.createdBy?` · ${r.createdBy}`:""}
+                                </div>
+                              </div>
+                              <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
+                                <div style={{fontWeight:800,fontSize:15,color:"#0f172a"}}>{fmt(r.total||0)} ₸</div>
+                                <div style={{display:"flex",gap:4}}>
+                                  <button title="Печать / PDF" onClick={()=>openOrPrintHtml(buildAvrHtml({...r, lines:(r.lines||[]).map(l=>({...l,included:true,doneQty:l.doneQty}))}))}
+                                    style={{background:"#e2e8f0",color:"#334155",border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🖨 Печать</button>
+                                  {currentUser.role!=="viewer" && (
+                                    <button title="Редактировать акт" onClick={()=>setAvrModal({ ...r, lines:(r.lines||[]).map(l=>({...l,included:true,doneQty:l.doneQty})) })}
+                                      style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                                  )}
+                                  {(currentUser.role==="admin"||(currentUser.role==="user"&&r.createdBy===currentUser.name)) && (
+                                    <button title="Удалить акт" onClick={()=>{ if(window.confirm("Удалить акт?")) saveReports(reportsRef.current.filter(x=>x.id!==r.id),{removedIds:[r.id],allowEmpty:true}); }}
+                                      style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })()}
@@ -10488,6 +10709,76 @@ function MainApp({ currentUser, setCurrentUser }) {
       </div>
 
       {/* Модал подтверждения выхода */}
+      {/* ── Построитель АВР (форма Р-1) ── */}
+      {avrModal && (()=>{
+        const m = avrModal;
+        const upd = patch => setAvrModal(p=>({...p,...patch}));
+        const updLine = (i,patch) => setAvrModal(p=>({...p, lines:p.lines.map((l,idx)=>idx===i?{...l,...patch}:l)}));
+        const selected = m.lines.filter(l=>l.included && Number(l.doneQty)>0);
+        const total = selected.reduce((s,l)=>s+Math.round(l.price*Number(l.doneQty)),0);
+        const allOn = m.lines.every(l=>l.included);
+        return (
+        <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setAvrModal(null)}>
+          <div style={{background:"#fff",borderRadius:14,width:"100%",maxWidth:760,maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 24px 70px rgba(0,0,0,.3)",overflow:"hidden"}} onClick={e=>e.stopPropagation()}>
+            {/* шапка */}
+            <div style={{padding:"16px 20px",borderBottom:"1px solid #eef2f7",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+              <div>
+                <div style={{fontSize:16,fontWeight:800,color:"#0f172a"}}>📋 Акт выполненных работ (Р-1)</div>
+                <div style={{fontSize:12,color:"#94a3b8",marginTop:2}}>Отметьте работы и при необходимости скорректируйте выполненное количество</div>
+              </div>
+              <button onClick={()=>setAvrModal(null)} style={{background:"none",border:"none",fontSize:24,color:"#94a3b8",cursor:"pointer",lineHeight:1}}>×</button>
+            </div>
+            {/* реквизиты акта */}
+            <div style={{padding:"14px 20px",borderBottom:"1px solid #f1f5f9",display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
+              <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>№ акта<input className="fi" style={{marginTop:4}} value={m.actNo} onChange={e=>upd({actNo:e.target.value})}/></label>
+              <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Дата акта<input type="date" className="fi" style={{marginTop:4}} value={m.actDate} onChange={e=>upd({actDate:e.target.value})}/></label>
+              <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Договор №<input className="fi" style={{marginTop:4}} value={m.contractNo} onChange={e=>upd({contractNo:e.target.value})} placeholder="—"/></label>
+              <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Дата договора<input type="date" className="fi" style={{marginTop:4}} value={m.contractDate||""} onChange={e=>upd({contractDate:e.target.value})}/></label>
+              <label style={{fontSize:11,color:"#64748b",fontWeight:600,gridColumn:"1 / -1"}}>Заказчик<input className="fi" style={{marginTop:4}} value={m.clientName} onChange={e=>upd({clientName:e.target.value})} placeholder="ФИО / Название"/></label>
+            </div>
+            {/* список работ */}
+            <div style={{padding:"8px 20px",borderBottom:"1px solid #f1f5f9",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <button onClick={()=>setAvrModal(p=>({...p, lines:p.lines.map(l=>({...l,included:!allOn}))}))}
+                style={{background:"none",border:"1px solid #e2e8f0",borderRadius:7,padding:"5px 11px",fontSize:11,fontWeight:600,color:"#475569",cursor:"pointer",fontFamily:"inherit"}}>
+                {allOn?"☐ Снять все":"☑ Выбрать все"}
+              </button>
+              <span style={{fontSize:12,color:"#64748b"}}>Выбрано: <b>{selected.length}</b> из {m.lines.length}</span>
+            </div>
+            <div style={{overflowY:"auto",flex:1,padding:"6px 12px"}}>
+              {m.lines.map((l,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 8px",borderBottom:"1px solid #f8fafc",opacity:l.included?1:.45}}>
+                  <input type="checkbox" checked={l.included} onChange={e=>updLine(i,{included:e.target.checked})} style={{width:16,height:16,flexShrink:0,cursor:"pointer"}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,color:"#0f172a",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{l.name}</div>
+                    <div style={{fontSize:11,color:"#94a3b8"}}>{l.cat?l.cat+" · ":""}{fmt(l.price)} ₸/{l.unit||"ед."}</div>
+                  </div>
+                  <input type="number" min="0" step="any" value={l.doneQty} disabled={!l.included}
+                    onChange={e=>updLine(i,{doneQty:e.target.value})}
+                    style={{width:78,padding:"6px 8px",border:"1px solid #e2e8f0",borderRadius:7,fontSize:13,textAlign:"right",fontFamily:"inherit"}}/>
+                  <span style={{fontSize:11,color:"#94a3b8",width:30,flexShrink:0}}>{l.unit||"ед."}</span>
+                  <div style={{width:96,textAlign:"right",fontSize:13,fontWeight:700,color:l.included?"#0f172a":"#cbd5e1",flexShrink:0}}>{fmt(Math.round(l.price*(Number(l.doneQty)||0)))} ₸</div>
+                </div>
+              ))}
+            </div>
+            {/* подвал */}
+            <div style={{padding:"14px 20px",borderTop:"1px solid #eef2f7",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:12,color:"#64748b"}}>Итого по акту (без НДС)</div>
+                <div style={{fontSize:22,fontWeight:900,color:"#0f172a"}}>{fmt(total)} ₸</div>
+              </div>
+              <div style={{display:"flex",gap:10}}>
+                <button onClick={()=>setAvrModal(null)} style={{padding:"11px 18px",borderRadius:10,border:"1px solid #e2e8f0",background:"#f8fafc",color:"#475569",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Отмена</button>
+                <button disabled={selected.length===0} onClick={()=>saveAndPrintAvr(m)}
+                  style={{padding:"11px 20px",borderRadius:10,border:"none",background:selected.length===0?"#cbd5e1":"#7c3aed",color:"#fff",fontSize:14,fontWeight:700,cursor:selected.length===0?"default":"pointer",fontFamily:"inherit"}}>
+                  🖨 Сохранить и печать
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
       {logoutConfirm && (
         <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,.55)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setLogoutConfirm(false)}>
           <div style={{background:"#fff",borderRadius:16,padding:"28px 24px",maxWidth:320,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,.25)",textAlign:"center"}} onClick={e=>e.stopPropagation()}>
