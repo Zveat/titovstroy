@@ -3500,7 +3500,8 @@ function MainApp({ currentUser, setCurrentUser }) {
   const [finProjCatFilter, setFinProjCatFilter] = useState("");
 
   // ── Связь фин-проектов с объектами (по номеру договора) ──
-  const normCN = (s) => String(s||"").trim().toLowerCase().replace(/\s+/g,"");
+  // нормализация номера договора для сопоставления: убираем пробелы, № и # — чтобы «№0919#153» и «0919#153» считались одним
+  const normCN = (s) => String(s||"").trim().toLowerCase().replace(/[\s№#]/g,"");
   // map: нормализованный № договора → { object, contract, planTotal, planCost, planMargin, planMarginPct }
   const contractLinkMap = useMemo(() => {
     const m = {};
@@ -9644,7 +9645,8 @@ ${reqBlock}`;
                     };
                     const delp = async () => {
                       if (!mp.id) return; if (!confirm("Удалить проект?")) return;
-                      await saveFinanceProjects(finProjectsRef.current.filter(x=>x.id!==mp.id));
+                      // removedIds обязательно — иначе merge при сохранении вернёт удалённый проект из облака
+                      await saveFinanceProjects(finProjectsRef.current.filter(x=>x.id!==mp.id), {removedIds:[mp.id], allowEmpty:true});
                       setFinProjModal(null);
                     };
                     return (
