@@ -4358,9 +4358,11 @@ function MainApp({ currentUser, setCurrentUser }) {
     const objCost = (o) => (estByObj[o.id]||[]).reduce((s,e)=>s+estCost(e),0);
     const objType = (o) => o.objType || "—";
 
-    const baseObjs = liveObjects
+    const baseObjsAll = liveObjects
       .filter(o => inRange(o.createdAt||o.updatedAt||0))   // когорта по дате СОЗДАНИЯ — архивация не тянет старый объект в текущий период
       .filter(o => !statsManager || (o.manager||"")===statsManager);
+    // Рабочее множество — БЕЗ архива (как на дашборде); архив виден только в разбивке «по статусам»
+    const baseObjs = baseObjsAll.filter(o => o.status!=="archive");
     // Договора, сформированные ВНУТРИ объектов (привязаны к объекту), без «Прочих договоров»
     const baseCon = contracts
       .filter(c => !c.deletedAt)
@@ -4377,7 +4379,7 @@ function MainApp({ currentUser, setCurrentUser }) {
     const totalCon = baseCon.length;
     const totalSumCon = baseCon.reduce((s,c)=>s+(c.works||[]).reduce((ss,w)=>ss+(w.quantity*w.price||0),0),0);
     const avgCon = totalCon ? Math.round(totalSumCon/totalCon) : 0;
-    const byStatus = {}; for(const s of DEAL_STATUSES) byStatus[s.key]=baseObjs.filter(o=>(o.status||"new")===s.key).length;
+    const byStatus = {}; for(const s of DEAL_STATUSES) byStatus[s.key]=baseObjsAll.filter(o=>(o.status||"new")===s.key).length;
     const byType = {}; for(const o of baseObjs){ const t=objType(o); byType[t]=(byType[t]||0)+1; }
 
     // ── A. Финансовый обзор — по ПОДПИСАННЫМ объектам (статус объекта = источник правды) ──
@@ -6264,14 +6266,15 @@ function MainApp({ currentUser, setCurrentUser }) {
         const _finKpi = (_isAdmin||_isMgr) ? (() => {
           const active = (finProjects||[]).filter(p=>(p.rawStatus||p.status)!=="отменен");
           const txMap = {}; for(const t of (financeTx||[])){if(t.deletedAt||t.included===false) continue; const cn=normCN(t.contractNo); if(!txMap[cn])txMap[cn]={inc:0,exp:0}; if(t.type==="income")txMap[cn].inc+=(Number(t.amount)||0); else txMap[cn].exp+=(Number(t.amount)||0); }
-          const totalInc = Object.values(txMap).reduce((s,v)=>s+v.inc,0);
-          const totalDebt = active.reduce((s,p)=>{const inc=txMap[normCN(p.contractNo)]?.inc||0; return s+Math.max(0,(Number(p.budget)||0)-inc);},0);
-          const totalExp = Object.values(txMap).reduce((s,v)=>s+v.exp,0);
-          // маржа по бюджету: (бюджет - расходы) / бюджет — показывает ожидаемую рентабельность
+          // ВСЁ считаем по АКТИВНЫМ проектам — иначе числа не бьются (расходы завершённых проектов искажают маржу)
+          const totalInc = active.reduce((s,p)=>s+(txMap[normCN(p.contractNo)]?.inc||0),0);
+          const totalExp = active.reduce((s,p)=>s+(txMap[normCN(p.contractNo)]?.exp||0),0);
           const totalBudget = active.reduce((s,p)=>s+(Number(p.budget)||0),0);
+          const totalDebt = active.reduce((s,p)=>{const inc=txMap[normCN(p.contractNo)]?.inc||0; return s+Math.max(0,(Number(p.budget)||0)-inc);},0);
+          // маржа по бюджету активных: (бюджет − расходы по активным) / бюджет
           const margin = totalBudget>0?Math.round((totalBudget-totalExp)/totalBudget*100):null;
           const incMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&_inMonth(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
-          return {count:active.length,totalInc,totalDebt,margin,incMonth};
+          return {count:active.length,totalInc,totalDebt,totalBudget,margin,incMonth};
         })() : null;
         // ── Production KPIs (только для admin/manager) ──
         const _prodKpi = (_isAdmin||_isMgr) ? (() => {
@@ -7669,7 +7672,7 @@ function MainApp({ currentUser, setCurrentUser }) {
               </div>
             </div>
             <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14,marginBottom:20}}>
-              {[["Объектов",totalEst,"в периоде","#2563eb","📋"],["Объём объектов",fmt(totalSumEst)+" ₸","сумма смет","#2563eb","💰"],["Ср. чек",fmt(avgEst)+" ₸","на объект","#059669","🎯"],["Договоров",totalCon,"по объектам","#2563eb","📄"],["Объём договоров",fmt(totalSumCon)+" ₸","сумма договоров","#2563eb","🧾"],["Средний договор",fmt(avgCon)+" ₸","на договор","#059669","📊"]].map(([l,v,s,c,ic],i)=>(
+              {[["Создано объектов",totalEst,"в периоде, без архива","#2563eb","📋"],["Объём объектов",fmt(totalSumEst)+" ₸","сумма смет","#2563eb","💰"],["Ср. чек",fmt(avgEst)+" ₸","на объект","#059669","🎯"],["Договоров",totalCon,"по объектам","#2563eb","📄"],["Объём договоров",fmt(totalSumCon)+" ₸","сумма договоров","#2563eb","🧾"],["Средний договор",fmt(avgCon)+" ₸","на договор","#059669","📊"]].map(([l,v,s,c,ic],i)=>(
                 <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"16px 18px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",position:"relative",overflow:"hidden",transition:"transform .18s ease,box-shadow .18s ease"}}
                   onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
                   onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)";}}>
@@ -7740,10 +7743,12 @@ function MainApp({ currentUser, setCurrentUser }) {
               const _ds = d => { const x=new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
               const activeFp = (finProjects||[]).filter(p=>(p.rawStatus||p.status)!=="отменен");
               const txMap = {}; for(const t of (financeTx||[])){ if(t.deletedAt||t.included===false) continue; const cn=_norm(t.contractNo); if(!txMap[cn])txMap[cn]={inc:0,exp:0}; if(t.type==="income")txMap[cn].inc+=(Number(t.amount)||0); else txMap[cn].exp+=(Number(t.amount)||0); }
-              const totalInc = Object.values(txMap).reduce((s,v)=>s+v.inc,0);
-              const totalExp = Object.values(txMap).reduce((s,v)=>s+v.exp,0);
+              // ВСЁ по АКТИВНЫМ проектам — числа сходятся: Бюджет = Получено + Дебиторка
               const totalBudget = activeFp.reduce((s,p)=>s+(Number(p.budget)||0),0);
+              const totalInc = activeFp.reduce((s,p)=>s+(txMap[_norm(p.contractNo)]?.inc||0),0);
+              const totalExp = activeFp.reduce((s,p)=>s+(txMap[_norm(p.contractNo)]?.exp||0),0);
               const totalDebt = activeFp.reduce((s,p)=>{const inc=txMap[_norm(p.contractNo)]?.inc||0; return s+Math.max(0,(Number(p.budget)||0)-inc);},0);
+              const recvPct = totalBudget>0?Math.round(totalInc/totalBudget*100):0;
               const planMargin = totalBudget>0?Math.round((totalBudget-totalExp)/totalBudget*100):null;
               const incMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&_inM(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
               const expMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="expense"&&_inM(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
@@ -7755,12 +7760,12 @@ function MainApp({ currentUser, setCurrentUser }) {
               const prodDefects = prods.reduce((s,p)=>s+((p.defects||[]).filter(d=>!d.done).length),0);
               if(activeFp.length===0 && prods.length===0) return null;
               const finCards = [
-                ["Активных проектов", activeFp.length, "не отменены", "#2563eb"],
-                ["Получено (всего)", fmt(Math.round(totalInc))+" ₸", "оплачено клиентами", "#059669"],
-                ["Дебиторка", fmt(Math.round(totalDebt))+" ₸", "долги клиентов", totalDebt>0?"#dc2626":"#059669"],
-                ["Расходы (всего)", fmt(Math.round(totalExp))+" ₸", "по проектам", "#64748b"],
-                ["Маржа план", planMargin!=null?planMargin+"%":"—", "бюджет − расходы", planMargin!=null&&planMargin>=30?"#059669":planMargin!=null&&planMargin>=0?"#d97706":"#dc2626"],
-                ["Приход за месяц", fmt(Math.round(incMonth))+" ₸", "минус расход "+fmt(Math.round(expMonth)), "#059669"],
+                ["Сумма контрактов", fmt(Math.round(totalBudget))+" ₸", activeFp.length+" активных проектов", "#2563eb"],
+                ["Получено", fmt(Math.round(totalInc))+" ₸", recvPct+"% от контрактов", "#059669"],
+                ["Дебиторка", fmt(Math.round(totalDebt))+" ₸", "осталось получить", totalDebt>0?"#dc2626":"#059669"],
+                ["Расходы", fmt(Math.round(totalExp))+" ₸", "по активным проектам", "#64748b"],
+                ["Маржа план", planMargin!=null?planMargin+"%":"—", "контракты − расходы", planMargin!=null&&planMargin>=30?"#059669":planMargin!=null&&planMargin>=0?"#d97706":"#dc2626"],
+                ["Денежный поток за месяц", fmt(Math.round(incMonth-expMonth))+" ₸", "приход "+fmt(Math.round(incMonth))+" − расход "+fmt(Math.round(expMonth)), incMonth-expMonth>=0?"#059669":"#dc2626"],
               ];
               const prodCards = [
                 ["В работе", prodActive, "активных производств", "#2563eb"],
