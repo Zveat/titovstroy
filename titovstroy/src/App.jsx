@@ -377,6 +377,10 @@ const PRODUCTIONS_KEY         = "titovstroy-productions";   // производ�
 const PRODUCTIONS_BACKUPS_KEY = "titovstroy-productions-backups";
 const REPORTS_KEY         = "titovstroy-reports";          // отчёты по объектам (АВР, форма Р-1)
 const REPORTS_BACKUPS_KEY = "titovstroy-reports-backups";
+const WORKERS_KEY         = "titovstroy-workers";          // справочник подрядчиков (рабочих)
+const WORKERS_BACKUPS_KEY = "titovstroy-workers-backups";
+const PODRYADS_KEY        = "titovstroy-podryads";         // договоры подряда с рабочими + их приложения
+const PODRYADS_BACKUPS_KEY= "titovstroy-podryads-backups";
 // единый снимок рабочего пространства: объекты + их сметы + их договора
 const WORKSPACE_BACKUPS_KEY = "titovstroy-workspace-backups";
 // legacy ключ для миграции старых сделок
@@ -3358,6 +3362,15 @@ function MainApp({ currentUser, setCurrentUser }) {
   useEffect(() => { reportsRef.current = reports; }, [reports]);
   const [avrModal, setAvrModal] = useState(null); // черновик акта в построителе
 
+  // Подрядчики (рабочие) и договоры подряда с ними
+  const [workers, setWorkers] = useState([]);
+  const workersRef = useRef([]);
+  useEffect(() => { workersRef.current = workers; }, [workers]);
+  const [podryads, setPodryads] = useState([]);
+  const podryadsRef = useRef([]);
+  useEffect(() => { podryadsRef.current = podryads; }, [podryads]);
+  const [podryadModal, setPodryadModal] = useState(null); // черновик договора/приложения подряда
+
   // ── ФИНАНСЫ ──
   const [financeTx, setFinanceTx] = useState([]);
   const financeTxRef = useRef([]);
@@ -3643,7 +3656,7 @@ function MainApp({ currentUser, setCurrentUser }) {
   const loadContracts = useCallback(async () => {
     let ok = true;
     try {
-      const [cr, cl, ca, ob, pd, rp] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY), storage.getResult(OBJECTS_KEY), storage.getResult(PRODUCTIONS_KEY), storage.getResult(REPORTS_KEY)]);
+      const [cr, cl, ca, ob, pd, rp, wk, py] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY), storage.getResult(OBJECTS_KEY), storage.getResult(PRODUCTIONS_KEY), storage.getResult(REPORTS_KEY), storage.getResult(WORKERS_KEY), storage.getResult(PODRYADS_KEY)]);
       // Договоры
       if (cr.status === "found" && cr.value) { try { const p = JSON.parse(cr.value); if (Array.isArray(p)) { setContracts(p); contractsRef.current = p; } } catch {} }
       else if (cr.status === "empty") { setContracts([]); contractsRef.current = []; }
@@ -3658,6 +3671,12 @@ function MainApp({ currentUser, setCurrentUser }) {
       // Отчёты (АВР)
       if (rp.status === "found" && rp.value) { try { const p = JSON.parse(rp.value); if (Array.isArray(p)) { setReports(p); reportsRef.current = p; } } catch {} }
       else if (rp.status === "empty") { setReports([]); reportsRef.current = []; }
+      // Подрядчики
+      if (wk.status === "found" && wk.value) { try { const p = JSON.parse(wk.value); if (Array.isArray(p)) { setWorkers(p); workersRef.current = p; } } catch {} }
+      else if (wk.status === "empty") { setWorkers([]); workersRef.current = []; }
+      // Договоры подряда
+      if (py.status === "found" && py.value) { try { const p = JSON.parse(py.value); if (Array.isArray(p)) { setPodryads(p); podryadsRef.current = p; } } catch {} }
+      else if (py.status === "empty") { setPodryads([]); podryadsRef.current = []; }
       // Клиенты
       if (cl.status === "found" && cl.value) { try { const p = JSON.parse(cl.value); if (Array.isArray(p)) { const cls = p.map(c=>({...c, createdAt:c.createdAt||Date.now()})); setContractClients(cls); clientsRef.current = cls; } } catch {} }
       else if (cl.status === "empty") { setContractClients([]); clientsRef.current = []; }
@@ -3695,6 +3714,12 @@ function MainApp({ currentUser, setCurrentUser }) {
   };
   const saveReports = async (list, opts = {}) => {
     return await saveListProtected(REPORTS_KEY, REPORTS_BACKUPS_KEY, list, (fl)=>{ reportsRef.current = fl; setReports(fl); }, { loadedRef: _contractsLoaded, ...opts });
+  };
+  const saveWorkers = async (list, opts = {}) => {
+    return await saveListProtected(WORKERS_KEY, WORKERS_BACKUPS_KEY, list, (fl)=>{ workersRef.current = fl; setWorkers(fl); }, { loadedRef: _contractsLoaded, ...opts });
+  };
+  const savePodryads = async (list, opts = {}) => {
+    return await saveListProtected(PODRYADS_KEY, PODRYADS_BACKUPS_KEY, list, (fl)=>{ podryadsRef.current = fl; setPodryads(fl); }, { loadedRef: _contractsLoaded, ...opts });
   };
 
   // ── АВР (форма Р-1): построитель и печать ──
@@ -3818,6 +3843,193 @@ tfoot td{font-weight:700}
     await saveReports(next, { replace: true });
     setAvrModal(null);
     openOrPrintHtml(buildAvrHtml({ ...m, lines: items }));
+  };
+
+  // ════════════ ДОГОВОР ПОДРЯДА С РАБОЧИМИ (Прочие документы) ════════════
+  // Сумма раздела: ручная сумма за раздел ИЛИ сумма позиций (кол-во × цена)
+  const podSectionSum = (sec) => {
+    if (sec.lumpSum !== "" && sec.lumpSum != null) return Number(sec.lumpSum) || 0;
+    return (sec.items || []).reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0);
+  };
+  const podTotal = (m) => {
+    if (m.manualTotal !== "" && m.manualTotal != null) return Number(m.manualTotal) || 0;
+    return (m.sections || []).reduce((s, sec) => s + podSectionSum(sec), 0);
+  };
+  // Открыть построитель договора подряда / приложения
+  const openPodryadBuilder = ({ kind = "podryad", obj = null, est = null, mainNumber = "", mainDate = "", preset = null } = {}) => {
+    if (preset) { setPodryadModal({ ...preset, sections: (preset.sections || []).map(s => ({ ...s, items: (s.items || []).map(i => ({ ...i })) })) }); return; }
+    let sections;
+    if (est) {
+      const lines = buildAvrLinesFromEst(est);
+      sections = [{ title: "", lumpSum: "", items: lines.map(l => ({ name: l.name, qty: l.qty, unit: l.unit, price: "" })) }];
+    } else {
+      sections = [{ title: "", lumpSum: "", items: [{ name: "", qty: "", unit: "", price: "" }] }];
+    }
+    const podCount = podryadsRef.current.filter(p => p.kind === "podryad").length;
+    const annexCount = podryadsRef.current.filter(p => p.kind === "annex").length;
+    setPodryadModal({
+      id: null, kind,
+      number: kind === "podryad" ? String(1012 + podCount) : (mainNumber || ""),
+      annexNo: kind === "annex" ? String(2 + annexCount) : "",
+      mainNumber, mainDate,
+      date: new Date().toISOString().slice(0, 10), city: "Караганда",
+      workerId: "", worker: { name: "", iin: "", doc: "", docIssuer: "Выдан МВД РК", address: "", phone: "", email: "" },
+      contragentId: contragentsRef.current[0]?.id || "",
+      objectId: obj?.id || "", objectAddress: obj?.address || "",
+      format: kind === "annex" ? "sections" : "table",
+      sections, manualTotal: "", avans: "", termDays: "", withStamp: false,
+    });
+  };
+  const savePodryad = async (m) => {
+    const id = m.id || genId();
+    const record = { ...m, id, total: podTotal(m), createdAt: m.createdAt || Date.now(), updatedAt: Date.now(), createdBy: m.createdBy || currentUser?.name || "" };
+    const cur = podryadsRef.current;
+    const next = cur.some(p => p.id === id) ? cur.map(p => p.id === id ? record : p) : [record, ...cur];
+    await savePodryads(next, { replace: true });
+    return record;
+  };
+  // HTML договора подряда / приложения (юридический текст — дословно из утверждённых образцов)
+  const buildPodryadHtml = (m) => {
+    const esc = s => String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const money = n => Math.round(Number(n) || 0).toLocaleString("ru-RU");
+    const ca = contragentsRef.current.find(c => c.id === m.contragentId) || contragentsRef.current[0] || {};
+    const w = m.worker || {};
+    const dt = m.date ? new Date(m.date) : new Date();
+    const dd = String(dt.getDate()).padStart(2, "0"), mm = String(dt.getMonth() + 1).padStart(2, "0"), yy = dt.getFullYear();
+    const total = podTotal(m);
+    const stampImg = m.withStamp ? `<img src="${window.location.origin}/stamp.jpg" alt="" style="position:absolute;left:30px;bottom:-150px;width:190px;height:190px;object-fit:contain;opacity:.85;mix-blend-mode:multiply"/>` : "";
+    // Реквизиты заказчика (наше ТОО)
+    const zakBlock = `<p class="b">Заказчик:</p>
+<p>${esc(ca.name || 'ТОО "TITOVSTROY"')}<br/>БИН ${esc(ca.bin || "231040002769")}<br/>Банк: ${esc(ca.bank || 'АО "Kaspi Bank"')}<br/>БИК: ${esc(ca.bik || "CASPKZKA")}<br/>Номер счёта: ${esc(ca.account || "KZ38722S000030058973")}<br/>Юр.Адрес: ${esc(ca.address || "Казахстан, улица Кирпичная, дом 8г")}<br/>Тел.: ${esc(ca.phone || "8707 667 8766")}<br/>Email: ${esc(ca.email || "titovstroy@mail.ru")}<br/>Генеральный директор:</p>
+<p style="position:relative">${esc(ca.director || "Титов В.Е.")}  ______________ М.П.${stampImg}</p>`;
+    const podBlock = `<p class="b">Подрядчик:</p>
+<p>ФИО: ${esc(w.name || "___________________")}<br/>ИИН: ${esc(w.iin || "___________")}<br/>№ документа: ${esc(w.doc || "___________")}<br/>Адрес: ${esc(w.address || "")}<br/>Тел.: ${esc(w.phone || "")}<br/>Почта: ${esc(w.email || "")}<br/>Подпись ___________</p>`;
+    // Перечень работ — таблица (как Прил.1) или разделы (как Прил.2)
+    const worksBlock = (() => {
+      if ((m.format || "table") === "sections") {
+        return (m.sections || []).map(sec => {
+          const items = (sec.items || []).filter(i => (i.name || "").trim());
+          const lines = items.map(i => `<p style="margin:1pt 0">- ${esc(i.name)}${i.qty ? ` — ${esc(i.qty)} ${esc(i.unit || "")}` : ""}${(i.price !== "" && i.price != null) ? ` — ${money(i.price)} ₸` : ""}</p>`).join("");
+          return `<p class="b" style="margin-top:8pt">${esc(sec.title || "Работы")}:</p>${lines}<p class="b">Стоимость работ: ${money(podSectionSum(sec))} ₸</p>`;
+        }).join("");
+      }
+      // табличный формат
+      let n = 0;
+      const rows = (m.sections || []).flatMap(sec => (sec.items || [])).filter(i => (i.name || "").trim()).map(i => {
+        n++;
+        return `<tr><td class="tc">${n}</td><td>${esc(i.name)}</td><td class="tc">${esc(i.qty || "")}</td><td class="tc">${esc(i.unit || "")}</td>${m.showLinePrice ? `<td class="tr">${i.price !== "" && i.price != null ? money(i.price) : ""}</td>` : ""}</tr>`;
+      }).join("");
+      return `<table><thead><tr><th style="width:34px">№</th><th>Наименование работ</th><th style="width:64px">Объём</th><th style="width:58px">Ед.</th>${m.showLinePrice ? '<th style="width:96px">Сумма, ₸</th>' : ""}</tr></thead><tbody>${rows}</tbody></table>`;
+    })();
+    const CSS = `*{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:Verdana,Geneva,Tahoma,sans-serif;padding:18mm 14mm 18mm 22mm;line-height:1.5;color:#000;font-size:10pt}
+  p{margin:3pt 0;text-align:justify}.b{font-weight:bold}.c{text-align:center}
+  h1{font-size:13pt;text-align:center;margin:8pt 0 2pt}.sub{text-align:center;margin-bottom:8pt}
+  .s{font-weight:bold;text-align:center;margin:10pt 0 4pt}
+  table{width:100%;border-collapse:collapse;margin:6pt 0;font-size:9pt;table-layout:fixed}
+  th,td{border:1px solid #000;padding:3pt 5pt;word-wrap:break-word}
+  th{background:#e5e7eb;font-weight:bold;text-align:center;font-size:9pt}.tc{text-align:center}.tr{text-align:right}
+  .pb{page-break-before:always}
+  .np{margin-top:20px;text-align:center}
+  @media print{.np{display:none}@page{size:A4;margin:0}body{padding:12mm 12mm 12mm 18mm}tr{page-break-inside:avoid}}`;
+    // Тело главного договора (kind==="podryad") — дословный юр-текст
+    const mainBody = m.kind !== "podryad" ? "" : `
+<h1>Договор подряда №${esc(m.number || "____")}<br/>на выполнение ремонтно-отделочных работ</h1>
+<p class="c">г. ${esc(m.city || "Караганда")} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; "${dd}" ${["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"][dt.getMonth()]} ${yy} г.</p>
+<p>${esc(w.name || "___________________")} ИИН ${esc(w.iin || "___________")}, № документа: ${esc(w.doc || "___________")}., ${esc(w.docIssuer || "Выдан МВД РК")}, (далее - "подрядчик") с одной стороны, и ${esc(ca.name || "ТОО TITOVSTROY")}, БИН ${esc(ca.bin || "231040002769")} (далее - "заказчик"), в лице директора ${esc(ca.directorFull || "Василия Титова")}, действующего на основании Устава, с одной стороны, совместно именуемые "Стороны", а по отдельности – "Сторона", заключили настоящий Договор о нижеследующем:</p>
+<p class="s">1. Предмет договора</p>
+<p>1.1. Подрядчик обязуется выполнить по заданию Заказчика работу, и сдать ее результат Заказчику, а Заказчик обязуется принять результат работы и оплатить его. Подробный перечень работ, сроки их выполнения, стоимость и иные условия указываются в Приложении №1 к настоящему договору, которое является его неотъемлемой частью. В случае противоречий между условиями договора и Приложения — применяются условия Приложения.</p>
+<p>1.3. Работу Подрядчик выполняет на своем оборудовании и своими инструментами, если иное не оговорено и не утверждено сторонами с отметкой в приложение №1</p>
+<p>1.4. Срок выполнения работ с указывается в приложение №1, Любые дополнительные работы выполняются на основании дополнительного соглашения сторон</p>
+<p>1.4.1. Подрядчик не вправе привлекать третьих лиц без письменного согласия Заказчика.</p>
+<p>1.4.2. Подрядчик обязуется не изменять объем и характер работ без предварительного письменного согласования с Заказчиком. Все изменения фиксируются в дополнительном соглашении или обновлённом Приложении №1.”</p>
+<p>1.4.3. Работа считается выполненной после подписания акта приема-сдачи Работы Заказчиком или его уполномоченным представителем.</p>
+<p class="s">2. Права и обязанности сторон</p>
+<p>2.1. Подрядчик обязан:</p>
+<p>2.1.1. Выполнить Работу с надлежащим качеством.</p>
+<p>2.1.2. Соблюдать нормы СНиП, технику безопасности и правила работы на объекте.</p>
+<p>2.1.3. Подрядчик несёт ответственность за сохранность переданного ему инструмента, материалов и имущества Заказчика.</p>
+<p>2.1.4. В случае порчи имущества или оборудования, Подрядчик обязан возместить ущерб в полном объёме.</p>
+<p>2.1.5. Подрядчик обязуется не покидать объект до подписания акта приёмки работ или письменного разрешения Заказчика.</p>
+<p>2.1.6. Выполнить Работу в срок, указанный в приложение №1 настоящего договора.</p>
+<p>2.1.7. Передать результат Работы Заказчику.</p>
+<p>2.1.8. Безвозмездно исправить по требованию Заказчика все выявленные недостатки, если в процессе выполнения Работы Подрядчик допустил отступление от условий договора, ухудшившее качество Работы, в течение 3 дней, если иное не оговорено сторонами.</p>
+<p>2.1.9. Подрядчик обязан выполнить Работу лично.</p>
+<p>2.1.10. В случае выявления дефектов в период гарантийного срока (12 месяцев), Подрядчик обязан устранить их за свой счет в течение 3 рабочих дней, если иное не оговорено сторонами.</p>
+<p>2.1.11. Ежедневно отправлять фото- или видеоотчет о ходе работ.</p>
+<p>2.1.12. Подрядчик несёт ответственность за действия привлеченных им работников и подрядчиков, если иное не согласовано письменно с Заказчиком.</p>
+<p>2.1.13. На объекте запрещено употребление алкоголя, нахождение в состоянии опьянения и курение в неположенных местах. Нарушение — основание для расторжения договора и штраф 50 000 тг.</p>
+<p>2.2. Подрядчик имеет право:</p>
+<p>2.3. Заказчик обязан:</p>
+<p>2.3.1. В течение 7 рабочих дней после получения от Подрядчика извещения об окончании Работы либо по истечении срока, указанного в п. 1.4 настоящего договора, осмотреть и принять результат Работы, а при обнаружении отступлений от договора, ухудшающих результат Работы, или иных недостатков в Работе немедленно заявить об этом Подрядчику.</p>
+<p>2.3.2. Оплатить Работу по цене, указанной в приложение №1 настоящего договора, в течение 3 банковских дней с момента приемки результатов Работы.</p>
+<p>2.4. Заказчик имеет право:</p>
+<p>2.4.1. Во всякое время проверять ход и качество Работы, выполняемой Подрядчиком, не вмешиваясь в его деятельность.</p>
+<p class="s">3. Цена договора и порядок расчетов</p>
+<p>3.1. Цена и порядок оплаты указываются в Приложении №1. Любые дополнительные работы выполняются на основании дополнительного соглашения сторон.</p>
+<p>3.2. Оплата производится по факту выполнения и приемки этапа работ.</p>
+<p>3.3. Предоплата не допускается, если иное не оговорено сторонами.</p>
+<p>3.4. При выявлении некачественно выполненных работ Заказчик вправе уменьшить сумму оплаты пропорционально качеству выполненного.</p>
+<p>3.5. Уплата Заказчиком Подрядчику цены договора осуществляется путем перечисления средств на счет подрядчика и/или наличными, в течение 4 банковских дней после выполнения Подрядчиком Работ в полном объеме, на основании Акта выполненных Работ и предоставления Подрядчиком надлежащим образом оформленного счета на оплату.</p>
+<p class="s">4. Ответственность сторон</p>
+<p>4.1. Подрядчик несет полную материальную ответственность за ущерб, причиненный Заказчику вследствие некачественного выполнения работ, несоблюдения сроков или повреждения имущества на объекте.</p>
+<p>4.2. За нарушение сроков выполнения работ — штраф 2,5% от суммы этапа за каждый день просрочки.</p>
+<p>4.3. За отказ от устранения брака — штраф 10% от суммы договора.</p>
+<p>4.4. Все удержания производятся из суммы, подлежащей оплате подрядчику.</p>
+<p>4.3. Меры ответственности сторон, не предусмотренные в настоящем договоре, применяются в соответствии с нормами действующего законодательства Республики Казахстан.</p>
+<p>4.4. Уплата неустойки не освобождает стороны от выполнения лежащих на них обязательств или устранения нарушений.</p>
+<p>4.5. Гарантийный срок на выполненные работы составляет 12 месяцев с даты подписания акта приемки.</p>
+<p>4.6. Подрядчику запрещается вести переговоры с клиентами Заказчика напрямую, принимать оплату в обход Заказчика, оставлять свои контакты на объекте или использовать бренд Заказчика в личных целях. Нарушение — штраф 500 000 тг.</p>
+<p>4.7. Подрядчик несёт ответственность за качество выполненных работ, включая скрытые дефекты, выявленные в течение гарантийного срока.</p>
+<p>4.8. При невыполнении или ненадлежащем исполнении обязательств Заказчик имеет право привлечь третьих лиц для устранения недостатков с последующим удержанием стоимости таких работ из суммы, подлежащей выплате Подрядчику</p>
+<p>4.9. Подрядчик обязуется не использовать коммерческую информацию, фотографии и материалы объектов Заказчика без письменного разрешения.</p>
+<p>4.10. Подрядчик обязуется не принимать заказы от клиентов Заказчика в течение 6 месяцев после окончания работ.</p>
+<p class="s">5. Обстоятельства непреодолимой силы</p>
+<p>5.1. Стороны несут ответственность за неисполнение, а также ненадлежащее исполнение обязательств по настоящему Договору, в соответствии с законодательством Республики Казахстан и Договором. Ни одна из Сторон не несет ответственность за неисполнение, либо ненадлежащее исполнение каких-либо обязательств по Договору, если такое неисполнение или ненадлежащее исполнение вызвано обстоятельствами непреодолимой силы, которые Сторона не могла ни предвидеть, ни предотвратить разумными мерами.</p>
+<p>5.2. К обстоятельствам непреодолимой силы Стороны относят: наводнения, пожары, войны, революции, национализации, изъятия для государственных нужд, издания нормативных правовых или иных обязательных к исполнению актов. Обстоятельствами непреодолимой силы не являются любые действия, вызванные небрежностью или виной Сторон, их уполномоченных лиц, сотрудников, агентов, а также аффилированных лиц.</p>
+<p>5.3. В случае возникновения обстоятельств непреодолимой силы, Сторона, подвергшаяся их воздействию, незамедлительно уведомляет об этом другую Сторону в течение 2-х суток, путем вручения либо отправкой по почте письменного уведомления, уточняющего дату начала и описание обстоятельств или сообщения по факсимильной связи или по электронной почте с одного из адресов электронной почты, указанных в Договоре. В случае, если обстоятельства непреодолимой силы препятствуют отправлению такого уведомления, оно должно быть отправлено в рабочий день, следующий за днем окончания воздействия обстоятельств непреодолимой силы.</p>
+<p>5.4. Срок исполнения обязательств Сторон по Договору приостанавливается на срок действия обстоятельств непреодолимой силы и возобновляется с даты их прекращения. Соответственно, настоящим Стороны подтверждают, что без дополнительного соглашения между Сторонами, обстоятельства непреодолимой силы не прекращают обязательства Сторон по Договору, а лишь приостанавливают сроки для их исполнения и по окончании воздействия обстоятельств непреодолимой силы Стороны продолжат исполнение обязательств по Договору в соответствии и на условиях, изложенных в нем.</p>
+<p>5.5. Доказательством наличия обстоятельств непреодолимой силы служит свидетельство, выданное компетентным органом, организацией, авиаперевозчиком, транспортной организацией. В случае, если наличие обстоятельств непреодолимой силы общеизвестно, Стороны освобождаются от обязанности доказывания их воздействия.</p>
+<p>5.6. В случае действия обстоятельств непреодолимой силы в течение 30 (тридцати) суток, любая из Сторон вправе расторгнуть настоящий Договор с обязательным предварительным проведением взаиморасчетов за фактически оказанные услуги, но без обязанностей по возмещению возможных убытков другой Стороны. При воздействии обстоятельств непреодолимой силы Стороны, по возможности, препятствуют разглашению конфиденциальной информации. В случае если разглашение все же произошло, Сторона должна сообщить об этом факте другой Стороне в кратчайший срок, в противном случае не уведомившая о разглашении конфиденциальной информации Сторона несет ответственность без учета воздействия обстоятельств непреодолимой силы.</p>
+<p class="s">6. Порядок разрешения споров</p>
+<p>6.1. Споры и разногласия, которые могут возникнуть при исполнении настоящего договора, будут по возможности разрешаться путем переговоров между сторонами.</p>
+<p>6.2. В случае невозможности разрешения споров путем переговоров все споры, разногласия или требования, возникающие из настоящего контракта (договора) либо в связи с ним, в том числе касающиеся его нарушения, прекращения или недействительности подлежат окончательному урегулированию в суде по месту нахождения Заказчика, претензионный порядок обязателен. Срок рассмотрения претензии — 5 (пять) календарных дней</p>
+<p class="s">7. Заключительные положения</p>
+<p>7.1. Любые изменения и дополнения к настоящему договору действительны лишь при условии, что они совершены в письменной форме и подписаны уполномоченными на то представителями сторон. Приложения к настоящему договору составляют его неотъемлемую часть.</p>
+<p>7.2. Настоящий договор составлен в двух экземплярах на русском языке. Оба экземпляра идентичны и имеют одинаковую силу. У каждой из сторон находится один экземпляр настоящего договора.</p>
+<p>7.3. В случае расторжения договора по инициативе одной из сторон, стороны обязуются произвести взаиморасчёты за фактически выполненные и принятые работы. Договор считается расторгнутым после подписания сторонами соглашения о расторжении.</p>
+<p>7.4. Договор вступает в силу с даты подписания Сторонами и действует в течение 1 года, а в части взаиморасчетов и предоставления гарантии – до их полного завершения.</p>
+<p>7.5. Настоящий Договор подписан в двух экземплярах, по одному для каждой Стороны. Экземпляры идентичны и имеют равную юридическую силу.</p>
+<p class="s">8. Юридические адреса сторон и банковские реквизиты</p>
+${zakBlock}
+${podBlock}`;
+    // Приложение (для kind==="podryad" — №1 в составе договора; для kind==="annex" — отдельный документ)
+    const annexNo = m.kind === "podryad" ? "1" : (m.annexNo || "");
+    const annexRefNo = m.kind === "podryad" ? m.number : (m.mainNumber || "");
+    const annexRefDate = m.kind === "podryad" ? `«${dd}» ${mm}.${yy} г.` : (m.mainDate ? (() => { const d = new Date(m.mainDate); return `«${String(d.getDate()).padStart(2, "0")}» ${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()} г.`; })() : "«__» __.____ г.");
+    const annexBody = `
+<h1${m.kind === "podryad" ? ' class="pb"' : ""}>Приложение №${esc(annexNo)}${m.kind === "annex" ? ` от ${dd}.${mm}.${yy}` : ""}<br/>Перечень этапов, видов и стоимость работ</h1>
+<p class="sub">к Договору ремонтно-отделочных работ № ${esc(annexRefNo || "____")} от ${annexRefDate}</p>
+<p class="b">Общие положения</p>
+<p>1.1. Настоящее Приложение является неотъемлемой частью Договора ремонтно-отделочных работ и определяет этапы, виды и стоимость работ, выполняемых Подрядчиком на Объекте.</p>
+<p class="b">Перечень этапов и видов работ</p>
+<p>Ниже приведен перечень этапов и видов работ, их объемы, сроки выполнения и стоимость</p>
+${worksBlock}
+<p>2.1. Адрес проведения работ: ${esc(m.objectAddress || "___________________")}</p>
+<p class="b">Условия выполнения работ</p>
+<p>3.1. В стоимость Работ могут входить расходы Подрядчика на материалы, оборудование, доставку и иные затраты, необходимые для выполнения Работ, если иное прямо указано в договоре.</p>
+<p>3.2. Работы выполняются поэтапно в соответствии с указанными сроками.</p>
+<p>3.3. Любые дополнительные работы, не предусмотренные настоящим Приложением, выполняются на основании дополнительного соглашения сторон с корректировкой стоимости и сроков.</p>
+<p class="b">Порядок оплаты</p>
+<p>4.1. Оплата за работы (за исключением предоплаты) производится поэтапно на основании актов выполненных работ (форма КС-2) в течение 3 банковских дней после подписания акта.</p>
+${(m.avans !== "" && m.avans != null && Number(m.avans) > 0) ? `<p>4.2. Заказчик оплачивает подрядчику аванс в размере ${money(m.avans)} тг, аванс является возвратным в случае если подрядчик не приступил к выполнению работ в день получения или на следующий день после получения авансового платежа.</p>` : ""}
+<p class="b">Общая стоимость работ составляет ${money(total)} ₸</p>
+${(m.termDays !== "" && m.termDays != null) ? `<p class="b">Срок выполнения работ составляет ${esc(m.termDays)} календарных дней</p>` : ""}
+${zakBlock}
+${podBlock}`;
+    return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${m.kind === "annex" ? "Приложение №" + esc(m.annexNo) : "Договор подряда №" + esc(m.number)}</title><style>${CSS}</style></head><body>${mainBody}${annexBody}
+<div class="np"><button onclick="window.print()" style="padding:12px 32px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:Arial,sans-serif">🖨 Печать / Сохранить PDF</button></div>
+</body></html>`;
   };
   // upsert одной производственной карточки (ключ — objectId)
   const onSaveProduction = useCallback(async (record) => {
@@ -10276,6 +10488,10 @@ tfoot td{font-weight:700}
                                     style={{background:"rgba(124,58,237,.08)",color:"#7c3aed",border:"1px solid rgba(124,58,237,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>📋 Акт</button>
                                 )}
                                 {currentUser.role!=="viewer" && !isChild && (
+                                  <button title="Договор подряда с рабочим (работы из этой сметы, суммы редактируются)" onClick={()=>openPodryadBuilder({kind:"podryad",obj,est})}
+                                    style={{background:"rgba(124,58,237,.08)",color:"#7c3aed",border:"1px solid rgba(124,58,237,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>👷 Подряд</button>
+                                )}
+                                {currentUser.role!=="viewer" && !isChild && (
                                   <button title="Создать доп. смету к этой смете" onClick={()=>{ setObjectReturnId(obj.id); newSupplementaryEstimate(est); }}
                                     style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>+ Доп. смета</button>
                                 )}
@@ -10443,6 +10659,7 @@ tfoot td{font-weight:700}
                 const trashedCount = contracts.filter(c=>c.deletedAt).length;
                 return (<>
                   {trashedCount>0 && <button onClick={()=>setContractTab("trash")} style={{background:"rgba(220,38,38,.12)",color:"#ef4444",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"8px 13px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>🗑 Корзина ({trashedCount})</button>}
+                  {currentUser.role !== "viewer" && <button className="btn" style={{fontSize:13,padding:"9px 16px",background:"rgba(124,58,237,.1)",color:"#7c3aed",border:"1px solid rgba(124,58,237,.25)",borderRadius:8,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}} onClick={()=>openPodryadBuilder({kind:"podryad"})}>+ Договор подряда</button>}
                   {currentUser.role !== "viewer" && <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:"",createdBy:currentUser.name,createdById:currentUser.id}); setContractTab("editor"); }}>+ Новый</button>}
                 </>);
               })()}
@@ -10452,6 +10669,54 @@ tfoot td{font-weight:700}
           </>)}
 
           <div style={{paddingTop:0}}>
+
+            {/* ── ДОГОВОРЫ ПОДРЯДА (с рабочими) ── */}
+            {contractTab === "list" && podryads.filter(p=>!p.deletedAt).length>0 && (
+              <div style={{marginBottom:14}}>
+                <div style={{fontSize:11,color:"#7c3aed",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:8}}>👷 Договоры подряда ({podryads.filter(p=>!p.deletedAt).length})</div>
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {podryads.filter(p=>!p.deletedAt).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).map(p=>{
+                    const wkName = p.worker?.name || (workers.find(w=>w.id===p.workerId)?.name) || "—";
+                    const title = p.kind==="annex" ? `Приложение №${p.annexNo||"?"}`+(p.mainNumber?` к №${p.mainNumber}`:"") : `Договор подряда №${p.number||"б/н"}`;
+                    return (
+                      <div key={p.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 16px",borderLeft:"3px solid #ede9fe"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                          <div style={{minWidth:0,flex:1}}>
+                            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                              <span style={{fontSize:10,fontWeight:700,color:"#7c3aed",background:"rgba(124,58,237,.08)",borderRadius:3,padding:"1px 6px"}}>{p.kind==="annex"?"ПРИЛОЖЕНИЕ":"ПОДРЯД"}</span>
+                              <span style={{fontWeight:600,fontSize:13,color:"#0f172a"}}>{title}</span>
+                            </div>
+                            <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>
+                              Подрядчик: {wkName} · {new Date(p.date||p.createdAt||0).toLocaleDateString("ru-RU")}
+                              {p.objectAddress?` · ${p.objectAddress}`:""}
+                            </div>
+                          </div>
+                          <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
+                            <div style={{fontWeight:800,fontSize:15,color:"#0f172a"}}>{fmt(p.total||0)} ₸</div>
+                            <div style={{display:"flex",gap:4}}>
+                              <button title="Печать / PDF" onClick={()=>openOrPrintHtml(buildPodryadHtml(p))}
+                                style={{background:"#e2e8f0",color:"#334155",border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🖨 Печать</button>
+                              {currentUser.role!=="viewer" && p.kind==="podryad" && (
+                                <button title="Добавить приложение к этому договору" onClick={()=>openPodryadBuilder({kind:"annex",mainNumber:p.number,mainDate:p.date})}
+                                  style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>+ Прил.</button>
+                              )}
+                              {currentUser.role!=="viewer" && (
+                                <button title="Редактировать" onClick={()=>openPodryadBuilder({preset:p})}
+                                  style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                              )}
+                              {(currentUser.role==="admin"||(currentUser.role==="user"&&p.createdBy===currentUser.name)) && (
+                                <button title="Удалить" onClick={()=>{ if(window.confirm("Удалить документ?")) savePodryads(podryadsRef.current.filter(x=>x.id!==p.id),{removedIds:[p.id],allowEmpty:true}); }}
+                                  style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* ── СПИСОК ДОГОВОРОВ ── */}
             {contractTab === "list" && (
@@ -10712,6 +10977,143 @@ tfoot td{font-weight:700}
       </div>
 
       {/* Модал подтверждения выхода */}
+      {/* ── Построитель Договора подряда / Приложения ── */}
+      {podryadModal && (()=>{
+        const m = podryadModal;
+        const upd = patch => setPodryadModal(p=>({...p,...patch}));
+        const updWorker = patch => setPodryadModal(p=>({...p,worker:{...p.worker,...patch}}));
+        const updSec = (si,patch) => setPodryadModal(p=>({...p,sections:p.sections.map((s,i)=>i===si?{...s,...patch}:s)}));
+        const updItem = (si,ii,patch) => setPodryadModal(p=>({...p,sections:p.sections.map((s,i)=>i!==si?s:{...s,items:s.items.map((it,j)=>j===ii?{...it,...patch}:it)})}));
+        const addItem = si => setPodryadModal(p=>({...p,sections:p.sections.map((s,i)=>i!==si?s:{...s,items:[...s.items,{name:"",qty:"",unit:"",price:""}]})}));
+        const delItem = (si,ii) => setPodryadModal(p=>({...p,sections:p.sections.map((s,i)=>i!==si?s:{...s,items:s.items.filter((_,j)=>j!==ii)})}));
+        const addSection = () => setPodryadModal(p=>({...p,sections:[...p.sections,{title:"",lumpSum:"",items:[{name:"",qty:"",unit:"",price:""}]}]}));
+        const delSection = si => setPodryadModal(p=>({...p,sections:p.sections.filter((_,i)=>i!==si)}));
+        const importFromObject = (objId) => {
+          const obj = objects.find(o=>o.id===objId); if(!obj){ upd({objectId:""}); return; }
+          const ests = estimates.filter(e=>e.objectId===objId);
+          const mainEst = ests.find(e=>!e.parentId||e.parentId===e.id) || ests[0];
+          if(!mainEst){ upd({objectId:objId, objectAddress:obj.address||m.objectAddress}); alert("У объекта нет сметы для импорта."); return; }
+          const lines = buildAvrLinesFromEst(mainEst);
+          upd({objectId:objId, objectAddress:obj.address||m.objectAddress, sections:[{title:"",lumpSum:"",items:lines.map(l=>({name:l.name,qty:l.qty,unit:l.unit,price:""}))}]});
+        };
+        const saveWorkerToDir = async () => {
+          if(!(m.worker?.name||"").trim()){ alert("Заполните ФИО подрядчика."); return; }
+          const wid = m.workerId || genId();
+          const rec = { id:wid, ...m.worker };
+          const cur = workersRef.current;
+          const next = cur.some(x=>x.id===wid) ? cur.map(x=>x.id===wid?rec:x) : [rec,...cur];
+          await saveWorkers(next,{replace:true});
+          upd({workerId:wid});
+          alert("Подрядчик сохранён в справочник.");
+        };
+        const total = podTotal(m);
+        const isAnnex = m.kind==="annex";
+        const fih = {background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:7,color:"#0f172a",fontSize:12,padding:"6px 8px",fontFamily:"inherit",width:"100%"};
+        return (
+        <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setPodryadModal(null)}>
+          <div style={{background:"#fff",borderRadius:14,width:"100%",maxWidth:820,maxHeight:"94vh",display:"flex",flexDirection:"column",boxShadow:"0 24px 70px rgba(0,0,0,.3)",overflow:"hidden"}} onClick={e=>e.stopPropagation()}>
+            <div style={{padding:"16px 20px",borderBottom:"1px solid #eef2f7",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+              <div>
+                <div style={{fontSize:16,fontWeight:800,color:"#0f172a"}}>👷 {isAnnex?"Приложение к договору подряда":"Договор подряда с рабочим"}</div>
+                <div style={{fontSize:12,color:"#94a3b8",marginTop:2}}>Юридический текст фиксированный — заполните стороны, работы и суммы</div>
+              </div>
+              <button onClick={()=>setPodryadModal(null)} style={{background:"none",border:"none",fontSize:24,color:"#94a3b8",cursor:"pointer",lineHeight:1}}>×</button>
+            </div>
+            <div style={{overflowY:"auto",flex:1,padding:"14px 20px",display:"flex",flexDirection:"column",gap:14}}>
+              {/* Реквизиты */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
+                {!isAnnex && <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>№ договора<input style={{...fih,marginTop:4}} value={m.number} onChange={e=>upd({number:e.target.value})}/></label>}
+                {isAnnex && <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>№ приложения<input style={{...fih,marginTop:4}} value={m.annexNo} onChange={e=>upd({annexNo:e.target.value})}/></label>}
+                {isAnnex && <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>К договору №<input style={{...fih,marginTop:4}} value={m.mainNumber} onChange={e=>upd({mainNumber:e.target.value})}/></label>}
+                {isAnnex && <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Дата договора<input type="date" style={{...fih,marginTop:4}} value={m.mainDate||""} onChange={e=>upd({mainDate:e.target.value})}/></label>}
+                <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Дата<input type="date" style={{...fih,marginTop:4}} value={m.date} onChange={e=>upd({date:e.target.value})}/></label>
+                <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Город<input style={{...fih,marginTop:4}} value={m.city} onChange={e=>upd({city:e.target.value})}/></label>
+              </div>
+              {/* Подрядчик */}
+              <div style={{background:"#faf5ff",border:"1px solid #ede9fe",borderRadius:10,padding:"12px 14px"}}>
+                <div style={{fontSize:11,color:"#7c3aed",fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>Подрядчик (рабочий)</div>
+                <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8,flexWrap:"wrap"}}>
+                  <select style={{...fih,flex:1,minWidth:160}} value={m.workerId||""} onChange={e=>{ const wk=workers.find(x=>x.id===e.target.value); if(wk) upd({workerId:wk.id,worker:{name:wk.name||"",iin:wk.iin||"",doc:wk.doc||"",docIssuer:wk.docIssuer||"Выдан МВД РК",address:wk.address||"",phone:wk.phone||"",email:wk.email||""}}); else upd({workerId:""}); }}>
+                    <option value="">— выбрать из справочника —</option>
+                    {workers.map(wk=>(<option key={wk.id} value={wk.id}>{wk.name}</option>))}
+                  </select>
+                  <button onClick={saveWorkerToDir} style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:7,padding:"7px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>💾 В справочник</button>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8}}>
+                  <input style={fih} value={m.worker?.name||""} onChange={e=>updWorker({name:e.target.value})} placeholder="ФИО"/>
+                  <input style={fih} value={m.worker?.iin||""} onChange={e=>updWorker({iin:e.target.value})} placeholder="ИИН"/>
+                  <input style={fih} value={m.worker?.doc||""} onChange={e=>updWorker({doc:e.target.value})} placeholder="№ документа"/>
+                  <input style={fih} value={m.worker?.phone||""} onChange={e=>updWorker({phone:e.target.value})} placeholder="Телефон"/>
+                  <input style={fih} value={m.worker?.address||""} onChange={e=>updWorker({address:e.target.value})} placeholder="Адрес"/>
+                </div>
+              </div>
+              {/* Заказчик + объект */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10}}>
+                <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Заказчик (наше ТОО)
+                  <select style={{...fih,marginTop:4}} value={m.contragentId||""} onChange={e=>upd({contragentId:e.target.value})}>
+                    {contragents.map(c=>(<option key={c.id} value={c.id}>{c.name}</option>))}
+                  </select>
+                </label>
+                <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Объект (импорт работ из сметы)
+                  <select style={{...fih,marginTop:4}} value={m.objectId||""} onChange={e=>importFromObject(e.target.value)}>
+                    <option value="">— не привязан —</option>
+                    {objects.filter(o=>!o.deletedAt).map(o=>(<option key={o.id} value={o.id}>{o.clientName||o.address||o.id}</option>))}
+                  </select>
+                </label>
+                <label style={{fontSize:11,color:"#64748b",fontWeight:600,gridColumn:"1 / -1"}}>Адрес проведения работ<input style={{...fih,marginTop:4}} value={m.objectAddress||""} onChange={e=>upd({objectAddress:e.target.value})} placeholder="г. ..., ул. ..."/></label>
+              </div>
+              {/* Формат перечня */}
+              <div style={{display:"flex",gap:14,alignItems:"center",flexWrap:"wrap",borderTop:"1px solid #f1f5f9",paddingTop:12}}>
+                <span style={{fontSize:12,color:"#64748b",fontWeight:600}}>Формат перечня:</span>
+                <label style={{fontSize:12,display:"flex",alignItems:"center",gap:5,cursor:"pointer"}}><input type="radio" checked={(m.format||"table")==="table"} onChange={()=>upd({format:"table"})}/> Таблица (Прил.1)</label>
+                <label style={{fontSize:12,display:"flex",alignItems:"center",gap:5,cursor:"pointer"}}><input type="radio" checked={m.format==="sections"} onChange={()=>upd({format:"sections"})}/> Разделы (Прил.2)</label>
+                <label style={{fontSize:12,display:"flex",alignItems:"center",gap:5,cursor:"pointer",marginLeft:"auto"}}><input type="checkbox" checked={!!m.showLinePrice} onChange={e=>upd({showLinePrice:e.target.checked})}/> Показывать цену за позицию</label>
+              </div>
+              {/* Разделы и работы */}
+              {(m.sections||[]).map((sec,si)=>(
+                <div key={si} style={{border:"1px solid #e2e8f0",borderRadius:10,padding:"10px 12px"}}>
+                  {m.format==="sections" && (
+                    <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+                      <input style={{...fih,fontWeight:700}} value={sec.title||""} onChange={e=>updSec(si,{title:e.target.value})} placeholder="Название раздела (напр. «Раздельный санузел под ключ»)"/>
+                      <input type="number" style={{...fih,width:120}} value={sec.lumpSum} onChange={e=>updSec(si,{lumpSum:e.target.value})} placeholder="Сумма ₸"/>
+                      {m.sections.length>1 && <button onClick={()=>delSection(si)} style={{background:"none",border:"none",color:"#cbd5e1",fontSize:18,cursor:"pointer"}}>×</button>}
+                    </div>
+                  )}
+                  {(sec.items||[]).map((it,ii)=>(
+                    <div key={ii} style={{display:"flex",gap:6,alignItems:"center",marginBottom:5}}>
+                      <input style={{...fih,flex:1}} value={it.name} onChange={e=>updItem(si,ii,{name:e.target.value})} placeholder="Наименование работы"/>
+                      <input type="number" style={{...fih,width:60}} value={it.qty} onChange={e=>updItem(si,ii,{qty:e.target.value})} placeholder="Кол."/>
+                      <input style={{...fih,width:54}} value={it.unit} onChange={e=>updItem(si,ii,{unit:e.target.value})} placeholder="ед."/>
+                      {m.showLinePrice && <input type="number" style={{...fih,width:88}} value={it.price} onChange={e=>updItem(si,ii,{price:e.target.value})} placeholder="Цена ₸"/>}
+                      <button onClick={()=>delItem(si,ii)} style={{background:"none",border:"none",color:"#cbd5e1",fontSize:16,cursor:"pointer",flexShrink:0}}>×</button>
+                    </div>
+                  ))}
+                  <button onClick={()=>addItem(si)} style={{marginTop:4,background:"rgba(37,99,235,.06)",color:"#2563eb",border:"1px dashed rgba(37,99,235,.3)",borderRadius:7,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ позиция</button>
+                </div>
+              ))}
+              {m.format==="sections" && <button onClick={addSection} style={{background:"rgba(124,58,237,.06)",color:"#7c3aed",border:"1px dashed rgba(124,58,237,.35)",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",alignSelf:"flex-start"}}>+ Добавить раздел</button>}
+              {/* Итоги */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,borderTop:"1px solid #f1f5f9",paddingTop:12}}>
+                <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Общая стоимость ₸ (пусто = авто)<input type="number" style={{...fih,marginTop:4}} value={m.manualTotal} onChange={e=>upd({manualTotal:e.target.value})} placeholder={String(Math.round((m.sections||[]).reduce((s,sec)=>s+podSectionSum(sec),0)))}/></label>
+                <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Аванс ₸ (необязательно)<input type="number" style={{...fih,marginTop:4}} value={m.avans} onChange={e=>upd({avans:e.target.value})} placeholder="0"/></label>
+                <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Срок (календ. дней)<input type="number" style={{...fih,marginTop:4}} value={m.termDays} onChange={e=>upd({termDays:e.target.value})} placeholder="25"/></label>
+                <label style={{fontSize:12,color:"#475569",fontWeight:600,display:"flex",alignItems:"flex-end",gap:8,cursor:"pointer",paddingBottom:6}}><input type="checkbox" checked={!!m.withStamp} onChange={e=>upd({withStamp:e.target.checked})} style={{width:16,height:16}}/>🔖 Печать ТОО</label>
+              </div>
+            </div>
+            {/* подвал */}
+            <div style={{padding:"14px 20px",borderTop:"1px solid #eef2f7",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+              <div><div style={{fontSize:12,color:"#64748b"}}>Итого</div><div style={{fontSize:22,fontWeight:900,color:"#0f172a"}}>{fmt(total)} ₸</div></div>
+              <div style={{display:"flex",gap:10}}>
+                <button onClick={()=>setPodryadModal(null)} style={{padding:"11px 18px",borderRadius:10,border:"1px solid #e2e8f0",background:"#f8fafc",color:"#475569",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Отмена</button>
+                <button onClick={async()=>{ await savePodryad(m); setPodryadModal(null); }} style={{padding:"11px 18px",borderRadius:10,border:"1px solid #7c3aed",background:"#fff",color:"#7c3aed",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Сохранить</button>
+                <button onClick={async()=>{ const rec=await savePodryad(m); setPodryadModal(null); openOrPrintHtml(buildPodryadHtml(rec)); }} style={{padding:"11px 20px",borderRadius:10,border:"none",background:"#7c3aed",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🖨 Сохранить и печать</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
       {/* ── Построитель АВР (форма Р-1) ── */}
       {avrModal && (()=>{
         const m = avrModal;
