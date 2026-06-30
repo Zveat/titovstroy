@@ -4359,12 +4359,8 @@ function MainApp({ currentUser, setCurrentUser }) {
     const objType = (o) => o.objType || "—";
 
     const baseObjs = liveObjects
-      .filter(o => inRange(o.updatedAt||o.createdAt||0))
+      .filter(o => inRange(o.createdAt||o.updatedAt||0))   // когорта по дате СОЗДАНИЯ — архивация не тянет старый объект в текущий период
       .filter(o => !statsManager || (o.manager||"")===statsManager);
-    // сметы в периоде (для финансового блока «согласованные сметы», как было раньше)
-    const baseEstimates = estimates
-      .filter(e => inRange(e.updatedAt||e.createdAt||0))
-      .filter(e => !statsManager || (e.proj?.manager||"")===statsManager);
     // Договора, сформированные ВНУТРИ объектов (привязаны к объекту), без «Прочих договоров»
     const baseCon = contracts
       .filter(c => !c.deletedAt)
@@ -4384,30 +4380,34 @@ function MainApp({ currentUser, setCurrentUser }) {
     const byStatus = {}; for(const s of DEAL_STATUSES) byStatus[s.key]=baseObjs.filter(o=>(o.status||"new")===s.key).length;
     const byType = {}; for(const o of baseObjs){ const t=objType(o); byType[t]=(byType[t]||0)+1; }
 
-    // ── A. Финансовый обзор (по согласованным сметам — как было раньше) ──
-    const agreedEst   = baseEstimates.filter(e=>e.status==="agreed"&&(e.total||0)>0);
-    const wonRevenue  = agreedEst.reduce((s,e)=>s+(e.total||0),0);
-    const wonCost     = agreedEst.reduce((s,e)=>s+estCost(e),0);
+    // ── A. Финансовый обзор — по ПОДПИСАННЫМ объектам (статус объекта = источник правды) ──
+    const signedObjsFin = baseObjs.filter(o=>o.status==="signed"&&objVal(o)>0);
+    const wonRevenue  = signedObjsFin.reduce((s,o)=>s+objVal(o),0);
+    const wonCost     = signedObjsFin.reduce((s,o)=>s+objCost(o),0);
     const wonProfit   = wonRevenue - wonCost;
     const wonMargin   = wonRevenue>0 ? Math.round(wonProfit/wonRevenue*100) : 0;
-    const withSumEstimates = baseEstimates.filter(e=>(e.total||0)>0);
-    const allRevenue  = withSumEstimates.reduce((s,e)=>s+(e.total||0),0);
-    const allCost     = withSumEstimates.reduce((s,e)=>s+estCost(e),0);
+    // Потенциал — все активные объекты с суммой (кроме архива)
+    const potentialObjs = baseObjs.filter(o=>o.status!=="archive"&&objVal(o)>0);
+    const allRevenue  = potentialObjs.reduce((s,o)=>s+objVal(o),0);
+    const allCost     = potentialObjs.reduce((s,o)=>s+objCost(o),0);
     const allProfit   = allRevenue - allCost;
     const allMargin   = allRevenue>0 ? Math.round(allProfit/allRevenue*100) : 0;
 
-    // ── B. Воронка с деньгами и прибылью + конверсия (по сметам, как было) ──
-    const funnel = STATUSES.map(s=>{
-      const list = baseEstimates.filter(e=>(e.status||"new")===s.key);
-      const sum  = list.reduce((a,e)=>a+(e.total||0),0);
-      const cost = list.reduce((a,e)=>a+estCost(e),0);
+    // ── B. Воронка сделок по статусам ОБЪЕКТОВ (архив — терминал, не стадия) ──
+    const funnelStatusesAn = DEAL_STATUSES.filter(s=>s.key!=="archive");
+    const funnel = funnelStatusesAn.map(s=>{
+      const list = baseObjs.filter(o=>(o.status||"new")===s.key);
+      const sum  = list.reduce((a,o)=>a+objVal(o),0);
+      const cost = list.reduce((a,o)=>a+objCost(o),0);
       return { key:s.key, label:s.label, color:s.color, bg:s.bg, count:list.length, sum, profit:sum-cost };
     });
-    const sentB   = funnel.find(f=>f.key==="sent")   || {count:0,sum:0,profit:0};
-    const agreedB = funnel.find(f=>f.key==="agreed") || {count:0,sum:0,profit:0};
-    const activeEsts = baseEstimates.filter(e=>(e.status||"new")!=="archive");
-    const winRateOverall = activeEsts.length>0 ? Math.round(agreedB.count/activeEsts.length*100) : 0;
-    const winRateSent    = (sentB.count+agreedB.count)>0 ? Math.round(agreedB.count/(sentB.count+agreedB.count)*100) : 0;
+    const signedB = funnel.find(f=>f.key==="signed") || {count:0,sum:0,profit:0};
+    const refuseB = funnel.find(f=>f.key==="refuse") || {count:0,sum:0,profit:0};
+    const activeObjsCount = baseObjs.filter(o=>o.status!=="archive").length;
+    // Общая конверсия = подписано / все активные объекты
+    const winRateOverall = activeObjsCount>0 ? Math.round(signedB.count/activeObjsCount*100) : 0;
+    // Close-rate = подписано / решённые (подписано + отказ)
+    const winRateSent    = (signedB.count+refuseB.count)>0 ? Math.round(signedB.count/(signedB.count+refuseB.count)*100) : 0;
 
     // ── D. Рентабельность по категориям (по сметам объектов в периоде) ──
     const objIdSet = new Set(baseObjs.map(o=>o.id));
@@ -4446,19 +4446,22 @@ function MainApp({ currentUser, setCurrentUser }) {
       return {name:m, count:mos.length, sum, profit, margin: sum>0?Math.round(profit/sum*100):0, sent:inwork, agreed:done, conv};
     }).sort((a,b)=>b.profit-a.profit);
 
-    // ── E. Динамика по месяцам (по объектам и их сумме) ──
+    // ── E. Динамика по месяцам (по объектам, их сумме и конверсии) ──
     const monthMap = {};
-    for(const o of withSumEst){
+    for(const o of baseObjs){
+      if(o.status==="archive") continue;
       const d = new Date(o.createdAt||o.updatedAt||0);
       const key = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
-      if(!monthMap[key]) monthMap[key]={key, revenue:0, cost:0};
+      if(!monthMap[key]) monthMap[key]={key, revenue:0, cost:0, total:0, signed:0};
       monthMap[key].revenue += objVal(o);
       monthMap[key].cost += objCost(o);
+      monthMap[key].total += 1;
+      if(o.status==="signed") monthMap[key].signed += 1;
     }
     const MONTH_RU = ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"];
     const monthly = Object.values(monthMap).sort((a,b)=>a.key.localeCompare(b.key)).slice(-12).map(m=>{
       const [y,mo]=m.key.split("-");
-      return {...m, label: MONTH_RU[Number(mo)-1]+" "+y.slice(2), profit:m.revenue-m.cost};
+      return {...m, label: MONTH_RU[Number(mo)-1]+" "+y.slice(2), profit:m.revenue-m.cost, conv:m.total>0?Math.round(m.signed/m.total*100):0};
     });
 
     // ── F. «Зависшие» объекты в работе (без движения 14+ дней) ──
@@ -4476,6 +4479,9 @@ function MainApp({ currentUser, setCurrentUser }) {
     // ── G. Средний цикл сделки (от создания до подписания, в днях) ──
     const signedObjs = baseObjs.filter(o=>o.status==="signed"&&o.createdAt&&o.updatedAt&&o.updatedAt>o.createdAt);
     const avgDealDays = signedObjs.length>0 ? Math.round(signedObjs.reduce((s,o)=>s+Math.floor((o.updatedAt-o.createdAt)/864e5),0)/signedObjs.length) : null;
+    // Среднее время «зависания» открытых сделок в согласовании (от создания до сейчас)
+    const approvalOpen = liveObjects.filter(o=>o.status==="approval"&&(!statsManager||(o.manager||"")===statsManager));
+    const avgApprovalDays = approvalOpen.length>0 ? Math.round(approvalOpen.reduce((s,o)=>s+Math.floor((nowMs-(o.createdAt||o.updatedAt||nowMs))/864e5),0)/approvalOpen.length) : null;
 
     // ── H. Конверсия по типу объекта (архив не в знаменателе — искажал бы конверсию) ──
     const convByType = {};
@@ -4493,8 +4499,8 @@ function MainApp({ currentUser, setCurrentUser }) {
 
     return { baseEst: baseObjs, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType, TYPE_L2,
       wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin,
-      funnel, winRateOverall, winRateSent, agreedB, sentB, catProfit, monthly, staleSent,
-      avgDealDays, signedObjsCount: signedObjs.length, convByType, topObjects, objVal };
+      funnel, winRateOverall, winRateSent, signedB, refuseB, catProfit, monthly, staleSent,
+      avgDealDays, avgApprovalDays, signedObjsCount: signedObjs.length, convByType, topObjects, objVal };
   }, [estimates, contracts, objects, statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers, catalogVersion]);
 
   // Защита от краша: если activeCat не в Gdyn — берём первый
@@ -6239,7 +6245,9 @@ function MainApp({ currentUser, setCurrentUser }) {
         const objectsThisMonth = liveObjects.filter(o=>o.status!=="archive"&&_inMonth(o.createdAt||o.updatedAt||0));
         const objectsWithSum = objectsThisMonth.filter(o=>_objVal(o)>0);
         const totalSumMonth = objectsWithSum.reduce((s,o)=>s+_objVal(o), 0);
-        const signedMonth = objectsThisMonth.filter(o=>o.status==="signed"&&_objVal(o)>0);
+        // Прибыль/маржа — по сделкам, ПОДПИСАННЫМ в этом месяце (updatedAt ≈ дата подписания),
+        // независимо от того, когда объект был создан
+        const signedMonth = liveObjects.filter(o=>o.status==="signed"&&_inMonth(o.updatedAt||o.createdAt||0)&&_objVal(o)>0);
         const signedRevMonth = signedMonth.reduce((s,o)=>s+_objVal(o), 0);
         const signedCostMonth = signedMonth.reduce((s,o)=>s+_objCost(o), 0);
         const profitMonth = signedRevMonth - signedCostMonth;
@@ -6436,7 +6444,9 @@ function MainApp({ currentUser, setCurrentUser }) {
 
             {/* Воронка по статусам */}
             {liveObjects.length>0&&(()=>{
-              const maxCount = Math.max(1,...DEAL_STATUSES.map(s=>liveObjects.filter(o=>(o.status||"new")===s.key).length));
+              // Архив — терминальное хранилище, не стадия воронки; не показываем его баром
+              const funnelStatuses = DEAL_STATUSES.filter(s=>s.key!=="archive");
+              const maxCount = Math.max(1,...funnelStatuses.map(s=>liveObjects.filter(o=>(o.status||"new")===s.key).length));
               const signedCount = liveObjects.filter(o=>o.status==="signed").length;
               const nonArchive = liveObjects.filter(o=>o.status!=="archive").length;
               const convToSigned = nonArchive>0?Math.round(signedCount/nonArchive*100):0;
@@ -6449,7 +6459,7 @@ function MainApp({ currentUser, setCurrentUser }) {
                     </span>
                   </div>
                   <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                    {DEAL_STATUSES.map(s=>{
+                    {funnelStatuses.map(s=>{
                       const list = liveObjects.filter(o=>(o.status||"new")===s.key);
                       const sum = list.reduce((acc,o)=>acc+(_estByObjId[o.id]||[]).reduce((ss,e)=>ss+(e.total||0),0),0);
                       const w = Math.round((list.length/maxCount)*100);
@@ -7619,8 +7629,8 @@ function MainApp({ currentUser, setCurrentUser }) {
       {/* ЭКРАН: АНАЛИТИКА */}
       {effScreen === "analytics" && (()=>{
         const { baseEst, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType, TYPE_L2,
-          wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin, funnel, winRateOverall, winRateSent, agreedB, sentB, catProfit, monthly, staleSent,
-          avgDealDays, signedObjsCount, convByType, topObjects, objVal } = analyticsData;
+          wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin, funnel, winRateOverall, winRateSent, catProfit, monthly, staleSent,
+          avgDealDays, avgApprovalDays, signedObjsCount, convByType, topObjects, objVal } = analyticsData;
         const PERIOD_BTNS = [["all","Всё время"],["month","Месяц"],["3month","3 месяца"],["week","Неделя"],["custom","Вручную"]];
         return (
           <div className="page">
@@ -7677,7 +7687,7 @@ function MainApp({ currentUser, setCurrentUser }) {
             {/* ── A. Финансовый обзор ── */}
             <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
               <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
-                <span style={{fontSize:11,color:"#059669",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>💰 Финансы — согласованные сметы (заработано)</span>
+                <span style={{fontSize:11,color:"#059669",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>💰 Финансы — подписанные договоры (заработано)</span>
                 <span style={{fontSize:11,color:"#94a3b8"}}>в выбранном периоде</span>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
@@ -7694,15 +7704,15 @@ function MainApp({ currentUser, setCurrentUser }) {
                 ))}
               </div>
               <div style={{marginTop:12,paddingTop:12,borderTop:"1px dashed #e5e7eb",display:"flex",gap:18,flexWrap:"wrap",fontSize:12,color:"#64748b"}}>
-                <span>Потенциал (все сметы с суммой): <b style={{color:"#334155"}}>{fmt(Math.round(allRevenue))} ₸</b> выручка · прибыль <b style={{color:"#059669"}}>{fmt(Math.round(allProfit))} ₸</b> · маржа <b style={{color:"#334155"}}>{allMargin}%</b></span>
+                <span>Потенциал (все активные объекты с суммой): <b style={{color:"#334155"}}>{fmt(Math.round(allRevenue))} ₸</b> выручка · прибыль <b style={{color:"#059669"}}>{fmt(Math.round(allProfit))} ₸</b> · маржа <b style={{color:"#334155"}}>{allMargin}%</b></span>
               </div>
             </div>
 
             {/* ── B. Воронка с деньгами и конверсией ── */}
             <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
               <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
-                <span style={{fontSize:11,color:"#7c3aed",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>🪜 Воронка продаж (деньги)</span>
-                <span style={{fontSize:12,color:"#64748b"}}>Win-rate: <b style={{color:"#059669"}}>{winRateOverall}%</b> от всех · <b style={{color:"#7c3aed"}}>{winRateSent}%</b> от отправленных</span>
+                <span style={{fontSize:11,color:"#7c3aed",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>🪜 Воронка сделок (объекты)</span>
+                <span style={{fontSize:12,color:"#64748b"}}>Конверсия: <b style={{color:"#059669"}}>{winRateOverall}%</b> от всех · <b style={{color:"#7c3aed"}}>{winRateSent}%</b> из решённых</span>
               </div>
               {(() => {
                 const maxSum = Math.max(1, ...funnel.map(f=>f.sum));
@@ -7723,6 +7733,66 @@ function MainApp({ currentUser, setCurrentUser }) {
               })()}
             </div>
 
+            {/* ── B2. Финансы и производство — текущий снимок (по всей компании) ── */}
+            {(()=>{
+              const _norm = s => String(s||"").replace(/[№#\s]/g,"").toLowerCase();
+              const _inM = ts => { const d=new Date(ts||0); const n=new Date(); return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear(); };
+              const _ds = d => { const x=new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
+              const activeFp = (finProjects||[]).filter(p=>(p.rawStatus||p.status)!=="отменен");
+              const txMap = {}; for(const t of (financeTx||[])){ if(t.deletedAt||t.included===false) continue; const cn=_norm(t.contractNo); if(!txMap[cn])txMap[cn]={inc:0,exp:0}; if(t.type==="income")txMap[cn].inc+=(Number(t.amount)||0); else txMap[cn].exp+=(Number(t.amount)||0); }
+              const totalInc = Object.values(txMap).reduce((s,v)=>s+v.inc,0);
+              const totalExp = Object.values(txMap).reduce((s,v)=>s+v.exp,0);
+              const totalBudget = activeFp.reduce((s,p)=>s+(Number(p.budget)||0),0);
+              const totalDebt = activeFp.reduce((s,p)=>{const inc=txMap[_norm(p.contractNo)]?.inc||0; return s+Math.max(0,(Number(p.budget)||0)-inc);},0);
+              const planMargin = totalBudget>0?Math.round((totalBudget-totalExp)/totalBudget*100):null;
+              const incMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&_inM(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
+              const expMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="expense"&&_inM(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
+              const prods = productions||[];
+              const today = _ds(new Date());
+              const prodActive = prods.filter(p=>p.prodStatus==="active").length;
+              const prodOverdue = prods.filter(p=>p.prodStatus==="active"&&p.planEndDate&&_ds(p.planEndDate)<today&&!p.factEndDate).length;
+              const prodDoneMonth = prods.filter(p=>p.factEndDate&&_inM(new Date(p.factEndDate).getTime())).length;
+              const prodDefects = prods.reduce((s,p)=>s+((p.defects||[]).filter(d=>!d.done).length),0);
+              if(activeFp.length===0 && prods.length===0) return null;
+              const finCards = [
+                ["Активных проектов", activeFp.length, "не отменены", "#2563eb"],
+                ["Получено (всего)", fmt(Math.round(totalInc))+" ₸", "оплачено клиентами", "#059669"],
+                ["Дебиторка", fmt(Math.round(totalDebt))+" ₸", "долги клиентов", totalDebt>0?"#dc2626":"#059669"],
+                ["Расходы (всего)", fmt(Math.round(totalExp))+" ₸", "по проектам", "#64748b"],
+                ["Маржа план", planMargin!=null?planMargin+"%":"—", "бюджет − расходы", planMargin!=null&&planMargin>=30?"#059669":planMargin!=null&&planMargin>=0?"#d97706":"#dc2626"],
+                ["Приход за месяц", fmt(Math.round(incMonth))+" ₸", "минус расход "+fmt(Math.round(expMonth)), "#059669"],
+              ];
+              const prodCards = [
+                ["В работе", prodActive, "активных производств", "#2563eb"],
+                ["Просрочено", prodOverdue, "срок истёк", prodOverdue>0?"#dc2626":"#059669"],
+                ["Сдано за месяц", prodDoneMonth, "фактически завершено", "#059669"],
+                ["Открытых замечаний", prodDefects, "незакрытые дефекты", prodDefects>0?"#d97706":"#059669"],
+              ];
+              const Card = ([l,v,s,c],i)=>(
+                <div key={i} style={{padding:"12px 14px",background:"#f9fafb",borderRadius:8,borderLeft:`3px solid ${c}`}}>
+                  <div style={{fontSize:9,color:"#94a3b8",textTransform:"uppercase",letterSpacing:.8,marginBottom:6}}>{l}</div>
+                  <div style={{fontSize:17,fontWeight:900,color:c,lineHeight:1.1}}>{v}</div>
+                  <div style={{fontSize:10,color:"#94a3b8",marginTop:4}}>{s}</div>
+                </div>
+              );
+              return (
+                <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
+                  <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
+                    <span style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>💼 Финансы и производство</span>
+                    <span style={{fontSize:11,color:"#94a3b8"}}>текущий снимок · не зависит от периода</span>
+                  </div>
+                  {activeFp.length>0 && <>
+                    <div style={{fontSize:10,color:"#059669",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>💰 Финансы по проектам</div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:prods.length>0?16:0}}>{finCards.map(Card)}</div>
+                  </>}
+                  {prods.length>0 && <>
+                    <div style={{fontSize:10,color:"#d97706",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>🏗 Производство</div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>{prodCards.map(Card)}</div>
+                  </>}
+                </div>
+              );
+            })()}
+
             {/* ── E. Динамика по месяцам ── */}
             {monthly.length>0 && (
               <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
@@ -7738,6 +7808,7 @@ function MainApp({ currentUser, setCurrentUser }) {
                             <div title={"Выручка: "+fmt(Math.round(m.revenue))+" ₸"} style={{width:14,height:`${Math.max(2,Math.round(m.revenue/maxRev*110))}px`,background:"#93c5fd",borderRadius:"3px 3px 0 0"}}/>
                             <div title={"Прибыль: "+fmt(Math.round(m.profit))+" ₸"} style={{width:14,height:`${Math.max(2,Math.round(Math.max(0,m.profit)/maxRev*110))}px`,background:"#059669",borderRadius:"3px 3px 0 0"}}/>
                           </div>
+                          <div style={{fontSize:9,fontWeight:700,color:m.conv>=40?"#059669":m.conv>=20?"#d97706":"#94a3b8",whiteSpace:"nowrap"}} title="Конверсия в подписанные">{m.total>0?m.conv+"%":""}</div>
                           <div style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>{m.label}</div>
                         </div>
                       ))}
@@ -7747,6 +7818,7 @@ function MainApp({ currentUser, setCurrentUser }) {
                 <div style={{display:"flex",gap:16,marginTop:10,fontSize:11,color:"#94a3b8"}}>
                   <span><span style={{display:"inline-block",width:10,height:10,background:"#93c5fd",borderRadius:2,marginRight:5}}/>Выручка</span>
                   <span><span style={{display:"inline-block",width:10,height:10,background:"#059669",borderRadius:2,marginRight:5}}/>Прибыль</span>
+                  <span>% — конверсия в подписанные за месяц</span>
                 </div>
               </div>
             )}
@@ -7815,12 +7887,12 @@ function MainApp({ currentUser, setCurrentUser }) {
                     </div>
                   ))}
                 </div>
-                <div style={{fontSize:10,color:"#94a3b8",marginTop:8}}>Оборот/прибыль — в тыс. ₸. Конверсия = согласовано / (отправлено + согласовано).</div>
+                <div style={{fontSize:10,color:"#94a3b8",marginTop:8}}>Оборот/прибыль — в тыс. ₸. Конверсия = подписано / активные объекты (кроме архива).</div>
               </div>
             )}
 
             {/* ── G+H. Цикл сделки + Конверсия по типу ── */}
-            {(avgDealDays!==null || Object.keys(convByType).length>0) && (
+            {(avgDealDays!==null || avgApprovalDays!==null || Object.keys(convByType).length>0) && (
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:16,marginBottom:16}}>
                 {avgDealDays!==null && (
                   <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
@@ -7828,9 +7900,20 @@ function MainApp({ currentUser, setCurrentUser }) {
                     <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
                       <span style={{fontSize:36,fontWeight:900,color:"#0f172a"}}>{avgDealDays}</span>
                       <span style={{fontSize:14,color:"#64748b"}}>дней</span>
+                      {avgApprovalDays!==null && <span style={{fontSize:12,color:"#94a3b8",marginLeft:"auto"}}>в согласовании сейчас: <b style={{color:avgApprovalDays>14?"#dc2626":"#0f172a"}}>{avgApprovalDays} дн.</b></span>}
                     </div>
                     <div style={{fontSize:12,color:"#94a3b8"}}>от создания объекта до подписания договора</div>
                     <div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>по {signedObjsCount} подписанным договорам в периоде</div>
+                  </div>
+                )}
+                {avgDealDays===null && avgApprovalDays!==null && (
+                  <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
+                    <div style={{fontSize:11,color:"#d97706",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>⏳ Среднее время в согласовании</div>
+                    <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
+                      <span style={{fontSize:36,fontWeight:900,color:avgApprovalDays>14?"#dc2626":"#0f172a"}}>{avgApprovalDays}</span>
+                      <span style={{fontSize:14,color:"#64748b"}}>дней</span>
+                    </div>
+                    <div style={{fontSize:12,color:"#94a3b8"}}>открытые сделки в статусе «Согласование»</div>
                   </div>
                 )}
                 {Object.keys(convByType).length>0 && (
