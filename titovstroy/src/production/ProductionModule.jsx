@@ -56,11 +56,13 @@ const projAddress = (p) => {
 const _normCN = (s) => String(s||"").trim().toLowerCase().replace(/\s+/g,"");
 
 export default function ProductionModule({
-  objects, allObjects, unlinkedProjects, estimates, contracts, productions,
+  objects, entries = [], allObjects, unlinkedProjects, estimates, contracts, productions,
   onSaveProduction, onDeleteProduction, buildStagesFromEstimate,
   finProjects, financeTx,
   fmt, genId, currentUser,
 }) {
+  // карта запись производства по ключу записи (objectId реального объекта или "fp:<id>")
+  const entryByKey = useMemo(() => { const m = {}; for (const e of entries) m[e.key] = e; return m; }, [entries]);
   const [openId, setOpenId] = useState(null);
   const [tab, setTab] = useState("info");
   const [search, setSearch] = useState("");
@@ -82,8 +84,8 @@ export default function ProductionModule({
   // Объект может быть реальным (из objects) либо "виртуальным" — из карточки производства,
   // созданной по проекту Финансов (objectId начинается с "fp:").
   const openObj = openId ? (
-    objects.find(o => o.id === openId) ||
-    (() => { const pr = prodByObj[openId]; return pr ? { id: openId, clientName: pr.title || "Проект", address: pr.address || "", clientPhone: "" } : null; })()
+    (allObjects || objects).find(o => o.id === openId) ||
+    (() => { const e = entryByKey[openId]; if (e) return { id: openId, clientName: e.name || "Проект", address: e.address || "", clientPhone: "" }; const pr = prodByObj[openId]; return pr ? { id: openId, clientName: pr.title || "Проект", address: pr.address || "", clientPhone: "" } : null; })()
   ) : null;
   const openProd = openObj ? (prodByObj[openObj.id] || emptyProduction(openObj.id, genId)) : null;
 
@@ -140,42 +142,12 @@ export default function ProductionModule({
     return m;
   }, [contracts]);
 
-  // Финансовая сводка для каждого объекта в списке (бюджет, оплата, долг, маржа)
+  // Финансовая сводка для каждой записи производства — берётся напрямую из prodEntries (источник = финпроект)
   const finSummaryMap = useMemo(() => {
     const map = {};
-    if (!finProjects?.length) return map;
-    const txByContract = {};
-    for (const t of (financeTx || [])) {
-      if (t.deletedAt || t.included === false) continue;
-      const cn = _normCN(t.contractNo);
-      if (!txByContract[cn]) txByContract[cn] = [];
-      txByContract[cn].push(t);
-    }
-    const objList = [
-      ...objects,
-      ...(productions || []).filter(p => String(p.objectId).startsWith("fp:")).map(p => ({ id: p.objectId, clientName: p.title || "", address: p.address || "" })),
-    ];
-    for (const obj of objList) {
-      let fp = finProjects.find(p => p.objectId === obj.id);
-      if (!fp) {
-        const objContracts = (contracts || []).filter(c => c.objectId === obj.id && !c.deletedAt);
-        for (const c of objContracts) { fp = finProjects.find(p => _normCN(p.contractNo) === _normCN(c.number)); if (fp) break; }
-      }
-      if (!fp && obj.clientName?.length > 2) {
-        fp = finProjects.find(p => { const d = ((p.description || "") + " " + (p.comment || "")).toLowerCase(); return d.includes(obj.clientName.toLowerCase()); });
-      }
-      if (!fp) continue;
-      const cn = _normCN(fp.contractNo);
-      const txList = txByContract[cn] || [];
-      const income = txList.filter(t => t.type === "income").reduce((s, t) => s + (Number(t.amount) || 0), 0);
-      const expense = txList.filter(t => t.type === "expense").reduce((s, t) => s + (Number(t.amount) || 0), 0);
-      const budget = Number(fp.budget) || 0;
-      const debt = Math.max(0, budget - income);
-      const margin = income > 0 ? Math.round((income - expense) / income * 100) : null;
-      map[obj.id] = { budget, income, expense, debt, margin, contractNo: fp.contractNo };
-    }
+    for (const e of entries) map[e.key] = { budget: e.budget, income: e.income, expense: e.expense, debt: e.debt, margin: e.margin, contractNo: e.contractNo };
     return map;
-  }, [finProjects, financeTx, objects, productions, contracts]);
+  }, [entries]);
 
   // ─── СПИСОК ОБЪЕКТОВ ───
   if (!openObj) {
@@ -183,11 +155,8 @@ export default function ProductionModule({
     const num = v => Number(v) || 0;
     const today = _dayStart(new Date());
     const nowD = new Date();
-    const objIdSet = new Set(objects.map(o => o.id));
-    const baseEntries = [
-      ...objects.map(o => ({ id: o.id, name: o.clientName || "Без названия", address: o.address || "—", updatedAt: o.updatedAt || 0 })),
-      ...(productions || []).filter(p => String(p.objectId).startsWith("fp:") && !objIdSet.has(p.objectId)).map(p => ({ id: p.objectId, name: p.title || "Проект", address: p.address || "—", updatedAt: p.updatedAt || 0 })),
-    ];
+    // Список = ВСЕ финпроекты (одна запись на проект). Источник — entries из App.
+    const baseEntries = entries.map(e => ({ id: e.key, name: e.name || "Без названия", address: e.address || "—", updatedAt: prodByObj[e.key]?.updatedAt || 0 }));
     // Метрики объекта для светофора и сводки (тянутся из этапов/смет/производства)
     const metricsOf = (id) => {
       const p = prodByObj[id];
@@ -200,26 +169,30 @@ export default function ProductionModule({
       const doneStages = sts.filter(s => s.status === "done").length;
       const prog = sts.length ? Math.round(doneStages / sts.length * 100) : launchProgress(p);
       const defectsOpen = (p?.defects || []).filter(d => !d.done).length;
-      const finished = !!p?.factEndDate;
+      // статус производства: сохранённый → иначе по статусу финпроекта (новый/в работе/выполнен/отменён)
+      const e = entryByKey[id];
+      const prodStatus = p?.prodStatus || e?.prodStatusDefault || "new";
+      const finished = prodStatus === "done" || !!p?.factEndDate;
       let daysLeft = null, overdue = false;
       if (!finished && p?.planEndDate) { daysLeft = Math.round((_dayStart(p.planEndDate) - today) / 864e5); if (daysLeft < 0) overdue = true; }
       const overdueStages = sts.some(s => s.status !== "done" && s.planEnd && _dayStart(s.planEnd) < today);
       let sev, color, label;
-      if (finished) { sev = 0; color = "#94a3b8"; label = "Сдан ✓"; }
+      if (prodStatus === "cancel") { sev = 0; color = "#94a3b8"; label = "Отменён"; }
+      else if (finished) { sev = 0; color = "#94a3b8"; label = "Сдан ✓"; }
       else if (overdue || overdueStages) { sev = 3; color = "#dc2626"; label = "Просрочка"; }
       else if ((daysLeft != null && daysLeft <= 5) || defectsOpen > 0) { sev = 2; color = "#d97706"; label = "Внимание"; }
       else { sev = 1; color = "#059669"; label = "В норме"; }
-      const fd = finished ? new Date(p.factEndDate) : null;
+      const fdRaw = p?.factEndDate || e?.closedAt;
+      const fd = (finished && fdRaw) ? new Date(fdRaw) : null;
       const finishedThisMonth = !!(fd && fd.getMonth() === nowD.getMonth() && fd.getFullYear() === nowD.getFullYear());
-      const prodStatus = p?.prodStatus || "active";
       return { pc, cp, cf, mPlan, mFact, prog, defectsOpen, finished, daysLeft, sev, color, label, responsible: p?.responsible || "", stagesCount: sts.length, doneStages, finishedThisMonth, prodStatus };
     };
     const rows = baseEntries
-      .filter(o => !statusFilter || (prodByObj[o.id]?.prodStatus || "active") === statusFilter)
+      .filter(o => !statusFilter || (prodByObj[o.id]?.prodStatus || entryByKey[o.id]?.prodStatusDefault || "new") === statusFilter)
       .filter(o => !q || [o.name, o.address].some(v => v && v.toLowerCase().includes(q)))
       .map(o => ({ ...o, m: metricsOf(o.id) }))
       .sort((a, b) => (b.m.sev - a.m.sev) || ((a.m.daysLeft == null ? 999 : a.m.daysLeft) - (b.m.daysLeft == null ? 999 : b.m.daysLeft)) || (b.updatedAt - a.updatedAt));
-    const sum = rows.reduce((a, r) => { a.pc += r.m.pc; a.cp += r.m.cp; a.cf += r.m.cf; a.defects += r.m.defectsOpen; if (r.m.finished) { a.done++; if (r.m.finishedThisMonth) a.doneMonth++; } else a.inWork++; if (r.m.sev === 3) a.overdue++; return a; }, { pc: 0, cp: 0, cf: 0, defects: 0, done: 0, doneMonth: 0, inWork: 0, overdue: 0 });
+    const sum = rows.reduce((a, r) => { a.pc += r.m.pc; a.cp += r.m.cp; a.cf += r.m.cf; a.defects += r.m.defectsOpen; if (r.m.prodStatus === "done") { a.done++; if (r.m.finishedThisMonth) a.doneMonth++; } else if (r.m.prodStatus === "active") a.inWork++; if (r.m.sev === 3) a.overdue++; return a; }, { pc: 0, cp: 0, cf: 0, defects: 0, done: 0, doneMonth: 0, inWork: 0, overdue: 0 });
     const compMPlan = sum.pc ? Math.round((sum.pc - sum.cp) / sum.pc * 100) : null;
     const compMFact = (sum.pc && sum.cf) ? Math.round((sum.pc - sum.cf) / sum.pc * 100) : null;
     const sumCard = (label, value, sub, color) => (
