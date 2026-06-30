@@ -2426,6 +2426,36 @@ const DOC_TYPES = [
 ];
 const TYPE_LABELS = { repair_fiz:"Договор ремонта", annex:"Приложение", design:"Дизайн-проект", design_add:"Доп. соглашение дизайн", reservation:"Бронь", podryad:"Договор подряда", podryad_annex:"Приложение к подряду" };
 
+// Переиспользуемый выпадающий список с поиском (вместо некрасивых native <select>)
+function SearchSelect({ value, options, onChange, placeholder = "🔍 Поиск…", style }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const sel = options.find(o => o.value === value);
+  const s = q.trim().toLowerCase();
+  const filtered = s ? options.filter(o => (o.label || "").toLowerCase().includes(s) || (o.sub || "").toLowerCase().includes(s)) : options;
+  return (
+    <div style={{ position: "relative", ...(style || {}) }}>
+      <input value={open ? q : (sel ? sel.label : "")} placeholder={placeholder}
+        onChange={e => { setQ(e.target.value); setOpen(true); }} onFocus={() => { setQ(""); setOpen(true); }}
+        style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, color: "#0f172a", fontSize: 13, padding: "8px 10px", fontFamily: "inherit", width: "100%", boxSizing: "border-box" }} />
+      {open && (<>
+        <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 41, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, marginTop: 4, maxHeight: 300, overflowY: "auto", boxShadow: "0 14px 40px rgba(15,23,42,.18)" }}>
+          {filtered.length === 0 && <div style={{ padding: "10px 12px", fontSize: 12, color: "#94a3b8" }}>Ничего не найдено</div>}
+          {filtered.slice(0, 120).map(o => (
+            <div key={o.value} onClick={() => { onChange(o.value); setOpen(false); setQ(""); }}
+              style={{ padding: "9px 12px", cursor: "pointer", fontSize: 13, color: "#0f172a", borderBottom: "1px solid #f1f5f9", display: "flex", flexDirection: "column", gap: 1, background: o.value === value ? "#eff6ff" : "#fff" }}
+              onMouseEnter={e => e.currentTarget.style.background = "#f8fafc"} onMouseLeave={e => e.currentTarget.style.background = o.value === value ? "#eff6ff" : "#fff"}>
+              <span style={{ fontWeight: 600 }}>{o.label}</span>
+              {o.sub && <span style={{ fontSize: 11, color: "#94a3b8" }}>{o.sub}</span>}
+            </div>
+          ))}
+        </div>
+      </>)}
+    </div>
+  );
+}
+
 function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onGDoc, onAddClientFromEstimate, onUpdateClient, onCreateClient, workers=[], onCreateWorker, importObjects=[], getObjectWorks, currentUserRole, fmt }) {
   const [withStamp, setWithStamp] = useState(true);
   const [showClientForm, setShowClientForm] = useState(false);
@@ -2433,6 +2463,8 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
   const [newClientData, setNewClientData] = useState({ name:"", phone:"", type:"физ" });
   const [showNewWorker, setShowNewWorker] = useState(false);
   const [newWorkerData, setNewWorkerData] = useState({ name:"", iin:"", doc:"", phone:"", address:"" });
+  const [impSearch, setImpSearch] = useState("");
+  const [impOpen, setImpOpen] = useState(false);
   const type = contract.type || "repair_fiz";
   const total = (contract.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
   const upd = (patch) => onUpdate(prev=>({...prev,...patch}));
@@ -2461,9 +2493,8 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         <div>
           <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Тип документа</div>
-          <select style={fi} value={type} onChange={e=>upd({type:e.target.value})}>
-            {DOC_TYPES.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
-          </select>
+          <SearchSelect value={type} onChange={v=>upd({type:v})} placeholder="Тип документа…"
+            options={DOC_TYPES.map(d=>({value:d.value,label:d.label}))}/>
         </div>
         <div>
           <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Статус</div>
@@ -2607,10 +2638,8 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
         <div>
           <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",marginBottom:8}}>ПОДРЯДЧИК (рабочий)</div>
           <div style={{display:"flex",gap:6,alignItems:"center"}}>
-            <select className="fi" style={{flex:1}} value={contract.workerId||""} onChange={e=>{upd({workerId:e.target.value});setShowNewWorker(false);}}>
-              <option value="">— Выбрать подрядчика —</option>
-              {workers.map(w=>(<option key={w.id} value={w.id}>{w.name}</option>))}
-            </select>
+            <SearchSelect style={{flex:1}} value={contract.workerId||""} onChange={v=>{upd({workerId:v});setShowNewWorker(false);}} placeholder="🔍 Поиск подрядчика…"
+              options={workers.map(w=>({value:w.id,label:w.name||"Без имени",sub:[w.iin&&("ИИН "+w.iin),w.phone].filter(Boolean).join(" · ")}))}/>
             <button onClick={()=>setShowNewWorker(s=>!s)} style={{background:showNewWorker?"#eff6ff":"#f3f4f6",color:"#059669",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ Новый</button>
           </div>
           {showNewWorker && (
@@ -2631,16 +2660,33 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
               </div>
             </div>
           )}
-          {/* Импорт работ из сметы объекта */}
-          {getObjectWorks && (
-            <div style={{marginTop:10}}>
+          {/* Импорт работ из сметы объекта — с поиском */}
+          {getObjectWorks && (()=>{
+            const selected = importObjects.find(o=>o.id===contract.objectId);
+            const filtered = importObjects.filter(o=>{ const s=impSearch.trim().toLowerCase(); return !s || (o.label||"").toLowerCase().includes(s); });
+            return (
+            <div style={{marginTop:10,position:"relative"}}>
               <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Подтянуть работы из сметы объекта (суммы потом редактируются)</div>
-              <select className="fi" value={contract.objectId||""} onChange={e=>{ const oid=e.target.value; if(!oid){upd({objectId:""});return;} const ws=getObjectWorks(oid); const o=importObjects.find(x=>x.id===oid); upd({objectId:oid, works:ws.length?ws:(contract.works||[]), objectAddress:o?.address||contract.objectAddress||""}); }}>
-                <option value="">— объект —</option>
-                {importObjects.map(o=>(<option key={o.id} value={o.id}>{o.label}</option>))}
-              </select>
+              <input value={impOpen?impSearch:(selected?.label||"")} placeholder="🔍 Поиск объекта по имени или адресу…"
+                onChange={e=>{setImpSearch(e.target.value);setImpOpen(true);}} onFocus={()=>{setImpSearch("");setImpOpen(true);}}
+                style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,color:"#0f172a",fontSize:13,padding:"8px 10px",fontFamily:"inherit",width:"100%",boxSizing:"border-box"}}/>
+              {impOpen && (<>
+                <div onClick={()=>setImpOpen(false)} style={{position:"fixed",inset:0,zIndex:40}}/>
+                <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:41,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,marginTop:4,maxHeight:300,overflowY:"auto",boxShadow:"0 14px 40px rgba(15,23,42,.18)"}}>
+                  {filtered.length===0 && <div style={{padding:"10px 12px",fontSize:12,color:"#94a3b8"}}>Ничего не найдено</div>}
+                  {filtered.slice(0,80).map(o=>(
+                    <div key={o.id} onClick={()=>{ const ws=getObjectWorks(o.id); upd({objectId:o.id, works:ws.length?ws:(contract.works||[]), objectAddress:o.address||contract.objectAddress||""}); setImpOpen(false); setImpSearch(""); }}
+                      style={{padding:"9px 12px",cursor:"pointer",fontSize:13,color:"#0f172a",borderBottom:"1px solid #f1f5f9",display:"flex",flexDirection:"column",gap:1,background:o.id===contract.objectId?"#eff6ff":"#fff"}}
+                      onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=o.id===contract.objectId?"#eff6ff":"#fff"}>
+                      <span style={{fontWeight:600}}>{o.label}</span>
+                      {o.address && o.address!==o.label && <span style={{fontSize:11,color:"#94a3b8"}}>{o.address}</span>}
+                    </div>
+                  ))}
+                </div>
+              </>)}
             </div>
-          )}
+            );
+          })()}
         </div>
       )}
       {/* Клиент */}
@@ -2653,10 +2699,8 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
           )}
         </div>
         <div style={{display:"flex",gap:6,alignItems:"center"}}>
-          <select className="fi" style={{flex:1}} value={contract.clientId||""} onChange={e=>{upd({clientId:e.target.value});setShowNewClientForm(false);}}>
-            <option value="">— Выбрать клиента —</option>
-            {clients.map(c=>(<option key={c.id} value={c.id}>{c.name}{c.clientType==="yur" || c.type==="юр" ? " (ЮР)" : ""}</option>))}
-          </select>
+          <SearchSelect style={{flex:1}} value={contract.clientId||""} onChange={v=>{upd({clientId:v});setShowNewClientForm(false);}} placeholder="🔍 Поиск клиента…"
+            options={clients.map(c=>({value:c.id,label:(c.name||"Без имени")+((c.clientType==="yur"||c.type==="юр")?" (ЮР)":""),sub:[c.phone,c.address].filter(Boolean).join(" · ")}))}/>
           {contract.clientId
             ? <button onClick={()=>setShowClientForm(s=>!s)}
                 style={{background:showClientForm?"#eff6ff":"#f3f4f6",color:"#2563eb",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
@@ -2750,10 +2794,8 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       {/* Подрядчик/Заказчик (наше ТОО) */}
       <div>
         <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",marginBottom:8}}>{isPod?"ЗАКАЗЧИК (наше ТОО)":"ПОДРЯДЧИК"}</div>
-        <select className="fi" value={contract.contragentId||""} onChange={e=>upd({contragentId:e.target.value})}>
-          <option value="">— Выбрать ТОО —</option>
-          {contragents.map(c=>(<option key={c.id} value={c.id}>{c.name}</option>))}
-        </select>
+        <SearchSelect value={contract.contragentId||""} onChange={v=>upd({contragentId:v})} placeholder="🔍 Выбрать ТОО…"
+          options={contragents.map(c=>({value:c.id,label:c.name,sub:c.bin?("БИН "+c.bin):""}))}/>
       </div>
       {/* Доп. поля договора подряда */}
       {isPod && (
@@ -8317,9 +8359,9 @@ ${reqBlock}`;
                   </div>
                   {activeFp.length>0 && <>
                     <div style={{fontSize:10,color:"#059669",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>💰 Финансы по проектам</div>
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:prods.length>0?16:0}}>{finCards.map(Card)}</div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:prodEntries.length>0?16:0}}>{finCards.map(Card)}</div>
                   </>}
-                  {prods.length>0 && <>
+                  {prodEntries.length>0 && <>
                     <div style={{fontSize:10,color:"#d97706",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>🏗 Производство</div>
                     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>{prodCards.map(Card)}</div>
                   </>}
