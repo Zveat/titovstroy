@@ -344,6 +344,7 @@ const DEAL_STATUSES = [
   { key:"new",      label:"Черновик",                color:"#64748b", bg:"#f3f4f6"              },
   { key:"approval", label:"Согласование с клиентом", color:"#d97706", bg:"rgba(217,119,6,.12)"  },
   { key:"signed",   label:"Договор подписан",        color:"#059669", bg:"rgba(5,150,105,.1)"   },
+  { key:"refuse",   label:"Отказ",                   color:"#dc2626", bg:"rgba(220,38,38,.1)"   },
   { key:"archive",  label:"Архив",                   color:"#64748b", bg:"rgba(107,114,128,.12)"},
 ];
 const OBJECTS_KEY         = "titovstroy-objects";
@@ -1033,7 +1034,7 @@ function AdminPanel({ currentUser, onClose }) {
     Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
 
-  const roleLabel = r => r==="admin" ? "👑 Админ" : r==="viewer" ? "👁 Наблюдатель" : r==="manager" ? "🧑‍💼 Руководитель" : "👤 Замерщик";
+  const roleLabel = r => r==="admin"?"👑 Админ":r==="viewer"?"👁 Наблюдатель":r==="manager"?"🧑‍💼 Руководитель":r==="foreman"?"🔨 Прораб":"👤 Замерщик";
 
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(17,24,39,.4)",backdropFilter:"blur(2px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:16,fontFamily:"'Inter','Segoe UI',sans-serif"}}>
@@ -1107,6 +1108,7 @@ function AdminPanel({ currentUser, onClose }) {
                         <select style={{width:"100%",background:"#f8fafc",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:8,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none",cursor:"pointer"}}
                           value={editingUser.role||"user"} onChange={e=>setEditingUser(p=>({...p,role:e.target.value}))} disabled={u.id===currentUser.id}>
                           <option value="user">👤 Замерщик</option>
+                          <option value="foreman">🔨 Прораб</option>
                           <option value="manager">🧑‍💼 Руководитель</option>
                           <option value="admin">👑 Администратор</option>
                           <option value="viewer">👁 Наблюдатель</option>
@@ -1748,7 +1750,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
     const curCat = (localCatalog?.catRenames||{})[origCatKey] || origCatKey; const curSub = (localCatalog?.subRenames||{})[key] || origSubKey;
     await saveCatalog({ ...(localCatalog||{}), hiddenSubs:hs, custom:((localCatalog||{}).custom||[]).filter(w => !(w.cat===curCat && w.sub===curSub)) }); Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
-  const roleLabel = r => r==="admin" ? "👑 Администратор" : r==="viewer" ? "👁 Наблюдатель" : r==="manager" ? "🧑‍💼 Руководитель" : "👤 Замерщик";
+  const roleLabel = r => r==="admin"?"👑 Администратор":r==="viewer"?"👁 Наблюдатель":r==="manager"?"🧑‍💼 Руководитель":r==="foreman"?"🔨 Прораб":"👤 Замерщик";
   const roleColor = r => r==="admin" ? "#ffffff" : r==="viewer" ? "#94a3b8" : "#94a3b8";
   const PRESENCE_ONLINE = 2 * 60 * 1000;
   const formatLastSeen = (ts) => {
@@ -4438,14 +4440,15 @@ function MainApp({ currentUser, setCurrentUser }) {
       const profit = sum-cost;
       const inwork = mos.filter(o=>o.status==="approval").length;
       const done = mos.filter(o=>o.status==="signed").length;
-      const conv = (done+inwork)>0 ? Math.round(done/(done+inwork)*100) : 0;
+      const activeLeads = mos.filter(o=>o.status!=="archive").length;
+      const conv = activeLeads>0 ? Math.round(done/activeLeads*100) : 0;
       return {name:m, count:mos.length, sum, profit, margin: sum>0?Math.round(profit/sum*100):0, sent:inwork, agreed:done, conv};
     }).sort((a,b)=>b.profit-a.profit);
 
     // ── E. Динамика по месяцам (по объектам и их сумме) ──
     const monthMap = {};
     for(const o of withSumEst){
-      const d = new Date(o.updatedAt||o.createdAt||0);
+      const d = new Date(o.createdAt||o.updatedAt||0);
       const key = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
       if(!monthMap[key]) monthMap[key]={key, revenue:0, cost:0};
       monthMap[key].revenue += objVal(o);
@@ -5948,23 +5951,34 @@ function MainApp({ currentUser, setCurrentUser }) {
   // ─────────────────────────────────────────────────────────────────────────
   // РЕНДЕР
   // ─────────────────────────────────────────────────────────────────────────
-  const NAV_ITEMS = useMemo(() => [
-    ...(currentUser.role !== "viewer" ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
-    { id:"objects",   icon:"📦", label:"Объекты" },
-    ...(currentUser.role !== "viewer" ? [{ id:"production", icon:"🏗", label:"Производство" }] : []),
-    { id:"contracts", icon:"📄", label:"Прочие договора", short:"Договора" },
-    ...(currentUser.role !== "viewer" ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
-    ...((currentUser.role==="admin"||currentUser.role==="manager") ? [{ id:"finance", icon:"💰", label:"Финансы" }] : []),
-    ...(currentUser.role==="admin" ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
-  ], [currentUser.role]);
+  const NAV_ITEMS = useMemo(() => {
+    const r = currentUser.role;
+    const isAdmin = r === "admin", isMgr = r === "manager", isForeman = r === "foreman", isUser = r === "user", isViewer = r === "viewer";
+    return [
+      ...(isAdmin||isMgr||isUser ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
+      { id:"objects", icon:"📦", label:"Объекты" },
+      ...(isAdmin||isMgr||isForeman ? [{ id:"production", icon:"🏗", label:"Производство" }] : []),
+      ...(!isViewer&&!isForeman ? [{ id:"contracts", icon:"📄", label:"Прочие договора", short:"Договора" }] : []),
+      ...(isAdmin||isMgr ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
+      ...(isAdmin||isMgr ? [{ id:"finance", icon:"💰", label:"Финансы" }] : []),
+      ...(isAdmin ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
+    ];
+  }, [currentUser.role]);
 
-  // Наблюдатель не имеет доступа к дашборду/аналитике/админке — показываем объекты.
-  // Вычисляем эффективный экран без setState во время рендера (иначе нарушаются правила хуков).
-  const effScreen = (currentUser.role === "viewer" && (screen === "dashboard" || screen === "analytics" || screen === "admin" || screen === "deals" || screen === "finance" || screen === "production")) ? "objects"
-    : (currentUser.role !== "admin" && currentUser.role !== "manager" && screen === "finance") ? "objects"
-    : screen;
+  // Роли доступа
+  const _r = currentUser.role;
+  const _isAdmin = _r === "admin", _isMgr = _r === "manager", _isForeman = _r === "foreman", _isUser = _r === "user", _isViewer = _r === "viewer";
+  // Эффективный экран с учётом ограничений роли
+  const effScreen = (() => {
+    if (_isViewer && (screen==="dashboard"||screen==="analytics"||screen==="admin"||screen==="deals"||screen==="finance"||screen==="production")) return "objects";
+    if (_isForeman && (screen==="analytics"||screen==="finance"||screen==="contracts"||screen==="dashboard"||screen==="admin")) return "production";
+    if (_isUser && (screen==="analytics"||screen==="finance"||screen==="production"||screen==="admin")) return "objects";
+    if (!_isAdmin && !_isMgr && screen==="finance") return "objects";
+    if (!_isAdmin && screen==="admin") return "objects";
+    return screen;
+  })();
   // Руководитель видит финансы только для чтения
-  const finReadonly = currentUser.role === "manager";
+  const finReadonly = _isMgr;
 
   return (
     <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#f8fafc",minHeight:"100vh",color:"#0f172a",display:"flex",flexDirection:"column"}}>
@@ -6236,6 +6250,27 @@ function MainApp({ currentUser, setCurrentUser }) {
         const recentObjects = [...liveObjects].sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0)).slice(0,6);
         const recentContracts = [...contracts].filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,5);
         const monthName = new Date().toLocaleDateString("ru-RU",{month:"long"});
+        // ── Finance KPIs (только для admin/manager) ──
+        const _finKpi = (_isAdmin||_isMgr) ? (() => {
+          const active = (finProjects||[]).filter(p=>(p.rawStatus||p.status)!=="отменен");
+          const txMap = {}; for(const t of (financeTx||[])){if(t.deletedAt||t.included===false) continue; const cn=normCN(t.contractNo); if(!txMap[cn])txMap[cn]={inc:0,exp:0}; if(t.type==="income")txMap[cn].inc+=(Number(t.amount)||0); else txMap[cn].exp+=(Number(t.amount)||0); }
+          const totalInc = Object.values(txMap).reduce((s,v)=>s+v.inc,0);
+          const totalDebt = active.reduce((s,p)=>{const inc=txMap[normCN(p.contractNo)]?.inc||0; return s+Math.max(0,(Number(p.budget)||0)-inc);},0);
+          const totalExp = Object.values(txMap).reduce((s,v)=>s+v.exp,0);
+          const margin = totalInc>0?Math.round((totalInc-totalExp)/totalInc*100):null;
+          const incMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&_inMonth(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
+          return {count:active.length,totalInc,totalDebt,margin,incMonth};
+        })() : null;
+        // ── Production KPIs (только для admin/manager) ──
+        const _prodKpi = (_isAdmin||_isMgr) ? (() => {
+          const prods = productions||[];
+          const today = _dayStart(new Date());
+          const inWork = prods.filter(p=>p.prodStatus==="active").length;
+          const overdue = prods.filter(p=>p.prodStatus==="active"&&p.planEndDate&&_dayStart(p.planEndDate)<today&&!p.factEndDate).length;
+          const doneMonth = prods.filter(p=>p.factEndDate&&_inMonth(new Date(p.factEndDate).getTime())).length;
+          const defects = prods.reduce((s,p)=>s+((p.defects||[]).filter(d=>!d.done).length),0);
+          return {inWork,overdue,doneMonth,defects};
+        })() : null;
         return (
         <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40}}>
 
@@ -6268,7 +6303,7 @@ function MainApp({ currentUser, setCurrentUser }) {
             {/* Мини-метрики в баннере */}
             <div style={{display:"flex",gap:24,marginTop:20,flexWrap:"wrap"}}>
               {[
-                {label:"Объектов всего",  val:liveObjects.length},
+                {label:"Активных объектов",  val:liveObjects.filter(o=>o.status!=="archive"&&o.status!=="refuse").length},
                 {label:"В согласовании", val:approvalObjs.length},
                 {label:"Договоров",       val:signedObjs.length},
               ].map((m,i)=>(
@@ -6288,7 +6323,7 @@ function MainApp({ currentUser, setCurrentUser }) {
               {label:"Прибыль за "+monthName, value:fmt(Math.round(profitMonth))+" ₸", sub:"по подписанным", icon:"📈", accent:profitMonth>0?"#059669":"#ef4444"},
               {label:"Маржа за "+monthName, value:marginMonth+"%", sub:"рентабельность", icon:"🎯", accent:marginMonth>=35?"#059669":marginMonth>=20?"#d97706":"#ef4444"},
               {label:"Пайплайн (согласование)", value:fmt(Math.round(pipelineSum))+" ₸", sub:approvalObjs.length+" объектов", icon:"🔄", accent:"#d97706"},
-              {label:"Договоров подписано", value:signedObjs.length, sub:"из "+liveObjects.length+" всего", icon:"✅", accent:"#059669"},
+              {label:"Договоров подписано", value:signedObjs.length, sub:"из "+liveObjects.filter(o=>o.status!=="archive"&&o.status!=="refuse").length+" активных", icon:"✅", accent:"#059669"},
             ].map((s,i)=>(
               <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden"}}
                 onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
@@ -6303,6 +6338,62 @@ function MainApp({ currentUser, setCurrentUser }) {
               </div>
             ))}
           </div>
+
+          {/* ── Finance KPIs (admin/manager) ── */}
+          {_finKpi&&(
+            <div style={{marginBottom:24}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#64748b",marginBottom:10,textTransform:"uppercase",letterSpacing:".05em"}}>💰 Финансы по проектам</div>
+              <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14}}>
+                {[
+                  {label:"Активных проектов", value:_finKpi.count, sub:"не отменены", icon:"📁", accent:"#2563eb"},
+                  {label:"Выручка за "+monthName, value:fmt(_finKpi.incMonth)+" ₸", sub:"оплачено факт", icon:"💵", accent:"#059669"},
+                  {label:"Дебиторка", value:fmt(_finKpi.totalDebt)+" ₸", sub:"долги клиентов", icon:"⏳", accent:_finKpi.totalDebt>0?"#dc2626":"#059669"},
+                  {label:"Маржа факт", value:_finKpi.margin!=null?_finKpi.margin+"%":"—", sub:"по всем проектам", icon:"📊", accent:_finKpi.margin!=null&&_finKpi.margin>=30?"#059669":_finKpi.margin!=null&&_finKpi.margin>=0?"#d97706":"#dc2626"},
+                ].map((s,i)=>(
+                  <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden",cursor:"pointer"}}
+                    onClick={()=>setScreen("finance")}
+                    onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
+                    onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)";}}>
+                    <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:s.accent,opacity:.85}}/>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                      <div style={{fontSize:12,color:"#64748b",fontWeight:600,lineHeight:1.3,flex:1,paddingRight:8}}>{s.label}</div>
+                      <span style={{width:38,height:38,borderRadius:11,background:s.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{s.icon}</span>
+                    </div>
+                    <div className="kpi-val" style={{fontSize:26,fontWeight:800,color:"#0f172a",lineHeight:1,marginBottom:6,letterSpacing:-.5}}>{s.value}</div>
+                    <div style={{fontSize:11.5,color:"#94a3b8",fontWeight:500}}>{s.sub}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Production KPIs (admin/manager) ── */}
+          {_prodKpi&&(
+            <div style={{marginBottom:24}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#64748b",marginBottom:10,textTransform:"uppercase",letterSpacing:".05em"}}>🏗 Производство</div>
+              <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14}}>
+                {[
+                  {label:"В работе", value:_prodKpi.inWork, sub:"активных производств", icon:"🔨", accent:"#2563eb"},
+                  {label:"Просрочено", value:_prodKpi.overdue, sub:"плановый срок истёк", icon:"🚨", accent:_prodKpi.overdue>0?"#dc2626":"#059669"},
+                  {label:"Сдано за "+monthName, value:_prodKpi.doneMonth, sub:"фактически завершено", icon:"✅", accent:"#059669"},
+                  {label:"Открытых замечаний", value:_prodKpi.defects, sub:"незакрытые дефекты", icon:"⚠️", accent:_prodKpi.defects>0?"#d97706":"#059669"},
+                ].map((s,i)=>(
+                  <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden",cursor:"pointer"}}
+                    onClick={()=>setScreen("production")}
+                    onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
+                    onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)";}}>
+                    <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:s.accent,opacity:.85}}/>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                      <div style={{fontSize:12,color:"#64748b",fontWeight:600,lineHeight:1.3,flex:1,paddingRight:8}}>{s.label}</div>
+                      <span style={{width:38,height:38,borderRadius:11,background:s.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{s.icon}</span>
+                    </div>
+                    <div className="kpi-val" style={{fontSize:26,fontWeight:800,color:"#0f172a",lineHeight:1,marginBottom:6,letterSpacing:-.5}}>{s.value}</div>
+                    <div style={{fontSize:11.5,color:"#94a3b8",fontWeight:500}}>{s.sub}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Требуют внимания */}
           {staleObjs.length>0&&(
