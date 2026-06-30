@@ -3750,7 +3750,7 @@ function MainApp({ currentUser, setCurrentUser }) {
       <td class="r">${money(P(l))}</td>
       <td class="r">${money(P(l) * Q(l))}</td>
     </tr>`).join("");
-    const stampImg = m.withStamp ? `<img src="${window.location.origin}/stamp.jpg" alt="Печать" style="position:absolute;left:40px;bottom:-40px;width:200px;height:200px;object-fit:contain;opacity:.85;mix-blend-mode:multiply;pointer-events:none"/>` : "";
+    const stampImg = m.withStamp ? `<img src="${window.location.origin}/stamp.jpg" alt="Печать" style="position:absolute;left:40px;bottom:-140px;width:200px;height:200px;object-fit:contain;opacity:.85;mix-blend-mode:multiply;pointer-events:none"/>` : "";
     return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>АВР №${esc(m.actNo)}</title>
 <style>
@@ -3791,7 +3791,7 @@ tfoot td{font-weight:700}
 </table>
 <div class="total-words">Всего выполнено работ (оказано услуг) на сумму: <b>${money(total)} ₸</b><br/>(${tengeInWords(total)})</div>
 <div class="muted">Сумма указана без НДС. Работы выполнены в полном объёме, заказчик претензий по объёму, качеству и срокам не имеет.</div>
-<div class="sign" style="${m.withStamp ? "margin-bottom:120px" : ""}">
+<div class="sign" style="${m.withStamp ? "margin-bottom:170px" : ""}">
   <div class="col" style="position:relative"><div><b>Сдал (Исполнитель)</b></div><div class="line"></div><div class="muted">TitovStroy · подпись, дата</div>${stampImg}</div>
   <div class="col"><div><b>Принял (Заказчик)</b></div><div class="line"></div><div class="muted">${esc(m.clientName) || "подпись"} · подпись, дата</div></div>
 </div>
@@ -6131,7 +6131,7 @@ tfoot td{font-weight:700}
       ...(isAdmin||isMgr||isUser ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
       { id:"objects", icon:"📦", label:"Объекты" },
       ...(isAdmin||isMgr||isForeman ? [{ id:"production", icon:"🏗", label:"Производство" }] : []),
-      ...(!isViewer&&!isForeman ? [{ id:"contracts", icon:"📄", label:"Прочие договора", short:"Договора" }] : []),
+      ...(!isViewer&&!isForeman ? [{ id:"contracts", icon:"📄", label:"Прочие документы", short:"Документы" }] : []),
       ...(isAdmin||isMgr ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
       ...(isAdmin||isMgr ? [{ id:"finance", icon:"💰", label:"Финансы" }] : []),
       ...(isAdmin ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
@@ -10429,8 +10429,8 @@ tfoot td{font-weight:700}
               <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:22,lineHeight:1,padding:"0 4px"}}>←</button>
               <div style={{width:40,height:40,borderRadius:11,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,boxShadow:"0 3px 12px rgba(37,99,235,.5)"}}>📄</div>
               <div style={{minWidth:0}}>
-                <h1 style={{margin:0,fontSize:21,fontWeight:900,color:"#fff",lineHeight:1.1}}>Прочие договора</h1>
-                <div style={{fontSize:12,color:"rgba(255,255,255,.7)",marginTop:3}}>Договора вне объектов · клиенты и контрагенты</div>
+                <h1 style={{margin:0,fontSize:21,fontWeight:900,color:"#fff",lineHeight:1.1}}>Прочие документы</h1>
+                <div style={{fontSize:12,color:"rgba(255,255,255,.7)",marginTop:3}}>Документы вне объектов · клиенты и контрагенты</div>
               </div>
               <div style={{flex:1}}/>
               {["list","clients","contragents"].includes(contractTab) && currentUser.role === "admin" && (
