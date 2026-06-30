@@ -3750,7 +3750,7 @@ function MainApp({ currentUser, setCurrentUser }) {
       <td class="r">${money(P(l))}</td>
       <td class="r">${money(P(l) * Q(l))}</td>
     </tr>`).join("");
-    const stampImg = m.withStamp ? `<img src="${window.location.origin}/stamp.jpg" alt="Печать" style="position:absolute;left:60px;bottom:-18px;width:120px;height:120px;object-fit:contain;opacity:.85;mix-blend-mode:multiply;pointer-events:none"/>` : "";
+    const stampImg = m.withStamp ? `<img src="${window.location.origin}/stamp.jpg" alt="Печать" style="position:absolute;left:40px;bottom:-40px;width:200px;height:200px;object-fit:contain;opacity:.85;mix-blend-mode:multiply;pointer-events:none"/>` : "";
     return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>АВР №${esc(m.actNo)}</title>
 <style>
@@ -3791,7 +3791,7 @@ tfoot td{font-weight:700}
 </table>
 <div class="total-words">Всего выполнено работ (оказано услуг) на сумму: <b>${money(total)} ₸</b><br/>(${tengeInWords(total)})</div>
 <div class="muted">Сумма указана без НДС. Работы выполнены в полном объёме, заказчик претензий по объёму, качеству и срокам не имеет.</div>
-<div class="sign" style="${m.withStamp ? "margin-bottom:60px" : ""}">
+<div class="sign" style="${m.withStamp ? "margin-bottom:120px" : ""}">
   <div class="col" style="position:relative"><div><b>Сдал (Исполнитель)</b></div><div class="line"></div><div class="muted">TitovStroy · подпись, дата</div>${stampImg}</div>
   <div class="col"><div><b>Принял (Заказчик)</b></div><div class="line"></div><div class="muted">${esc(m.clientName) || "подпись"} · подпись, дата</div></div>
 </div>
