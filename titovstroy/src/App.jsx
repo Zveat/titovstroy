@@ -2426,11 +2426,13 @@ const DOC_TYPES = [
 ];
 const TYPE_LABELS = { repair_fiz:"Договор ремонта", annex:"Приложение", design:"Дизайн-проект", design_add:"Доп. соглашение дизайн", reservation:"Бронь", podryad:"Договор подряда", podryad_annex:"Приложение к подряду" };
 
-function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onGDoc, onAddClientFromEstimate, onUpdateClient, onCreateClient, currentUserRole, fmt }) {
+function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onGDoc, onAddClientFromEstimate, onUpdateClient, onCreateClient, workers=[], onCreateWorker, importObjects=[], getObjectWorks, currentUserRole, fmt }) {
   const [withStamp, setWithStamp] = useState(true);
   const [showClientForm, setShowClientForm] = useState(false);
   const [showNewClientForm, setShowNewClientForm] = useState(false);
   const [newClientData, setNewClientData] = useState({ name:"", phone:"", type:"физ" });
+  const [showNewWorker, setShowNewWorker] = useState(false);
+  const [newWorkerData, setNewWorkerData] = useState({ name:"", iin:"", doc:"", phone:"", address:"" });
   const type = contract.type || "repair_fiz";
   const total = (contract.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
   const upd = (patch) => onUpdate(prev=>({...prev,...patch}));
@@ -2600,10 +2602,52 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
         </div>
       </>)}
 
+      {/* Подрядчик (рабочий) — из отдельной базы «Подрядчики» — для договоров подряда */}
+      {isPod && (
+        <div>
+          <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",marginBottom:8}}>ПОДРЯДЧИК (рабочий)</div>
+          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+            <select className="fi" style={{flex:1}} value={contract.workerId||""} onChange={e=>{upd({workerId:e.target.value});setShowNewWorker(false);}}>
+              <option value="">— Выбрать подрядчика —</option>
+              {workers.map(w=>(<option key={w.id} value={w.id}>{w.name}</option>))}
+            </select>
+            <button onClick={()=>setShowNewWorker(s=>!s)} style={{background:showNewWorker?"#eff6ff":"#f3f4f6",color:"#059669",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ Новый</button>
+          </div>
+          {showNewWorker && (
+            <div style={{marginTop:8,padding:"12px 14px",background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,display:"flex",flexDirection:"column",gap:8}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#059669"}}>Новый подрядчик</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                <input className="fi" value={newWorkerData.name} onChange={e=>setNewWorkerData(p=>({...p,name:e.target.value}))} placeholder="ФИО *"/>
+                <input className="fi" value={newWorkerData.iin} onChange={e=>setNewWorkerData(p=>({...p,iin:e.target.value}))} placeholder="ИИН"/>
+                <input className="fi" value={newWorkerData.doc} onChange={e=>setNewWorkerData(p=>({...p,doc:e.target.value}))} placeholder="№ документа"/>
+                <input className="fi" value={newWorkerData.phone} onChange={e=>setNewWorkerData(p=>({...p,phone:e.target.value}))} placeholder="Телефон"/>
+                <input className="fi" style={{gridColumn:"1 / -1"}} value={newWorkerData.address} onChange={e=>setNewWorkerData(p=>({...p,address:e.target.value}))} placeholder="Адрес"/>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={async()=>{ if(!newWorkerData.name.trim())return; const id=await onCreateWorker({...newWorkerData,name:newWorkerData.name.trim()}); upd({workerId:id}); setShowNewWorker(false); setNewWorkerData({name:"",iin:"",doc:"",phone:"",address:""}); }}
+                  style={{background:"#059669",color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Создать и выбрать</button>
+                <button onClick={()=>{setShowNewWorker(false);setNewWorkerData({name:"",iin:"",doc:"",phone:"",address:""});}}
+                  style={{background:"#f3f4f6",color:"#64748b",border:"none",borderRadius:8,padding:"7px 14px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Отмена</button>
+              </div>
+            </div>
+          )}
+          {/* Импорт работ из сметы объекта */}
+          {getObjectWorks && (
+            <div style={{marginTop:10}}>
+              <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Подтянуть работы из сметы объекта (суммы потом редактируются)</div>
+              <select className="fi" value={contract.objectId||""} onChange={e=>{ const oid=e.target.value; if(!oid){upd({objectId:""});return;} const ws=getObjectWorks(oid); const o=importObjects.find(x=>x.id===oid); upd({objectId:oid, works:ws.length?ws:(contract.works||[]), objectAddress:o?.address||contract.objectAddress||""}); }}>
+                <option value="">— объект —</option>
+                {importObjects.map(o=>(<option key={o.id} value={o.id}>{o.label}</option>))}
+              </select>
+            </div>
+          )}
+        </div>
+      )}
       {/* Клиент */}
+      {!isPod && (
       <div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-          <div style={{fontSize:12,fontWeight:700,color:"#94a3b8"}}>{isPod?"ПОДРЯДЧИК (рабочий)":"ЗАКАЗЧИК"}</div>
+          <div style={{fontSize:12,fontWeight:700,color:"#94a3b8"}}>ЗАКАЗЧИК</div>
           {contract.estClient && !contract.clientId && (
             <div style={{fontSize:11,color:"#d97706"}}>⚠ Из сметы: {contract.estClient}</div>
           )}
@@ -2702,6 +2746,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
           );
         })()}
       </div>
+      )}
       {/* Подрядчик/Заказчик (наше ТОО) */}
       <div>
         <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",marginBottom:8}}>{isPod?"ЗАКАЗЧИК (наше ТОО)":"ПОДРЯДЧИК"}</div>
@@ -5617,7 +5662,8 @@ ${podBlock}`;
   });
   const generateContractPdf = (c, client, ca, withStamp=true) => {
     if (c.type==="podryad" || c.type==="podryad_annex") {
-      openOrPrintHtml(buildPodryadHtml(podryadContractToModel(c, client, withStamp)), 20000);
+      const worker = workersRef.current.find(w=>w.id===c.workerId) || null;
+      openOrPrintHtml(buildPodryadHtml(podryadContractToModel(c, worker, withStamp)), 20000);
       return;
     }
     const stampFile = ca?.stampFile || "stamp.jpg";
@@ -6174,7 +6220,7 @@ ${podBlock}`;
       ? ("Приложение №"+(c.appendix||2)+" Перечень работ к Договору №"+(c.mainNumber||num)+(dateStrG?" от "+dateStrG:"")).replace(/[<>:"/\\|?*]/g,"_")
       : (docLabelG+" №"+num+" "+clientName+(dateStrG?" от "+dateStrG:"")).replace(/[<>:"/\\|?*]/g,"_");
     const html = (c.type==="podryad"||c.type==="podryad_annex")
-      ? buildPodryadHtml(podryadContractToModel(c, client, false))
+      ? buildPodryadHtml(podryadContractToModel(c, workersRef.current.find(w=>w.id===c.workerId)||null, false))
       : buildContractHtml(c, client, ca, true, "");
 
     // Загружаем Google Identity Services если ещё нет
@@ -10905,6 +10951,16 @@ ${podBlock}`;
                 onCreateClient={async (newClient)=>{
                   await saveContractClients([...contractClients, newClient]);
                 }}
+                workers={workers}
+                onCreateWorker={async (w)=>{
+                  const rec = { id:w.id||genId(), ...w };
+                  const cur = workersRef.current;
+                  const next = cur.some(x=>x.id===rec.id) ? cur.map(x=>x.id===rec.id?rec:x) : [rec,...cur];
+                  await saveWorkers(next,{replace:false});
+                  return rec.id;
+                }}
+                importObjects={objects.filter(o=>!o.deletedAt).map(o=>({id:o.id,label:o.clientName||o.address||o.id,address:o.address||""}))}
+                getObjectWorks={(objId)=>{ const ests=estimates.filter(e=>e.objectId===objId); const main=ests.find(e=>!e.parentId||e.parentId===e.id)||ests[0]; return main?estimateToWorks(main):[]; }}
                 currentUserRole={currentUser.role}
                 fmt={fmt}
               />
