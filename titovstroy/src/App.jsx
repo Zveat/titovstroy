@@ -3661,6 +3661,38 @@ function MainApp({ currentUser, setCurrentUser }) {
     return (finProjects || []).filter(p => (p.rawStatus || p.status) !== "отменен" && !matchFpToObject(p));
   }, [finProjects, matchFpToObject]);
 
+  // ── ЕДИНЫЙ ИСТОЧНИК ПРОИЗВОДСТВА: одна запись на КАЖДЫЙ финпроект (Финансы → Проекты) ──
+  // Производство = все финпроекты (включая без сметы/импортированные, выполненные и отменённые).
+  // К объекту привязываемся для сметы/этапов; если объекта нет — карточка живёт по ключу "fp:<id>".
+  const FIN_TO_PROD = { "новый":"new","активен":"active","в работе":"active","приостановлен":"paused","выполнен":"done","отменен":"cancel" };
+  const prodEntries = useMemo(() => {
+    const txByCN = {};
+    for (const t of (financeTx || [])) { if (t.deletedAt || t.included === false) continue; const cn = normCN(t.contractNo); (txByCN[cn] || (txByCN[cn] = [])).push(t); }
+    const entries = []; const usedObj = new Set();
+    for (const fp of (finProjects || [])) {
+      const o = matchFpToObject(fp);
+      const objectId = o ? o.id : null;
+      if (objectId) { if (usedObj.has(objectId)) continue; usedObj.add(objectId); }
+      const cn = normCN(fp.contractNo);
+      const tx = txByCN[cn] || [];
+      const income = tx.filter(t => t.type === "income").reduce((s, t) => s + (Number(t.amount) || 0), 0);
+      const expense = tx.filter(t => t.type === "expense").reduce((s, t) => s + (Number(t.amount) || 0), 0);
+      const budget = Number(fp.budget) || 0;
+      const finStatus = (fp.rawStatus || fp.status || "").toLowerCase();
+      entries.push({
+        key: objectId || ("fp:" + fp.id), objectId, fpId: fp.id,
+        name: (o?.clientName) || fp.description || fp.client || "Проект",
+        address: (o?.address) || "",
+        contractNo: fp.contractNo || "",
+        finStatus, prodStatusDefault: FIN_TO_PROD[finStatus] || "new",
+        closedAt: fp.closedAt || "",
+        budget, income, expense, debt: Math.max(0, budget - income),
+        margin: income > 0 ? Math.round((income - expense) / income * 100) : null,
+      });
+    }
+    return entries;
+  }, [finProjects, financeTx, matchFpToObject]);
+
   // Мемоизированный фильтрованный/сортированный список смет
   const filteredEstimates = useMemo(() => {
     const q = debouncedListSearch.toLowerCase().trim();
@@ -6756,28 +6788,29 @@ ${reqBlock}`;
         const recentContracts = [...contracts].filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,5);
         const monthName = new Date().toLocaleDateString("ru-RU",{month:"long"});
         // ── Finance KPIs (только для admin/manager) ──
+        // «Активные» = НЕ отменён и НЕ выполнен (т.е. в работе + новые). Завершённые в активные не входят.
+        const _isActiveFin = p => { const s=(p.rawStatus||p.status||"").toLowerCase(); return s!=="отменен"&&s!=="выполнен"; };
         const _finKpi = (_isAdmin||_isMgr) ? (() => {
-          const active = (finProjects||[]).filter(p=>(p.rawStatus||p.status)!=="отменен");
+          const active = (finProjects||[]).filter(_isActiveFin);
           const txMap = {}; for(const t of (financeTx||[])){if(t.deletedAt||t.included===false) continue; const cn=normCN(t.contractNo); if(!txMap[cn])txMap[cn]={inc:0,exp:0}; if(t.type==="income")txMap[cn].inc+=(Number(t.amount)||0); else txMap[cn].exp+=(Number(t.amount)||0); }
-          // ВСЁ считаем по АКТИВНЫМ проектам — иначе числа не бьются (расходы завершённых проектов искажают маржу)
           const totalInc = active.reduce((s,p)=>s+(txMap[normCN(p.contractNo)]?.inc||0),0);
           const totalExp = active.reduce((s,p)=>s+(txMap[normCN(p.contractNo)]?.exp||0),0);
           const totalBudget = active.reduce((s,p)=>s+(Number(p.budget)||0),0);
           const totalDebt = active.reduce((s,p)=>{const inc=txMap[normCN(p.contractNo)]?.inc||0; return s+Math.max(0,(Number(p.budget)||0)-inc);},0);
-          // маржа по бюджету активных: (бюджет − расходы по активным) / бюджет
           const margin = totalBudget>0?Math.round((totalBudget-totalExp)/totalBudget*100):null;
           const incMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&_inMonth(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
           return {count:active.length,totalInc,totalDebt,totalBudget,margin,incMonth};
         })() : null;
-        // ── Production KPIs (только для admin/manager) ──
+        // ── Production KPIs (из единого источника prodEntries: одна запись на финпроект) ──
         const _prodKpi = (_isAdmin||_isMgr) ? (() => {
           const _ds = d => { const x=new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
-          const prods = productions||[];
           const today = _ds(new Date());
-          const inWork = prods.filter(p=>p.prodStatus==="active").length;
-          const overdue = prods.filter(p=>p.prodStatus==="active"&&p.planEndDate&&_ds(p.planEndDate)<today&&!p.factEndDate).length;
-          const doneMonth = prods.filter(p=>p.factEndDate&&_inMonth(new Date(p.factEndDate).getTime())).length;
-          const defects = prods.reduce((s,p)=>s+((p.defects||[]).filter(d=>!d.done).length),0);
+          const prodByKey = {}; for(const p of (productions||[])) prodByKey[p.objectId]=p;
+          const statusOf = e => (prodByKey[e.key]?.prodStatus) || e.prodStatusDefault;
+          const inWork = prodEntries.filter(e=>statusOf(e)==="active").length;
+          const overdue = prodEntries.filter(e=>{const p=prodByKey[e.key]; return statusOf(e)==="active"&&p?.planEndDate&&_ds(p.planEndDate)<today&&!p?.factEndDate;}).length;
+          const doneMonth = prodEntries.filter(e=>{ if(statusOf(e)!=="done") return false; const p=prodByKey[e.key]; const dt=p?.factEndDate||e.closedAt; return dt&&_inMonth(new Date(dt).getTime()); }).length;
+          const defects = prodEntries.reduce((s,e)=>s+((prodByKey[e.key]?.defects||[]).filter(d=>!d.done).length),0);
           return {inWork,overdue,doneMonth,defects};
         })() : null;
         return (
@@ -6854,7 +6887,7 @@ ${reqBlock}`;
               <div style={{fontSize:12,fontWeight:700,color:"#64748b",marginBottom:10,textTransform:"uppercase",letterSpacing:".05em"}}>💰 Финансы по проектам</div>
               <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14}}>
                 {[
-                  {label:"Активных проектов", value:_finKpi.count, sub:"не отменены", icon:"📁", accent:"#2563eb"},
+                  {label:"Активных проектов", value:_finKpi.count, sub:"в работе + новые", icon:"📁", accent:"#2563eb"},
                   {label:"Выручка за "+monthName, value:fmt(_finKpi.incMonth)+" ₸", sub:"оплачено факт", icon:"💵", accent:"#059669"},
                   {label:"Дебиторка", value:fmt(_finKpi.totalDebt)+" ₸", sub:"долги клиентов", icon:"⏳", accent:_finKpi.totalDebt>0?"#dc2626":"#059669"},
                   {label:"Маржа план", value:_finKpi.margin!=null?_finKpi.margin+"%":"—", sub:"бюджет минус расходы", icon:"📊", accent:_finKpi.margin!=null&&_finKpi.margin>=30?"#059669":_finKpi.margin!=null&&_finKpi.margin>=0?"#d97706":"#dc2626"},
@@ -8234,7 +8267,8 @@ ${reqBlock}`;
               const _norm = s => String(s||"").replace(/[№#\s]/g,"").toLowerCase();
               const _inM = ts => { const d=new Date(ts||0); const n=new Date(); return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear(); };
               const _ds = d => { const x=new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
-              const activeFp = (finProjects||[]).filter(p=>(p.rawStatus||p.status)!=="отменен");
+              // Активные = НЕ отменён и НЕ выполнен (в работе + новые)
+              const activeFp = (finProjects||[]).filter(p=>{const s=(p.rawStatus||p.status||"").toLowerCase(); return s!=="отменен"&&s!=="выполнен";});
               const txMap = {}; for(const t of (financeTx||[])){ if(t.deletedAt||t.included===false) continue; const cn=_norm(t.contractNo); if(!txMap[cn])txMap[cn]={inc:0,exp:0}; if(t.type==="income")txMap[cn].inc+=(Number(t.amount)||0); else txMap[cn].exp+=(Number(t.amount)||0); }
               // ВСЁ по АКТИВНЫМ проектам — числа сходятся: Бюджет = Получено + Дебиторка
               const totalBudget = activeFp.reduce((s,p)=>s+(Number(p.budget)||0),0);
@@ -8245,13 +8279,15 @@ ${reqBlock}`;
               const planMargin = totalBudget>0?Math.round((totalBudget-totalExp)/totalBudget*100):null;
               const incMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&_inM(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
               const expMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="expense"&&_inM(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
-              const prods = productions||[];
               const today = _ds(new Date());
-              const prodActive = prods.filter(p=>p.prodStatus==="active").length;
-              const prodOverdue = prods.filter(p=>p.prodStatus==="active"&&p.planEndDate&&_ds(p.planEndDate)<today&&!p.factEndDate).length;
-              const prodDoneMonth = prods.filter(p=>p.factEndDate&&_inM(new Date(p.factEndDate).getTime())).length;
-              const prodDefects = prods.reduce((s,p)=>s+((p.defects||[]).filter(d=>!d.done).length),0);
-              if(activeFp.length===0 && prods.length===0) return null;
+              // Производство — из единого источника prodEntries (одна запись на финпроект)
+              const _pbk = {}; for(const p of (productions||[])) _pbk[p.objectId]=p;
+              const _stOf = e => (_pbk[e.key]?.prodStatus) || e.prodStatusDefault;
+              const prodActive = prodEntries.filter(e=>_stOf(e)==="active").length;
+              const prodOverdue = prodEntries.filter(e=>{const p=_pbk[e.key]; return _stOf(e)==="active"&&p?.planEndDate&&_ds(p.planEndDate)<today&&!p?.factEndDate;}).length;
+              const prodDoneMonth = prodEntries.filter(e=>{ if(_stOf(e)!=="done") return false; const p=_pbk[e.key]; const dt=p?.factEndDate||e.closedAt; return dt&&_inM(new Date(dt).getTime()); }).length;
+              const prodDefects = prodEntries.reduce((s,e)=>s+((_pbk[e.key]?.defects||[]).filter(d=>!d.done).length),0);
+              if(activeFp.length===0 && prodEntries.length===0) return null;
               const finCards = [
                 ["Сумма контрактов", fmt(Math.round(totalBudget))+" ₸", activeFp.length+" активных проектов", "#2563eb"],
                 ["Получено", fmt(Math.round(totalInc))+" ₸", recvPct+"% от контрактов", "#059669"],
@@ -11037,6 +11073,7 @@ ${reqBlock}`;
               финпроектом / карточкой. Ручной массовый импорт убран — он заменял все карточки и плодил дубли. */}
           <ProductionModule
             objects={productionObjects}
+            entries={prodEntries}
             allObjects={objects}
             unlinkedProjects={unlinkedFinProjects}
             estimates={estimates}
