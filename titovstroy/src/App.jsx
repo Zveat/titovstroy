@@ -2421,8 +2421,10 @@ const DOC_TYPES = [
   { value:"design",      label:"Соглашение о дизайн-проекте" },
   { value:"design_add",  label:"Доп. соглашение к дизайн-проекту" },
   { value:"reservation", label:"Соглашение о резервировании" },
+  { value:"podryad",     label:"Договор подряда (с рабочим)" },
+  { value:"podryad_annex", label:"Доп. приложение к договору подряда" },
 ];
-const TYPE_LABELS = { repair_fiz:"Договор ремонта", annex:"Приложение", design:"Дизайн-проект", design_add:"Доп. соглашение дизайн", reservation:"Бронь" };
+const TYPE_LABELS = { repair_fiz:"Договор ремонта", annex:"Приложение", design:"Дизайн-проект", design_add:"Доп. соглашение дизайн", reservation:"Бронь", podryad:"Договор подряда", podryad_annex:"Приложение к подряду" };
 
 function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onGDoc, onAddClientFromEstimate, onUpdateClient, onCreateClient, currentUserRole, fmt }) {
   const [withStamp, setWithStamp] = useState(true);
@@ -2438,8 +2440,11 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
   const isDesign   = type==="design";
   const isDesAdd   = type==="design_add";
   const isRes      = type==="reservation";
-  const hasWorks   = isRepair || isAnnex;
-  const hasMainRef = isAnnex || isDesAdd;
+  const isPodryad  = type==="podryad";
+  const isPodAnnex = type==="podryad_annex";
+  const isPod      = isPodryad || isPodAnnex;
+  const hasWorks   = isRepair || isAnnex || isPod;
+  const hasMainRef = isAnnex || isDesAdd || isPodAnnex;
 
   const fi = {background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,color:"#0f172a",fontSize:13,padding:"8px 10px",fontFamily:"inherit",width:"100%"};
 
@@ -2474,14 +2479,14 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       {/* Основные поля — номер и дата */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         <div>
-          <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>{isAnnex?"Приложение №":isDesAdd?"Номер доп. соглашения":"Номер договора/соглашения"}</div>
-          {isAnnex
+          <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>{(isAnnex||isPodAnnex)?"Приложение №":isDesAdd?"Номер доп. соглашения":"Номер договора/соглашения"}</div>
+          {(isAnnex||isPodAnnex)
             ? <input className="fi" type="number" min="2" value={contract.appendix||2} onChange={e=>upd({appendix:parseInt(e.target.value)||2})}/>
             : <input className="fi" value={contract.number||""} onChange={e=>upd({number:e.target.value})} placeholder="0001#202020"/>}
         </div>
         <div>
-          <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>{isAnnex?"Дата приложения":"Дата"}</div>
-          <input className="fi" type="date" value={isAnnex?(contract.annexDate||contract.date||""):(contract.date||"")} onChange={e=>upd(isAnnex?{annexDate:e.target.value}:{date:e.target.value})}/>
+          <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>{(isAnnex||isPodAnnex)?"Дата приложения":"Дата"}</div>
+          <input className="fi" type="date" value={(isAnnex||isPodAnnex)?(contract.annexDate||contract.date||""):(contract.date||"")} onChange={e=>upd((isAnnex||isPodAnnex)?{annexDate:e.target.value}:{date:e.target.value})}/>
         </div>
       </div>
 
@@ -2598,7 +2603,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
       {/* Клиент */}
       <div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-          <div style={{fontSize:12,fontWeight:700,color:"#94a3b8"}}>ЗАКАЗЧИК</div>
+          <div style={{fontSize:12,fontWeight:700,color:"#94a3b8"}}>{isPod?"ПОДРЯДЧИК (рабочий)":"ЗАКАЗЧИК"}</div>
           {contract.estClient && !contract.clientId && (
             <div style={{fontSize:11,color:"#d97706"}}>⚠ Из сметы: {contract.estClient}</div>
           )}
@@ -2697,14 +2702,31 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
           );
         })()}
       </div>
-      {/* Подрядчик */}
+      {/* Подрядчик/Заказчик (наше ТОО) */}
       <div>
-        <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",marginBottom:8}}>ПОДРЯДЧИК</div>
+        <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",marginBottom:8}}>{isPod?"ЗАКАЗЧИК (наше ТОО)":"ПОДРЯДЧИК"}</div>
         <select className="fi" value={contract.contragentId||""} onChange={e=>upd({contragentId:e.target.value})}>
           <option value="">— Выбрать ТОО —</option>
           {contragents.map(c=>(<option key={c.id} value={c.id}>{c.name}</option>))}
         </select>
       </div>
+      {/* Доп. поля договора подряда */}
+      {isPod && (
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div style={{gridColumn:"1 / -1"}}>
+            <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Адрес проведения работ</div>
+            <input className="fi" value={contract.objectAddress||""} onChange={e=>upd({objectAddress:e.target.value})} placeholder="г. Караганда, ..."/>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Аванс (₸, необязательно)</div>
+            <input className="fi" type="number" value={contract.avans||""} onChange={e=>upd({avans:e.target.value})} placeholder="0"/>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Срок (календарных дней)</div>
+            <input className="fi" type="number" value={contract.termDays||""} onChange={e=>upd({termDays:e.target.value})} placeholder="25"/>
+          </div>
+        </div>
+      )}
       {/* Работы — только для ремонта и приложений */}
       {hasWorks && <div>
         <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",marginBottom:8}}>РАБОТЫ ({(contract.works||[]).length})</div>
@@ -3839,9 +3861,8 @@ tfoot td{font-weight:700}
       lines: items.map(l => ({ name: l.name, unit: l.unit, price: Number(l.price) || 0, doneQty: Number(l.doneQty) || 0 })),
       total, createdAt: m.createdAt || Date.now(), updatedAt: Date.now(), createdBy: currentUser?.name || "",
     };
-    const cur = reportsRef.current;
-    const next = cur.some(r => r.id === id) ? cur.map(r => r.id === id ? record : r) : [record, ...cur];
-    await saveReports(next, { replace: true });
+    // merge (replace:false) — акт не перезатирает облако, акты с других устройств сохраняются
+    await saveReports([record], { replace: false });
     setAvrModal(null);
     openOrPrintHtml(buildAvrHtml({ ...m, lines: items }));
   };
@@ -5580,7 +5601,25 @@ ${podBlock}`;
     return html;
   };
 
+  // Адаптер: договор подряда (тип podryad/podryad_annex) из формы редактора → модель для buildPodryadHtml
+  const podryadContractToModel = (c, worker, withStamp=false) => ({
+    kind: c.type==="podryad" ? "podryad" : "annex",
+    number: c.number || "", annexNo: c.appendix || "",
+    mainNumber: c.mainNumber || "", mainDate: c.mainDate || "",
+    date: c.type==="podryad" ? (c.date||"") : (c.annexDate||c.date||""),
+    city: c.city || "Караганда",
+    worker: { name: worker?.name||"", iin: worker?.iin||"", doc: worker?.doc||"", docIssuer: worker?.docIssuer||"Выдан МВД РК", address: worker?.address||"", phone: worker?.phone||"", email: worker?.email||"" },
+    contragentId: c.contragentId || "",
+    objectAddress: c.objectAddress || "",
+    format: "table", showLinePrice: (c.works||[]).some(w=>Number(w.price)>0),
+    sections: [{ title:"", lumpSum:"", items:(c.works||[]).map(w=>({ name:w.name, qty:w.quantity, unit:w.unit, price:w.price })) }],
+    manualTotal:"", avans: c.avans||"", termDays: c.termDays||"", withStamp,
+  });
   const generateContractPdf = (c, client, ca, withStamp=true) => {
+    if (c.type==="podryad" || c.type==="podryad_annex") {
+      openOrPrintHtml(buildPodryadHtml(podryadContractToModel(c, client, withStamp)), 20000);
+      return;
+    }
     const stampFile = ca?.stampFile || "stamp.jpg";
     const stamp = withStamp ? (stampsBase64[stampFile] || stampBase64) : "";
     const html = buildContractHtml(c, client, ca, false, stamp);
@@ -6129,12 +6168,14 @@ ${podBlock}`;
     const clientName = client?.name || c.estClient || "договор";
     const num = c.number || c.id?.slice(-4) || "б-н";
     const dateStrG = c.date ? c.date.split("-").reverse().join(".") : "";
-    const isAnnexG = (c.type||"repair_fiz") === "annex";
-    const docLabelG = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Соглашение о дизайн-проекте",design_add:"Доп соглашение к дизайн-проекту",reservation:"Соглашение о резервировании"}[c.type||"repair_fiz"] || "Договор";
+    const isAnnexG = (c.type||"repair_fiz") === "annex" || c.type==="podryad_annex";
+    const docLabelG = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Соглашение о дизайн-проекте",design_add:"Доп соглашение к дизайн-проекту",reservation:"Соглашение о резервировании",podryad:"Договор подряда",podryad_annex:"Приложение к договору подряда"}[c.type||"repair_fiz"] || "Договор";
     const title = isAnnexG
-      ? ("Приложение №"+(c.appendix||2)+" Перечень доп работ к Договору №"+(c.mainNumber||num)+(dateStrG?" от "+dateStrG:"")).replace(/[<>:"/\\|?*]/g,"_")
+      ? ("Приложение №"+(c.appendix||2)+" Перечень работ к Договору №"+(c.mainNumber||num)+(dateStrG?" от "+dateStrG:"")).replace(/[<>:"/\\|?*]/g,"_")
       : (docLabelG+" №"+num+" "+clientName+(dateStrG?" от "+dateStrG:"")).replace(/[<>:"/\\|?*]/g,"_");
-    const html = buildContractHtml(c, client, ca, true, "");
+    const html = (c.type==="podryad"||c.type==="podryad_annex")
+      ? buildPodryadHtml(podryadContractToModel(c, client, false))
+      : buildContractHtml(c, client, ca, true, "");
 
     // Загружаем Google Identity Services если ещё нет
     const loadGIS = () => new Promise((res, rej) => {
@@ -9722,7 +9763,7 @@ ${podBlock}`;
                               if(data.meta && data.meta.accounts) await saveFinanceMeta(data.meta);
                               if(Array.isArray(data.transactions)){
                                 const norm=data.transactions.map(t=>({...t,id:t.id||genId(),updatedAt:Date.now()}));
-                                await saveFinanceTx(norm,{replace:true,allowEmpty:true});
+                                await saveFinanceTx(norm,{replace:false,allowEmpty:true});
                               }
                               if(Array.isArray(data.projects)){
                                 const norm=data.projects.map(p=>({...p,id:p.id||genId()}));
@@ -9766,9 +9807,9 @@ ${podBlock}`;
                           <div style={{fontSize:11,color:"#94a3b8"}}>{t.category||""}{t.note?" · "+t.note:""} · {new Date(t.date||t.createdAt||0).toLocaleDateString("ru-RU")}</div>
                           <div style={{fontSize:11,color:daysLeft<=3?"#dc2626":"#f59e0b",fontWeight:600}}>осталось {daysLeft} дн.</div>
                         </div>
-                        <button onClick={async()=>{await saveFinanceTx(financeTxRef.current.map(x=>x.id===t.id?{...x,deletedAt:undefined}:x),{replace:true}); }}
+                        <button onClick={async()=>{await saveFinanceTx([{...t,deletedAt:undefined,updatedAt:Date.now()}],{replace:false}); }}
                           style={{background:"#f0fdf4",color:"#059669",border:"1px solid #bbf7d0",borderRadius:7,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↩</button>
-                        <button onClick={async()=>{if(confirm("Удалить безвозвратно?")) await saveFinanceTx(financeTxRef.current.filter(x=>x.id!==t.id),{replace:true,allowEmpty:true}); }}
+                        <button onClick={async()=>{if(confirm("Удалить безвозвратно?")) await saveFinanceTx([],{replace:false,removedIds:[t.id],allowEmpty:true}); }}
                           style={{background:"rgba(220,38,38,.1)",color:"#dc2626",border:"1px solid rgba(220,38,38,.2)",borderRadius:7,padding:"5px 10px",fontSize:12,cursor:"pointer"}}>✕</button>
                       </div>
                     );
@@ -9794,18 +9835,18 @@ ${podBlock}`;
                   recipient:m.recipient||"",
                   isAdvance:m.type==="income"?!!m.isAdvance:false,
                   included:m.included!==false, opuMonth:m.opuMonth, createdAt:m.createdAt||ts, updatedAt:Date.now() };
-                const cur=financeTxRef.current;
                 const isNew = !m.id;
-                const list = isNew ? [tx,...cur] : cur.map(x=>x.id===m.id?tx:x);
                 setFinTxModal(null);
-                saveFinanceTx(list,{replace:true});
+                // merge (replace:false) — не перезатираем облако: операции с других устройств не теряются
+                saveFinanceTx([tx],{replace:false});
                 writeAudit(currentUser, isNew?"создал операцию":"изменил операцию", "finance_tx", tx.id, `${tx.type} ${Math.round(tx.amount)} ₸ ${tx.category||""}`);
               };
               const del = ()=>{
                 if(!m.id) return; if(!confirm("Переместить операцию в корзину?")) return;
-                const list=financeTxRef.current.map(x=>x.id===m.id?{...x,deletedAt:Date.now()}:x);
+                const ex=financeTxRef.current.find(x=>x.id===m.id); if(!ex){ setFinTxModal(null); return; }
+                const deleted={...ex,deletedAt:Date.now(),updatedAt:Date.now()};
                 setFinTxModal(null);
-                saveFinanceTx(list,{replace:true});
+                saveFinanceTx([deleted],{replace:false});
                 writeAudit(currentUser,"удалил операцию","finance_tx",m.id,`${m.type} ${Math.round(Number(m.amount)||0)} ₸`);
               };
               return (
@@ -10489,7 +10530,13 @@ ${podBlock}`;
                                     style={{background:"rgba(124,58,237,.08)",color:"#7c3aed",border:"1px solid rgba(124,58,237,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>📋 Акт</button>
                                 )}
                                 {currentUser.role!=="viewer" && !isChild && (
-                                  <button title="Договор подряда с рабочим (работы из этой сметы, суммы редактируются)" onClick={()=>openPodryadBuilder({kind:"podryad",obj,est})}
+                                  <button title="Договор подряда с рабочим (работы из этой сметы, суммы редактируются)" onClick={()=>{
+                                    const ws = estimateToWorks(est);
+                                    const podCount = contractsRef.current.filter(c=>c.type==="podryad").length;
+                                    setObjectReturnId(obj.id);
+                                    setCurrentContract({id:Date.now().toString(),type:"podryad",number:String(1012+podCount),date:new Date().toISOString().slice(0,10),city:"Караганда",clientId:"",contragentId:contragentsRef.current[0]?.id||"",works:ws,objectId:obj.id,objectAddress:obj.address||"",appendix:1,note:"",createdBy:currentUser.name,createdById:currentUser.id});
+                                    setContractTab("editor"); setScreen("contracts");
+                                  }}
                                     style={{background:"rgba(124,58,237,.08)",color:"#7c3aed",border:"1px solid rgba(124,58,237,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>👷 Подряд</button>
                                 )}
                                 {currentUser.role!=="viewer" && !isChild && (
@@ -10665,15 +10712,13 @@ ${podBlock}`;
                       <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>setNewDocMenu(v=>!v)}>+ Новый ▾</button>
                       {newDocMenu && (<>
                         <div onClick={()=>setNewDocMenu(false)} style={{position:"fixed",inset:0,zIndex:60}}/>
-                        <div style={{position:"absolute",top:"calc(100% + 6px)",right:0,zIndex:61,background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,boxShadow:"0 12px 40px rgba(0,0,0,.18)",overflow:"hidden",minWidth:240}}>
-                          {[...DOC_TYPES, { value:"podryad", label:"Договор подряда (с рабочим)" }, { value:"podryad_annex", label:"Доп. приложение к договору подряда (№2, 3…)" }].map(dt=>{
+                        <div style={{position:"absolute",top:"calc(100% + 6px)",right:0,zIndex:61,background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,boxShadow:"0 12px 40px rgba(0,0,0,.18)",overflow:"hidden",minWidth:260}}>
+                          {DOC_TYPES.map(dt=>{
                             const isPod = dt.value==="podryad"||dt.value==="podryad_annex";
                             return (
                             <button key={dt.value} onClick={()=>{
                               setNewDocMenu(false);
-                              if(dt.value==="podryad"){ openPodryadBuilder({kind:"podryad"}); return; }
-                              if(dt.value==="podryad_annex"){ openPodryadBuilder({kind:"annex"}); return; }
-                              setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],type:dt.value,clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:dt.value==="annex"?2:1,note:"",createdBy:currentUser.name,createdById:currentUser.id});
+                              setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],type:dt.value,city:"Караганда",clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:(dt.value==="annex"||dt.value==="podryad_annex")?2:1,note:"",createdBy:currentUser.name,createdById:currentUser.id});
                               setContractTab("editor");
                             }}
                               style={{display:"block",width:"100%",textAlign:"left",padding:"10px 14px",background:isPod?"rgba(124,58,237,.06)":"#fff",border:"none",borderTop:dt.value==="podryad"?"1px solid #eef2f7":"none",fontSize:13,color:isPod?"#7c3aed":"#0f172a",fontWeight:isPod?700:500,cursor:"pointer",fontFamily:"inherit"}}
@@ -10696,54 +10741,6 @@ ${podBlock}`;
 
           <div style={{paddingTop:0}}>
 
-            {/* ── ДОГОВОРЫ ПОДРЯДА (с рабочими) ── */}
-            {contractTab === "list" && podryads.filter(p=>!p.deletedAt).length>0 && (
-              <div style={{marginBottom:14}}>
-                <div style={{fontSize:11,color:"#7c3aed",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:8}}>👷 Договоры подряда ({podryads.filter(p=>!p.deletedAt).length})</div>
-                <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                  {podryads.filter(p=>!p.deletedAt).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).map(p=>{
-                    const wkName = p.worker?.name || (workers.find(w=>w.id===p.workerId)?.name) || "—";
-                    const title = p.kind==="annex" ? `Приложение №${p.annexNo||"?"}`+(p.mainNumber?` к №${p.mainNumber}`:"") : `Договор подряда №${p.number||"б/н"}`;
-                    return (
-                      <div key={p.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 16px",borderLeft:"3px solid #ede9fe"}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-                          <div style={{minWidth:0,flex:1}}>
-                            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                              <span style={{fontSize:10,fontWeight:700,color:"#7c3aed",background:"rgba(124,58,237,.08)",borderRadius:3,padding:"1px 6px"}}>{p.kind==="annex"?"ПРИЛОЖЕНИЕ":"ПОДРЯД"}</span>
-                              <span style={{fontWeight:600,fontSize:13,color:"#0f172a"}}>{title}</span>
-                            </div>
-                            <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>
-                              Подрядчик: {wkName} · {new Date(p.date||p.createdAt||0).toLocaleDateString("ru-RU")}
-                              {p.objectAddress?` · ${p.objectAddress}`:""}
-                            </div>
-                          </div>
-                          <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
-                            <div style={{fontWeight:800,fontSize:15,color:"#0f172a"}}>{fmt(p.total||0)} ₸</div>
-                            <div style={{display:"flex",gap:4}}>
-                              <button title="Печать / PDF" onClick={()=>openOrPrintHtml(buildPodryadHtml(p))}
-                                style={{background:"#e2e8f0",color:"#334155",border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🖨 Печать</button>
-                              {currentUser.role!=="viewer" && p.kind==="podryad" && (
-                                <button title="Добавить приложение к этому договору" onClick={()=>openPodryadBuilder({kind:"annex",mainNumber:p.number,mainDate:p.date})}
-                                  style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>+ Прил.</button>
-                              )}
-                              {currentUser.role!=="viewer" && (
-                                <button title="Редактировать" onClick={()=>openPodryadBuilder({preset:p})}
-                                  style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
-                              )}
-                              {(currentUser.role==="admin"||(currentUser.role==="user"&&p.createdBy===currentUser.name)) && (
-                                <button title="Удалить" onClick={()=>{ if(window.confirm("Удалить документ?")) savePodryads(podryadsRef.current.filter(x=>x.id!==p.id),{removedIds:[p.id],allowEmpty:true}); }}
-                                  style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
             {/* ── СПИСОК ДОГОВОРОВ ── */}
             {contractTab === "list" && (
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -10764,15 +10761,15 @@ ${podBlock}`;
                   </div>
                 )}
                 {(() => {
-                  const TLABEL = {repair_fiz:"Договор",annex:"Приложение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронь"};
+                  const TLABEL = {repair_fiz:"Договор",annex:"Приложение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронь",podryad:"Договор подряда",podryad_annex:"Приложение подряда"};
                   const contractTitle = (c) => {
                     const t = c.type||"repair_fiz";
-                    if(t==="annex") return `Приложение №${c.appendix||2}`+(c.mainNumber?` к №${c.mainNumber}`:"");
+                    if(t==="annex"||t==="podryad_annex") return `${t==="podryad_annex"?"Приложение подряда":"Приложение"} №${c.appendix||2}`+(c.mainNumber?` к №${c.mainNumber}`:"");
                     const lbl = TLABEL[t]||"Договор";
                     return c.number ? `${lbl} №${c.number}` : `${lbl} (без номера)`;
                   };
                   // дочерние = приложения/доп.соглашения, ссылающиеся на номер существующего договора
-                  const isChildType = (c) => (c.type==="annex"||c.type==="design_add");
+                  const isChildType = (c) => (c.type==="annex"||c.type==="design_add"||c.type==="podryad_annex");
                   const numMap = {}; // number -> contract
                   contracts.forEach(c=>{ if(c.number && !isChildType(c)) numMap[c.number]=c; });
                   const childMap = {}; // parentId -> [child]
@@ -11003,151 +11000,6 @@ ${podBlock}`;
       </div>
 
       {/* Модал подтверждения выхода */}
-      {/* ── Построитель Договора подряда / Приложения ── */}
-      {podryadModal && (()=>{
-        const m = podryadModal;
-        const upd = patch => setPodryadModal(p=>({...p,...patch}));
-        const updWorker = patch => setPodryadModal(p=>({...p,worker:{...p.worker,...patch}}));
-        const updSec = (si,patch) => setPodryadModal(p=>({...p,sections:p.sections.map((s,i)=>i===si?{...s,...patch}:s)}));
-        const updItem = (si,ii,patch) => setPodryadModal(p=>({...p,sections:p.sections.map((s,i)=>i!==si?s:{...s,items:s.items.map((it,j)=>j===ii?{...it,...patch}:it)})}));
-        const addItem = si => setPodryadModal(p=>({...p,sections:p.sections.map((s,i)=>i!==si?s:{...s,items:[...s.items,{name:"",qty:"",unit:"",price:""}]})}));
-        const delItem = (si,ii) => setPodryadModal(p=>({...p,sections:p.sections.map((s,i)=>i!==si?s:{...s,items:s.items.filter((_,j)=>j!==ii)})}));
-        const addSection = () => setPodryadModal(p=>({...p,sections:[...p.sections,{title:"",lumpSum:"",items:[{name:"",qty:"",unit:"",price:""}]}]}));
-        const delSection = si => setPodryadModal(p=>({...p,sections:p.sections.filter((_,i)=>i!==si)}));
-        const importFromObject = (objId) => {
-          const obj = objects.find(o=>o.id===objId); if(!obj){ upd({objectId:""}); return; }
-          const ests = estimates.filter(e=>e.objectId===objId);
-          const mainEst = ests.find(e=>!e.parentId||e.parentId===e.id) || ests[0];
-          if(!mainEst){ upd({objectId:objId, objectAddress:obj.address||m.objectAddress}); alert("У объекта нет сметы для импорта."); return; }
-          const lines = buildAvrLinesFromEst(mainEst);
-          upd({objectId:objId, objectAddress:obj.address||m.objectAddress, sections:[{title:"",lumpSum:"",items:lines.map(l=>({name:l.name,qty:l.qty,unit:l.unit,price:""}))}]});
-        };
-        const saveWorkerToDir = async () => {
-          if(!(m.worker?.name||"").trim()){ alert("Заполните ФИО подрядчика."); return; }
-          const wid = m.workerId || genId();
-          const rec = { id:wid, ...m.worker };
-          const cur = workersRef.current;
-          const next = cur.some(x=>x.id===wid) ? cur.map(x=>x.id===wid?rec:x) : [rec,...cur];
-          await saveWorkers(next,{replace:true});
-          upd({workerId:wid});
-          alert("Подрядчик сохранён в справочник.");
-        };
-        const total = podTotal(m);
-        const isAnnex = m.kind==="annex";
-        const fih = {background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:7,color:"#0f172a",fontSize:12,padding:"6px 8px",fontFamily:"inherit",width:"100%"};
-        return (
-        <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setPodryadModal(null)}>
-          <div style={{background:"#fff",borderRadius:14,width:"100%",maxWidth:820,maxHeight:"94vh",display:"flex",flexDirection:"column",boxShadow:"0 24px 70px rgba(0,0,0,.3)",overflow:"hidden"}} onClick={e=>e.stopPropagation()}>
-            <div style={{padding:"16px 20px",borderBottom:"1px solid #eef2f7",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
-              <div>
-                <div style={{fontSize:16,fontWeight:800,color:"#0f172a"}}>👷 {isAnnex?"Приложение к договору подряда":"Договор подряда с рабочим"}</div>
-                <div style={{fontSize:12,color:"#94a3b8",marginTop:2}}>Юридический текст фиксированный — заполните стороны, работы и суммы</div>
-              </div>
-              <button onClick={()=>setPodryadModal(null)} style={{background:"none",border:"none",fontSize:24,color:"#94a3b8",cursor:"pointer",lineHeight:1}}>×</button>
-            </div>
-            <div style={{overflowY:"auto",flex:1,padding:"14px 20px",display:"flex",flexDirection:"column",gap:14}}>
-              {/* Реквизиты */}
-              {isAnnex && (
-                <label style={{fontSize:11,color:"#64748b",fontWeight:600,display:"block"}}>Договор подряда (родитель)
-                  <select style={{...fih,marginTop:4}} value={m._parentId||""} onChange={e=>{ const par=podryads.find(x=>x.id===e.target.value); if(par){ upd({_parentId:par.id, mainNumber:par.number||"", mainDate:par.date||"", contragentId:par.contragentId||m.contragentId, objectId:par.objectId||m.objectId, objectAddress:par.objectAddress||m.objectAddress, worker:(m.worker?.name?m.worker:(par.worker||m.worker)), workerId:(m.workerId||par.workerId||"")}); } else upd({_parentId:""}); }}>
-                    <option value="">— выбрать из существующих —</option>
-                    {podryads.filter(p=>p.kind==="podryad"&&!p.deletedAt).map(p=>(<option key={p.id} value={p.id}>Договор подряда №{p.number} · {p.worker?.name||"—"}</option>))}
-                  </select>
-                </label>
-              )}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
-                {!isAnnex && <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>№ договора<input style={{...fih,marginTop:4}} value={m.number} onChange={e=>upd({number:e.target.value})}/></label>}
-                {isAnnex && <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>№ приложения<input style={{...fih,marginTop:4}} value={m.annexNo} onChange={e=>upd({annexNo:e.target.value})}/></label>}
-                {isAnnex && <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>К договору №<input style={{...fih,marginTop:4}} value={m.mainNumber} onChange={e=>upd({mainNumber:e.target.value})}/></label>}
-                {isAnnex && <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Дата договора<input type="date" style={{...fih,marginTop:4}} value={m.mainDate||""} onChange={e=>upd({mainDate:e.target.value})}/></label>}
-                <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Дата<input type="date" style={{...fih,marginTop:4}} value={m.date} onChange={e=>upd({date:e.target.value})}/></label>
-                <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Город<input style={{...fih,marginTop:4}} value={m.city} onChange={e=>upd({city:e.target.value})}/></label>
-              </div>
-              {/* Подрядчик */}
-              <div style={{background:"#faf5ff",border:"1px solid #ede9fe",borderRadius:10,padding:"12px 14px"}}>
-                <div style={{fontSize:11,color:"#7c3aed",fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>Подрядчик (рабочий)</div>
-                <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8,flexWrap:"wrap"}}>
-                  <select style={{...fih,flex:1,minWidth:160}} value={m.workerId||""} onChange={e=>{ const wk=workers.find(x=>x.id===e.target.value); if(wk) upd({workerId:wk.id,worker:{name:wk.name||"",iin:wk.iin||"",doc:wk.doc||"",docIssuer:wk.docIssuer||"Выдан МВД РК",address:wk.address||"",phone:wk.phone||"",email:wk.email||""}}); else upd({workerId:""}); }}>
-                    <option value="">— выбрать из справочника —</option>
-                    {workers.map(wk=>(<option key={wk.id} value={wk.id}>{wk.name}</option>))}
-                  </select>
-                  <button onClick={saveWorkerToDir} style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:7,padding:"7px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>💾 В справочник</button>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8}}>
-                  <input style={fih} value={m.worker?.name||""} onChange={e=>updWorker({name:e.target.value})} placeholder="ФИО"/>
-                  <input style={fih} value={m.worker?.iin||""} onChange={e=>updWorker({iin:e.target.value})} placeholder="ИИН"/>
-                  <input style={fih} value={m.worker?.doc||""} onChange={e=>updWorker({doc:e.target.value})} placeholder="№ документа"/>
-                  <input style={fih} value={m.worker?.phone||""} onChange={e=>updWorker({phone:e.target.value})} placeholder="Телефон"/>
-                  <input style={fih} value={m.worker?.address||""} onChange={e=>updWorker({address:e.target.value})} placeholder="Адрес"/>
-                </div>
-              </div>
-              {/* Заказчик + объект */}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10}}>
-                <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Заказчик (наше ТОО)
-                  <select style={{...fih,marginTop:4}} value={m.contragentId||""} onChange={e=>upd({contragentId:e.target.value})}>
-                    {contragents.map(c=>(<option key={c.id} value={c.id}>{c.name}</option>))}
-                  </select>
-                </label>
-                <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Объект (импорт работ из сметы)
-                  <select style={{...fih,marginTop:4}} value={m.objectId||""} onChange={e=>importFromObject(e.target.value)}>
-                    <option value="">— не привязан —</option>
-                    {objects.filter(o=>!o.deletedAt).map(o=>(<option key={o.id} value={o.id}>{o.clientName||o.address||o.id}</option>))}
-                  </select>
-                </label>
-                <label style={{fontSize:11,color:"#64748b",fontWeight:600,gridColumn:"1 / -1"}}>Адрес проведения работ<input style={{...fih,marginTop:4}} value={m.objectAddress||""} onChange={e=>upd({objectAddress:e.target.value})} placeholder="г. ..., ул. ..."/></label>
-              </div>
-              {/* Формат перечня */}
-              <div style={{display:"flex",gap:14,alignItems:"center",flexWrap:"wrap",borderTop:"1px solid #f1f5f9",paddingTop:12}}>
-                <span style={{fontSize:12,color:"#64748b",fontWeight:600}}>Формат перечня:</span>
-                <label style={{fontSize:12,display:"flex",alignItems:"center",gap:5,cursor:"pointer"}}><input type="radio" checked={(m.format||"table")==="table"} onChange={()=>upd({format:"table"})}/> Таблица (Прил.1)</label>
-                <label style={{fontSize:12,display:"flex",alignItems:"center",gap:5,cursor:"pointer"}}><input type="radio" checked={m.format==="sections"} onChange={()=>upd({format:"sections"})}/> Разделы (Прил.2)</label>
-                <label style={{fontSize:12,display:"flex",alignItems:"center",gap:5,cursor:"pointer",marginLeft:"auto"}}><input type="checkbox" checked={!!m.showLinePrice} onChange={e=>upd({showLinePrice:e.target.checked})}/> Показывать цену за позицию</label>
-              </div>
-              {/* Разделы и работы */}
-              {(m.sections||[]).map((sec,si)=>(
-                <div key={si} style={{border:"1px solid #e2e8f0",borderRadius:10,padding:"10px 12px"}}>
-                  {m.format==="sections" && (
-                    <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
-                      <input style={{...fih,fontWeight:700}} value={sec.title||""} onChange={e=>updSec(si,{title:e.target.value})} placeholder="Название раздела (напр. «Раздельный санузел под ключ»)"/>
-                      <input type="number" style={{...fih,width:120}} value={sec.lumpSum} onChange={e=>updSec(si,{lumpSum:e.target.value})} placeholder="Сумма ₸"/>
-                      {m.sections.length>1 && <button onClick={()=>delSection(si)} style={{background:"none",border:"none",color:"#cbd5e1",fontSize:18,cursor:"pointer"}}>×</button>}
-                    </div>
-                  )}
-                  {(sec.items||[]).map((it,ii)=>(
-                    <div key={ii} style={{display:"flex",gap:6,alignItems:"center",marginBottom:5}}>
-                      <input style={{...fih,flex:1}} value={it.name} onChange={e=>updItem(si,ii,{name:e.target.value})} placeholder="Наименование работы"/>
-                      <input type="number" style={{...fih,width:60}} value={it.qty} onChange={e=>updItem(si,ii,{qty:e.target.value})} placeholder="Кол."/>
-                      <input style={{...fih,width:54}} value={it.unit} onChange={e=>updItem(si,ii,{unit:e.target.value})} placeholder="ед."/>
-                      {m.showLinePrice && <input type="number" style={{...fih,width:88}} value={it.price} onChange={e=>updItem(si,ii,{price:e.target.value})} placeholder="Цена ₸"/>}
-                      <button onClick={()=>delItem(si,ii)} style={{background:"none",border:"none",color:"#cbd5e1",fontSize:16,cursor:"pointer",flexShrink:0}}>×</button>
-                    </div>
-                  ))}
-                  <button onClick={()=>addItem(si)} style={{marginTop:4,background:"rgba(37,99,235,.06)",color:"#2563eb",border:"1px dashed rgba(37,99,235,.3)",borderRadius:7,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ позиция</button>
-                </div>
-              ))}
-              {m.format==="sections" && <button onClick={addSection} style={{background:"rgba(124,58,237,.06)",color:"#7c3aed",border:"1px dashed rgba(124,58,237,.35)",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",alignSelf:"flex-start"}}>+ Добавить раздел</button>}
-              {/* Итоги */}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,borderTop:"1px solid #f1f5f9",paddingTop:12}}>
-                <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Общая стоимость ₸ (пусто = авто)<input type="number" style={{...fih,marginTop:4}} value={m.manualTotal} onChange={e=>upd({manualTotal:e.target.value})} placeholder={String(Math.round((m.sections||[]).reduce((s,sec)=>s+podSectionSum(sec),0)))}/></label>
-                <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Аванс ₸ (необязательно)<input type="number" style={{...fih,marginTop:4}} value={m.avans} onChange={e=>upd({avans:e.target.value})} placeholder="0"/></label>
-                <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Срок (календ. дней)<input type="number" style={{...fih,marginTop:4}} value={m.termDays} onChange={e=>upd({termDays:e.target.value})} placeholder="25"/></label>
-                <label style={{fontSize:12,color:"#475569",fontWeight:600,display:"flex",alignItems:"flex-end",gap:8,cursor:"pointer",paddingBottom:6}}><input type="checkbox" checked={!!m.withStamp} onChange={e=>upd({withStamp:e.target.checked})} style={{width:16,height:16}}/>🔖 Печать ТОО</label>
-              </div>
-            </div>
-            {/* подвал */}
-            <div style={{padding:"14px 20px",borderTop:"1px solid #eef2f7",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
-              <div><div style={{fontSize:12,color:"#64748b"}}>Итого</div><div style={{fontSize:22,fontWeight:900,color:"#0f172a"}}>{fmt(total)} ₸</div></div>
-              <div style={{display:"flex",gap:10}}>
-                <button onClick={()=>setPodryadModal(null)} style={{padding:"11px 18px",borderRadius:10,border:"1px solid #e2e8f0",background:"#f8fafc",color:"#475569",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Отмена</button>
-                <button onClick={async()=>{ await savePodryad(m); setPodryadModal(null); }} style={{padding:"11px 18px",borderRadius:10,border:"1px solid #7c3aed",background:"#fff",color:"#7c3aed",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Сохранить</button>
-                <button onClick={async()=>{ const rec=await savePodryad(m); setPodryadModal(null); openOrPrintHtml(buildPodryadHtml(rec)); }} style={{padding:"11px 20px",borderRadius:10,border:"none",background:"#7c3aed",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🖨 Сохранить и печать</button>
-              </div>
-            </div>
-          </div>
-        </div>
-        );
-      })()}
-
       {/* ── Построитель АВР (форма Р-1) ── */}
       {avrModal && (()=>{
         const m = avrModal;
