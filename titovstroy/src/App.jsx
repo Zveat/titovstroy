@@ -3626,7 +3626,8 @@ function MainApp({ currentUser, setCurrentUser }) {
 
   // Объекты «в работе» для раздела «Производство»: только те, по которым заведён
   // проект в Финансах (связь по objectId, либо по номеру договора).
-  // Сопоставить финпроект с объектом: по objectId → договору → имени/адресу/телефону (двунаправленно)
+  // Сопоставить финпроект с объектом ТОЛЬКО надёжно: objectId → договор → полное имя клиента в описании → телефон.
+  // По адресу НЕ матчим (одна улица у разных объектов → ложные совпадения).
   const matchFpToObject = useCallback((p) => {
     if (p.objectId) { const o = liveObjects.find(x => x.id === p.objectId); if (o) return o; }
     const link = p.contractNo ? contractLinkMap[normCN(p.contractNo)] : null;
@@ -3634,29 +3635,25 @@ function MainApp({ currentUser, setCurrentUser }) {
     const _n = s => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
     const hay = _n((p.description || "") + " " + (p.client || "") + " " + (p.comment || ""));
     const hayDigits = hay.replace(/\D/g, "");
-    const pd = _n(p.description);
     return liveObjects.find(o => {
-      const nm = _n(o.clientName), ad = _n(o.address), ph = String(o.clientPhone || "").replace(/\D/g, "");
-      if (nm && nm.length >= 3 && hay.includes(nm)) return true;            // описание содержит имя объекта
-      if (ad && ad.length >= 4 && hay.includes(ad)) return true;            // описание содержит адрес объекта
-      if (ph && ph.length >= 6 && hayDigits.includes(ph)) return true;      // телефон
-      if (pd && pd.length >= 4 && (nm.includes(pd) || ad.includes(pd))) return true; // имя/адрес объекта содержит описание проекта
+      const nm = _n(o.clientName), ph = String(o.clientPhone || "").replace(/\D/g, "");
+      if (nm && nm.length >= 4 && hay.includes(nm)) return true;       // описание содержит ПОЛНОЕ имя клиента
+      if (ph && ph.length >= 6 && hayDigits.includes(ph)) return true; // телефон
       return false;
     }) || null;
   }, [liveObjects, contractLinkMap]);
 
+  // Производство = ТОЛЬКО объекты, у которых есть активный финпроект (Финансы → Проекты).
+  // Без «подписанных объектов» и без старых карточек. Отказ/архив исключены.
   const productionObjects = useMemo(() => {
     const ids = new Set();
     for (const p of (finProjects || [])) {
-      if ((p.rawStatus || p.status) === "отменен") continue; // отменённые не показываем
+      if ((p.rawStatus || p.status) === "отменен") continue;
       const o = matchFpToObject(p);
-      if (o) ids.add(o.id);
+      if (o && o.status !== "refuse" && o.status !== "archive") ids.add(o.id);
     }
-    // объекты, по которым уже создана карточка производства (в т.ч. добавленные вручную)
-    const prodIds = new Set((productions || []).map(p => p.objectId));
-    // «В работе» = договор подписан (статус «Заключён») / есть фин-проект / есть карточка
-    return liveObjects.filter(o => o.status === "signed" || ids.has(o.id) || prodIds.has(o.id));
-  }, [liveObjects, finProjects, productions, matchFpToObject]);
+    return liveObjects.filter(o => ids.has(o.id));
+  }, [liveObjects, finProjects, matchFpToObject]);
 
   // Проекты из Финансов, которые НЕ привязаны ни к одному объекту — их тоже можно
   // добавить в производство вручную (разовая миграция текущих работ из Google-таблиц).
