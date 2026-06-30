@@ -4006,13 +4006,14 @@ tfoot td{font-weight:700}
           return `<p class="b" style="margin-top:8pt">${esc(sec.title || "Работы")}:</p>${lines}<p class="b">Стоимость работ: ${money(podSectionSum(sec))} ₸</p>`;
         }).join("");
       }
-      // табличный формат
+      // табличный формат. В режиме «за объём» (showLinePrice) — колонки Цена + Сумма (как в редакторе)
       let n = 0;
       const rows = (m.sections || []).flatMap(sec => (sec.items || [])).filter(i => (i.name || "").trim()).map(i => {
         n++;
-        return `<tr><td class="tc">${n}</td><td>${esc(i.name)}</td><td class="tc">${esc(i.qty || "")}</td><td class="tc">${esc(i.unit || "")}</td>${m.showLinePrice ? `<td class="tr">${i.price !== "" && i.price != null ? money(i.price) : ""}</td>` : ""}</tr>`;
+        const price = Number(i.price) || 0, qty = Number(i.qty) || 0;
+        return `<tr><td class="tc">${n}</td><td>${esc(i.name)}</td><td class="tc">${esc(i.qty || "")}</td><td class="tc">${esc(i.unit || "")}</td>${m.showLinePrice ? `<td class="tr">${i.price !== "" && i.price != null ? money(price) : ""}</td><td class="tr">${i.price !== "" && i.price != null ? money(price * qty) : ""}</td>` : ""}</tr>`;
       }).join("");
-      return `<table><thead><tr><th style="width:34px">№</th><th>Наименование работ</th><th style="width:64px">Объём</th><th style="width:58px">Ед.</th>${m.showLinePrice ? '<th style="width:96px">Сумма, ₸</th>' : ""}</tr></thead><tbody>${rows}</tbody></table>`;
+      return `<table><thead><tr><th style="width:32px">№</th><th>Наименование работ</th><th style="width:60px">Объём</th><th style="width:50px">Ед.</th>${m.showLinePrice ? '<th style="width:88px">Цена, ₸</th><th style="width:100px">Сумма, ₸</th>' : ""}</tr></thead><tbody>${rows}</tbody></table>`;
     })();
     const CSS = `*{margin:0;padding:0;box-sizing:border-box}
   body{font-family:Verdana,Geneva,Tahoma,sans-serif;padding:18mm 14mm 18mm 22mm;line-height:1.5;color:#000;font-size:10pt}
