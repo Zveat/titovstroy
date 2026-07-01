@@ -11037,14 +11037,13 @@ ${reqBlock}`;
                       style={{background:contractFilterStatus===s.key?s.bg:"rgba(0,0,0,.03)",color:contractFilterStatus===s.key?s.color:"#94a3b8",border:`1px solid ${contractFilterStatus===s.key?s.color:"#e2e8f0"}`,borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{s.label}</button>
                   ))}
                 </div>
-                {/* Фильтр по типу документа */}
+                {/* Фильтр по типу документа (приложения относятся к своему типу) */}
                 <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:2}}>
-                  {[["","Все",""],["podryad","🔨 Подряд","#059669"],["other","📄 Договоры","#2563eb"]].map(([k,l,col])=>{
+                  {[["","Все","#2563eb"],["podryad","🔨 Подряд","#059669"],["repair","🛠 Ремонт","#2563eb"],["design","🎨 Дизайн","#7c3aed"],["reserve","📌 Резерв","#d97706"]].map(([k,l,col])=>{
                     const act = contractTypeFilter===k;
-                    const c = col||"#2563eb";
                     return (
                       <button key={k} onClick={()=>setContractTypeFilter(k)}
-                        style={{background:act?c:"rgba(0,0,0,.03)",color:act?"#fff":"#94a3b8",border:`1px solid ${act?c:"#e2e8f0"}`,borderRadius:8,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
+                        style={{background:act?col:"rgba(0,0,0,.03)",color:act?"#fff":"#94a3b8",border:`1px solid ${act?col:"#e2e8f0"}`,borderRadius:8,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
                     );
                   })}
                 </div>
@@ -11074,7 +11073,8 @@ ${reqBlock}`;
                   const _objIds = new Set(objects.map(o=>o.id));
                   // показываем: договоры подряда — ВСЕГДА; остальные — без объекта или с несуществующим объектом (сироты). Без удалённых.
                   const _isPodType = c => c.type==="podryad" || c.type==="podryad_annex";
-                  const _matchType = c => !contractTypeFilter || (contractTypeFilter==="podryad" ? _isPodType(c) : !_isPodType(c));
+                  const _docCat = c => { const t=c.type||"repair_fiz"; if(t==="podryad"||t==="podryad_annex") return "podryad"; if(t==="design"||t==="design_add") return "design"; if(t==="reservation") return "reserve"; return "repair"; };
+                  const _matchType = c => !contractTypeFilter || _docCat(c)===contractTypeFilter;
                   const roots = contracts.filter(c=>!c.deletedAt && !childIds.has(c.id) && (_isPodType(c) || !c.objectId || !_objIds.has(c.objectId)) && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus) && _matchType(c));
 
                   const renderContractCard = (c, isChild=false, kidsCount=0, collapsed=false) => {
