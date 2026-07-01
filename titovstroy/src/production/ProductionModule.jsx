@@ -905,25 +905,34 @@ function MoneyInput({ value, onChange, big }) {
 }
 
 // Компактное денежное поле для таблиц: «115 957» с пробелами, ввод только цифр
+// Числовое поле с ЛОКАЛЬНЫМ вводом: пока печатаешь — обновляется только само поле,
+// в родителя (и сохранение) значение уходит на blur/Enter. Так не тормозит при вводе.
 function NumCell({ value, onChange, ph = "—" }) {
-  const txt = (value === undefined || value === null || value === "") ? "" : new Intl.NumberFormat("ru-RU").format(value);
-  return <input type="text" inputMode="numeric" value={txt} placeholder={ph}
-    onChange={e => { const d = e.target.value.replace(/[^\d]/g, ""); onChange(d === "" ? undefined : Number(d)); }}
+  const fmtN = v => (v === undefined || v === null || v === "") ? "" : new Intl.NumberFormat("ru-RU").format(v);
+  const [local, setLocal] = useState(null);
+  const shown = local !== null ? local : fmtN(value);
+  const commit = () => { if (local === null) return; const d = local.replace(/[^\d]/g, ""); onChange(d === "" ? undefined : Number(d)); setLocal(null); };
+  return <input type="text" inputMode="numeric" value={shown} placeholder={ph}
+    onChange={e => setLocal(e.target.value)} onBlur={commit}
+    onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
     style={{ width: "100%", minWidth: 64, border: "1px solid #e2e8f0", borderRadius: 5, padding: "5px 6px", fontSize: 12.5, textAlign: "right", fontFamily: "inherit", outline: "none", boxSizing: "border-box", color: "#0f172a" }} />;
 }
 // Ввод себестоимости ЗА ЕДИНИЦУ: в поле пишем цену за 1 ед., а храним итог (за ед. × кол-во).
-// Так маржа и ИТОГО считаются корректно, а старые данные (хранятся итогом) показываются как итог÷кол-во.
+// Локальный ввод (commit на blur/Enter) — не тормозит. Старые данные (итог) показываются как итог÷кол-во.
 function PerUnitCell({ total, qty, onChange, ph = "—" }) {
   const q = Number(qty) || 0;
   const totalNum = Number(total) || 0;
-  const perUnit = (total === undefined || total === null || total === "") ? "" : (q > 0 ? Math.round(totalNum / q) : totalNum);
-  const txt = perUnit === "" ? "" : new Intl.NumberFormat("ru-RU").format(perUnit);
   const fmtN = n => new Intl.NumberFormat("ru-RU").format(n);
+  const perUnit = (total === undefined || total === null || total === "") ? "" : (q > 0 ? Math.round(totalNum / q) : totalNum);
+  const [local, setLocal] = useState(null);
+  const shown = local !== null ? local : (perUnit === "" ? "" : fmtN(perUnit));
+  const commit = () => { if (local === null) return; const d = local.replace(/[^\d]/g, ""); const u = d === "" ? undefined : Number(d); onChange(u === undefined ? undefined : (q > 0 ? u * q : u)); setLocal(null); };
   return (
     <div>
-      <input type="text" inputMode="numeric" value={txt} placeholder={ph}
+      <input type="text" inputMode="numeric" value={shown} placeholder={ph}
         title={q > 0 ? `за единицу × ${fmtN(q)} = ${fmtN(totalNum)} ₸` : "сумма"}
-        onChange={e => { const d = e.target.value.replace(/[^\d]/g, ""); const u = d === "" ? undefined : Number(d); onChange(u === undefined ? undefined : (q > 0 ? u * q : u)); }}
+        onChange={e => setLocal(e.target.value)} onBlur={commit}
+        onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
         style={{ width: "100%", minWidth: 64, border: "1px solid #e2e8f0", borderRadius: 5, padding: "5px 6px", fontSize: 12.5, textAlign: "right", fontFamily: "inherit", outline: "none", boxSizing: "border-box", color: "#0f172a" }} />
       {q > 0 && totalNum > 0 && <div style={{ fontSize: 9.5, color: "#94a3b8", textAlign: "right", marginTop: 2, whiteSpace: "nowrap" }}>= {fmtN(totalNum)} ₸</div>}
     </div>
