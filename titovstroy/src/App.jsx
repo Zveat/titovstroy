@@ -4681,6 +4681,24 @@ ${reqBlock}`;
       setBackupsModal(backups);
     } catch(e) { setBackupsModal([]); }
   };
+  // ТОЧЕЧНОЕ ВОССТАНОВЛЕНИЕ: вернуть ТОЛЬКО пропавшие сметы из снимка (по id),
+  // не трогая ни одну существующую смету и вообще ничего больше (финансы/объекты — не при чём).
+  const recoverMissingFromBackup = async (snap) => {
+    if (!snap || !snap.data) return;
+    let list;
+    try { list = JSON.parse(snap.data); } catch { window.alert("Не удалось прочитать бэкап"); return; }
+    if (!Array.isArray(list)) { window.alert("Бэкап повреждён"); return; }
+    list = list.filter(e => e && typeof e==="object" && e.id);
+    const haveIds = new Set(estimatesRef.current.map(e => e.id));
+    const missing = list.filter(e => !haveIds.has(e.id));
+    if (missing.length === 0) { window.alert("В этом снимке нет смет, которых сейчас не хватает — все уже на месте."); return; }
+    const names = missing.slice(0, 12).map(e => `• ${e.proj?.name || "Без названия"}${e.proj?.address ? ` — ${e.proj.address}` : ""}`).join("\n");
+    if (!window.confirm(`Вернуть недостающие сметы из снимка ${new Date(snap.ts).toLocaleString("ru-RU")}?\n\nБудет ДОБАВЛЕНО: ${missing.length}\n${names}${missing.length > 12 ? `\n…и ещё ${missing.length - 12}` : ""}\n\nСуществующие сметы, финансы и всё остальное НЕ изменятся — только добавятся пропавшие.`)) return;
+    // merge (без replace): недостающие добавятся, существующие и облачные сметы останутся как есть
+    await saveEstimates([...estimatesRef.current, ...missing]);
+    setBackupsModal(null);
+    window.alert(`Возвращено смет: ${missing.length} ✓\nОстальное осталось как было.`);
+  };
   const restoreBackup = async (snap) => {
     if (!snap || !snap.data) return;
     let list;
@@ -4744,6 +4762,20 @@ ${reqBlock}`;
     } catch { setWsBackupsModal([]); }
   };
 
+  // Точечно вытащить ТОЛЬКО пропавшие сметы из снимка рабочего пространства,
+  // не восстанавливая финансы/объекты/договоры (их не трогаем совсем).
+  const recoverMissingEstimatesFromWs = async (snap) => {
+    const list = Array.isArray(snap?.estimates) ? snap.estimates.filter(e => e && e.id) : [];
+    if (!list.length) { window.alert("В этом снимке нет смет."); return; }
+    const haveIds = new Set(estimatesRef.current.map(e => e.id));
+    const missing = list.filter(e => !haveIds.has(e.id));
+    if (missing.length === 0) { window.alert("В этом снимке нет смет, которых сейчас не хватает — все уже на месте."); return; }
+    const names = missing.slice(0, 12).map(e => `• ${e.proj?.name || "Без названия"}${e.proj?.address ? ` — ${e.proj.address}` : ""}`).join("\n");
+    if (!window.confirm(`Вернуть недостающие сметы из снимка ${new Date(snap.ts).toLocaleString("ru-RU")}?\n\nБудет ДОБАВЛЕНО смет: ${missing.length}\n${names}${missing.length > 12 ? `\n…и ещё ${missing.length - 12}` : ""}\n\nФинансы, объекты и договоры НЕ трогаем — добавятся только пропавшие сметы.`)) return;
+    await saveEstimates([...estimatesRef.current, ...missing]);
+    setWsBackupsModal(null);
+    window.alert(`Возвращено смет: ${missing.length} ✓\nФинансы и всё остальное не тронуты.`);
+  };
   const restoreWorkspace = async (snap) => {
     if (!snap) return;
     const o = Array.isArray(snap.objects) ? snap.objects : [];
@@ -8088,7 +8120,7 @@ ${reqBlock}`;
               <div style={{fontWeight:800,fontSize:16,color:"#0f172a"}}>🕘 Бэкапы архива</div>
               <button onClick={()=>setBackupsModal(null)} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#94a3b8"}}>✕</button>
             </div>
-            <div style={{fontSize:12,color:"#94a3b8",marginBottom:14}}>Снимки архива перед каждой записью (последние 20). Можно откатиться к любому.</div>
+            <div style={{fontSize:12,color:"#94a3b8",marginBottom:14}}>Снимки архива перед каждой записью (последние 20). <b>«Вернуть недостающие»</b> — добавит только пропавшие сметы, ничего существующего и финансы не тронет. <b>«Восстановить»</b> — откатит весь архив смет к снимку.</div>
             {backupsModal.length===0 && <div style={{textAlign:"center",padding:"30px 0",color:"#94a3b8",fontSize:13}}>Бэкапов пока нет</div>}
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
               {backupsModal.map((snap,i)=>(
@@ -8097,10 +8129,18 @@ ${reqBlock}`;
                     <div style={{fontSize:13,fontWeight:600,color:"#0f172a"}}>{new Date(snap.ts).toLocaleString("ru-RU")}</div>
                     <div style={{fontSize:11,color:"#94a3b8"}}>Смет: {snap.count}{snap.by?` · ${snap.by}`:""}{i===0?" · последний":""}</div>
                   </div>
-                  <button onClick={()=>restoreBackup(snap)}
-                    style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(37,99,235,.2)",borderRadius:8,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                    Восстановить
-                  </button>
+                  <div style={{display:"flex",gap:6,flexShrink:0}}>
+                    <button onClick={()=>recoverMissingFromBackup(snap)}
+                      title="Добавить только пропавшие сметы. Существующие сметы и финансы не изменятся."
+                      style={{background:"#ecfdf5",color:"#059669",border:"1px solid rgba(5,150,105,.25)",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                      Вернуть недостающие
+                    </button>
+                    <button onClick={()=>restoreBackup(snap)}
+                      title="Откатить весь архив смет к этому снимку (существующие сметы заменятся версиями из снимка). Финансы не трогает."
+                      style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(37,99,235,.2)",borderRadius:8,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                      Восстановить
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -8127,13 +8167,22 @@ ${reqBlock}`;
                     <div style={{fontSize:13,fontWeight:600,color:"#0f172a"}}>{new Date(snap.ts).toLocaleString("ru-RU")}</div>
                     <div style={{fontSize:11,color:"#94a3b8"}}>📦 {snap.counts?.o??(snap.objects?.length||0)} · 📋 {snap.counts?.e??(snap.estimates?.length||0)} · 📄 {snap.counts?.c??(snap.contracts?.length||0)} · 💰 {snap.counts?.f??(snap.financeTx?.length||0)} оп.{snap.by?` · ${snap.by}`:""}{i===0?" · последний":""}</div>
                   </div>
-                  <button onClick={()=>restoreWorkspace(snap)}
-                    style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(37,99,235,.2)",borderRadius:8,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                    Восстановить
-                  </button>
+                  <div style={{display:"flex",gap:6,flexShrink:0}}>
+                    <button onClick={()=>recoverMissingEstimatesFromWs(snap)}
+                      title="Добавить только пропавшие сметы из этого снимка. Финансы, объекты и договоры не трогаем."
+                      style={{background:"#ecfdf5",color:"#059669",border:"1px solid rgba(5,150,105,.25)",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                      Вернуть сметы
+                    </button>
+                    <button onClick={()=>restoreWorkspace(snap)}
+                      title="Восстановить ВСЁ из снимка: объекты, сметы, договоры и финансы. Текущее уйдёт в бэкап."
+                      style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(37,99,235,.2)",borderRadius:8,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                      Восстановить всё
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
+            <div style={{fontSize:11,color:"#94a3b8",marginTop:12,lineHeight:1.5}}><b>«Вернуть сметы»</b> — безопасно: добавит только пропавшие сметы, финансы и остальное не изменятся. <b>«Восстановить всё»</b> — откатит объекты/сметы/договоры/финансы к снимку.</div>
           </div>
         </div>
       )}
