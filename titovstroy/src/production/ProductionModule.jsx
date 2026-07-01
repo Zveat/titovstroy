@@ -911,6 +911,24 @@ function NumCell({ value, onChange, ph = "—" }) {
     onChange={e => { const d = e.target.value.replace(/[^\d]/g, ""); onChange(d === "" ? undefined : Number(d)); }}
     style={{ width: "100%", minWidth: 64, border: "1px solid #e2e8f0", borderRadius: 5, padding: "5px 6px", fontSize: 12.5, textAlign: "right", fontFamily: "inherit", outline: "none", boxSizing: "border-box", color: "#0f172a" }} />;
 }
+// Ввод себестоимости ЗА ЕДИНИЦУ: в поле пишем цену за 1 ед., а храним итог (за ед. × кол-во).
+// Так маржа и ИТОГО считаются корректно, а старые данные (хранятся итогом) показываются как итог÷кол-во.
+function PerUnitCell({ total, qty, onChange, ph = "—" }) {
+  const q = Number(qty) || 0;
+  const totalNum = Number(total) || 0;
+  const perUnit = (total === undefined || total === null || total === "") ? "" : (q > 0 ? Math.round(totalNum / q) : totalNum);
+  const txt = perUnit === "" ? "" : new Intl.NumberFormat("ru-RU").format(perUnit);
+  const fmtN = n => new Intl.NumberFormat("ru-RU").format(n);
+  return (
+    <div>
+      <input type="text" inputMode="numeric" value={txt} placeholder={ph}
+        title={q > 0 ? `за единицу × ${fmtN(q)} = ${fmtN(totalNum)} ₸` : "сумма"}
+        onChange={e => { const d = e.target.value.replace(/[^\d]/g, ""); const u = d === "" ? undefined : Number(d); onChange(u === undefined ? undefined : (q > 0 ? u * q : u)); }}
+        style={{ width: "100%", minWidth: 64, border: "1px solid #e2e8f0", borderRadius: 5, padding: "5px 6px", fontSize: 12.5, textAlign: "right", fontFamily: "inherit", outline: "none", boxSizing: "border-box", color: "#0f172a" }} />
+      {q > 0 && totalNum > 0 && <div style={{ fontSize: 9.5, color: "#94a3b8", textAlign: "right", marginTop: 2, whiteSpace: "nowrap" }}>= {fmtN(totalNum)} ₸</div>}
+    </div>
+  );
+}
 
 function FinanceTab({ prod, patch, fmt, finSummary }) {
   const stages = prod.stages || [];
@@ -964,8 +982,8 @@ function FinanceTab({ prod, patch, fmt, finSummary }) {
               <tr>
                 <th style={{ ...th, textAlign: "left", minWidth: 200 }}>Наименование работы</th>
                 <th style={{ ...th, textAlign: "right" }}>Цена, ₸</th>
-                <th style={{ ...th, textAlign: "right" }}>Себ. план, ₸</th>
-                <th style={{ ...th, textAlign: "right" }}>Себ. факт, ₸</th>
+                <th style={{ ...th, textAlign: "right" }}>Себ. план /ед, ₸</th>
+                <th style={{ ...th, textAlign: "right" }}>Себ. факт /ед, ₸</th>
                 <th style={{ ...th, textAlign: "right" }}>Маржа план</th>
                 <th style={{ ...th, textAlign: "right" }}>Маржа факт</th>
                 <th style={{ ...th, textAlign: "center" }}>Опл.</th>
@@ -987,8 +1005,8 @@ function FinanceTab({ prod, patch, fmt, finSummary }) {
                           <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="+ примечание" style={{ width: "100%", maxWidth: 240, border: "none", borderBottom: "1px dashed #e2e8f0", fontSize: 11, color: "#64748b", fontFamily: "inherit", outline: "none", marginTop: 3, padding: "1px 0", background: "transparent" }} />
                         </td>
                         <td style={{ ...tdc, minWidth: 92 }}><NumCell value={s.priceClient} onChange={v => upd(s.id, { priceClient: v })} /></td>
-                        <td style={{ ...tdc, minWidth: 92 }}><NumCell value={s.costPlan} onChange={v => upd(s.id, { costPlan: v })} /></td>
-                        <td style={{ ...tdc, minWidth: 92 }}><NumCell value={s.costFact} onChange={v => upd(s.id, { costFact: v })} /></td>
+                        <td style={{ ...tdc, minWidth: 92 }}><PerUnitCell total={s.costPlan} qty={s.qty} onChange={v => upd(s.id, { costPlan: v })} /></td>
+                        <td style={{ ...tdc, minWidth: 92 }}><PerUnitCell total={s.costFact} qty={s.qty} onChange={v => upd(s.id, { costFact: v })} /></td>
                         <td style={{ padding: "6px 8px", textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}>{margCell(mPlanSum, mpl)}</td>
                         <td style={{ padding: "6px 8px", textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}>{margCell(mFactSum, mft)}</td>
                         <td style={{ padding: "6px 8px", textAlign: "center", verticalAlign: "top" }}><input type="checkbox" checked={!!s.paid} onChange={e => upd(s.id, { paid: e.target.checked })} title="Оплачено клиентом" style={{ width: 17, height: 17, cursor: "pointer" }} /></td>
