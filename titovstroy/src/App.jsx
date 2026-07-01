@@ -3790,29 +3790,45 @@ function MainApp({ currentUser, setCurrentUser }) {
 
   // Автосохранение сметы
   const _autoSaveRef = useRef(null);
+  const _estFlushRef = useRef(null); // id открытой сметы — для принудительного флеша при уходе
+  // Собрать актуальный список смет из текущего состояния редактора (или null, если сохранять нельзя)
+  const _buildEstimateList = () => {
+    if (!currentId) return null;
+    const cur = estimatesRef.current;
+    const exists = cur.find(e => e.id === currentId);
+    // ЗАЩИТА: не затирать смету с позициями пустой версией (если не явный сброс)
+    if (exists && countFilled(exists.rows) > 0 && countFilled(rows) === 0 && !_allowEmptySave.current) return null;
+    // parentId/dsNumber берём из стейта (новая ДС) ИЛИ из сохранённой записи (открытая ДС). Игнорируем самоссылку.
+    const _ep = exists?.parentId && exists.parentId!==currentId ? exists.parentId : null;
+    const pId = currentParentId || _ep;
+    const dsN = pId ? (currentDsNumber || exists?.dsNumber) : null;
+    const objId = currentObjectId || exists?.objectId || null;
+    const updated = { id:currentId, proj, rows, discount, markup, note, status:estStatus, sentAt: estStatus==="sent" ? (estSentAt||exists?.sentAt||new Date().toISOString().slice(0,10)) : (exists?.sentAt||null), comment:estComment, createdAt:exists?.createdAt||Date.now(), createdBy:exists?.createdBy||currentUser?.name, updatedAt:Date.now(), updatedBy:currentUser?.name, total:final, ...(objId ? {objectId:objId} : {}), ...(pId ? {parentId:pId, dsNumber:dsN} : {}) };
+    updated.history = _appendHistory(exists, updated);
+    return exists ? cur.map(e=>e.id===currentId?updated:e) : [updated,...cur];
+  };
+  const _flushEstimate = () => {
+    const newList = _buildEstimateList();
+    if (!newList) return;
+    setEstimates(newList);
+    saveEstimates(newList);
+  };
   useEffect(() => {
-    if (!currentId) return;
+    if (!currentId) { _estFlushRef.current = null; return; }
+    _estFlushRef.current = currentId;
     if (_autoSaveRef.current) clearTimeout(_autoSaveRef.current);
-    _autoSaveRef.current = setTimeout(() => {
-      const cur = estimatesRef.current;
-      const exists = cur.find(e => e.id === currentId);
-      // ЗАЩИТА: не затирать смету с позициями пустой версией (если не явный сброс)
-      if (exists && countFilled(exists.rows) > 0 && countFilled(rows) === 0 && !_allowEmptySave.current) {
-        return;
-      }
-      // parentId/dsNumber берём из стейта (новая ДС) ИЛИ из сохранённой записи (открытая ДС). Игнорируем самоссылку.
-      const _ep = exists?.parentId && exists.parentId!==currentId ? exists.parentId : null;
-      const pId = currentParentId || _ep;
-      const dsN = pId ? (currentDsNumber || exists?.dsNumber) : null;
-      const objId = currentObjectId || exists?.objectId || null;
-      const updated = { id:currentId, proj, rows, discount, markup, note, status:estStatus, sentAt: estStatus==="sent" ? (estSentAt||exists?.sentAt||new Date().toISOString().slice(0,10)) : (exists?.sentAt||null), comment:estComment, createdAt:exists?.createdAt||Date.now(), createdBy:exists?.createdBy||currentUser?.name, updatedAt:Date.now(), updatedBy:currentUser?.name, total:final, ...(objId ? {objectId:objId} : {}), ...(pId ? {parentId:pId, dsNumber:dsN} : {}) };
-      updated.history = _appendHistory(exists, updated);
-      const newList = exists ? cur.map(e=>e.id===currentId?updated:e) : [updated,...cur];
-      setEstimates(newList);
-      saveEstimates(newList);
-    }, 1500);
+    _autoSaveRef.current = setTimeout(_flushEstimate, 900);
     return () => clearTimeout(_autoSaveRef.current);
   }, [rows, proj, discount, markup, note, estStatus, estSentAt, estComment]);
+  // ПРИНУДИТЕЛЬНЫЙ ФЛЕШ при уходе из редактора сметы: если пользователь ушёл (сменил экран
+  // верхней навигацией) до срабатывания дебаунса — всё равно сохраняем, чтобы смета не пропала.
+  useEffect(() => {
+    if (screen === "editor") return;
+    if (!_estFlushRef.current) return;
+    if (_autoSaveRef.current) clearTimeout(_autoSaveRef.current);
+    _flushEstimate();
+    _estFlushRef.current = null;
+  }, [screen]);
 
   // ── Загрузка списка смет из shared storage ──
   const loadContracts = useCallback(async () => {
@@ -4376,17 +4392,26 @@ ${reqBlock}`;
     });
   };
 
-  // Автосохранение договора
+  // Автосохранение договора: короткий дебаунс + запоминаем последнее состояние для флеша
   const _contractAutoSave = useRef(null);
+  const _editContractRef = useRef(null);
+  const _saveContractNow = (c) => { if (!c || c._mode) return; const list = contractsRef.current.filter(x=>x.id!==c.id); saveContracts([...list, {...c, updatedAt: Date.now()}]); };
   useEffect(() => {
-    if (!currentContract || currentContract._mode) return;
+    if (!currentContract || currentContract._mode) { _editContractRef.current = null; return; }
+    _editContractRef.current = currentContract;
     if (_contractAutoSave.current) clearTimeout(_contractAutoSave.current);
-    _contractAutoSave.current = setTimeout(async () => {
-      const list = contractsRef.current.filter(x=>x.id!==currentContract.id);
-      await saveContracts([...list, {...currentContract, updatedAt: Date.now()}]);
-    }, 1500);
+    const snap = currentContract;
+    _contractAutoSave.current = setTimeout(() => _saveContractNow(snap), 600);
     return () => clearTimeout(_contractAutoSave.current);
   }, [currentContract]);
+  // ФЛЕШ: при любом уходе из редактора договора (кнопка, стрелка, боковое меню) сохраняем последнее состояние
+  useEffect(() => {
+    const open = screen === "contracts" && contractTab === "editor";
+    if (open) return;
+    const c = _editContractRef.current;
+    if (c) { _editContractRef.current = null; _saveContractNow(c); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contractTab, screen]);
 
   // Автосохранение сделки (тест)
   const _dealAutoSave = useRef(null);
@@ -4510,7 +4535,16 @@ ${reqBlock}`;
     // Сметы из базы, которых нет в текущем списке, СОХРАНЯЕМ (другое устройство их добавило).
     let finalList;
     if (replace) {
-      finalList = list;
+      // БЕЗОПАСНАЯ ЗАМЕНА: `list` — источник истины для своих id (восстановление,
+      // перенос сметы, санитизация), НО мы НИКОГДА не роняем сметы, которые есть
+      // в облаке и отсутствуют в списке (кроме явно удалённых removedIds).
+      // Раньше здесь был голый `finalList = list` — из-за него смета, добавленная
+      // на другом устройстве, могла бесследно исчезнуть при любой replace-записи.
+      const rm = new Set(removedIds);
+      const map = new Map();
+      for (const e of stored) if (e && e.id && !rm.has(e.id)) map.set(e.id, e);
+      for (const e of list) { if (!e || !e.id || rm.has(e.id)) continue; map.set(e.id, e); }
+      finalList = [...map.values()];
     } else {
       const map = new Map();
       for (const e of stored) if (e && e.id) map.set(e.id, e);
@@ -4580,8 +4614,22 @@ ${reqBlock}`;
     } catch(e) { console.warn("guard check err", e); }
 
     let finalList;
-    if (replace) finalList = list;
-    else {
+    if (replace) {
+      // БЕЗОПАСНАЯ ЗАМЕНА для коллекций с id (договоры, клиенты, объекты, отчёты…):
+      // список перекрывает свои id, но записи из облака, которых нет в списке, НЕ
+      // теряются (кроме removedIds). Коллекции без id (производство ключуется по
+      // objectId) сохраняем как раньше — голым списком.
+      const idKeyed = list.every(e => e && e.id) && stored.every(e => e && e.id);
+      if (idKeyed) {
+        const rm = new Set(removedIds);
+        const map = new Map();
+        for (const e of stored) if (e && e.id && !rm.has(e.id)) map.set(e.id, e);
+        for (const e of list) { if (!e || !e.id || rm.has(e.id)) continue; map.set(e.id, e); }
+        finalList = [...map.values()];
+      } else {
+        finalList = list;
+      }
+    } else {
       const map = new Map();
       for (const e of stored) if (e && e.id) map.set(e.id, e);
       for (const e of list) {
@@ -10906,8 +10954,9 @@ ${reqBlock}`;
                   contracts.forEach(c=>{ if(isChildType(c) && c.mainNumber && numMap[c.mainNumber]){ const pid=numMap[c.mainNumber].id; (childMap[pid]||(childMap[pid]=[])).push(c); } });
                   const childIds = new Set(Object.values(childMap).flat().map(c=>c.id));
                   const _objIds = new Set(objects.map(o=>o.id));
-                  // показываем договоры без объекта ИЛИ привязанные к несуществующему объекту (сироты), без удалённых
-                  const roots = contracts.filter(c=>!c.deletedAt && !childIds.has(c.id) && (!c.objectId || !_objIds.has(c.objectId)) && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus));
+                  // показываем: договоры подряда — ВСЕГДА; остальные — без объекта или с несуществующим объектом (сироты). Без удалённых.
+                  const _isPodType = c => c.type==="podryad" || c.type==="podryad_annex";
+                  const roots = contracts.filter(c=>!c.deletedAt && !childIds.has(c.id) && (_isPodType(c) || !c.objectId || !_objIds.has(c.objectId)) && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus));
 
                   const renderContractCard = (c, isChild=false) => {
                     const client = contractClients.find(x=>x.id===c.clientId);
@@ -11017,7 +11066,10 @@ ${reqBlock}`;
                 clients={contractClients}
                 contragents={contragents}
                 onUpdate={setCurrentContract}
-                onBack={()=>{
+                onBack={async ()=>{
+                  // Принудительно сохраняем перед выходом (не ждём дебаунс), чтобы ничего не терялось
+                  const c = currentContract;
+                  if (c && !c._mode) { await saveContracts([...contractsRef.current.filter(x=>x.id!==c.id), {...c, updatedAt: Date.now()}]); }
                   if (objectReturnId) {
                     const obj = objectsRef.current.find(x=>x.id===objectReturnId);
                     setObjectReturnId(null);
