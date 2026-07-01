@@ -11077,11 +11077,28 @@ ${reqBlock}`;
                   const _matchType = c => !contractTypeFilter || _docCat(c)===contractTypeFilter;
                   const roots = contracts.filter(c=>!c.deletedAt && !childIds.has(c.id) && (_isPodType(c) || !c.objectId || !_objIds.has(c.objectId)) && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus) && _matchType(c));
 
+                  const workerNameOf = (c) => (workers.find(w=>w.id===c.workerId)?.name) || c.worker?.name || "";
+                  // Создать доп. приложение к договору подряда (приложение №1 встроено в договор, доп идут с №2)
+                  const createPodryadAnnex = (parent) => {
+                    const kids = childMap[parent.id]||[];
+                    const nextNo = kids.reduce((m,k)=>Math.max(m, k.appendix||0), 1) + 1;
+                    setCurrentContract({
+                      id: Date.now().toString(), type:"podryad_annex", appendix: nextNo,
+                      mainNumber: parent.number||"", mainDate: parent.date||"",
+                      number: parent.number||"", date: new Date().toISOString().slice(0,10),
+                      workerId: parent.workerId||"", ...(parent.worker?{worker:parent.worker}:{}),
+                      contragentId: parent.contragentId||"", works: [], priceMode: parent.priceMode||"perline",
+                      note:"", createdBy: currentUser.name, createdById: currentUser.id,
+                    });
+                    setContractTab("editor");
+                  };
+
                   const renderContractCard = (c, isChild=false, kidsCount=0, collapsed=false) => {
                     const client = contractClients.find(x=>x.id===c.clientId);
                     const ca = contragents.find(x=>x.id===c.contragentId);
                     const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
                     const isPod = c.type==="podryad" || c.type==="podryad_annex";
+                    const workerName = isPod ? workerNameOf(c) : "";
                     return (
                       <div key={c.id}>
                         {isChild && <div style={{display:"flex",alignItems:"center",gap:6,marginLeft:26,marginBottom:2,marginTop:4}}>
@@ -11100,13 +11117,15 @@ ${reqBlock}`;
                                 )}
                                 {isPod && !isChild && <span style={{fontSize:14,flexShrink:0}}>🔨</span>}
                                 <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>
-                                  {contractTitle(c)}
+                                  {contractTitle(c)}{isPod && workerName ? ` — ${workerName}` : ""}
                                 </div>
                                 {(()=>{ const s=CONTRACT_STATUSES.find(x=>x.key===(c.contractStatus||"draft"))||CONTRACT_STATUSES[0]; return <span style={{fontSize:10,fontWeight:700,color:s.color,background:s.bg,borderRadius:4,padding:"1px 7px",flexShrink:0,whiteSpace:"nowrap"}}>{s.label}</span>; })()}
                                 {!isChild && kidsCount>0 && <span style={{fontSize:10,fontWeight:700,color:"#7c3aed",background:"rgba(124,58,237,.08)",borderRadius:4,padding:"1px 7px",flexShrink:0,whiteSpace:"nowrap"}}>приложений: {kidsCount}</span>}
                               </div>
                               <div style={{fontSize:12,color:"#94a3b8",marginTop:3}}>
-                                {client ? `👤 ${client.name}` : c.estClient ? `👤 ${c.estClient} (не добавлен)` : "Клиент не выбран"}
+                                {isPod
+                                  ? (workerName ? `🔨 ${workerName}` : "Подрядчик не выбран")
+                                  : (client ? `👤 ${client.name}` : c.estClient ? `👤 ${c.estClient} (не добавлен)` : "Клиент не выбран")}
                                 {ca && <span style={{marginLeft:8}}>· {ca.name}</span>}
                               </div>
                               <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>
@@ -11116,6 +11135,10 @@ ${reqBlock}`;
                             <div style={{textAlign:"right",flexShrink:0}}>
                               <div style={{fontWeight:800,fontSize:16,color:"#0f172a"}}>{fmt(total)} ₸</div>
                               <div style={{display:"flex",gap:5,marginTop:6}}>
+                                {c.type==="podryad" && !isChild && currentUser.role!=="viewer" && (
+                                  <button title="Создать доп. приложение к этому договору подряда" onClick={e=>{e.stopPropagation(); createPodryadAnnex(c);}}
+                                    style={{background:"#ecfdf5",color:"#059669",border:"1px solid rgba(5,150,105,.25)",borderRadius:5,padding:"3px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ Приложение</button>
+                                )}
                                 <button onClick={e=>{e.stopPropagation();
                                   const cl = contractClients.find(x=>x.id===c.clientId);
                                   const ca2 = contragents.find(x=>x.id===c.contragentId);
