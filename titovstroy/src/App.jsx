@@ -3644,6 +3644,8 @@ function MainApp({ currentUser, setCurrentUser }) {
   const [listFilterManager, setListFilterManager] = useState(""); // "" = все
   const [listFilterStatus, setListFilterStatus] = useState(""); // "" = все статусы
   const [contractFilterStatus, setContractFilterStatus] = useState(""); // "" = все статусы договоров
+  const [contractTypeFilter, setContractTypeFilter] = useState(""); // "" = все | "podryad" | "other"
+  const [collapsedContracts, setCollapsedContracts] = useState({}); // id корневого договора -> true, если приложения свёрнуты
   const [listSort, setListSort] = useState("date"); // "date" | "sum" | "name"
   const debouncedListSearch = useDebounce(listSearch, 200);
 
@@ -11035,6 +11037,17 @@ ${reqBlock}`;
                       style={{background:contractFilterStatus===s.key?s.bg:"rgba(0,0,0,.03)",color:contractFilterStatus===s.key?s.color:"#94a3b8",border:`1px solid ${contractFilterStatus===s.key?s.color:"#e2e8f0"}`,borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{s.label}</button>
                   ))}
                 </div>
+                {/* Фильтр по типу документа */}
+                <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:2}}>
+                  {[["","Все",""],["podryad","🔨 Подряд","#059669"],["other","📄 Договоры","#2563eb"]].map(([k,l,col])=>{
+                    const act = contractTypeFilter===k;
+                    const c = col||"#2563eb";
+                    return (
+                      <button key={k} onClick={()=>setContractTypeFilter(k)}
+                        style={{background:act?c:"rgba(0,0,0,.03)",color:act?"#fff":"#94a3b8",border:`1px solid ${act?c:"#e2e8f0"}`,borderRadius:8,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
+                    );
+                  })}
+                </div>
                 {contracts.length === 0 && (
                   <div style={{textAlign:"center",padding:"60px 0",color:"#94a3b8"}}>
                     <div style={{fontSize:40,marginBottom:12}}>📋</div>
@@ -11052,35 +11065,45 @@ ${reqBlock}`;
                   };
                   // дочерние = приложения/доп.соглашения, ссылающиеся на номер существующего договора
                   const isChildType = (c) => (c.type==="annex"||c.type==="design_add"||c.type==="podryad_annex");
-                  const numMap = {}; // number -> contract
-                  contracts.forEach(c=>{ if(c.number && !isChildType(c)) numMap[c.number]=c; });
+                  const _norm = s => String(s||"").trim().toLowerCase().replace(/[\s№#]/g,"");
+                  const numMap = {}; // нормализованный номер -> контракт
+                  contracts.forEach(c=>{ if(c.number && !isChildType(c)){ const k=_norm(c.number); if(k) numMap[k]=c; } });
                   const childMap = {}; // parentId -> [child]
-                  contracts.forEach(c=>{ if(isChildType(c) && c.mainNumber && numMap[c.mainNumber]){ const pid=numMap[c.mainNumber].id; (childMap[pid]||(childMap[pid]=[])).push(c); } });
+                  contracts.forEach(c=>{ if(isChildType(c) && c.mainNumber){ const k=_norm(c.mainNumber); if(numMap[k]){ const pid=numMap[k].id; (childMap[pid]||(childMap[pid]=[])).push(c); } } });
                   const childIds = new Set(Object.values(childMap).flat().map(c=>c.id));
                   const _objIds = new Set(objects.map(o=>o.id));
                   // показываем: договоры подряда — ВСЕГДА; остальные — без объекта или с несуществующим объектом (сироты). Без удалённых.
                   const _isPodType = c => c.type==="podryad" || c.type==="podryad_annex";
-                  const roots = contracts.filter(c=>!c.deletedAt && !childIds.has(c.id) && (_isPodType(c) || !c.objectId || !_objIds.has(c.objectId)) && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus));
+                  const _matchType = c => !contractTypeFilter || (contractTypeFilter==="podryad" ? _isPodType(c) : !_isPodType(c));
+                  const roots = contracts.filter(c=>!c.deletedAt && !childIds.has(c.id) && (_isPodType(c) || !c.objectId || !_objIds.has(c.objectId)) && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus) && _matchType(c));
 
-                  const renderContractCard = (c, isChild=false) => {
+                  const renderContractCard = (c, isChild=false, kidsCount=0, collapsed=false) => {
                     const client = contractClients.find(x=>x.id===c.clientId);
                     const ca = contragents.find(x=>x.id===c.contragentId);
                     const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
+                    const isPod = c.type==="podryad" || c.type==="podryad_annex";
                     return (
                       <div key={c.id}>
-                        {isChild && <div style={{display:"flex",alignItems:"center",gap:6,marginLeft:16,marginBottom:2,marginTop:4}}>
+                        {isChild && <div style={{display:"flex",alignItems:"center",gap:6,marginLeft:26,marginBottom:2,marginTop:4}}>
                           <div style={{width:2,height:14,background:"#e2e8f0",borderRadius:2,flexShrink:0}}/>
                           <span style={{fontSize:10,color:"#7c3aed",fontWeight:700,background:"rgba(124,58,237,.08)",borderRadius:3,padding:"1px 6px"}}>Приложение №{c.appendix||2}</span>
                         </div>}
-                        <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:8,padding:"14px 18px",cursor:"pointer",transition:"all .15s",marginLeft:isChild?16:0,borderLeft:isChild?"3px solid #ede9fe":"1px solid #e5e7eb"}}
+                        <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:8,padding:"14px 18px",cursor:"pointer",transition:"all .15s",marginLeft:isChild?26:0,borderLeft:isChild?"3px solid #ede9fe":(isPod?"3px solid #10b981":"1px solid #e5e7eb")}}
                           onClick={()=>{ setCurrentContract({...c}); setContractTab("editor"); }}>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                                {!isChild && kidsCount>0 && (
+                                  <button onClick={e=>{ e.stopPropagation(); setCollapsedContracts(m=>({...m,[c.id]:!m[c.id]})); }}
+                                    title={collapsed?"Развернуть приложения":"Свернуть приложения"}
+                                    style={{background:"rgba(0,0,0,.04)",border:"1px solid #e2e8f0",borderRadius:5,width:22,height:22,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:11,color:"#64748b",flexShrink:0,padding:0}}>{collapsed?"▸":"▾"}</button>
+                                )}
+                                {isPod && !isChild && <span style={{fontSize:14,flexShrink:0}}>🔨</span>}
                                 <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>
                                   {contractTitle(c)}
                                 </div>
                                 {(()=>{ const s=CONTRACT_STATUSES.find(x=>x.key===(c.contractStatus||"draft"))||CONTRACT_STATUSES[0]; return <span style={{fontSize:10,fontWeight:700,color:s.color,background:s.bg,borderRadius:4,padding:"1px 7px",flexShrink:0,whiteSpace:"nowrap"}}>{s.label}</span>; })()}
+                                {!isChild && kidsCount>0 && <span style={{fontSize:10,fontWeight:700,color:"#7c3aed",background:"rgba(124,58,237,.08)",borderRadius:4,padding:"1px 7px",flexShrink:0,whiteSpace:"nowrap"}}>приложений: {kidsCount}</span>}
                               </div>
                               <div style={{fontSize:12,color:"#94a3b8",marginTop:3}}>
                                 {client ? `👤 ${client.name}` : c.estClient ? `👤 ${c.estClient} (не добавлен)` : "Клиент не выбран"}
@@ -11115,12 +11138,21 @@ ${reqBlock}`;
                     );
                   };
 
-                  return roots.map(c=>(
-                    <div key={c.id}>
-                      {renderContractCard(c,false)}
-                      {(childMap[c.id]||[]).sort((a,b)=>(a.appendix||0)-(b.appendix||0)).map(ch=>renderContractCard(ch,true))}
+                  if (roots.length===0) return (
+                    <div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:13}}>
+                      Ничего не найдено по выбранным фильтрам
                     </div>
-                  ));
+                  );
+                  return roots.map(c=>{
+                    const kids = (childMap[c.id]||[]).sort((a,b)=>(a.appendix||0)-(b.appendix||0));
+                    const collapsed = !!collapsedContracts[c.id];
+                    return (
+                      <div key={c.id} style={{display:"flex",flexDirection:"column",gap:0}}>
+                        {renderContractCard(c,false,kids.length,collapsed)}
+                        {!collapsed && kids.map(ch=>renderContractCard(ch,true))}
+                      </div>
+                    );
+                  });
                 })()}
               </div>
             )}
