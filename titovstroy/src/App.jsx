@@ -2456,6 +2456,18 @@ function SearchSelect({ value, options, onChange, placeholder = "🔍 Поиск
   );
 }
 
+// Числовое поле с ЛОКАЛЬНЫМ вводом: пока печатаешь — меняется только само поле,
+// в стейт (и пересчёт всей сметы) значение уходит на blur/Enter. Убирает тормоза при вводе цен/объёмов.
+function NumInput({ value, onCommit, style, min = "0", placeholder, className, disabled }) {
+  const [local, setLocal] = useState(null);
+  const shown = local !== null ? local : ((value === undefined || value === null) ? "" : String(value));
+  const commit = () => { if (local === null) return; onCommit(local); setLocal(null); };
+  return <input type="number" min={min} placeholder={placeholder} className={className} disabled={disabled} value={shown}
+    onChange={e => setLocal(e.target.value)} onBlur={commit}
+    onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
+    style={style} />;
+}
+
 function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onGDoc, onAddClientFromEstimate, onUpdateClient, onCreateClient, workers=[], onCreateWorker, importObjects=[], getObjectWorks, currentUserRole, fmt }) {
   const [withStamp, setWithStamp] = useState(true);
   const [showClientForm, setShowClientForm] = useState(false);
@@ -7652,14 +7664,14 @@ ${reqBlock}`;
                               <div className="wrow-mob-extra" style={{flexDirection:"column",alignItems:"flex-start",gap:3,display:"none",marginTop:4}}>
                                 <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                                   <span style={{fontSize:11,color:"#94a3b8"}}>Цена:</span>
-                                  <input type="number" min="0"
+                                  <NumInput
                                     value={r.manualPrice !== undefined ? r.manualPrice : (price||"")}
-                                    onChange={e=>setRow(work.code || work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}
+                                    onCommit={v=>setRow(work.code || work.name,"manualPrice",v===""?undefined:Number(v))}
                                     style={{width:80,border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 5px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
                                   <span style={{fontSize:11,color:"#94a3b8"}}>Объём:</span>
-                                  <input type="number" min="0"
+                                  <NumInput
                                     value={r.qty||""}
-                                    onChange={e=>setRow(work.code || work.name,"qty",e.target.value)}
+                                    onCommit={v=>setRow(work.code || work.name,"qty",v)}
                                     style={{width:60,border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 5px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
                                 </div>
                                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%"}}>
@@ -7675,15 +7687,15 @@ ${reqBlock}`;
                                 style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:4,padding:"3px 4px",fontSize:11,textAlign:"center",fontFamily:"inherit",background:"#fff"}}/>
                             </div>
                             <div className="wrow-desk" style={{textAlign:"right"}}>
-                              <input type="number" min="0"
+                              <NumInput
                                 value={r.manualPrice !== undefined ? r.manualPrice : (price||"")}
-                                onChange={e=>setRow(work.code || work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}
+                                onCommit={v=>setRow(work.code || work.name,"manualPrice",v===""?undefined:Number(v))}
                                 style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:4,padding:"3px 6px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
                             </div>
                             <div className="wrow-desk" style={{textAlign:"right"}}>
-                              <input type="number" min="0"
+                              <NumInput
                                 value={r.qty||""}
-                                onChange={e=>setRow(work.code || work.name,"qty",e.target.value)}
+                                onCommit={v=>setRow(work.code || work.name,"qty",v)}
                                 style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:4,padding:"3px 6px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
                             </div>
                             <div className="wrow-desk" style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:6}}>
@@ -7804,8 +7816,8 @@ ${reqBlock}`;
                         {currentUser.role!=="viewer" && <span onClick={()=>setEditingPriceRow(work.name)} title="Ввести цену" style={{cursor:"pointer",fontSize:10,color:"#94a3b8"}}>✏</span>}
                       </div>
                     );
-                    const qtyInput = <input className="num" style={{width:70,textAlign:"center",opacity:currentUser.role==="viewer"?.4:1}} type="number" min="0" placeholder="0" disabled={currentUser.role==="viewer"}
-                      value={r.qty||""} onChange={e=>setRow(work.code || work.name,"qty",e.target.value)}/>;
+                    const qtyInput = <NumInput className="num" style={{width:70,textAlign:"center",opacity:currentUser.role==="viewer"?.4:1}} disabled={currentUser.role==="viewer"}
+                      value={r.qty||""} onCommit={v=>setRow(work.code || work.name,"qty",v)}/>;
                     const nameBlock = (
                       <div style={{minWidth:0}}>
                         {showBreadcrumb && <div style={{fontSize:10,color:"#334155",marginBottom:2}}>{work.cat} › {work.sub}</div>}
@@ -7888,8 +7900,8 @@ ${reqBlock}`;
                           <span style={{fontSize:11,color:"#94a3b8",whiteSpace:"nowrap"}}>
                             {displayPrice!=null ? fmt(displayPrice)+" ₸/ед" : <span style={{fontStyle:"italic",fontSize:10}}>нет цены</span>}
                           </span>
-                          <input className="num" style={{width:82,textAlign:"center",fontSize:16,padding:"7px 10px",fontWeight:700}} type="number" min="0" placeholder="0"
-                            value={r.qty||""} onChange={e=>setRow(work.code || work.name,"qty",e.target.value)}/>
+                          <NumInput className="num" style={{width:82,textAlign:"center",fontSize:16,padding:"7px 10px",fontWeight:700}} placeholder="0"
+                            value={r.qty||""} onCommit={v=>setRow(work.code || work.name,"qty",v)}/>
                           {total>0
                             ? <span style={{fontSize:12,fontWeight:800,color:"#0f172a",whiteSpace:"nowrap"}}>{fmt(total)} ₸</span>
                             : <span style={{fontSize:10,color:"#334155"}}>—</span>}
@@ -10168,7 +10180,7 @@ ${reqBlock}`;
                     </div>
                     <div style={{display:"grid",gap:12}}>
                       <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Дата</div><input type="date" className="fi" value={m.date} onChange={e=>set("date",e.target.value)}/></div>
-                      <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Сумма, ₸</div><input type="number" className="fi" value={m.amount} onChange={e=>set("amount",e.target.value)} placeholder="0"/></div>
+                      <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Сумма, ₸</div><NumInput className="fi" value={m.amount} onCommit={v=>set("amount",v)} placeholder="0"/></div>
                       {m.type==="transfer" ? (<>
                         <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Со счёта</div><select className="fi" value={m.account} onChange={e=>set("account",e.target.value)}>{financeMeta.accounts.map(a=><option key={a.id} value={a.name}>{a.name}</option>)}</select></div>
                         <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>На счёт</div><select className="fi" value={m.accountTo} onChange={e=>set("accountTo",e.target.value)}>{financeMeta.accounts.map(a=><option key={a.id} value={a.name}>{a.name}</option>)}</select></div>
@@ -11066,9 +11078,9 @@ ${reqBlock}`;
                   const isChildType = (c) => (c.type==="annex"||c.type==="design_add"||c.type==="podryad_annex");
                   const _norm = s => String(s||"").trim().toLowerCase().replace(/[\s№#]/g,"");
                   const numMap = {}; // нормализованный номер -> контракт
-                  contracts.forEach(c=>{ if(c.number && !isChildType(c)){ const k=_norm(c.number); if(k) numMap[k]=c; } });
-                  const childMap = {}; // parentId -> [child]
-                  contracts.forEach(c=>{ if(isChildType(c) && c.mainNumber){ const k=_norm(c.mainNumber); if(numMap[k]){ const pid=numMap[k].id; (childMap[pid]||(childMap[pid]=[])).push(c); } } });
+                  contracts.forEach(c=>{ if(!c.deletedAt && c.number && !isChildType(c)){ const k=_norm(c.number); if(k) numMap[k]=c; } });
+                  const childMap = {}; // parentId -> [child] (удалённые не показываем — уходят в корзину)
+                  contracts.forEach(c=>{ if(!c.deletedAt && isChildType(c) && c.mainNumber){ const k=_norm(c.mainNumber); if(numMap[k]){ const pid=numMap[k].id; (childMap[pid]||(childMap[pid]=[])).push(c); } } });
                   const childIds = new Set(Object.values(childMap).flat().map(c=>c.id));
                   const _objIds = new Set(objects.map(o=>o.id));
                   // показываем: договоры подряда — ВСЕГДА; остальные — без объекта или с несуществующим объектом (сироты). Без удалённых.
