@@ -3266,6 +3266,127 @@ function PublicKP({ id }) {
   );
 }
 
+// ─── ПУБЛИЧНАЯ СТРАНИЦА «ПРОГРЕСС ОБЪЕКТА» (по ссылке #/progress/<токен>, без входа) ───
+const PROGRESS_NODE = (token) => "titovstroy-progress-" + token;
+const _PROG_ST = { todo:{l:"Не начат",c:"#64748b",bg:"#f1f5f9",i:"⏳"}, progress:{l:"В работе",c:"#2563eb",bg:"#eff6ff",i:"🔨"}, done:{l:"Готово",c:"#059669",bg:"#ecfdf5",i:"✓"}, delayed:{l:"Задержка",c:"#dc2626",bg:"#fef2f2",i:"⚠️"} };
+function PublicProgress({ token }) {
+  const [state, setState] = useState("loading"); // loading | notfound | ok
+  const [s, setS] = useState(null);
+  useEffect(() => {
+    let stop = false;
+    (async () => {
+      try {
+        const r = await storage.getResult(PROGRESS_NODE(token));
+        if (stop) return;
+        if (r.status === "found" && r.value) {
+          let data = null; try { data = JSON.parse(r.value); } catch {}
+          if (data && !data.revoked && Array.isArray(data.stages)) {
+            setS(data); setState("ok");
+            try { storage.set(PROGRESS_NODE(token), JSON.stringify({ ...data, viewedAt: Date.now(), viewCount: (data.viewCount || 0) + 1 })); } catch {}
+            return;
+          }
+        }
+        setState("notfound");
+      } catch { if (!stop) setState("notfound"); }
+    })();
+    return () => { stop = true; };
+  }, [token]);
+
+  const fmt = (n) => (Math.round(Number(n) || 0)).toLocaleString("ru-RU");
+  const dt = (d) => d ? new Date(d).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" }) : "";
+  const wrap = (children) => (
+    <div style={{ minHeight: "100vh", background: "#eef2f7", padding: "calc(16px + env(safe-area-inset-top,0px)) 12px 40px", boxSizing: "border-box", fontFamily: "'Golos Text','Segoe UI',sans-serif", color: "#0f172a" }}>
+      <div style={{ maxWidth: 560, margin: "0 auto" }}>{children}</div>
+    </div>
+  );
+
+  if (state === "loading") return wrap(<div style={{ textAlign: "center", padding: "60px 0", color: "#94a3b8" }}>Загрузка…</div>);
+  if (state === "notfound") return wrap(
+    <div style={{ textAlign: "center", padding: "60px 20px", background: "#fff", borderRadius: 16 }}>
+      <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
+      <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 6 }}>Ссылка недоступна</div>
+      <div style={{ fontSize: 13, color: "#64748b" }}>Возможно, доступ закрыт. Свяжитесь с менеджером.</div>
+    </div>
+  );
+
+  const pct = Math.max(0, Math.min(100, Number(s.progressPct) || 0));
+  const pay = s.payment || {};
+  return wrap(<>
+    {/* Шапка */}
+    <div style={{ background: "linear-gradient(135deg,#1d4ed8,#2563eb)", color: "#fff", borderRadius: 16, padding: "20px 22px", marginBottom: 14, boxShadow: "0 6px 20px rgba(37,99,235,.25)" }}>
+      <div style={{ fontSize: 12, opacity: .85, marginBottom: 4 }}>Ваш объект</div>
+      <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1.15 }}>{s.objectAddress || s.clientName || "Ремонт"}</div>
+      {s.managerName && <div style={{ fontSize: 12.5, opacity: .9, marginTop: 8 }}>Менеджер: {s.managerName}</div>}
+    </div>
+
+    {/* Прогресс */}
+    <div style={{ background: "#fff", borderRadius: 16, padding: "18px 20px", marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+        <span style={{ fontWeight: 800, fontSize: 15 }}>Готовность</span>
+        <span style={{ fontWeight: 900, fontSize: 22, color: "#2563eb" }}>{pct}%</span>
+      </div>
+      <div style={{ height: 12, background: "#e2e8f0", borderRadius: 8, overflow: "hidden" }}>
+        <div style={{ width: pct + "%", height: "100%", background: "linear-gradient(90deg,#22c55e,#16a34a)", borderRadius: 8, transition: "width .4s" }} />
+      </div>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 12, fontSize: 12.5, color: "#64748b" }}>
+        {s.startDate && <span>Старт: <b style={{ color: "#334155" }}>{dt(s.startDate)}</b></span>}
+        {s.planEndDate && <span>План сдачи: <b style={{ color: "#334155" }}>{dt(s.planEndDate)}</b></span>}
+        {s.factEndDate && <span>Сдан: <b style={{ color: "#059669" }}>{dt(s.factEndDate)}</b></span>}
+      </div>
+    </div>
+
+    {/* Этапы */}
+    <div style={{ background: "#fff", borderRadius: 16, padding: "16px 18px", marginBottom: 14 }}>
+      <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10 }}>Этапы работ</div>
+      {(s.stages || []).length === 0 && <div style={{ color: "#94a3b8", fontSize: 13, padding: "8px 0" }}>Этапы появятся по мере старта работ.</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {(s.stages || []).map((st, i) => {
+          const cfg = _PROG_ST[st.status] || _PROG_ST.todo;
+          return (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: cfg.bg, borderRadius: 10, border: "1px solid " + cfg.bg }}>
+              <span style={{ fontSize: 15, flexShrink: 0 }}>{cfg.i}</span>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: "#0f172a" }}>{st.name}</div>
+                <div style={{ fontSize: 11, color: cfg.c, fontWeight: 700, marginTop: 1 }}>{cfg.l}{st.planEnd ? ` · до ${dt(st.planEnd)}` : ""}</div>
+              </div>
+              {Number(st.priceClient) > 0 && <div style={{ fontSize: 13, fontWeight: 800, color: "#334155", flexShrink: 0 }}>{fmt(st.priceClient)} ₸</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+
+    {/* Оплата */}
+    {(pay.budget > 0 || pay.paid > 0) && (
+      <div style={{ background: "#fff", borderRadius: 16, padding: "16px 18px", marginBottom: 14 }}>
+        <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10 }}>Оплата по договору</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13.5 }}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#64748b" }}>Сумма договора</span><b>{fmt(pay.budget)} ₸</b></div>
+          <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#64748b" }}>Оплачено</span><b style={{ color: "#059669" }}>{fmt(pay.paid)} ₸</b></div>
+          <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #f1f5f9", paddingTop: 8 }}><span style={{ color: "#64748b" }}>Остаток</span><b style={{ color: pay.remaining > 0 ? "#dc2626" : "#059669" }}>{fmt(pay.remaining)} ₸</b></div>
+        </div>
+      </div>
+    )}
+
+    {/* Приёмка */}
+    {(s.handover || []).length > 0 && (
+      <div style={{ background: "#fff", borderRadius: 16, padding: "16px 18px", marginBottom: 14 }}>
+        <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10 }}>Приёмка объекта</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+          {s.handover.map((h, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13 }}>
+              <span style={{ fontSize: 14, color: h.done ? "#059669" : "#cbd5e1" }}>{h.done ? "✓" : "○"}</span>
+              <span style={{ color: h.done ? "#0f172a" : "#94a3b8" }}>{h.text}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+
+    <div style={{ textAlign: "center", fontSize: 11.5, color: "#94a3b8", marginTop: 18 }}>TitovStroy · ремонт и отделка{s.publishedAt ? ` · обновлено ${new Date(s.publishedAt).toLocaleDateString("ru-RU")}` : ""}</div>
+  </>);
+}
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     try {
@@ -3287,6 +3408,9 @@ export default function App() {
   // Публичная страница КП по ссылке #/kp/<id> — открывается без входа
   const _kpId = (() => { const m = (typeof window !== "undefined" ? (window.location.hash || "") : "").match(/^#\/kp\/(.+)$/); return m ? decodeURIComponent(m[1]) : null; })();
   if (_kpId) return <PublicKP id={_kpId} />;
+  // Публичная страница прогресса объекта по ссылке #/progress/<токен> — без входа
+  const _progToken = (() => { const m = (typeof window !== "undefined" ? (window.location.hash || "") : "").match(/^#\/progress\/(.+)$/); return m ? decodeURIComponent(m[1]) : null; })();
+  if (_progToken) return <PublicProgress token={_progToken} />;
   if (!currentUser) return <LoginScreen onLogin={setCurrentUser} />;
   return <MainApp key={currentUser.id} currentUser={currentUser} setCurrentUser={setCurrentUser} />;
 }
@@ -4292,6 +4416,67 @@ ${reqBlock}`;
     const list = productionsRef.current.filter(p => p.objectId !== objectId);
     await saveProductions(list, { replace: true, allowEmpty: true });
   }, []);
+
+  // ── ДОСТУП КЛИЕНТА К ПРОГРЕССУ (публичная ссылка #/progress/<токен>) ──
+  const prodEntriesRef = useRef([]);
+  useEffect(() => { prodEntriesRef.current = prodEntries; }, [prodEntries]);
+  // Собрать ОЧИЩЕННЫЙ снимок для клиента (без себестоимости/маржи/подрядчиков/внутренних заметок)
+  const buildProgressSnapshot = useCallback((objectId, prev = {}) => {
+    const obj = objectsRef.current.find(o => o.id === objectId);
+    if (!obj) return null;
+    const prod = productionsRef.current.find(p => p.objectId === objectId) || {};
+    const entry = (prodEntriesRef.current || []).find(e => e.objectId === objectId);
+    const stages = (prod.stages || []).filter(st => st && String(st.name || "").trim());
+    let totVal = 0, doneVal = 0, doneCnt = 0;
+    for (const st of stages) { const v = Number(st.priceClient) || 0; totVal += v; if ((st.status || "todo") === "done") { doneVal += v; doneCnt++; } }
+    const progressPct = totVal > 0 ? Math.round(doneVal / totVal * 100) : stages.length > 0 ? Math.round(doneCnt / stages.length * 100) : 0;
+    const handover = (prod.checklistHandover || []).filter(i => (i.section || "") === "Клиентская приёмка").map(i => ({ text: i.text, done: !!i.done }));
+    const budget = Number(entry?.budget) || 0, paid = Number(entry?.income) || 0;
+    return {
+      v: 1, objectAddress: obj.address || "", clientName: obj.clientName || "", managerName: obj.manager || "",
+      startDate: prod.startDate || "", planEndDate: prod.planEndDate || "", factEndDate: prod.factEndDate || "",
+      progressPct,
+      stages: stages.map(st => ({ name: st.manualName || st.name || "Этап", status: st.status || "todo", planEnd: st.planEnd || "", priceClient: Number(st.priceClient) || 0 })),
+      payment: { budget, paid, remaining: Math.max(0, budget - paid) },
+      handover,
+      publishedAt: Date.now(), viewCount: prev.viewCount || 0, viewedAt: prev.viewedAt || null,
+    };
+  }, []);
+  const publishProgress = useCallback(async (objectId) => {
+    const obj = objectsRef.current.find(o => o.id === objectId);
+    if (!obj || !obj.progressShared || !obj.progressToken) return;
+    let prev = {};
+    try { const r = await storage.getResult(PROGRESS_NODE(obj.progressToken)); if (r.status === "found" && r.value) prev = JSON.parse(r.value); } catch {}
+    const snap = buildProgressSnapshot(objectId, prev);
+    if (snap) { try { await storage.set(PROGRESS_NODE(obj.progressToken), JSON.stringify(snap)); } catch (e) { console.warn("publishProgress err", e); } }
+  }, [buildProgressSnapshot]);
+  const publishProgressRef = useRef(); publishProgressRef.current = publishProgress;
+  // Включить/выключить доступ клиента; возвращает ссылку (или null при выключении)
+  const toggleClientShare = useCallback(async (objectId) => {
+    const obj = objectsRef.current.find(o => o.id === objectId);
+    if (!obj) return null;
+    const linkOf = t => window.location.origin + window.location.pathname + "#/progress/" + t;
+    if (obj.progressShared && obj.progressToken) {
+      const token = obj.progressToken;
+      await saveObjects([...objectsRef.current.filter(o => o.id !== objectId), { ...obj, progressShared: false, updatedAt: Date.now() }]);
+      try { await storage.set(PROGRESS_NODE(token), JSON.stringify({ revoked: true })); } catch {}
+      return null;
+    }
+    const token = obj.progressToken || (genId() + Math.random().toString(36).slice(2, 10));
+    await saveObjects([...objectsRef.current.filter(o => o.id !== objectId), { ...obj, progressShared: true, progressToken: token, updatedAt: Date.now() }]);
+    const snap = buildProgressSnapshot(objectId, {});
+    if (snap) { try { await storage.set(PROGRESS_NODE(token), JSON.stringify(snap)); } catch {} }
+    return linkOf(token);
+  }, [saveObjects, buildProgressSnapshot]);
+  // Живое авто-обновление: при любом изменении производства/оплат пере-публикуем снимки всех открытых объектов
+  const _progPubTimer = useRef(null);
+  useEffect(() => {
+    const shared = objectsRef.current.filter(o => o.progressShared && o.progressToken);
+    if (!shared.length) return;
+    if (_progPubTimer.current) clearTimeout(_progPubTimer.current);
+    _progPubTimer.current = setTimeout(() => { shared.forEach(o => publishProgressRef.current?.(o.id)); }, 1200);
+    return () => { if (_progPubTimer.current) clearTimeout(_progPubTimer.current); };
+  }, [prodEntries, productions]);
 
   // Построить этапы из привязанной к объекту сметы: группировка по категориям сметы
   const buildStagesFromEstimate = useCallback((objectId) => {
@@ -11363,6 +11548,7 @@ ${reqBlock}`;
             productions={productions}
             onSaveProduction={onSaveProduction}
             onDeleteProduction={onDeleteProduction}
+            onToggleClientShare={toggleClientShare}
             buildStagesFromEstimate={buildStagesFromEstimate}
             finProjects={finProjects}
             financeTx={financeTx}
