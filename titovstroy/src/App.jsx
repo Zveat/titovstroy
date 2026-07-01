@@ -4022,6 +4022,57 @@ tfoot td{font-weight:700}
     openOrPrintHtml(buildAvrHtml({ ...m, lines: items }));
   };
 
+  // ── ВОССТАНОВЛЕНИЕ СМЕТЫ ИЗ АКТА (АВР) ──
+  // Если исходная смета пропала, её позиции сохранились внутри акта. Пересобираем
+  // смету из строк акта (наименование/ед./кол-во/цена), привязываем к объекту.
+  const restoreEstimateFromAvr = async (r, obj) => {
+    const lines = (r?.lines || []).filter(l => l && Number(l.doneQty) > 0);
+    if (!lines.length) { window.alert("В акте нет позиций для восстановления."); return; }
+    if (r.estId && estimatesRef.current.some(e => e.id === r.estId)) {
+      window.alert("Смета этого акта уже есть в архиве — восстановление не требуется."); return;
+    }
+    if (!window.confirm(`Восстановить смету из «Акт №${r.actNo || "б/н"}»?\n\nПозиций: ${lines.length} · Сумма: ${fmt(r.total || 0)} ₸\n\nБудет создана новая смета и привязана к этому объекту. Цены берутся из акта (наценка 0). Существующие данные не изменятся.`)) return;
+
+    const stamp = Date.now();
+    const codeOf = (i) => `AVR-${r.id || stamp}-${i}`;
+    // 1) Позиции каталога (custom), чтобы смета корректно считалась и отображалась
+    const customWorks = lines.map((l, i) => ({
+      code: codeOf(i),
+      cat: "Восстановлено из актов",
+      sub: String(obj?.clientName || obj?.address || "Объект").slice(0, 40) || "Объект",
+      name: l.name || `Позиция ${i + 1}`, unit: l.unit || "",
+      tiers: [], cost: 0, margin: 0, fixedPrice: Number(l.price) || 0,
+    }));
+    const cur = _catalogOverrides;
+    const existing = cur.custom || [];
+    const codes = new Set(existing.map(w => w.code));
+    const merged = [...existing, ...customWorks.filter(w => !codes.has(w.code))];
+    const nextCat = { renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], ...cur, custom: merged };
+    await storage.set(CATALOG_KEY, JSON.stringify(nextCat));
+    setCatalogOverrides(nextCat);
+    setCatalogVersion(v => v + 1);
+
+    // 2) Строки сметы (ручная цена = цена из акта, кол-во = выполненное)
+    const rows = {};
+    lines.forEach((l, i) => { rows[codeOf(i)] = { qty: Number(l.doneQty) || 0, manualPrice: Number(l.price) || 0, manualName: l.name || "", manualUnit: l.unit || "" }; });
+
+    // 3) Сама смета — привязана к объекту, наценка 0 (цены уже финальные)
+    const estId = genId();
+    const est = {
+      id: estId, objectId: obj.id,
+      proj: { name: obj.clientName || "", phone: obj.clientPhone || "", address: obj.address || "", type: obj.objType || "Вторичка", area: obj.area || "", manager: obj.manager || currentUser?.name || "" },
+      rows, discount: 0, markup: 0,
+      note: `Восстановлено из Акт №${r.actNo || "б/н"} от ${new Date(r.actDate || r.createdAt || Date.now()).toLocaleDateString("ru-RU")}`,
+      status: "new", total: Number(r.total) || 0,
+      createdAt: r.createdAt || Date.now(), createdBy: r.createdBy || currentUser?.name || "",
+      updatedAt: Date.now(), updatedBy: currentUser?.name || "",
+    };
+    await saveEstimates([...estimatesRef.current, est]);
+    // привяжем акт к новой смете, чтобы повторно не пересоздавать
+    await saveReports([{ ...r, estId, updatedAt: Date.now() }], { replace: false });
+    window.alert(`Смета восстановлена ✓\nПозиций: ${lines.length} · Сумма: ${fmt(r.total || 0)} ₸\n\nОна появилась в карточке объекта в разделе «Сметы».`);
+  };
+
   // ════════════ ДОГОВОР ПОДРЯДА С РАБОЧИМИ (Прочие документы) ════════════
   // Сумма раздела: ручная сумма за раздел ИЛИ сумма позиций (кол-во × цена)
   const podSectionSum = (sec) => {
@@ -10910,6 +10961,10 @@ ${reqBlock}`;
                                 <div style={{display:"flex",gap:4}}>
                                   <button title="Печать / PDF" onClick={()=>openOrPrintHtml(buildAvrHtml({...r, lines:(r.lines||[]).map(l=>({...l,included:true,doneQty:l.doneQty}))}))}
                                     style={{background:"#e2e8f0",color:"#334155",border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🖨 Печать</button>
+                                  {currentUser.role!=="viewer" && !(r.estId && estimates.some(e=>e.id===r.estId)) && (
+                                    <button title="Восстановить смету из этого акта (если исходная смета пропала)" onClick={()=>restoreEstimateFromAvr(r, obj)}
+                                      style={{background:"#ecfdf5",color:"#059669",border:"1px solid rgba(5,150,105,.25)",borderRadius:4,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>↩ В смету</button>
+                                  )}
                                   {currentUser.role!=="viewer" && (
                                     <button title="Редактировать акт" onClick={()=>setAvrModal({ ...r, lines:(r.lines||[]).map(l=>({...l,included:true,doneQty:l.doneQty})) })}
                                       style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
