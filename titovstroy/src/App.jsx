@@ -250,6 +250,9 @@ function getPrice(work, qty, complexity, cpxPct) {
   return (price !== null && !isNaN(Number(price))) ? Number(price) * mult : null;
 }
 
+// Виртуальная категория для позиций сметы без каталога (восстановленные из актов и пр.)
+const EXTRA_CAT = "Восстановлено из актов";
+
 function groupData(works) {
   const g = {};
   for (const w of works) {
@@ -3307,7 +3310,26 @@ function MainApp({ currentUser, setCurrentUser }) {
     _onCatalogChange = () => setCatalogVersion(v => v + 1);
     return () => { _onCatalogChange = null; };
   }, []);
-  const Gdyn = useMemo(() => groupData(getEffectiveCatalog()), [catalogVersion]);
+  // Позиции сметы (перенесено выше Gdyn — нужно для виртуальной категории из «сиротских» строк)
+  const [rows, setRows] = useState({});
+  const GdynBase = useMemo(() => groupData(getEffectiveCatalog()), [catalogVersion]);
+  const _catKeySet = useMemo(() => {
+    const s = new Set();
+    for (const w of getEffectiveCatalog()) { if (w?.code) s.add(w.code); if (w?.name) s.add(w.name); }
+    return s;
+  }, [catalogVersion]);
+  // Виртуальная категория EXTRA_CAT строится СТРОГО из строк текущей сметы (позиции без каталога,
+  // напр. восстановленные из акта). Не засоряет общий каталог и видна только в той смете, где есть.
+  const Gdyn = useMemo(() => {
+    const extra = [];
+    for (const [key, r] of Object.entries(rows || {})) {
+      if (!r || !(Number(r.qty) > 0)) continue;
+      if (_catKeySet.has(key)) continue; // строка есть в каталоге — не сирота
+      extra.push({ code: key, name: r.manualName || key, unit: r.manualUnit || "", cat: EXTRA_CAT, sub: "Позиции", tiers: [], cost: 0, fixedPrice: Number(r.manualPrice) || 0 });
+    }
+    if (!extra.length) return GdynBase;
+    return { ...GdynBase, [EXTRA_CAT]: { "Позиции": extra } };
+  }, [GdynBase, rows, _catKeySet]);
   const cats = Object.keys(Gdyn);
 
   // Авторизация (currentUser приходит пропом из обёртки App — здесь компонент
@@ -3430,7 +3452,6 @@ function MainApp({ currentUser, setCurrentUser }) {
   const [currentObjectId, setCurrentObjectId] = useState(null); // объект, к которому привязана открытая смета
   const [activeCat, setActiveCat] = useState(cats[0]);
   const [activeSub, setActiveSub] = useState(Object.keys(Gdyn[cats[0]]||{})[0]);
-  const [rows, setRows] = useState({});
   const [proj, setProj] = useState({...EMPTY_PROJ});
   const [discount, setDiscount] = useState(0);
   const [markup, setMarkup] = useState(0); // внутреннее повышение цены — клиенту не показывается
@@ -4049,24 +4070,8 @@ tfoot td{font-weight:700}
 
     const stamp = Date.now();
     const codeOf = (i) => `AVR-${r.id || stamp}-${i}`;
-    // 1) Позиции каталога (custom), чтобы смета корректно считалась и отображалась
-    const customWorks = lines.map((l, i) => ({
-      code: codeOf(i),
-      cat: "Восстановлено из актов",
-      sub: String(obj?.clientName || obj?.address || "Объект").slice(0, 40) || "Объект",
-      name: l.name || `Позиция ${i + 1}`, unit: l.unit || "",
-      tiers: [], cost: 0, margin: 0, fixedPrice: Number(l.price) || 0,
-    }));
-    const cur = _catalogOverrides;
-    const existing = cur.custom || [];
-    const codes = new Set(existing.map(w => w.code));
-    const merged = [...existing, ...customWorks.filter(w => !codes.has(w.code))];
-    const nextCat = { renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], ...cur, custom: merged };
-    await storage.set(CATALOG_KEY, JSON.stringify(nextCat));
-    setCatalogOverrides(nextCat);
-    setCatalogVersion(v => v + 1);
-
-    // 2) Строки сметы (ручная цена = цена из акта, кол-во = выполненное)
+    // Позиции хранятся ПРЯМО в смете (наименование/ед./цена/кол-во) как «сиротские» строки —
+    // они показываются в виртуальной категории EXTRA_CAT только этой сметы и НЕ засоряют общий каталог.
     const rows = {};
     lines.forEach((l, i) => { rows[codeOf(i)] = { qty: Number(l.doneQty) || 0, manualPrice: Number(l.price) || 0, manualName: l.name || "", manualUnit: l.unit || "" }; });
 
@@ -4557,7 +4562,19 @@ ${reqBlock}`;
         });
       }} catch {}
       try { if (pr) setPriceOverrides(JSON.parse(pr.value)); } catch {}
-      try { if (cat) setCatalogOverrides(JSON.parse(cat.value)); } catch {}
+      try {
+        if (cat) {
+          let parsedCat = JSON.parse(cat.value);
+          // ОЧИСТКА: убираем из ОБЩЕГО каталога позиции, ранее добавленные при восстановлении из актов
+          // (они засоряли все сметы категорией EXTRA_CAT и дублировали работы). Теперь такие позиции
+          // живут прямо внутри своей сметы как «сиротские» строки.
+          if (Array.isArray(parsedCat?.custom) && parsedCat.custom.some(w => w?.cat === EXTRA_CAT)) {
+            parsedCat = { ...parsedCat, custom: parsedCat.custom.filter(w => w?.cat !== EXTRA_CAT) };
+            try { await storage.set(CATALOG_KEY, JSON.stringify(parsedCat)); } catch(e) { console.warn("cat cleanup save err", e); }
+          }
+          setCatalogOverrides(parsedCat);
+        }
+      } catch {}
     } catch(e) {
       console.error("loadEstimates error — данные не тронуты", e);
     }
