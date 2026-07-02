@@ -391,34 +391,38 @@ export default function ProductionModule({
         </div>
       </div>
 
-      {/* Доступ клиента к прогрессу (публичная ссылка) */}
-      {onToggleClientShare && currentUser?.role !== "viewer" && (() => {
+      {/* Клиент: доступ к прогрессу + сообщение — одной карточкой */}
+      {currentUser?.role !== "viewer" && (() => {
         const shared = !!(openObj.progressShared && openObj.progressToken);
         const realUrl = shared ? (window.location.origin + window.location.pathname + "#/progress/" + openObj.progressToken) : null;
         const url = realUrl || shareLink;
         return (
-          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", marginBottom: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>👁 Доступ клиента к прогрессу{shared && <span style={{ fontSize: 11, color: "#059669", fontWeight: 700 }}> · открыт</span>}</div>
-              <button disabled={shareBusy} onClick={async () => { setShareBusy(true); const link = await onToggleClientShare(openObj.id); setShareLink(link); setShareBusy(false); }}
-                style={{ background: shared ? "rgba(220,38,38,.08)" : "#ecfdf5", color: shared ? "#dc2626" : "#059669", border: "1px solid " + (shared ? "rgba(220,38,38,.2)" : "rgba(5,150,105,.25)"), borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: shareBusy ? "default" : "pointer", opacity: shareBusy ? .6 : 1, fontFamily: "inherit", whiteSpace: "nowrap" }}>
-                {shared ? "Закрыть доступ" : "Открыть доступ клиенту"}
-              </button>
-            </div>
-            {(shared || shareLink) && url && (
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                <input readOnly value={url} onFocus={e => e.target.select()} style={{ flex: 1, minWidth: 180, border: "1px solid #cbd5e1", borderRadius: 6, padding: "7px 9px", fontSize: 11.5, fontFamily: "inherit", color: "#0f172a", background: "#f8fafc" }} />
-                <button onClick={() => { try { navigator.clipboard.writeText(url); } catch {} }} style={{ background: "#eff6ff", color: "#2563eb", border: "1px solid rgba(37,99,235,.2)", borderRadius: 6, padding: "7px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Копировать</button>
-                <a href={"https://wa.me/?text=" + encodeURIComponent("Прогресс вашего ремонта: " + url)} target="_blank" rel="noopener" style={{ background: "#25D366", color: "#fff", textDecoration: "none", padding: "7px 11px", borderRadius: 6, fontSize: 12, fontWeight: 700 }}>WhatsApp</a>
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", marginBottom: 14, display: "flex", flexDirection: "column", gap: 11 }}>
+            {onToggleClientShare && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>👁 Доступ клиента к прогрессу{shared && <span style={{ fontSize: 11, color: "#059669", fontWeight: 700 }}> · открыт</span>}</div>
+                  <button disabled={shareBusy} onClick={async () => { setShareBusy(true); const link = await onToggleClientShare(openObj.id); setShareLink(link); setShareBusy(false); }}
+                    style={{ background: shared ? "rgba(220,38,38,.08)" : "#ecfdf5", color: shared ? "#dc2626" : "#059669", border: "1px solid " + (shared ? "rgba(220,38,38,.2)" : "rgba(5,150,105,.25)"), borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: shareBusy ? "default" : "pointer", opacity: shareBusy ? .6 : 1, fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                    {shared ? "Закрыть доступ" : "Открыть доступ клиенту"}
+                  </button>
+                </div>
+                {(shared || shareLink) && url && (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    <input readOnly value={url} onFocus={e => e.target.select()} style={{ flex: 1, minWidth: 180, border: "1px solid #cbd5e1", borderRadius: 6, padding: "7px 9px", fontSize: 11.5, fontFamily: "inherit", color: "#0f172a", background: "#f8fafc" }} />
+                    <button onClick={() => { try { navigator.clipboard.writeText(url); } catch {} }} style={{ background: "#eff6ff", color: "#2563eb", border: "1px solid rgba(37,99,235,.2)", borderRadius: 6, padding: "7px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Копировать</button>
+                    <a href={"https://wa.me/?text=" + encodeURIComponent("Прогресс вашего ремонта: " + url)} target="_blank" rel="noopener" style={{ background: "#25D366", color: "#fff", textDecoration: "none", padding: "7px 11px", borderRadius: 6, fontSize: 12, fontWeight: 700 }}>WhatsApp</a>
+                  </div>
+                )}
+                <div style={{ fontSize: 10.5, color: "#94a3b8" }}>Клиент видит прогресс, этапы, сроки и оплату. Себестоимость, маржа и подрядчики скрыты.</div>
               </div>
             )}
-            <div style={{ fontSize: 10.5, color: "#94a3b8" }}>Клиент видит прогресс, этапы, сроки и оплату. Себестоимость, маржа и подрядчики скрыты.</div>
+            {onToggleClientShare && <div style={{ borderTop: "1px solid #f1f5f9" }} />}
+            {/* Сообщение клиенту — общий комментарий от компании на странице прогресса */}
+            <ClientMessageCard prod={openProd} patch={patchProd} embedded />
           </div>
         );
       })()}
-
-      {/* Сообщение клиенту — общий комментарий от компании на странице прогресса */}
-      {currentUser?.role !== "viewer" && <ClientMessageCard prod={openProd} patch={patchProd} />}
 
       <div style={{ display: "flex", gap: 4, marginBottom: 18, flexWrap: "wrap", borderBottom: "1px solid #e2e8f0" }}>
         {TABS.map(t => (
@@ -625,35 +629,55 @@ function ChecklistTab({ kind, prod, patch, genId, title }) {
 }
 
 // ─── Сообщение клиенту (общий комментарий от компании на странице прогресса) ───
-function ClientMessageCard({ prod, patch }) {
+// Свёрнут по умолчанию, чтобы не занимать место над вкладками; разворачивается по кнопке.
+function ClientMessageCard({ prod, patch, embedded = false }) {
   const saved = prod.clientMessage && typeof prod.clientMessage === "object" ? prod.clientMessage : null;
   const savedText = saved ? (saved.text || "") : (typeof prod.clientMessage === "string" ? prod.clientMessage : "");
+  const [open, setOpen] = useState(false);
   const [text, setText] = useState(savedText);
-  const [ok, setOk] = useState(false);
   // Сброс поля при переключении объекта
-  useEffect(() => { setText(savedText); }, [prod.objectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setText(savedText); setOpen(false); }, [prod.objectId]); // eslint-disable-line react-hooks/exhaustive-deps
   const dirty = text.trim() !== savedText.trim();
   const save = () => {
     const t = text.trim();
     patch({ clientMessage: t ? { text: t, updatedAt: Date.now() } : null });
-    setOk(true); setTimeout(() => setOk(false), 2500);
+    setOpen(false);
   };
-  const clear = () => { setText(""); patch({ clientMessage: null }); };
+  const clear = () => { setText(""); patch({ clientMessage: null }); setOpen(false); };
+  // В embedded-режиме карточка встроена в родительскую — без своей рамки/фона/отступов
+  const wrap = embedded
+    ? { background: "transparent", border: "none", borderRadius: 0, padding: 0, marginBottom: 0 }
+    : { background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "10px 14px", marginBottom: 14 };
+
+  // Свёрнутый вид — компактная строка с превью
+  if (!open) {
+    return (
+      <div style={{ ...wrap, display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 15, flexShrink: 0 }}>💬</span>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>Сообщение клиенту{savedText && <span style={{ fontSize: 11, color: "#059669", fontWeight: 700 }}> · опубликовано</span>}</div>
+          <div style={{ fontSize: 12, color: savedText ? "#64748b" : "#94a3b8", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{savedText || "нет сообщения — клиент его не видит"}</div>
+        </div>
+        <button onClick={() => setOpen(true)} style={{ background: "#eff6ff", color: "#2563eb", border: "1px solid rgba(37,99,235,.2)", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>{savedText ? "Изменить" : "Написать"}</button>
+      </div>
+    );
+  }
+  // Развёрнутый вид — редактор
   return (
-    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", marginBottom: 14 }}>
+    <div style={wrap}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>💬 Сообщение клиенту{savedText && <span style={{ fontSize: 11, color: "#059669", fontWeight: 700 }}> · опубликовано</span>}</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>💬 Сообщение клиенту</div>
         {saved?.updatedAt && <span style={{ fontSize: 11, color: "#94a3b8" }}>обновлено {new Date(saved.updatedAt).toLocaleDateString("ru-RU")}</span>}
       </div>
-      <textarea value={text} onChange={e => setText(e.target.value)} rows={3} placeholder="Например: На этой неделе закончили черновую электрику, начинаем штукатурку. Плитку привезут в пятницу…"
+      <textarea autoFocus value={text} onChange={e => setText(e.target.value)} rows={3} placeholder="Например: На этой неделе закончили черновую электрику, начинаем штукатурку. Плитку привезут в пятницу…"
         style={{ width: "100%", border: "1px solid #cbd5e1", borderRadius: 8, padding: "9px 11px", fontSize: 13, fontFamily: "inherit", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
         <button onClick={save} disabled={!dirty}
           style={{ background: dirty ? "#2563eb" : "#e2e8f0", color: dirty ? "#fff" : "#94a3b8", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: dirty ? "pointer" : "default", fontFamily: "inherit" }}>
           {savedText ? "Обновить сообщение" : "Опубликовать клиенту"}
         </button>
-        {savedText && !dirty && <button onClick={clear} style={{ background: "none", border: "none", color: "#dc2626", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>Убрать</button>}
-        {ok && <span style={{ fontSize: 12, color: "#059669", fontWeight: 700 }}>✓ Сохранено</span>}
+        <button onClick={() => { setText(savedText); setOpen(false); }} style={{ background: "none", border: "none", color: "#64748b", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>Свернуть</button>
+        {savedText && <button onClick={clear} style={{ background: "none", border: "none", color: "#dc2626", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0, marginLeft: "auto" }}>Убрать</button>}
       </div>
       <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 8 }}>Появится отдельным блоком вверху страницы клиента. Обновляется у клиента в течение минуты или по кнопке «Обновить».</div>
     </div>
