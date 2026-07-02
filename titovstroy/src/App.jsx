@@ -680,6 +680,45 @@ const storage = {
     } catch(e) {}
     return { value, fbOk, fbError };
   },
+  // Список ключей с незасинхронизированными («грязными») правками
+  dirtyKeys() {
+    const out = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.endsWith(_DIRTY_SUFFIX)) out.push(k.slice(0, -_DIRTY_SUFFIX.length));
+      }
+    } catch(e) {}
+    return out;
+  },
+  // САМОИСЦЕЛЕНИЕ: дослать в облако все зависшие локальные правки, предварительно
+  // СЛИВ с сервером по id. Незасинканное не теряется, но и устаревшая локальная
+  // копия не затирает сервер. set() сам снимает «грязный» флаг при успехе.
+  async flushDirty() {
+    if (!_fbDb) return 0;
+    const keys = this.dirtyKeys();
+    let done = 0;
+    for (const key of keys) {
+      try {
+        const localVal = localStorage.getItem(key);
+        if (localVal == null) { try { localStorage.removeItem(key + _DIRTY_SUFFIX); } catch(e){} continue; }
+        let merged = localVal;
+        try {
+          await _fbAuthReady;
+          const snap = await _race(get(ref(_fbDb, _fbKey(key))), 8000);
+          if (snap === _TIMEOUT) continue; // облако не ответило — оставим до следующего раза
+          if (snap && snap.exists()) {
+            const cRaw = snap.val();
+            const cloudVal = typeof cRaw === "string" ? cRaw : JSON.stringify(cRaw);
+            merged = _reconcileDirty(localVal, cloudVal);
+          }
+        } catch(e) { continue; }
+        const res = await this.set(key, merged);
+        if (res && res.fbOk) done++;
+      } catch(e) {}
+    }
+    return done;
+  },
 };
 
 // ─── ЭКРАН ВХОДА ─────────────────────────────────────────────────────────────
@@ -4807,6 +4846,40 @@ ${reqBlock}`;
   // Финансы грузим для админа и руководителя
   useEffect(() => { if (currentUser?.role === "admin" || currentUser?.role === "manager") loadFinance(); }, [currentUser?.role, loadFinance]);
 
+  // ── САМОИСЦЕЛЕНИЕ СИНХРОНИЗАЦИИ ──
+  const [resyncing, setResyncing] = useState(false);
+  const [dirtyCount, setDirtyCount] = useState(0);
+  // Ручная пересинхронизация: дослать зависшие правки в облако (со слиянием) и перечитать всё с сервера
+  const resyncNow = useCallback(async () => {
+    if (resyncing) return;
+    setResyncing(true);
+    try {
+      await storage.flushDirty();
+      await Promise.all([loadEstimates(), loadContracts()]);
+      if (currentUser?.role === "admin" || currentUser?.role === "manager") await loadFinance();
+      setDirtyCount(storage.dirtyKeys().length);
+    } catch(e) { console.warn("resync err", e); }
+    setResyncing(false);
+  }, [resyncing, loadEstimates, loadContracts, loadFinance, currentUser?.role]);
+  const _resyncRef = useRef(resyncNow); _resyncRef.current = resyncNow;
+  // Авто-флеш зависших правок: при старте, периодически и при возврате сети
+  useEffect(() => {
+    let stop = false;
+    const flush = () => { if (!stop) storage.flushDirty().then(()=>{ if(!stop) setDirtyCount(storage.dirtyKeys().length); }).catch(()=>{}); };
+    flush();
+    const iv = setInterval(flush, 90000);
+    const onOnline = () => _resyncRef.current && _resyncRef.current();
+    window.addEventListener("online", onOnline);
+    return () => { stop = true; clearInterval(iv); window.removeEventListener("online", onOnline); };
+  }, []);
+  // Индикатор «есть несинхронизированные изменения»
+  useEffect(() => {
+    const upd = () => setDirtyCount(storage.dirtyKeys().length);
+    upd();
+    const iv = setInterval(upd, 5000);
+    return () => clearInterval(iv);
+  }, []);
+
   // ── Сохранение списка смет с защитой от рассинхрона ──
   // opts.replace=true — записать ровно `list` (восстановление из бэкапа)
   // opts.removedIds — id, которые нужно удалить из объединённого набора (явное удаление)
@@ -7255,9 +7328,13 @@ ${reqBlock}`;
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                 {navHistory.length > 0 && <button onClick={goBack} style={{background:"none",border:"1px solid #ccc",borderRadius:6,padding:"4px 12px",cursor:"pointer",marginRight:8,fontSize:14,color:"#fff",borderColor:"rgba(255,255,255,.4)"}}>← Назад</button>}
                 {staleObjs.length>0&&<span style={{background:"rgba(251,191,36,.2)",color:"#fde68a",border:"1px solid rgba(251,191,36,.3)",borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:700}}>⚠ {staleObjs.length} требуют внимания</span>}
-                <span style={{fontSize:11,fontWeight:600,display:"flex",alignItems:"center",gap:5,padding:"4px 12px",borderRadius:20,background:"rgba(255,255,255,.15)",color:"rgba(255,255,255,.9)",backdropFilter:"blur(4px)"}}>
-                  {syncStatus==="saving"?"⏳ Сохраняю...":syncStatus==="saved"?"✓ Сохранено":syncStatus==="error"?"⚠ Ошибка":"☁ Синк"}
-                </span>
+                <button onClick={resyncNow} disabled={resyncing}
+                  title={dirtyCount>0 ? `Есть несинхронизированные изменения (${dirtyCount}). Нажмите, чтобы синхронизировать с сервером.` : "Обновить данные с сервера"}
+                  style={{fontSize:11,fontWeight:700,display:"flex",alignItems:"center",gap:5,padding:"4px 12px",borderRadius:20,cursor:resyncing?"default":"pointer",fontFamily:"inherit",border:"1px solid "+(dirtyCount>0?"rgba(251,191,36,.5)":"rgba(255,255,255,.25)"),background:dirtyCount>0?"rgba(251,191,36,.2)":"rgba(255,255,255,.15)",color:dirtyCount>0?"#fde68a":"rgba(255,255,255,.9)",backdropFilter:"blur(4px)"}}>
+                  {resyncing ? "🔄 Синхронизирую…"
+                    : dirtyCount>0 ? `⚠ Не синхронизировано (${dirtyCount})`
+                    : syncStatus==="saving"?"⏳ Сохраняю...":syncStatus==="saved"?"✓ Сохранено":syncStatus==="error"?"⚠ Ошибка":"☁ Обновить"}
+                </button>
                 <button onClick={()=>{ setLogoutConfirm(true); }}
                   style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.25)",borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:600,cursor:"pointer",color:"rgba(255,255,255,.9)",fontFamily:"inherit"}}>
                   🚪 Выйти
