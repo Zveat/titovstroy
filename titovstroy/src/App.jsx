@@ -11016,7 +11016,7 @@ ${reqBlock}`;
         };
 
         return (
-        <div className="page" style={{maxWidth:960,minHeight:"100vh"}}>
+        <div style={{padding:"20px 16px 90px",minHeight:"100vh"}}>
           {/* Шапка */}
           <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"22px 26px",marginBottom:20,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
             <div style={{position:"absolute",top:-30,right:-30,width:160,height:160,borderRadius:"50%",background:"rgba(59,130,246,.08)"}}/>
@@ -11575,8 +11575,9 @@ ${reqBlock}`;
                 })()}
                 </>)}
 
-                {/* Производственные вкладки — встроенный модуль Производства для этого объекта */}
-                {["launch","stages","finance","journal","defects","handover"].includes(objWsTab) && (
+                {/* Производственные вкладки (и производственная часть «Информации») — встроенный модуль Производства */}
+                {["info","launch","stages","finance","journal","defects","handover"].includes(objWsTab) && (
+                  <div style={{marginTop: objWsTab==="info" ? 14 : 0}}>
                   <ProductionModule
                     embedObjectId={obj.id}
                     embedTab={objWsTab}
@@ -11597,6 +11598,7 @@ ${reqBlock}`;
                     genId={genId}
                     currentUser={currentUser}
                   />
+                  </div>
                 )}
               </div>
             );
