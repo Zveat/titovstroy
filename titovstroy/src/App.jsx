@@ -11336,7 +11336,8 @@ ${reqBlock}`;
                 </button>
               )}
               {contractTab === "list" && (()=>{
-                const trashedCount = contracts.filter(c=>c.deletedAt).length;
+                const _seeDoc = c => currentUser.role==="admin"||currentUser.role==="manager"||c.createdById===currentUser.id||c.createdBy===currentUser.name;
+                const trashedCount = contracts.filter(c=>c.deletedAt && _seeDoc(c)).length;
                 return (<>
                   {trashedCount>0 && <button onClick={()=>setContractTab("trash")} style={{background:"rgba(220,38,38,.12)",color:"#ef4444",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"8px 13px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>🗑 Корзина ({trashedCount})</button>}
                   {currentUser.role !== "viewer" && <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:"",createdBy:currentUser.name,createdById:currentUser.id}); setContractTab("editor"); }}>+ Новый</button>}
@@ -11399,7 +11400,10 @@ ${reqBlock}`;
                   const _isPodType = c => c.type==="podryad" || c.type==="podryad_annex";
                   const _docCat = c => { const t=c.type||"repair_fiz"; if(t==="podryad"||t==="podryad_annex") return "podryad"; if(t==="design"||t==="design_add") return "design"; if(t==="reservation") return "reserve"; return "repair"; };
                   const _matchType = c => !contractTypeFilter || _docCat(c)===contractTypeFilter;
-                  const roots = contracts.filter(c=>!c.deletedAt && !childIds.has(c.id) && (_isPodType(c) || !c.objectId || !_objIds.has(c.objectId)) && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus) && _matchType(c));
+                  // Видимость по роли: админ и руководитель видят все договоры, обычный сотрудник — только свои
+                  const _canSeeAllDocs = currentUser.role==="admin" || currentUser.role==="manager";
+                  const _isOwnDoc = c => c.createdById===currentUser.id || (c.createdBy && c.createdBy===currentUser.name);
+                  const roots = contracts.filter(c=>!c.deletedAt && !childIds.has(c.id) && (_canSeeAllDocs || _isOwnDoc(c)) && (_isPodType(c) || !c.objectId || !_objIds.has(c.objectId)) && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus) && _matchType(c));
 
                   const workerNameOf = (c) => (workers.find(w=>w.id===c.workerId)?.name) || c.worker?.name || "";
                   // Создать доп. приложение к договору подряда (приложение №1 встроено в договор, доп идут с №2)
@@ -11505,18 +11509,21 @@ ${reqBlock}`;
             )}
 
             {/* ── КОРЗИНА ДОГОВОРОВ ── */}
-            {contractTab === "trash" && (
+            {contractTab === "trash" && (()=>{
+              const _seeDoc = c => currentUser.role==="admin"||currentUser.role==="manager"||c.createdById===currentUser.id||c.createdBy===currentUser.name;
+              const trashed = contracts.filter(c=>c.deletedAt && _seeDoc(c));
+              return (
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
                 <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
                   <button onClick={()=>setContractTab("list")} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:18,lineHeight:1,padding:"0 4px"}}>←</button>
                   <span style={{fontWeight:700,fontSize:15,color:"#0f172a"}}>🗑 Корзина договоров</span>
                 </div>
-                {contracts.filter(c=>c.deletedAt).length===0 ? (
+                {trashed.length===0 ? (
                   <div style={{textAlign:"center",padding:"60px 0",color:"#94a3b8"}}>
                     <div style={{fontSize:40,marginBottom:12}}>🗑</div>
                     <div style={{fontWeight:700}}>Корзина пуста</div>
                   </div>
-                ) : contracts.filter(c=>c.deletedAt).sort((a,b)=>b.deletedAt-a.deletedAt).map(c=>{
+                ) : trashed.sort((a,b)=>b.deletedAt-a.deletedAt).map(c=>{
                   const client = contractClients.find(x=>x.id===c.clientId);
                   const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
                   const TLABEL2 = {repair_fiz:"Договор",annex:"Приложение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронь"};
@@ -11540,7 +11547,8 @@ ${reqBlock}`;
                   );
                 })}
               </div>
-            )}
+              );
+            })()}
 
             {/* ── РЕДАКТОР ДОГОВОРА ── */}
             {contractTab === "editor" && currentContract && !currentContract._mode && (
