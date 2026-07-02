@@ -12,7 +12,9 @@ function useDebounce(value, ms) {
   return dv;
 }
 
-const firebaseConfig = {
+// Боевая база (по умолчанию). НЕ меняется — на продакшне переменных окружения нет,
+// поэтому используется именно этот конфиг, как раньше.
+const _FB_PROD = {
   apiKey:            "AIzaSyCPawCUYGY20SB5cLLszjoNzK5ytew9tCs",
   authDomain:        "titovstroy-da1cf.firebaseapp.com",
   databaseURL:       "https://titovstroy-da1cf-default-rtdb.firebaseio.com",
@@ -21,6 +23,21 @@ const firebaseConfig = {
   messagingSenderId: "736574510792",
   appId:             "1:736574510792:web:b5d243a051caf4887337fd"
 };
+// Конфиг из окружения (Vercel: разные значения для Production/Preview). Если задан
+// VITE_FB_DATABASE_URL — используем его (dev-база на превью-ветке), иначе — боевую.
+const _env = (typeof import.meta !== "undefined" && import.meta.env) ? import.meta.env : {};
+const _FB_ENV = {
+  apiKey:            _env.VITE_FB_API_KEY,
+  authDomain:        _env.VITE_FB_AUTH_DOMAIN,
+  databaseURL:       _env.VITE_FB_DATABASE_URL,
+  projectId:         _env.VITE_FB_PROJECT_ID,
+  storageBucket:     _env.VITE_FB_STORAGE_BUCKET,
+  messagingSenderId: _env.VITE_FB_SENDER_ID,
+  appId:             _env.VITE_FB_APP_ID,
+};
+// Признак dev-окружения: конфиг взят из переменных (значит база — не боевая)
+const IS_DEV_ENV = !!_FB_ENV.databaseURL;
+const firebaseConfig = IS_DEV_ENV ? _FB_ENV : _FB_PROD;
 let _fbDb = null;
 let _fbAuth = null;
 // Promise resolves when anonymous auth is ready (or immediately if auth unavailable)
@@ -3596,6 +3613,15 @@ export default function App() {
     if (!currentUser?.id) return;
     try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: currentUser, savedAt: Date.now() })); } catch(e) {}
   }, [currentUser?.id]);
+  // Метка тестового окружения (dev-база) — чтобы не спутать превью с боевым сайтом
+  useEffect(() => {
+    if (!IS_DEV_ENV) return;
+    const b = document.createElement("div");
+    b.textContent = "🧪 ТЕСТ · dev-база";
+    b.style.cssText = "position:fixed;left:8px;bottom:8px;z-index:99999;background:#7c3aed;color:#fff;font:700 11px/1 'Golos Text',sans-serif;padding:6px 10px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.25);pointer-events:none;letter-spacing:.02em";
+    document.body.appendChild(b);
+    return () => { try { document.body.removeChild(b); } catch {} };
+  }, []);
   // Публичная страница КП по ссылке #/kp/<id> — открывается без входа
   const _kpId = (() => { const m = (typeof window !== "undefined" ? (window.location.hash || "") : "").match(/^#\/kp\/(.+)$/); return m ? decodeURIComponent(m[1]) : null; })();
   if (_kpId) return <PublicKP id={_kpId} />;
