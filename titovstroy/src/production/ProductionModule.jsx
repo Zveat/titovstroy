@@ -381,11 +381,18 @@ export default function ProductionModule({
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 4px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <button onClick={() => setOpenId(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#64748b", padding: 0 }}>←</button>
-        <div>
-          <div style={{ fontSize: 19, fontWeight: 800, color: "#0f172a" }}>{openObj.clientName || "Объект"}</div>
-          <div style={{ fontSize: 13, color: "#64748b" }}>{openObj.address || "—"}{openObj.clientPhone ? ` · 📞 ${openObj.clientPhone}` : ""}</div>
+      {/* Тёмная шапка объекта с кнопкой «назад» — всегда над вкладками */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, background: "linear-gradient(135deg,#0f172a,#1e293b)", borderRadius: 16, padding: "16px 20px", marginBottom: 16, color: "#fff" }}>
+        <button onClick={() => setOpenId(null)} title="Назад"
+          style={{ background: "rgba(255,255,255,.1)", border: "1px solid rgba(255,255,255,.18)", borderRadius: 9, width: 34, height: 34, fontSize: 20, cursor: "pointer", color: "#e2e8f0", padding: 0, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>←</button>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 21, fontWeight: 900, marginBottom: 6, lineHeight: 1.15 }}>{openObj.clientName || "Объект"}</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "5px 16px", fontSize: 13, color: "rgba(255,255,255,.82)" }}>
+            {openObj.address && <span>📍 {openObj.address}</span>}
+            {openObj.clientPhone && <span>📞 {openObj.clientPhone}</span>}
+            {openObj.objType && <span>🏠 {openObj.objType}</span>}
+            {openObj.area && <span>📐 {openObj.area} м²</span>}
+          </div>
         </div>
       </div>
 
@@ -471,16 +478,6 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientSh
           {alerts.map((a, i) => <div key={i} style={{ fontSize: 12.5, color: "#b91c1c", padding: "2px 0" }}>• {a}</div>)}
         </div>
       )}
-      {/* Шапка объекта */}
-      <div style={{ background: "linear-gradient(135deg,#0f172a,#1e293b)", borderRadius: 16, padding: "20px 22px", color: "#fff" }}>
-        <div style={{ fontSize: 21, fontWeight: 900, marginBottom: 6, lineHeight: 1.15 }}>{obj.clientName || "Без названия"}</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "5px 16px", fontSize: 13, color: "rgba(255,255,255,.82)" }}>
-          {obj.address && <span>📍 {obj.address}</span>}
-          {obj.clientPhone && <span>📞 {obj.clientPhone}</span>}
-          {obj.objType && <span>🏠 {obj.objType}</span>}
-          {obj.area && <span>📐 {obj.area} м²</span>}
-        </div>
-      </div>
       {/* Связь в один тап */}
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px" }}>
         <div style={{ fontSize: 10.5, color: "#94a3b8", marginBottom: 10, textTransform: "uppercase", letterSpacing: ".03em", fontWeight: 700 }}>Связь</div>
