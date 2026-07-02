@@ -24,7 +24,7 @@ const PROD_STATUSES = [
   { key: "active",  label: "В работе",       color: "#2563eb", bg: "#eff6ff"               },
   { key: "paused",  label: "Приостановлен",  color: "#f59e0b", bg: "rgba(245,158,11,.1)"  },
   { key: "done",    label: "Выполнен",       color: "#059669", bg: "rgba(5,150,105,.1)"   },
-  { key: "cancel",  label: "Отменён",        color: "#94a3b8", bg: "#f3f4f6"               },
+  { key: "cancel",  label: "Расторгнут",     color: "#dc2626", bg: "rgba(220,38,38,.1)"    },
 ];
 const psByKey = (k) => PROD_STATUSES.find(s => s.key === k) || PROD_STATUSES[1];
 
@@ -443,7 +443,8 @@ const _dayStart = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return
 const _waPhone = (p) => { let d = (p || "").replace(/\D/g, ""); if (d.length === 11 && d[0] === "8") d = "7" + d.slice(1); else if (d.length === 10) d = "7" + d; return d; };
 function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientShare, currentUser }) {
   const objEstimates = estimates.filter(e => e.objectId === obj.id);
-  const objContracts = contracts.filter(c => c.objectId === obj.id && !c.deletedAt);
+  // Только клиентские договоры: подряд (с рабочим) — это себестоимость, в метрику «Договоры» не входит
+  const objContracts = contracts.filter(c => c.objectId === obj.id && !c.deletedAt && c.type !== "podryad" && c.type !== "podryad_annex");
   const totalEst = objEstimates.reduce((s, e) => s + (Number(e.total) || 0), 0);
   const totalCon = objContracts.reduce((s, c) => s + (c.works || []).reduce((ss, w) => ss + (Number(w.quantity) || 0) * (Number(w.price) || 0), 0), 0);
   const stages = prod.stages || [];
