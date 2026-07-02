@@ -60,10 +60,13 @@ export default function ProductionModule({
   onSaveProduction, onDeleteProduction, onToggleClientShare, buildStagesFromEstimate,
   finProjects, financeTx,
   fmt, genId, currentUser,
+  embedObjectId, embedTab, // встроенный режим: карточка одного объекта внутри раздела «Объекты»
 }) {
   // карта запись производства по ключу записи (objectId реального объекта или "fp:<id>")
   const entryByKey = useMemo(() => { const m = {}; for (const e of entries) m[e.key] = e; return m; }, [entries]);
   const [openId, setOpenId] = useState(null);
+  // В embed-режиме объект задан снаружи (карточка в «Объектах»), список не показываем
+  const activeId = embedObjectId != null ? embedObjectId : openId;
   const [tab, setTab] = useState("info");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState(""); // «Все» — иначе новые карточки (статус «new») прячутся под «В работе»
@@ -83,9 +86,9 @@ export default function ProductionModule({
 
   // Объект может быть реальным (из objects) либо "виртуальным" — из карточки производства,
   // созданной по проекту Финансов (objectId начинается с "fp:").
-  const openObj = openId ? (
-    (allObjects || objects).find(o => o.id === openId) ||
-    (() => { const e = entryByKey[openId]; if (e) return { id: openId, clientName: e.name || "Проект", address: e.address || "", clientPhone: "" }; const pr = prodByObj[openId]; return pr ? { id: openId, clientName: pr.title || "Проект", address: pr.address || "", clientPhone: "" } : null; })()
+  const openObj = activeId ? (
+    (allObjects || objects).find(o => o.id === activeId) ||
+    (() => { const e = entryByKey[activeId]; if (e) return { id: activeId, clientName: e.name || "Проект", address: e.address || "", clientPhone: "" }; const pr = prodByObj[activeId]; return pr ? { id: activeId, clientName: pr.title || "Проект", address: pr.address || "", clientPhone: "" } : null; })()
   ) : null;
   const openProd = openObj ? (prodByObj[openObj.id] || emptyProduction(openObj.id, genId)) : null;
 
@@ -99,7 +102,7 @@ export default function ProductionModule({
     const record = { ...base, stages: fromEst.length ? estToStages(fromEst, genId) : [], updatedAt: Date.now() };
     onSaveProduction(record);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openId]);
+  }, [activeId]);
 
   const patchProd = (patch) => onSaveProduction({ ...openProd, ...patch, updatedAt: Date.now() });
 
@@ -148,6 +151,23 @@ export default function ProductionModule({
     for (const e of entries) map[e.key] = { budget: e.budget, income: e.income, expense: e.expense, debt: e.debt, margin: e.margin, contractNo: e.contractNo };
     return map;
   }, [entries]);
+
+  // ─── ВСТРОЕННЫЙ РЕЖИМ: только контент одной производственной вкладки ───
+  // Используется карточкой объекта в разделе «Объекты» (единый экран). Свою шапку,
+  // список, вкладки Информация/доступ клиента не рисуем — их даёт карточка объекта.
+  if (embedObjectId != null) {
+    if (!openObj || !openProd) return <div style={{ color: "#94a3b8", fontSize: 13, padding: "16px 4px" }}>Нет данных производства.</div>;
+    return (
+      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+        {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист запуска объекта" />}
+        {embedTab === "handover" && <ChecklistTab kind="checklistHandover" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист сдачи объекта" />}
+        {embedTab === "stages" && <StagesTab prod={openProd} patch={patchProd} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} />}
+        {embedTab === "finance" && <FinanceTab prod={openProd} patch={patchProd} fmt={fmt} finSummary={finSummary} />}
+        {embedTab === "journal" && <JournalTab prod={openProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
+        {embedTab === "defects" && <DefectsTab prod={openProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
+      </div>
+    );
+  }
 
   // ─── СПИСОК ОБЪЕКТОВ ───
   if (!openObj) {
