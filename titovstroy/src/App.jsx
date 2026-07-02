@@ -399,6 +399,7 @@ const DEAL_STATUSES = [
 ];
 // Производственный статус → единый (производство перевешивает статус сделки, когда объект в работе)
 const PROD_TO_DEAL = { active:"work", paused:"paused", done:"done", cancel:"cancel" };
+const PROD_STATUSES_LABELS = { new:"Новый", active:"В работе", paused:"Приостановлен", done:"Выполнен", cancel:"Расторгнут" };
 const OBJECTS_KEY         = "titovstroy-objects";
 const OBJECTS_BACKUPS_KEY = "titovstroy-objects-backups";
 const PRODUCTIONS_KEY         = "titovstroy-productions";   // производственные карточки объектов
@@ -3987,6 +3988,7 @@ function MainApp({ currentUser, setCurrentUser }) {
   // При открытии другого объекта возвращаемся на вкладку «Информация»
   useEffect(()=>{ setObjWsTab("info"); }, [currentObject?.id]);
   const [objectFilterStatus, setObjectFilterStatus] = useState("approval");
+  const [statusConflictsOpen, setStatusConflictsOpen] = useState(false); // раскрыта ли панель «Проверка статусов»
   const [objectFilterType, setObjectFilterType] = useState("");
   const [objectFilterManager, setObjectFilterManager] = useState("");
   const [objectDateSort, setObjectDateSort] = useState("new"); // new = сначала новые, old = сначала старые
@@ -11129,6 +11131,58 @@ ${reqBlock}`;
                   ))}
                 </div>
               )}
+
+              {/* Проверка статусов: где показываемый статус (произв./финпроект) отличается от статуса в карточке.
+                  Ничего не меняет само — только показывает и даёт принять решение по каждому объекту. */}
+              {(()=>{
+                const conflicts = objects.filter(o=>!o.deletedAt).map(o=>{
+                  const dbKey = o.status||"new";
+                  const usKey = unifiedStatusOf(o);
+                  if(usKey===dbKey) return null;
+                  const pr = productions.find(p=>p.objectId===o.id);
+                  const pe = prodEntries.find(e=>e.objectId===o.id);
+                  const source = pr?.prodStatus ? `карточка производства (статус «${(PROD_STATUSES_LABELS[pr.prodStatus]||pr.prodStatus)}»)` : pe?.finStatus ? `проект в Финансах (статус «${pe.finStatus}»)` : "—";
+                  return { obj:o, dbKey, usKey, source };
+                }).filter(Boolean);
+                if(!conflicts.length) return null;
+                return (
+                  <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:"10px 14px"}}>
+                    <div onClick={()=>setStatusConflictsOpen(v=>!v)} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",userSelect:"none"}}>
+                      <span style={{fontSize:13,fontWeight:700,color:"#92400e"}}>⚠ Проверка статусов: {conflicts.length} объект(ов), где статус карточки не совпадает с производством/финансами</span>
+                      <span style={{marginLeft:"auto",fontSize:12,color:"#b45309",fontWeight:600}}>{statusConflictsOpen?"▲ свернуть":"▼ показать"}</span>
+                    </div>
+                    {statusConflictsOpen && (
+                      <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:10}}>
+                        {conflicts.map(({obj,dbKey,usKey,source})=>{
+                          const dbSt=DEAL_STATUSES.find(s=>s.key===dbKey)||DEAL_STATUSES[0];
+                          const usSt=DEAL_STATUSES.find(s=>s.key===usKey)||DEAL_STATUSES[0];
+                          return (
+                            <div key={obj.id} style={{background:"#fff",border:"1px solid #fde68a",borderRadius:8,padding:"10px 12px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                              <div style={{minWidth:0,flex:1}}>
+                                <div style={{fontWeight:700,fontSize:13,color:"#0f172a"}}>{obj.clientName||"Без клиента"}{obj.address?` · ${obj.address}`:""}</div>
+                                <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>Показывается из-за: {source}</div>
+                              </div>
+                              <span style={{fontSize:10,fontWeight:700,color:dbSt.color,background:dbSt.bg,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap"}}>в карточке: {dbSt.label}</span>
+                              <span style={{fontSize:12,color:"#94a3b8"}}>→</span>
+                              <span style={{fontSize:10,fontWeight:700,color:usSt.color,background:usSt.bg,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap"}}>показано: {usSt.label}</span>
+                              {currentUser.role!=="viewer" && (
+                                <button onClick={()=>{ saveObjects(objectsRef.current.map(x=>x.id===obj.id?{...x,status:usKey,updatedAt:Date.now()}:x)); writeAudit(currentUser,"принял статус "+usSt.label,"object",obj.id,obj.clientName||obj.address||""); }}
+                                  style={{background:"#ecfdf5",color:"#059669",border:"1px solid rgba(5,150,105,.25)",borderRadius:6,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                                  Принять «{usSt.label}»
+                                </button>
+                              )}
+                              <button onClick={()=>{ setCurrentObject({...obj}); setObjectTab("workspace"); }}
+                                style={{background:"none",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:6,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                                Открыть
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {objects.length===0 && (
                 <div style={{textAlign:"center",padding:"60px 0",color:"#94a3b8"}}>
