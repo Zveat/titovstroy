@@ -553,6 +553,24 @@ const _race = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(_T
 const _fbKey = (k) => k.replace(/[^a-zA-Z0-9_]/g, "_"); // Firebase: только буквы/цифры/_
 const _TS_SUFFIX = "__wts"; // timestamp последней локальной записи
 const _DIRTY_SUFFIX = "__dirty"; // флаг: последняя запись в облако НЕ прошла — локальная копия новее
+// Согласование локальной («грязной») копии с облаком: для СПИСКОВ записей с id
+// объединяем по id и берём более свежую по updatedAt. Так незасинканная локальная
+// правка НЕ теряется, но и устаревшая локальная копия НЕ прячет более свежий сервер
+// (частая причина «данные откатились» после сбоя облака). Не-списки — прежнее поведение.
+function _reconcileDirty(localStr, cloudStr) {
+  try {
+    const L = JSON.parse(localStr);
+    const C = JSON.parse(cloudStr);
+    const okList = a => Array.isArray(a) && a.every(x => x && typeof x === "object" && x.id != null);
+    if (okList(L) && okList(C)) {
+      const map = new Map();
+      for (const e of C) map.set(e.id, e);
+      for (const e of L) { const ex = map.get(e.id); if (!ex || _ts(e.updatedAt) >= _ts(ex.updatedAt)) map.set(e.id, e); }
+      return JSON.stringify([...map.values()]);
+    }
+  } catch (e) {}
+  return localStr; // не списки/ошибка разбора — доверяем локальной (как раньше)
+}
 const storage = {
   // Расширенное чтение: { value, status: 'found'|'empty'|'unavailable' }
   // 'found' — данные есть; 'empty' — источник точно ответил, данных нет;
@@ -566,13 +584,28 @@ const storage = {
         if (v) return { value: v, status: "found" };
       }
     } catch(e) {}
-    // Незасинхронизированные локальные правки: если последняя запись в облако
-    // упала — доверяем локальной копии, иначе старое облако перетрёт свежую
-    // правку при перезаходе (потеря только что сохранённой сметы/операции).
+    // Незасинхронизированные локальные правки: последняя запись в облако упала.
+    // РАНЬШЕ слепо возвращали локальную копию — из-за этого устаревший локальный
+    // кэш мог перекрыть более свежий сервер (и даже затолкать старьё обратно при
+    // сохранении). ТЕПЕРЬ сверяем с облаком и объединяем по id: свежая правка не
+    // теряется, но и старая локальная копия не прячет актуальные серверные данные.
     try {
       if (localStorage.getItem(key + _DIRTY_SUFFIX)) {
-        const v = localStorage.getItem(key);
-        if (v) return { value: v, status: "found" };
+        const localVal = localStorage.getItem(key);
+        if (localVal) {
+          if (_fbDb) {
+            try {
+              await _fbAuthReady;
+              let snap = await _race(get(ref(_fbDb, _fbKey(key))), 8000);
+              if (snap && snap !== _TIMEOUT && snap.exists()) {
+                const cRaw = snap.val();
+                const cloudVal = typeof cRaw === "string" ? cRaw : JSON.stringify(cRaw);
+                return { value: _reconcileDirty(localVal, cloudVal), status: "found" };
+              }
+            } catch(e) { /* облако не ответило — доверяем локальной ниже */ }
+          }
+          return { value: localVal, status: "found" };
+        }
       }
     } catch(e) {}
     // Firebase (синхронизация между устройствами)
