@@ -61,8 +61,6 @@ export default function ProductionModule({
   finProjects, financeTx,
   fmt, genId, currentUser,
 }) {
-  const [shareLink, setShareLink] = useState(null); // ссылка для клиента после включения доступа
-  const [shareBusy, setShareBusy] = useState(false);
   // карта запись производства по ключу записи (objectId реального объекта или "fp:<id>")
   const entryByKey = useMemo(() => { const m = {}; for (const e of entries) m[e.key] = e; return m; }, [entries]);
   const [openId, setOpenId] = useState(null);
@@ -384,45 +382,12 @@ export default function ProductionModule({
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 4px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <button onClick={() => { setShareLink(null); setOpenId(null); }} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#64748b", padding: 0 }}>←</button>
+        <button onClick={() => setOpenId(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#64748b", padding: 0 }}>←</button>
         <div>
           <div style={{ fontSize: 19, fontWeight: 800, color: "#0f172a" }}>{openObj.clientName || "Объект"}</div>
           <div style={{ fontSize: 13, color: "#64748b" }}>{openObj.address || "—"}{openObj.clientPhone ? ` · 📞 ${openObj.clientPhone}` : ""}</div>
         </div>
       </div>
-
-      {/* Клиент: доступ к прогрессу + сообщение — одной карточкой */}
-      {currentUser?.role !== "viewer" && (() => {
-        const shared = !!(openObj.progressShared && openObj.progressToken);
-        const realUrl = shared ? (window.location.origin + window.location.pathname + "#/progress/" + openObj.progressToken) : null;
-        const url = realUrl || shareLink;
-        return (
-          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", marginBottom: 14, display: "flex", flexDirection: "column", gap: 11 }}>
-            {onToggleClientShare && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>👁 Доступ клиента к прогрессу{shared && <span style={{ fontSize: 11, color: "#059669", fontWeight: 700 }}> · открыт</span>}</div>
-                  <button disabled={shareBusy} onClick={async () => { setShareBusy(true); const link = await onToggleClientShare(openObj.id); setShareLink(link); setShareBusy(false); }}
-                    style={{ background: shared ? "rgba(220,38,38,.08)" : "#ecfdf5", color: shared ? "#dc2626" : "#059669", border: "1px solid " + (shared ? "rgba(220,38,38,.2)" : "rgba(5,150,105,.25)"), borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: shareBusy ? "default" : "pointer", opacity: shareBusy ? .6 : 1, fontFamily: "inherit", whiteSpace: "nowrap" }}>
-                    {shared ? "Закрыть доступ" : "Открыть доступ клиенту"}
-                  </button>
-                </div>
-                {(shared || shareLink) && url && (
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                    <input readOnly value={url} onFocus={e => e.target.select()} style={{ flex: 1, minWidth: 180, border: "1px solid #cbd5e1", borderRadius: 6, padding: "7px 9px", fontSize: 11.5, fontFamily: "inherit", color: "#0f172a", background: "#f8fafc" }} />
-                    <button onClick={() => { try { navigator.clipboard.writeText(url); } catch {} }} style={{ background: "#eff6ff", color: "#2563eb", border: "1px solid rgba(37,99,235,.2)", borderRadius: 6, padding: "7px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Копировать</button>
-                    <a href={"https://wa.me/?text=" + encodeURIComponent("Прогресс вашего ремонта: " + url)} target="_blank" rel="noopener" style={{ background: "#25D366", color: "#fff", textDecoration: "none", padding: "7px 11px", borderRadius: 6, fontSize: 12, fontWeight: 700 }}>WhatsApp</a>
-                  </div>
-                )}
-                <div style={{ fontSize: 10.5, color: "#94a3b8" }}>Клиент видит прогресс, этапы, сроки и оплату. Себестоимость, маржа и подрядчики скрыты.</div>
-              </div>
-            )}
-            {onToggleClientShare && <div style={{ borderTop: "1px solid #f1f5f9" }} />}
-            {/* Сообщение клиенту — общий комментарий от компании на странице прогресса */}
-            <ClientMessageCard prod={openProd} patch={patchProd} embedded />
-          </div>
-        );
-      })()}
 
       <div style={{ display: "flex", gap: 4, marginBottom: 18, flexWrap: "wrap", borderBottom: "1px solid #e2e8f0" }}>
         {TABS.map(t => (
@@ -433,7 +398,7 @@ export default function ProductionModule({
         ))}
       </div>
 
-      {tab === "info" && <InfoTab prod={openProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={patchProd} />}
+      {tab === "info" && <InfoTab prod={openProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={patchProd} onToggleClientShare={onToggleClientShare} currentUser={currentUser} />}
       {tab === "launch" && <ChecklistTab kind="checklistLaunch" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист запуска объекта" />}
       {tab === "handover" && <ChecklistTab kind="checklistHandover" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист сдачи объекта" />}
       {tab === "stages" && <StagesTab prod={openProd} patch={patchProd} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} />}
@@ -448,7 +413,7 @@ export default function ProductionModule({
 const _dayStart = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); };
 // Телефон → формат для wa.me (КЗ: 8XXXXXXXXXX → 7XXXXXXXXXX)
 const _waPhone = (p) => { let d = (p || "").replace(/\D/g, ""); if (d.length === 11 && d[0] === "8") d = "7" + d.slice(1); else if (d.length === 10) d = "7" + d; return d; };
-function InfoTab({ prod, obj, estimates, contracts, fmt, patch }) {
+function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientShare, currentUser }) {
   const objEstimates = estimates.filter(e => e.objectId === obj.id);
   const objContracts = contracts.filter(c => c.objectId === obj.id && !c.deletedAt);
   const totalEst = objEstimates.reduce((s, e) => s + (Number(e.total) || 0), 0);
@@ -574,6 +539,45 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch }) {
             style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box", resize: "vertical" }} />
         </div>
       </div>
+
+      {/* Клиент: доступ к прогрессу + сообщение */}
+      <ClientAccessBlock obj={obj} prod={prod} patch={patch} onToggleClientShare={onToggleClientShare} currentUser={currentUser} />
+    </div>
+  );
+}
+
+// ─── Блок «Клиент»: доступ к прогрессу + сообщение (внизу вкладки «Информация») ───
+function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, currentUser }) {
+  const [shareLink, setShareLink] = useState(null); // ссылка для клиента после включения доступа
+  const [shareBusy, setShareBusy] = useState(false);
+  if (currentUser?.role === "viewer") return null;
+  const shared = !!(obj.progressShared && obj.progressToken);
+  const realUrl = shared ? (window.location.origin + window.location.pathname + "#/progress/" + obj.progressToken) : null;
+  const url = realUrl || shareLink;
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 11 }}>
+      {onToggleClientShare && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>👁 Доступ клиента к прогрессу{shared && <span style={{ fontSize: 11, color: "#059669", fontWeight: 700 }}> · открыт</span>}</div>
+            <button disabled={shareBusy} onClick={async () => { setShareBusy(true); const link = await onToggleClientShare(obj.id); setShareLink(link); setShareBusy(false); }}
+              style={{ background: shared ? "rgba(220,38,38,.08)" : "#ecfdf5", color: shared ? "#dc2626" : "#059669", border: "1px solid " + (shared ? "rgba(220,38,38,.2)" : "rgba(5,150,105,.25)"), borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: shareBusy ? "default" : "pointer", opacity: shareBusy ? .6 : 1, fontFamily: "inherit", whiteSpace: "nowrap" }}>
+              {shared ? "Закрыть доступ" : "Открыть доступ клиенту"}
+            </button>
+          </div>
+          {(shared || shareLink) && url && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <input readOnly value={url} onFocus={e => e.target.select()} style={{ flex: 1, minWidth: 180, border: "1px solid #cbd5e1", borderRadius: 6, padding: "7px 9px", fontSize: 11.5, fontFamily: "inherit", color: "#0f172a", background: "#f8fafc" }} />
+              <button onClick={() => { try { navigator.clipboard.writeText(url); } catch {} }} style={{ background: "#eff6ff", color: "#2563eb", border: "1px solid rgba(37,99,235,.2)", borderRadius: 6, padding: "7px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Копировать</button>
+              <a href={"https://wa.me/?text=" + encodeURIComponent("Прогресс вашего ремонта: " + url)} target="_blank" rel="noopener" style={{ background: "#25D366", color: "#fff", textDecoration: "none", padding: "7px 11px", borderRadius: 6, fontSize: 12, fontWeight: 700 }}>WhatsApp</a>
+            </div>
+          )}
+          <div style={{ fontSize: 10.5, color: "#94a3b8" }}>Клиент видит прогресс, этапы, сроки и оплату. Себестоимость, маржа и подрядчики скрыты.</div>
+        </div>
+      )}
+      {onToggleClientShare && <div style={{ borderTop: "1px solid #f1f5f9" }} />}
+      {/* Сообщение клиенту — общий комментарий от компании на странице прогресса */}
+      <ClientMessageCard prod={prod} patch={patch} embedded />
     </div>
   );
 }
