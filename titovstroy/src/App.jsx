@@ -11241,11 +11241,21 @@ ${reqBlock}`;
 
             return (
               <div>
-                {/* Вкладки карточки объекта: Информация · Сметы · Документы */}
+                {/* Вкладки карточки объекта: Информация · Сметы · Документы · производство */}
                 <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap",borderBottom:"1px solid #e2e8f0"}}>
-                  {[["info","ℹ️ Информация"],["estimates",`📋 Сметы (${objEsts.length})`],["documents",`📄 Документы (${objCons.length+reports.filter(r=>r.objectId===obj.id).length})`]].map(([k,l])=>(
+                  {[
+                    ["info","ℹ️ Информация"],
+                    ["estimates",`📋 Сметы (${objEsts.length})`],
+                    ["documents",`📄 Документы (${objCons.length+reports.filter(r=>r.objectId===obj.id).length})`],
+                    ["launch","🚀 Запуск"],
+                    ["stages","🔨 Этапы"],
+                    ["finance","💰 Финансы"],
+                    ["journal","📖 Журнал"],
+                    ["defects","⚠️ Замечания"],
+                    ["handover","🏁 Сдача"],
+                  ].map(([k,l])=>(
                     <button key={k} onClick={()=>setObjWsTab(k)}
-                      style={{background:objWsTab===k?"#fff":"transparent",border:"1px solid",borderColor:objWsTab===k?"#e2e8f0":"transparent",borderBottom:objWsTab===k?"1px solid #fff":"1px solid transparent",marginBottom:-1,borderRadius:"10px 10px 0 0",padding:"9px 16px",fontSize:13,fontWeight:objWsTab===k?700:500,color:objWsTab===k?"#0f172a":"#64748b",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                      style={{background:objWsTab===k?"#fff":"transparent",border:"1px solid",borderColor:objWsTab===k?"#e2e8f0":"transparent",borderBottom:objWsTab===k?"1px solid #fff":"1px solid transparent",marginBottom:-1,borderRadius:"10px 10px 0 0",padding:"9px 14px",fontSize:13,fontWeight:objWsTab===k?700:500,color:objWsTab===k?"#0f172a":"#64748b",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
                       {l}
                     </button>
                   ))}
@@ -11564,6 +11574,30 @@ ${reqBlock}`;
                   );
                 })()}
                 </>)}
+
+                {/* Производственные вкладки — встроенный модуль Производства для этого объекта */}
+                {["launch","stages","finance","journal","defects","handover"].includes(objWsTab) && (
+                  <ProductionModule
+                    embedObjectId={obj.id}
+                    embedTab={objWsTab}
+                    objects={objects}
+                    entries={prodEntries}
+                    allObjects={objects}
+                    unlinkedProjects={unlinkedFinProjects}
+                    estimates={estimates}
+                    contracts={contracts}
+                    productions={productions}
+                    onSaveProduction={onSaveProduction}
+                    onDeleteProduction={onDeleteProduction}
+                    onToggleClientShare={toggleClientShare}
+                    buildStagesFromEstimate={buildStagesFromEstimate}
+                    finProjects={finProjects}
+                    financeTx={financeTx}
+                    fmt={fmt}
+                    genId={genId}
+                    currentUser={currentUser}
+                  />
+                )}
               </div>
             );
           })()}
