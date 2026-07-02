@@ -478,22 +478,6 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientSh
           {alerts.map((a, i) => <div key={i} style={{ fontSize: 12.5, color: "#b91c1c", padding: "2px 0" }}>• {a}</div>)}
         </div>
       )}
-      {/* Связь в один тап */}
-      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px" }}>
-        <div style={{ fontSize: 10.5, color: "#94a3b8", marginBottom: 10, textTransform: "uppercase", letterSpacing: ".03em", fontWeight: 700 }}>Связь</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          {obj.clientPhone ? (<>
-            <a href={"tel:" + obj.clientPhone} style={{ ...cBtn, background: "#eff6ff", color: "#2563eb" }}>📞 Позвонить</a>
-            <a href={"https://wa.me/" + _waPhone(obj.clientPhone)} target="_blank" rel="noopener" style={{ ...cBtn, background: "#25D366", color: "#fff" }}>📲 WhatsApp клиенту</a>
-          </>) : <span style={{ fontSize: 12, color: "#94a3b8" }}>Телефон клиента не указан</span>}
-          {prod.waGroup && <a href={prod.waGroup} target="_blank" rel="noopener" style={{ ...cBtn, background: "#f0fdf4", color: "#059669", border: "1px solid #bbf7d0" }}>🔗 Рабочая группа</a>}
-        </div>
-        <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Ссылка на рабочую группу WhatsApp</div>
-          <input value={prod.waGroup || ""} onChange={e => patch({ waGroup: e.target.value })} placeholder="https://chat.whatsapp.com/…"
-            style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
-        </div>
-      </div>
       {/* Ключевые метрики */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(148px,1fr))", gap: 12 }}>
         <Metric label="Дней в работе" value={daysInWork == null ? "—" : daysInWork} sub={daysInWork == null ? "не начато" : (prod.factEndDate ? "по факту сдачи" : "идёт сейчас")} color="#2563eb" />
@@ -534,6 +518,23 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientSh
           <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Примечания / особенности</div>
           <textarea value={prod.note || ""} onChange={e => patch({ note: e.target.value })} rows={2}
             style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box", resize: "vertical" }} />
+        </div>
+      </div>
+
+      {/* Связь в один тап */}
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px" }}>
+        <div style={{ fontSize: 10.5, color: "#94a3b8", marginBottom: 10, textTransform: "uppercase", letterSpacing: ".03em", fontWeight: 700 }}>Связь</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          {obj.clientPhone ? (<>
+            <a href={"tel:" + obj.clientPhone} style={{ ...cBtn, background: "#eff6ff", color: "#2563eb" }}>📞 Позвонить</a>
+            <a href={"https://wa.me/" + _waPhone(obj.clientPhone)} target="_blank" rel="noopener" style={{ ...cBtn, background: "#25D366", color: "#fff" }}>📲 WhatsApp клиенту</a>
+          </>) : <span style={{ fontSize: 12, color: "#94a3b8" }}>Телефон клиента не указан</span>}
+          {prod.waGroup && <a href={prod.waGroup} target="_blank" rel="noopener" style={{ ...cBtn, background: "#f0fdf4", color: "#059669", border: "1px solid #bbf7d0" }}>🔗 Рабочая группа</a>}
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Ссылка на рабочую группу WhatsApp</div>
+          <input value={prod.waGroup || ""} onChange={e => patch({ waGroup: e.target.value })} placeholder="https://chat.whatsapp.com/…"
+            style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
         </div>
       </div>
 
