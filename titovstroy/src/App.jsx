@@ -11120,44 +11120,95 @@ ${reqBlock}`;
                 </div>
               )}
 
+              {/* Плитки объектов — как в «Производстве» */}
+              <div style={{fontSize:12,color:"#94a3b8"}}>Объектов: {filteredObjects.length}</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>
               {filteredObjects.map(obj=>{
                 const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"new"))||DEAL_STATUSES[0];
                 const objEsts = estimates.filter(e=>e.objectId===obj.id);
-                const objCons = contracts.filter(c=>c.objectId===obj.id);
+                const objCons = contracts.filter(c=>c.objectId===obj.id && !c.deletedAt);
                 // сумма объекта = все сметы (основная + доп. сметы)
                 const total = objEsts.reduce((s,e)=>s+(e.total||0),0);
+                // Финансы/производство, если объект уже в работе (те же данные, что в «Производстве»)
+                const pe = prodEntries.find(e=>e.objectId===obj.id);
+                const pr = productions.find(p=>p.objectId===obj.id);
+                const sts = pr?.stages||[];
+                const doneSt = sts.filter(s=>s.status==="done").length;
+                const prog = sts.length?Math.round(doneSt/sts.length*100):0;
+                const fill = pe&&pe.budget>0?Math.min(100,Math.round(pe.income/pe.budget*100)):0;
+                const mCol = pe?.margin==null?"#94a3b8":pe.margin>=30?"#059669":pe.margin>=0?"#f59e0b":"#dc2626";
                 return (
-                  <div key={obj.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"14px 18px",cursor:"pointer",transition:"all .15s"}}
-                    onClick={()=>{ setCurrentObject({...obj}); setObjectTab("workspace"); }}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-                      <div style={{minWidth:0,flex:1}}>
-                        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                          <span style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>{obj.clientName||<span style={{color:"#94a3b8",fontStyle:"italic",fontWeight:400}}>Без клиента</span>}</span>
-                          {obj.clientPhone&&<span style={{fontSize:12,color:"#64748b",fontWeight:500}}>📞 {obj.clientPhone}</span>}
-                          <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:4,padding:"1px 7px",whiteSpace:"nowrap"}}>{st.label}</span>
+                  <div key={obj.id} onClick={()=>{ setCurrentObject({...obj}); setObjectTab("workspace"); }}
+                    style={{background:"#fff",border:"1px solid #eef2f7",borderRadius:16,cursor:"pointer",boxShadow:"0 1px 3px rgba(15,23,42,.07)",transition:"box-shadow .15s,transform .15s",overflow:"hidden",display:"flex",flexDirection:"column"}}
+                    onMouseEnter={e=>{e.currentTarget.style.boxShadow="0 8px 24px rgba(0,0,0,.08)";e.currentTarget.style.transform="translateY(-2px)";}}
+                    onMouseLeave={e=>{e.currentTarget.style.boxShadow="none";e.currentTarget.style.transform="none";}}>
+                    {/* Цветная полоса по статусу */}
+                    <div style={{height:4,background:`linear-gradient(90deg,${st.color},${st.color}99)`,flexShrink:0}}/>
+                    <div style={{padding:"14px 16px",flex:1,display:"flex",flexDirection:"column"}}>
+                      {/* Шапка карточки */}
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:14,fontWeight:800,color:"#0f172a",lineHeight:1.3,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{obj.clientName||<span style={{color:"#94a3b8",fontStyle:"italic",fontWeight:400}}>Без клиента</span>}</div>
+                          {obj.clientPhone&&<div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>📞 {obj.clientPhone}</div>}
+                          {obj.address&&<div style={{fontSize:11.5,color:"#64748b",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>📍 {obj.address}{obj.area?` · ${obj.area} м²`:""}</div>}
                         </div>
-                        <div style={{fontSize:12,color:"#94a3b8",marginTop:3}}>
-                          {obj.objType||"Вторичка"}{obj.address?` · 📍 ${obj.address}`:""}
-                          {obj.area?` · ${obj.area} м²`:""}
-                        </div>
-                        <div style={{fontSize:11,color:"#94a3b8",marginTop:3,display:"flex",gap:10,flexWrap:"wrap"}}>
-                          {obj.createdAt&&<span>📅 {fmtDate(obj.createdAt)}</span>}
-                          <span>📋 {objEsts.length} смет</span>
-                          <span>📄 {objCons.length} договоров</span>
-                          {obj.manager&&<span>👤 {obj.manager}</span>}
+                        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
+                          <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap"}}>{st.label}</span>
+                          {(currentUser.role==="admin"||(currentUser.role==="user"&&obj.createdById===currentUser.id)) && (
+                            <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить объект в корзину?")){ saveObjects(objectsRef.current.map(x=>x.id===obj.id?{...x,deletedAt:Date.now()}:x)); writeAudit(currentUser,"удалил объект","object",obj.id,obj.clientName||obj.address||obj.objType||""); }}}
+                              title="В корзину (можно восстановить)" style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.15)",borderRadius:6,padding:"2px 7px",fontSize:11,cursor:"pointer",fontFamily:"inherit",marginTop:2}}>🗑</button>
+                          )}
                         </div>
                       </div>
-                      <div style={{textAlign:"right",flexShrink:0}}>
-                        {total>0&&<div style={{fontWeight:800,fontSize:16,color:"#0f172a"}}>{fmt(total)} ₸</div>}
-                        {(currentUser.role==="admin"||(currentUser.role==="user"&&obj.createdById===currentUser.id)) && (
-                          <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить объект в корзину?")){ saveObjects(objectsRef.current.map(x=>x.id===obj.id?{...x,deletedAt:Date.now()}:x)); writeAudit(currentUser,"удалил объект","object",obj.id,obj.clientName||obj.address||obj.objType||""); }}}
-                            title="В корзину (можно восстановить)" style={{marginTop:6,background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
-                        )}
+                      {/* Финансовый блок — как в «Производстве» (если объект в работе), иначе сумма смет */}
+                      {pe ? (
+                        <div style={{marginBottom:10}}>
+                          {pe.budget>0 ? <>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
+                              <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{fmt(pe.income)} <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>из {fmt(pe.budget)} ₸</span></span>
+                              <span style={{fontSize:12,fontWeight:800,color:fill>=100?"#059669":"#2563eb"}}>{fill}%</span>
+                            </div>
+                            <div style={{height:6,background:"#f1f5f9",borderRadius:4,overflow:"hidden"}}>
+                              <div style={{width:fill+"%",height:"100%",background:fill>=100?"linear-gradient(90deg,#059669,#34d399)":"linear-gradient(90deg,#2563eb,#60a5fa)",borderRadius:4,transition:"width .3s"}}/>
+                            </div>
+                          </> : <div><span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{pe.income>0?fmt(pe.income)+" ₸":"—"}</span><span style={{fontSize:10,color:"#94a3b8",marginLeft:7}}>бюджет не указан</span></div>}
+                          <div style={{borderTop:"1px solid #f1f5f9",marginTop:10}}>
+                            {[["Долг",pe.debt>0?fmt(pe.debt)+" ₸":"—",pe.debt>0?"#dc2626":"#94a3b8"],
+                              ["Расходы",pe.expense>0?fmt(pe.expense)+" ₸":"—",pe.expense>0?"#dc2626":"#94a3b8"]
+                            ].map(([l,v,c])=>(
+                              <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9"}}>
+                                <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>{l}</span>
+                                <span style={{fontSize:13,fontWeight:700,color:c}}>{v}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:pe.margin==null?"#f8fafc":pe.margin>=30?"#f0fdf4":pe.margin>=0?"#fffbeb":"#fef2f2",borderRadius:10,padding:"8px 12px",marginTop:8}}>
+                            <span style={{fontSize:11,fontWeight:700,color:"#475569"}}>Маржа</span>
+                            <span style={{display:"flex",alignItems:"center",gap:7}}>
+                              <span style={{fontSize:14,fontWeight:800,color:mCol}}>{pe.income>0?fmt(pe.income-pe.expense)+" ₸":"—"}</span>
+                              {pe.margin!=null&&<span style={{fontSize:10,fontWeight:800,color:"#fff",background:mCol,borderRadius:6,padding:"2px 7px"}}>{pe.margin}%</span>}
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{marginBottom:10}}>
+                          <span style={{fontSize:16,fontWeight:800,color:"#0f172a"}}>{total>0?fmt(total)+" ₸":"—"}</span>
+                          <span style={{fontSize:10,color:"#94a3b8",marginLeft:7}}>по сметам</span>
+                        </div>
+                      )}
+                      {/* Футер */}
+                      <div style={{marginTop:"auto",display:"flex",flexWrap:"wrap",gap:"4px 10px",fontSize:11,color:"#64748b",borderTop:"1px solid #f1f5f9",paddingTop:10}}>
+                        <span>📋 {objEsts.length} смет</span>
+                        <span>📄 {objCons.length} дог.</span>
+                        {sts.length>0&&<span>🔨 {doneSt}/{sts.length} эт. · {prog}%</span>}
+                        {obj.manager&&<span>👤 {obj.manager}</span>}
+                        {obj.createdAt&&<span>📅 {fmtDate(obj.createdAt)}</span>}
                       </div>
                     </div>
                   </div>
                 );
               })}
+              </div>
             </div>
           )}
 
@@ -11198,7 +11249,7 @@ ${reqBlock}`;
             const obj = currentObject;
             const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"new"))||DEAL_STATUSES[0];
             const _allEsts = estimates.filter(e=>e.objectId===obj.id);
-            const _allCons = contracts.filter(c=>c.objectId===obj.id);
+            const _allCons = contracts.filter(c=>c.objectId===obj.id && !c.deletedAt);
             // Дерево смет: основная смета → под ней доп. сметы (ДС). parentId===id (битая ссылка) трактуем как основную.
             const _estIsMain = (e) => !e.parentId || e.parentId===e.id;
             const _estMains = _allEsts.filter(_estIsMain).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
@@ -11210,13 +11261,15 @@ ${reqBlock}`;
             // осиротевшие ДС (родитель удалён) — показываем в конце
             _allEsts.filter(e=>!_estIsMain(e) && !_estMains.some(m=>m.id===e.parentId)).forEach(ch=>objEsts.push(ch));
             // Дерево договоров: основной договор → под ним доп. соглашения (приложения)
-            const _conMains = _allCons.filter(c=>(c.type||"repair_fiz")!=="annex").sort((a,b)=>(b.id||0)-(a.id||0));
+            // Приложения (в т.ч. к договорам подряда) идут детьми под своим договором
+            const _conIsChild = c => c.type==="annex" || c.type==="podryad_annex";
+            const _conMains = _allCons.filter(c=>!_conIsChild(c)).sort((a,b)=>(b.id||0)-(a.id||0));
             const objCons = [];
             _conMains.forEach(m=>{
               objCons.push(m);
-              _allCons.filter(c=>c.type==="annex" && c.mainNumber && c.mainNumber===m.number).sort((a,b)=>(a.appendix||0)-(b.appendix||0)).forEach(ch=>objCons.push(ch));
+              _allCons.filter(c=>_conIsChild(c) && c.mainNumber && c.mainNumber===m.number).sort((a,b)=>(a.appendix||0)-(b.appendix||0)).forEach(ch=>objCons.push(ch));
             });
-            _allCons.filter(c=>c.type==="annex" && !(c.mainNumber && _conMains.some(m=>m.number===c.mainNumber))).forEach(ch=>objCons.push(ch));
+            _allCons.filter(c=>_conIsChild(c) && !(c.mainNumber && _conMains.some(m=>m.number===c.mainNumber))).forEach(ch=>objCons.push(ch));
             const canEdit = currentUser.role==="admin"||(currentUser.role==="user"&&obj.createdById===currentUser.id);
             // Текст печатаем локально (отзывчиво), сохраняем на blur. Синхронизируем скрытую запись клиента.
             const setObjLocal = (patch) => setCurrentObject(p=>({...p,...patch}));
@@ -11245,8 +11298,7 @@ ${reqBlock}`;
                 <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap",borderBottom:"1px solid #e2e8f0"}}>
                   {[
                     ["info","ℹ️ Информация"],
-                    ["estimates",`📋 Сметы (${objEsts.length})`],
-                    ["documents",`📄 Документы (${objCons.length+reports.filter(r=>r.objectId===obj.id).length})`],
+                    ["documents",`📄 Документы (${objEsts.length+objCons.length+reports.filter(r=>r.objectId===obj.id).length})`],
                     ["launch","🚀 Запуск"],
                     ["stages","🔨 Этапы"],
                     ["finance","💰 Финансы"],
@@ -11377,7 +11429,7 @@ ${reqBlock}`;
                 </div>
                 )}
 
-                {objWsTab==="estimates" && (
+                {objWsTab==="documents" && (
                 <div style={{marginTop:0}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                     <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>📋 Сметы ({objEsts.length})</div>
@@ -11453,8 +11505,8 @@ ${reqBlock}`;
                 )}
 
                 {objWsTab==="documents" && (<>
-                {/* Договоры объекта */}
-                <div style={{marginTop:0}}>
+                {/* Договоры объекта (включая договоры подряда, созданные в рамках объекта) */}
+                <div style={{marginTop:24}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                     <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>📄 Договоры ({objCons.length})</div>
                   </div>
@@ -11470,16 +11522,18 @@ ${reqBlock}`;
                       const ca2 = contragents.find(x=>x.id===c.contragentId);
                       const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
                       const stC = CONTRACT_STATUSES.find(x=>x.key===(c.contractStatus||"draft"))||CONTRACT_STATUSES[0];
-                      const TLABEL = {repair_fiz:"Договор",annex:"Доп. соглашение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронь"};
-                      const isAnnex = c.type==="annex";
-                      const conTitle = isAnnex ? `Доп. соглашение №${c.appendix||2}`+(c.mainNumber?` к договору №${c.mainNumber}`:"") : `${TLABEL[c.type||"repair_fiz"]||"Договор"} №${c.number||"б/н"}`;
+                      const TLABEL = {repair_fiz:"Договор",annex:"Доп. соглашение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронь",podryad:"👷 Договор подряда"};
+                      const isAnnex = c.type==="annex" || c.type==="podryad_annex";
+                      const conTitle = isAnnex
+                        ? `${c.type==="podryad_annex"?"Приложение":"Доп. соглашение"} №${c.appendix||2}`+(c.mainNumber?` к договору №${c.mainNumber}`:"")
+                        : `${TLABEL[c.type||"repair_fiz"]||"Договор"} №${c.number||"б/н"}`;
                       return (
                         <div key={c.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 16px",cursor:"pointer",transition:"all .12s",marginLeft:isAnnex?16:0,borderLeft:isAnnex?"3px solid #ede9fe":"1px solid #e5e7eb"}}
                           onClick={()=>{ setCurrentContract({...c}); setObjectReturnId(obj.id); setContractTab("editor"); setScreen("contracts"); }}>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                                {isAnnex && <span style={{fontSize:10,fontWeight:700,color:"#7c3aed",background:"rgba(124,58,237,.08)",borderRadius:3,padding:"1px 6px"}}>Доп. согл.</span>}
+                                {isAnnex && <span style={{fontSize:10,fontWeight:700,color:"#7c3aed",background:"rgba(124,58,237,.08)",borderRadius:3,padding:"1px 6px"}}>{c.type==="podryad_annex"?"Прил. подряда":"Доп. согл."}</span>}
                                 <span style={{fontWeight:600,fontSize:13,color:"#0f172a"}}>{conTitle}</span>
                                 <span style={{fontSize:10,fontWeight:700,color:stC.color,background:stC.bg,borderRadius:4,padding:"1px 6px"}}>{stC.label}</span>
                               </div>
