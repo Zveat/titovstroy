@@ -905,8 +905,11 @@ function DefectsTab({ prod, patch, genId, currentUser }) {
             <div key={it.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "9px 4px", borderBottom: "1px solid #f1f5f9" }}>
               <input type="checkbox" checked={!!it.done} onChange={e => upd(it.id, { done: e.target.checked })} style={{ width: 18, height: 18, cursor: "pointer", flexShrink: 0, marginTop: 2 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <input value={it.text} onChange={e => upd(it.id, { text: e.target.value })}
-                  style={{ width: "100%", border: "none", fontSize: 13, fontFamily: "inherit", outline: "none", color: it.done ? "#94a3b8" : "#0f172a", textDecoration: it.done ? "line-through" : "none", background: "transparent" }} />
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {it.source === "client" && <span style={{ fontSize: 9.5, fontWeight: 800, color: "#2563eb", background: "rgba(37,99,235,.1)", borderRadius: 4, padding: "1px 6px", flexShrink: 0, whiteSpace: "nowrap" }}>👤 ОТ КЛИЕНТА</span>}
+                  <input value={it.text} onChange={e => upd(it.id, { text: e.target.value })}
+                    style={{ width: "100%", border: "none", fontSize: 13, fontFamily: "inherit", outline: "none", color: it.done ? "#94a3b8" : "#0f172a", textDecoration: it.done ? "line-through" : "none", background: "transparent" }} />
+                </div>
                 <div style={{ fontSize: 10.5, color: "#cbd5e1", marginTop: 2 }}>{_fmtTs(it.ts)} · {it.author}{it.done ? " · устранено" : ""}</div>
               </div>
               <button onClick={() => del(it.id)} style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 15, flexShrink: 0, marginTop: 2 }}>✕</button>
