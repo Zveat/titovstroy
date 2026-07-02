@@ -3350,33 +3350,33 @@ function PublicProgress({ token }) {
   const [rmBusy, setRmBusy] = useState(false);
   const [rmSent, setRmSent] = useState(false);
   const [docs, setDocs] = useState(null);
-  useEffect(() => {
-    let stop = false;
-    (async () => {
-      try {
-        const r = await storage.getResult(PROGRESS_NODE(token));
-        if (stop) return;
-        if (r.status === "found" && r.value) {
-          let data = null; try { data = JSON.parse(r.value); } catch {}
-          if (data && !data.revoked && Array.isArray(data.stages)) {
-            setS(data); setState("ok");
-            try { storage.set(PROGRESS_NODE(token), JSON.stringify({ ...data, viewedAt: Date.now(), viewCount: (data.viewCount || 0) + 1 })); } catch {}
-            return;
-          }
+  const [refreshing, setRefreshing] = useState(false);
+  // Загрузка снимка прогресса + документов. isRefresh: не сбрасываем страницу в
+  // "недоступно" и не накручиваем счётчик просмотров при ручном обновлении.
+  const load = useCallback(async (opts = {}) => {
+    const isRefresh = !!opts.isRefresh;
+    let ok = false;
+    try {
+      const r = await storage.getResult(PROGRESS_NODE(token));
+      if (r.status === "found" && r.value) {
+        let data = null; try { data = JSON.parse(r.value); } catch {}
+        if (data && !data.revoked && Array.isArray(data.stages)) {
+          setS(data); setState("ok"); ok = true;
+          if (!isRefresh) { try { storage.set(PROGRESS_NODE(token), JSON.stringify({ ...data, viewedAt: Date.now(), viewCount: (data.viewCount || 0) + 1 })); } catch {} }
         }
-        setState("notfound");
-      } catch { if (!stop) setState("notfound"); }
-    })();
-    return () => { stop = true; };
+      }
+    } catch {}
+    if (!ok && !isRefresh) setState("notfound");
+    // Документы клиента (договоры/акты) из отдельной ноды
+    try { const r2 = await storage.getResult(DOCS_NODE(token)); if (r2.status === "found" && r2.value) { try { setDocs(JSON.parse(r2.value)); } catch {} } } catch {}
   }, [token]);
-  // Документы клиента (договоры/акты) из отдельной ноды
-  useEffect(() => {
-    let stop = false;
-    (async () => {
-      try { const r = await storage.getResult(DOCS_NODE(token)); if (!stop && r.status === "found" && r.value) { try { setDocs(JSON.parse(r.value)); } catch {} } } catch {}
-    })();
-    return () => { stop = true; };
-  }, [token]);
+  useEffect(() => { load(); }, [load]);
+  const refresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try { await load({ isRefresh: true }); } catch {}
+    setRefreshing(false);
+  };
   const openHtml = (html) => {
     if (!html) return;
     try { const blob = new Blob([html], { type: "text/html" }); const url = URL.createObjectURL(blob); window.open(url, "_blank"); setTimeout(() => URL.revokeObjectURL(url), 60000); }
@@ -3414,7 +3414,11 @@ function PublicProgress({ token }) {
     </div>
   );
 
-  const pct = Math.max(0, Math.min(100, Number(s.progressPct) || 0));
+  // Процент считаем прямо из этапов снимка — чтобы всегда совпадал с производством
+  // (по количеству готовых этапов), независимо от того, какая версия кода публиковала снимок.
+  const _stg = Array.isArray(s.stages) ? s.stages : [];
+  const _doneN = _stg.filter(st => (st.status || "todo") === "done").length;
+  const pct = _stg.length ? Math.round(_doneN / _stg.length * 100) : Math.max(0, Math.min(100, Number(s.progressPct) || 0));
   const pay = s.payment || {};
   const remarks = Array.isArray(s.clientRemarks) ? s.clientRemarks : [];
   const daysLeft = (s.planEndDate && !s.factEndDate) ? Math.ceil((new Date(s.planEndDate).getTime() - Date.now()) / 86400000) : null;
@@ -3430,7 +3434,12 @@ function PublicProgress({ token }) {
     <div style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)", color: "#fff", padding: "20px 20px 22px", margin: "12px 12px 14px", borderRadius: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
         <div style={{ width: 34, height: 34, borderRadius: 9, background: "#b8904a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 900, color: "#0c0e1a" }}>T</div>
-        <div style={{ fontSize: 17, fontWeight: 800 }}>TitovStroy <span style={{ color: "#94a3b8", fontWeight: 600 }}>· ремонт</span></div>
+        <div style={{ fontSize: 17, fontWeight: 800, flex: 1, minWidth: 0 }}>TitovStroy <span style={{ color: "#94a3b8", fontWeight: 600 }}>· ремонт</span></div>
+        <button onClick={refresh} disabled={refreshing} title="Обновить данные"
+          style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.1)", border: "1px solid rgba(255,255,255,.18)", color: "#e2e8f0", borderRadius: 9, padding: "7px 11px", fontSize: 12.5, fontWeight: 700, cursor: refreshing ? "default" : "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+          <span style={{ display: "inline-block", transition: "transform .6s ease", transform: refreshing ? "rotate(360deg)" : "none" }}>⟳</span>
+          {refreshing ? "Обновляю…" : "Обновить"}
+        </button>
       </div>
       <div style={{ fontSize: 11.5, color: "#94a3b8", marginBottom: 3 }}>Ваш объект</div>
       <div style={{ fontSize: 21, fontWeight: 900, lineHeight: 1.15 }}>{s.objectAddress || s.clientName || "Ремонт"}</div>
@@ -3447,7 +3456,7 @@ function PublicProgress({ token }) {
         <div style={{ width: pct + "%", height: "100%", background: "linear-gradient(90deg,#22c55e,#16a34a)", borderRadius: 8, transition: "width .4s" }} />
       </div>
       <div style={{ display: "flex", gap: "6px 16px", flexWrap: "wrap", marginTop: 12, fontSize: 12.5, color: "#64748b" }}>
-        {(s.totalStages > 0) && <span>Этапов готово: <b style={{ color: "#334155" }}>{s.doneStages || 0} из {s.totalStages}</b></span>}
+        {(_stg.length > 0) && <span>Этапов готово: <b style={{ color: "#334155" }}>{_doneN} из {_stg.length}</b></span>}
         {s.startDate && <span>Старт: <b style={{ color: "#334155" }}>{dt(s.startDate)}</b></span>}
         {s.planEndDate && <span>План сдачи: <b style={{ color: "#334155" }}>{dt(s.planEndDate)}</b></span>}
         {s.factEndDate ? <span style={{ color: "#059669", fontWeight: 700 }}>✓ Сдан {dt(s.factEndDate)}</span>
