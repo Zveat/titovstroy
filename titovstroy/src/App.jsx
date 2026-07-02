@@ -3341,9 +3341,13 @@ function PublicKP({ id }) {
 // ─── ПУБЛИЧНАЯ СТРАНИЦА «ПРОГРЕСС ОБЪЕКТА» (по ссылке #/progress/<токен>, без входа) ───
 const PROGRESS_NODE = (token) => "titovstroy-progress-" + token;
 const _PROG_ST = { todo:{l:"Не начат",c:"#64748b",bg:"#f1f5f9",i:"⏳"}, progress:{l:"В работе",c:"#2563eb",bg:"#eff6ff",i:"🔨"}, done:{l:"Готово",c:"#059669",bg:"#ecfdf5",i:"✓"}, delayed:{l:"Задержка",c:"#dc2626",bg:"#fef2f2",i:"⚠️"} };
+const COMPANY_WA = "77079824915"; // WhatsApp компании для связи с клиентом
 function PublicProgress({ token }) {
   const [state, setState] = useState("loading"); // loading | notfound | ok
   const [s, setS] = useState(null);
+  const [rmText, setRmText] = useState("");
+  const [rmBusy, setRmBusy] = useState(false);
+  const [rmSent, setRmSent] = useState(false);
   useEffect(() => {
     let stop = false;
     (async () => {
@@ -3366,72 +3370,115 @@ function PublicProgress({ token }) {
 
   const fmt = (n) => (Math.round(Number(n) || 0)).toLocaleString("ru-RU");
   const dt = (d) => d ? new Date(d).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" }) : "";
+  const submitRemark = async () => {
+    const t = rmText.trim(); if (!t || rmBusy) return;
+    setRmBusy(true);
+    try {
+      const r = await storage.getResult(PROGRESS_NODE(token));
+      let node = s || {}; try { if (r.status === "found" && r.value) node = JSON.parse(r.value); } catch {}
+      const list = Array.isArray(node.clientRemarks) ? node.clientRemarks : [];
+      const nrm = { id: "cr" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), text: t, ts: Date.now(), done: false };
+      const updated = { ...node, clientRemarks: [...list, nrm] };
+      await storage.set(PROGRESS_NODE(token), JSON.stringify(updated));
+      setS(updated); setRmText(""); setRmSent(true); setTimeout(() => setRmSent(false), 4000);
+    } catch (e) {}
+    setRmBusy(false);
+  };
   const wrap = (children) => (
-    <div style={{ minHeight: "100vh", background: "#eef2f7", padding: "calc(16px + env(safe-area-inset-top,0px)) 12px 40px", boxSizing: "border-box", fontFamily: "'Golos Text','Segoe UI',sans-serif", color: "#0f172a" }}>
+    <div style={{ minHeight: "100vh", background: "#eef2f7", padding: "0 0 40px", boxSizing: "border-box", fontFamily: "'Golos Text','Segoe UI',sans-serif", color: "#0f172a" }}>
       <div style={{ maxWidth: 560, margin: "0 auto" }}>{children}</div>
     </div>
   );
 
-  if (state === "loading") return wrap(<div style={{ textAlign: "center", padding: "60px 0", color: "#94a3b8" }}>Загрузка…</div>);
+  if (state === "loading") return wrap(<div style={{ textAlign: "center", padding: "90px 0", color: "#94a3b8" }}>Загрузка…</div>);
   if (state === "notfound") return wrap(
-    <div style={{ textAlign: "center", padding: "60px 20px", background: "#fff", borderRadius: 16 }}>
+    <div style={{ textAlign: "center", padding: "70px 20px", margin: "20px 12px", background: "#fff", borderRadius: 16 }}>
       <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
       <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 6 }}>Ссылка недоступна</div>
-      <div style={{ fontSize: 13, color: "#64748b" }}>Возможно, доступ закрыт. Свяжитесь с менеджером.</div>
+      <div style={{ fontSize: 13, color: "#64748b" }}>Возможно, доступ закрыт. Свяжитесь с менеджером: <a href={"https://wa.me/" + COMPANY_WA} style={{ color: "#059669" }}>WhatsApp</a></div>
     </div>
   );
 
   const pct = Math.max(0, Math.min(100, Number(s.progressPct) || 0));
   const pay = s.payment || {};
+  const remarks = Array.isArray(s.clientRemarks) ? s.clientRemarks : [];
+  const daysLeft = (s.planEndDate && !s.factEndDate) ? Math.ceil((new Date(s.planEndDate).getTime() - Date.now()) / 86400000) : null;
+  // Группировка этапов по категории (черновые / чистовые / санузел …)
+  const groups = []; const gmap = {};
+  for (const st of (s.stages || [])) { const c = st.cat || "Работы"; if (!gmap[c]) { gmap[c] = { cat: c, items: [] }; groups.push(gmap[c]); } gmap[c].items.push(st); }
+  const card = { background: "#fff", borderRadius: 16, padding: "16px 18px", margin: "0 12px 14px" };
+  const h = { fontWeight: 800, fontSize: 15, marginBottom: 10 };
+
   return wrap(<>
-    {/* Шапка */}
-    <div style={{ background: "linear-gradient(135deg,#1d4ed8,#2563eb)", color: "#fff", borderRadius: 16, padding: "20px 22px", marginBottom: 14, boxShadow: "0 6px 20px rgba(37,99,235,.25)" }}>
-      <div style={{ fontSize: 12, opacity: .85, marginBottom: 4 }}>Ваш объект</div>
-      <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1.15 }}>{s.objectAddress || s.clientName || "Ремонт"}</div>
-      {s.managerName && <div style={{ fontSize: 12.5, opacity: .9, marginTop: 8 }}>Менеджер: {s.managerName}</div>}
+    {/* Шапка — как в сервисе (тёмная) */}
+    <div style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)", color: "#fff", padding: "calc(20px + env(safe-area-inset-top,0px)) 20px 22px", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        <div style={{ width: 34, height: 34, borderRadius: 9, background: "#b8904a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 900, color: "#0c0e1a" }}>T</div>
+        <div style={{ fontSize: 17, fontWeight: 800 }}>TitovStroy <span style={{ color: "#94a3b8", fontWeight: 600 }}>· ремонт</span></div>
+      </div>
+      <div style={{ fontSize: 11.5, color: "#94a3b8", marginBottom: 3 }}>Ваш объект</div>
+      <div style={{ fontSize: 21, fontWeight: 900, lineHeight: 1.15 }}>{s.objectAddress || s.clientName || "Ремонт"}</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, alignItems: "center" }}>
+        {s.managerName && <span style={{ fontSize: 12, color: "#cbd5e1" }}>Менеджер: <b style={{ color: "#fff" }}>{s.managerName}</b></span>}
+        <a href={"https://wa.me/" + COMPANY_WA + "?text=" + encodeURIComponent("Здравствуйте! По объекту " + (s.objectAddress || ""))} target="_blank" rel="noopener"
+          style={{ background: "#25D366", color: "#fff", textDecoration: "none", padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700 }}>📲 Написать в WhatsApp</a>
+      </div>
     </div>
 
     {/* Прогресс */}
-    <div style={{ background: "#fff", borderRadius: 16, padding: "18px 20px", marginBottom: 14 }}>
+    <div style={card}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-        <span style={{ fontWeight: 800, fontSize: 15 }}>Готовность</span>
-        <span style={{ fontWeight: 900, fontSize: 22, color: "#2563eb" }}>{pct}%</span>
+        <span style={{ fontWeight: 800, fontSize: 15 }}>Готовность объекта</span>
+        <span style={{ fontWeight: 900, fontSize: 24, color: "#2563eb" }}>{pct}%</span>
       </div>
-      <div style={{ height: 12, background: "#e2e8f0", borderRadius: 8, overflow: "hidden" }}>
+      <div style={{ height: 14, background: "#e2e8f0", borderRadius: 8, overflow: "hidden" }}>
         <div style={{ width: pct + "%", height: "100%", background: "linear-gradient(90deg,#22c55e,#16a34a)", borderRadius: 8, transition: "width .4s" }} />
       </div>
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 12, fontSize: 12.5, color: "#64748b" }}>
+      <div style={{ display: "flex", gap: "6px 16px", flexWrap: "wrap", marginTop: 12, fontSize: 12.5, color: "#64748b" }}>
+        {(s.totalStages > 0) && <span>Этапов готово: <b style={{ color: "#334155" }}>{s.doneStages || 0} из {s.totalStages}</b></span>}
         {s.startDate && <span>Старт: <b style={{ color: "#334155" }}>{dt(s.startDate)}</b></span>}
         {s.planEndDate && <span>План сдачи: <b style={{ color: "#334155" }}>{dt(s.planEndDate)}</b></span>}
-        {s.factEndDate && <span>Сдан: <b style={{ color: "#059669" }}>{dt(s.factEndDate)}</b></span>}
+        {s.factEndDate ? <span style={{ color: "#059669", fontWeight: 700 }}>✓ Сдан {dt(s.factEndDate)}</span>
+          : daysLeft != null && <span style={{ color: daysLeft < 0 ? "#dc2626" : "#334155" }}>{daysLeft < 0 ? `Просрочка ${-daysLeft} дн.` : `Осталось ~${daysLeft} дн.`}</span>}
       </div>
     </div>
 
-    {/* Этапы */}
-    <div style={{ background: "#fff", borderRadius: 16, padding: "16px 18px", marginBottom: 14 }}>
-      <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10 }}>Этапы работ</div>
-      {(s.stages || []).length === 0 && <div style={{ color: "#94a3b8", fontSize: 13, padding: "8px 0" }}>Этапы появятся по мере старта работ.</div>}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {(s.stages || []).map((st, i) => {
-          const cfg = _PROG_ST[st.status] || _PROG_ST.todo;
-          return (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: cfg.bg, borderRadius: 10, border: "1px solid " + cfg.bg }}>
-              <span style={{ fontSize: 15, flexShrink: 0 }}>{cfg.i}</span>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: "#0f172a" }}>{st.name}</div>
-                <div style={{ fontSize: 11, color: cfg.c, fontWeight: 700, marginTop: 1 }}>{cfg.l}{st.planEnd ? ` · до ${dt(st.planEnd)}` : ""}</div>
-              </div>
-              {Number(st.priceClient) > 0 && <div style={{ fontSize: 13, fontWeight: 800, color: "#334155", flexShrink: 0 }}>{fmt(st.priceClient)} ₸</div>}
+    {/* Этапы — сгруппированы по категориям */}
+    <div style={card}>
+      <div style={h}>Этапы работ</div>
+      {groups.length === 0 && <div style={{ color: "#94a3b8", fontSize: 13, padding: "8px 0" }}>Этапы появятся по мере старта работ.</div>}
+      {groups.map((g, gi) => {
+        const dn = g.items.filter(x => (x.status || "todo") === "done").length;
+        return (
+          <div key={gi} style={{ marginBottom: gi < groups.length - 1 ? 14 : 0 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em" }}>{g.cat}</span>
+              <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>{dn}/{g.items.length}</span>
             </div>
-          );
-        })}
-      </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+              {g.items.map((st, i) => {
+                const cfg = _PROG_ST[st.status] || _PROG_ST.todo;
+                return (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: cfg.bg, borderRadius: 10 }}>
+                    <span style={{ fontSize: 15, flexShrink: 0 }}>{cfg.i}</span>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#0f172a" }}>{st.name}</div>
+                      <div style={{ fontSize: 11, color: cfg.c, fontWeight: 700, marginTop: 1 }}>{cfg.l}{st.planEnd ? ` · до ${dt(st.planEnd)}` : ""}</div>
+                    </div>
+                    {Number(st.priceClient) > 0 && <div style={{ fontSize: 12.5, fontWeight: 800, color: "#334155", flexShrink: 0 }}>{fmt(st.priceClient)} ₸</div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
     </div>
 
     {/* Оплата */}
     {(pay.budget > 0 || pay.paid > 0) && (
-      <div style={{ background: "#fff", borderRadius: 16, padding: "16px 18px", marginBottom: 14 }}>
-        <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10 }}>Оплата по договору</div>
+      <div style={card}>
+        <div style={h}>Оплата по договору</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13.5 }}>
           <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#64748b" }}>Сумма договора</span><b>{fmt(pay.budget)} ₸</b></div>
           <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#64748b" }}>Оплачено</span><b style={{ color: "#059669" }}>{fmt(pay.paid)} ₸</b></div>
@@ -3440,15 +3487,43 @@ function PublicProgress({ token }) {
       </div>
     )}
 
-    {/* Приёмка */}
+    {/* Замечания от клиента */}
+    <div style={card}>
+      <div style={h}>Замечания и пожелания</div>
+      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>Напишите, если что-то нужно поправить или уточнить — замечание попадёт прорабу.</div>
+      <div style={{ display: "flex", gap: 6, marginBottom: remarks.length ? 12 : 0 }}>
+        <textarea value={rmText} onChange={e => setRmText(e.target.value)} placeholder="Например: в спальне переделать угол у окна…" rows={2}
+          style={{ flex: 1, border: "1px solid #cbd5e1", borderRadius: 10, padding: "9px 11px", fontSize: 13, fontFamily: "inherit", outline: "none", resize: "vertical" }} />
+      </div>
+      <button onClick={submitRemark} disabled={!rmText.trim() || rmBusy}
+        style={{ width: "100%", background: (!rmText.trim() || rmBusy) ? "#cbd5e1" : "#2563eb", color: "#fff", border: "none", borderRadius: 10, padding: "11px", fontSize: 13.5, fontWeight: 700, cursor: (!rmText.trim() || rmBusy) ? "default" : "pointer", fontFamily: "inherit", marginBottom: remarks.length ? 14 : 0 }}>
+        {rmBusy ? "Отправляю…" : "Отправить замечание"}
+      </button>
+      {rmSent && <div style={{ fontSize: 12.5, color: "#059669", fontWeight: 700, marginTop: 8 }}>✓ Замечание отправлено, спасибо!</div>}
+      {remarks.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+          {remarks.slice().reverse().map((rm, i) => (
+            <div key={rm.id || i} style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "9px 11px", background: rm.done ? "#ecfdf5" : "#f8fafc", borderRadius: 10, border: "1px solid " + (rm.done ? "#a7f3d0" : "#e2e8f0") }}>
+              <span style={{ fontSize: 14, flexShrink: 0, color: rm.done ? "#059669" : "#f59e0b" }}>{rm.done ? "✓" : "⏳"}</span>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 13, color: "#0f172a" }}>{rm.text}</div>
+                <div style={{ fontSize: 10.5, color: rm.done ? "#059669" : "#f59e0b", fontWeight: 700, marginTop: 2 }}>{rm.done ? "Выполнено" : "В работе"}{rm.ts ? ` · ${new Date(rm.ts).toLocaleDateString("ru-RU")}` : ""}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+
+    {/* Приёмка (только клиентские шаги) */}
     {(s.handover || []).length > 0 && (
-      <div style={{ background: "#fff", borderRadius: 16, padding: "16px 18px", marginBottom: 14 }}>
-        <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 10 }}>Приёмка объекта</div>
+      <div style={card}>
+        <div style={h}>Приёмка с клиентом</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-          {s.handover.map((h, i) => (
+          {s.handover.map((hh, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13 }}>
-              <span style={{ fontSize: 14, color: h.done ? "#059669" : "#cbd5e1" }}>{h.done ? "✓" : "○"}</span>
-              <span style={{ color: h.done ? "#0f172a" : "#94a3b8" }}>{h.text}</span>
+              <span style={{ fontSize: 14, color: hh.done ? "#059669" : "#cbd5e1" }}>{hh.done ? "✓" : "○"}</span>
+              <span style={{ color: hh.done ? "#0f172a" : "#94a3b8" }}>{hh.text}</span>
             </div>
           ))}
         </div>
@@ -4504,13 +4579,19 @@ ${reqBlock}`;
     const progressPct = totVal > 0 ? Math.round(doneVal / totVal * 100) : stages.length > 0 ? Math.round(doneCnt / stages.length * 100) : 0;
     const handover = (prod.checklistHandover || []).filter(i => (i.section || "") === "Клиентская приёмка").map(i => ({ text: i.text, done: !!i.done }));
     const budget = Number(entry?.budget) || 0, paid = Number(entry?.income) || 0;
+    // Статус замечаний клиента подтягиваем из дефектов производства (по clientRemarkId)
+    const defectDone = {};
+    for (const d of (prod.defects || [])) { if (d.clientRemarkId) defectDone[d.clientRemarkId] = !!d.done; }
+    const clientRemarks = (Array.isArray(prev.clientRemarks) ? prev.clientRemarks : []).map(rm => ({
+      id: rm.id, text: rm.text, ts: rm.ts, done: (rm.id in defectDone) ? defectDone[rm.id] : !!rm.done,
+    }));
     return {
-      v: 1, objectAddress: obj.address || "", clientName: obj.clientName || "", managerName: obj.manager || "",
+      v: 2, objectAddress: obj.address || "", clientName: obj.clientName || "", managerName: obj.manager || "",
       startDate: prod.startDate || "", planEndDate: prod.planEndDate || "", factEndDate: prod.factEndDate || "",
-      progressPct,
-      stages: stages.map(st => ({ name: st.manualName || st.name || "Этап", status: st.status || "todo", planEnd: st.planEnd || "", priceClient: Number(st.priceClient) || 0 })),
+      progressPct, doneStages: doneCnt, totalStages: stages.length,
+      stages: stages.map(st => ({ name: st.manualName || st.name || "Этап", cat: st.cat || "Работы", status: st.status || "todo", planEnd: st.planEnd || "", priceClient: Number(st.priceClient) || 0 })),
       payment: { budget, paid, remaining: Math.max(0, budget - paid) },
-      handover,
+      handover, clientRemarks,
       publishedAt: Date.now(), viewCount: prev.viewCount || 0, viewedAt: prev.viewedAt || null,
     };
   }, []);
@@ -4523,6 +4604,35 @@ ${reqBlock}`;
     if (snap) { try { await storage.set(PROGRESS_NODE(obj.progressToken), JSON.stringify(snap)); } catch (e) { console.warn("publishProgress err", e); } }
   }, [buildProgressSnapshot]);
   const publishProgressRef = useRef(); publishProgressRef.current = publishProgress;
+  // Забрать замечания клиента из ноды прогресса и завести их в «Замечания» производства (с пометкой «от клиента»)
+  const syncClientRemarks = useCallback(async (objectId) => {
+    const obj = objectsRef.current.find(o => o.id === objectId);
+    if (!obj || !obj.progressShared || !obj.progressToken) return;
+    let node = {};
+    try { const r = await storage.getResult(PROGRESS_NODE(obj.progressToken)); if (r.status === "found" && r.value) node = JSON.parse(r.value); } catch {}
+    const remarks = Array.isArray(node.clientRemarks) ? node.clientRemarks : [];
+    if (!remarks.length) return;
+    const prod = productionsRef.current.find(p => p.objectId === objectId) || null;
+    const defects = prod ? (prod.defects || []) : [];
+    const known = new Set(defects.filter(d => d.clientRemarkId).map(d => d.clientRemarkId));
+    const toAdd = remarks.filter(rm => rm.id && !known.has(rm.id));
+    if (!toAdd.length) return;
+    const add = toAdd.map(rm => ({ id: genId(), text: rm.text || "", done: false, ts: rm.ts || Date.now(), author: "Клиент", source: "client", clientRemarkId: rm.id }));
+    const base = prod || emptyProduction(objectId, genId);
+    await onSaveProduction({ ...base, defects: [...add, ...defects], updatedAt: Date.now() });
+  }, [genId, onSaveProduction]);
+  const syncRemarksRef = useRef(); syncRemarksRef.current = syncClientRemarks;
+  // Опрос замечаний клиента раз в минуту (клиент пишет прямо в ноду — производственных событий нет)
+  useEffect(() => {
+    const tick = () => {
+      objectsRef.current.filter(o => o.progressShared && o.progressToken).forEach(async o => {
+        try { await syncRemarksRef.current?.(o.id); } catch {}
+        try { await publishProgressRef.current?.(o.id); } catch {}
+      });
+    };
+    const iv = setInterval(tick, 60000);
+    return () => clearInterval(iv);
+  }, []);
   // Включить/выключить доступ клиента; возвращает ссылку (или null при выключении)
   const toggleClientShare = useCallback(async (objectId) => {
     const obj = objectsRef.current.find(o => o.id === objectId);
@@ -4546,7 +4656,7 @@ ${reqBlock}`;
     const shared = objectsRef.current.filter(o => o.progressShared && o.progressToken);
     if (!shared.length) return;
     if (_progPubTimer.current) clearTimeout(_progPubTimer.current);
-    _progPubTimer.current = setTimeout(() => { shared.forEach(o => publishProgressRef.current?.(o.id)); }, 1200);
+    _progPubTimer.current = setTimeout(() => { shared.forEach(async o => { try { await syncRemarksRef.current?.(o.id); } catch {} publishProgressRef.current?.(o.id); }); }, 1200);
     return () => { if (_progPubTimer.current) clearTimeout(_progPubTimer.current); };
   }, [prodEntries, productions]);
 
