@@ -11078,7 +11078,7 @@ ${reqBlock}`;
                 <button onClick={()=>downloadCSV(
                   "objects_"+new Date().toISOString().slice(0,10)+".csv",
                   ["Статус","Клиент","Телефон","Адрес","Тип","Площадь","Менеджер","Дата создания","Смет (шт)","Сумма смет","Договоров"],
-                  filteredObjects.map(o=>{
+                  filteredObjects.filter(o=>!objectFilterStatus||unifiedStatusOf(o)===objectFilterStatus).map(o=>{
                     const ests=estimates.filter(e=>e.objectId===o.id);
                     const cons=contracts.filter(c=>c.objectId===o.id && !c.deletedAt && c.type!=="podryad" && c.type!=="podryad_annex");
                     const st=DEAL_STATUSES.find(s=>s.key===unifiedStatusOf(o))||DEAL_STATUSES[0];
