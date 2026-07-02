@@ -3446,6 +3446,18 @@ function PublicProgress({ token }) {
       {s.managerName && <div style={{ fontSize: 12.5, color: "#cbd5e1", marginTop: 10 }}>Менеджер: <b style={{ color: "#fff" }}>{s.managerName}</b></div>}
     </div>
 
+    {/* Сообщение от компании */}
+    {s.clientMessage && s.clientMessage.text && (
+      <div style={{ background: "#fff", borderRadius: 16, padding: "14px 16px", margin: "0 12px 14px", borderLeft: "4px solid #b8904a" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
+          <span style={{ fontSize: 15 }}>💬</span>
+          <span style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>Сообщение от компании</span>
+          {s.clientMessage.updatedAt && <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: "auto" }}>{new Date(s.clientMessage.updatedAt).toLocaleDateString("ru-RU")}</span>}
+        </div>
+        <div style={{ fontSize: 13.5, color: "#334155", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{s.clientMessage.text}</div>
+      </div>
+    )}
+
     {/* Прогресс */}
     <div style={card}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
@@ -4618,13 +4630,18 @@ ${reqBlock}`;
     const clientRemarks = (Array.isArray(prev.clientRemarks) ? prev.clientRemarks : []).map(rm => ({
       id: rm.id, text: rm.text, ts: rm.ts, done: (rm.id in defectDone) ? defectDone[rm.id] : !!rm.done,
     }));
+    // Общее сообщение от компании клиенту (пишется в производстве)
+    const cm = prod.clientMessage;
+    const clientMessage = (cm && typeof cm === "object" && String(cm.text || "").trim())
+      ? { text: String(cm.text).trim(), updatedAt: cm.updatedAt || null }
+      : (typeof cm === "string" && cm.trim() ? { text: cm.trim(), updatedAt: null } : null);
     return {
       v: 2, objectAddress: obj.address || "", clientName: obj.clientName || "", managerName: obj.manager || "",
       startDate: prod.startDate || "", planEndDate: prod.planEndDate || "", factEndDate: prod.factEndDate || "",
       progressPct, doneStages: doneCnt, totalStages: stages.length,
       stages: stages.map(st => ({ name: st.manualName || st.name || "Этап", cat: st.cat || "Работы", status: st.status || "todo", planEnd: st.planEnd || "", priceClient: Number(st.priceClient) || 0 })),
       payment: { budget, paid, remaining: Math.max(0, budget - paid) },
-      handover, clientRemarks,
+      handover, clientRemarks, clientMessage,
       publishedAt: Date.now(), viewCount: prev.viewCount || 0, viewedAt: prev.viewedAt || null,
     };
   }, []);
