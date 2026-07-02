@@ -4597,9 +4597,10 @@ ${reqBlock}`;
     const prod = productionsRef.current.find(p => p.objectId === objectId) || {};
     const entry = (prodEntriesRef.current || []).find(e => e.objectId === objectId);
     const stages = (prod.stages || []).filter(st => st && String(st.name || "").trim());
-    let totVal = 0, doneVal = 0, doneCnt = 0;
-    for (const st of stages) { const v = Number(st.priceClient) || 0; totVal += v; if ((st.status || "todo") === "done") { doneVal += v; doneCnt++; } }
-    const progressPct = totVal > 0 ? Math.round(doneVal / totVal * 100) : stages.length > 0 ? Math.round(doneCnt / stages.length * 100) : 0;
+    let doneCnt = 0;
+    for (const st of stages) { if ((st.status || "todo") === "done") doneCnt++; }
+    // Готовность считаем ТАК ЖЕ, как в производстве: доля выполненных этапов (по количеству)
+    const progressPct = stages.length > 0 ? Math.round(doneCnt / stages.length * 100) : 0;
     const handover = (prod.checklistHandover || []).filter(i => (i.section || "") === "Клиентская приёмка").map(i => ({ text: i.text, done: !!i.done }));
     const budget = Number(entry?.budget) || 0, paid = Number(entry?.income) || 0;
     // Статус замечаний клиента подтягиваем из дефектов производства (по clientRemarkId)
