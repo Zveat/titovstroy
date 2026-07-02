@@ -3973,8 +3973,11 @@ function MainApp({ currentUser, setCurrentUser }) {
   };
 
   const [objectTab, setObjectTab] = useState("list"); // list | workspace
+  const [objWsTab, setObjWsTab] = useState("info"); // вкладка внутри карточки объекта: info | estimates | documents
   const [objInfoCollapsed, setObjInfoCollapsed] = useState(false); // свёрнут ли блок инфо клиента/объекта
   const [currentObject, setCurrentObject] = useState(null);
+  // При открытии другого объекта возвращаемся на вкладку «Информация»
+  useEffect(()=>{ setObjWsTab("info"); }, [currentObject?.id]);
   const [objectFilterStatus, setObjectFilterStatus] = useState("approval");
   const [objectFilterType, setObjectFilterType] = useState("");
   const [objectFilterManager, setObjectFilterManager] = useState("");
@@ -11238,7 +11241,17 @@ ${reqBlock}`;
 
             return (
               <div>
-                {/* Карточка объекта — компактная */}
+                {/* Вкладки карточки объекта: Информация · Сметы · Документы */}
+                <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap",borderBottom:"1px solid #e2e8f0"}}>
+                  {[["info","ℹ️ Информация"],["estimates",`📋 Сметы (${objEsts.length})`],["documents",`📄 Документы (${objCons.length+reports.filter(r=>r.objectId===obj.id).length})`]].map(([k,l])=>(
+                    <button key={k} onClick={()=>setObjWsTab(k)}
+                      style={{background:objWsTab===k?"#fff":"transparent",border:"1px solid",borderColor:objWsTab===k?"#e2e8f0":"transparent",borderBottom:objWsTab===k?"1px solid #fff":"1px solid transparent",marginBottom:-1,borderRadius:"10px 10px 0 0",padding:"9px 16px",fontSize:13,fontWeight:objWsTab===k?700:500,color:objWsTab===k?"#0f172a":"#64748b",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+
+                {objWsTab==="info" && (
                 <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
                   {/* Статус */}
                   <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
@@ -11352,9 +11365,10 @@ ${reqBlock}`;
                   </div>
                   )}
                 </div>
+                )}
 
-                {/* Сметы объекта */}
-                <div style={{marginTop:24}}>
+                {objWsTab==="estimates" && (
+                <div style={{marginTop:0}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                     <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>📋 Сметы ({objEsts.length})</div>
                     {currentUser.role!=="viewer" && (
@@ -11426,9 +11440,11 @@ ${reqBlock}`;
                     })}
                   </div>
                 </div>
+                )}
 
+                {objWsTab==="documents" && (<>
                 {/* Договоры объекта */}
-                <div style={{marginTop:24}}>
+                <div style={{marginTop:0}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                     <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>📄 Договоры ({objCons.length})</div>
                   </div>
@@ -11547,6 +11563,7 @@ ${reqBlock}`;
                     </div>
                   );
                 })()}
+                </>)}
               </div>
             );
           })()}
