@@ -417,6 +417,9 @@ export default function ProductionModule({
         );
       })()}
 
+      {/* Сообщение клиенту — общий комментарий от компании на странице прогресса */}
+      {currentUser?.role !== "viewer" && <ClientMessageCard prod={openProd} patch={patchProd} />}
+
       <div style={{ display: "flex", gap: 4, marginBottom: 18, flexWrap: "wrap", borderBottom: "1px solid #e2e8f0" }}>
         {TABS.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
@@ -617,6 +620,42 @@ function ChecklistTab({ kind, prod, patch, genId, title }) {
           style={{ flex: 1, border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
         <button onClick={() => add(groups.length ? groups[groups.length - 1] : "")} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ Добавить</button>
       </div>
+    </div>
+  );
+}
+
+// ─── Сообщение клиенту (общий комментарий от компании на странице прогресса) ───
+function ClientMessageCard({ prod, patch }) {
+  const saved = prod.clientMessage && typeof prod.clientMessage === "object" ? prod.clientMessage : null;
+  const savedText = saved ? (saved.text || "") : (typeof prod.clientMessage === "string" ? prod.clientMessage : "");
+  const [text, setText] = useState(savedText);
+  const [ok, setOk] = useState(false);
+  // Сброс поля при переключении объекта
+  useEffect(() => { setText(savedText); }, [prod.objectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const dirty = text.trim() !== savedText.trim();
+  const save = () => {
+    const t = text.trim();
+    patch({ clientMessage: t ? { text: t, updatedAt: Date.now() } : null });
+    setOk(true); setTimeout(() => setOk(false), 2500);
+  };
+  const clear = () => { setText(""); patch({ clientMessage: null }); };
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>💬 Сообщение клиенту{savedText && <span style={{ fontSize: 11, color: "#059669", fontWeight: 700 }}> · опубликовано</span>}</div>
+        {saved?.updatedAt && <span style={{ fontSize: 11, color: "#94a3b8" }}>обновлено {new Date(saved.updatedAt).toLocaleDateString("ru-RU")}</span>}
+      </div>
+      <textarea value={text} onChange={e => setText(e.target.value)} rows={3} placeholder="Например: На этой неделе закончили черновую электрику, начинаем штукатурку. Плитку привезут в пятницу…"
+        style={{ width: "100%", border: "1px solid #cbd5e1", borderRadius: 8, padding: "9px 11px", fontSize: 13, fontFamily: "inherit", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
+        <button onClick={save} disabled={!dirty}
+          style={{ background: dirty ? "#2563eb" : "#e2e8f0", color: dirty ? "#fff" : "#94a3b8", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: dirty ? "pointer" : "default", fontFamily: "inherit" }}>
+          {savedText ? "Обновить сообщение" : "Опубликовать клиенту"}
+        </button>
+        {savedText && !dirty && <button onClick={clear} style={{ background: "none", border: "none", color: "#dc2626", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>Убрать</button>}
+        {ok && <span style={{ fontSize: 12, color: "#059669", fontWeight: 700 }}>✓ Сохранено</span>}
+      </div>
+      <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 8 }}>Появится отдельным блоком вверху страницы клиента. Обновляется у клиента в течение минуты или по кнопке «Обновить».</div>
     </div>
   );
 }
