@@ -384,13 +384,21 @@ const CONTRACT_STATUSES = [
   { key:"archive", label:"Архив",        color:"#64748b", bg:"rgba(107,114,128,.12)"},
 ];
 // Объекты — статусы жизненного цикла
+// Единые статусы объекта (сделка + производство). Ключи старых статусов сохранены,
+// чтобы существующие объекты не потеряли статус: new/approval/signed/refuse/archive.
 const DEAL_STATUSES = [
-  { key:"new",      label:"Черновик",                color:"#64748b", bg:"#f3f4f6"              },
-  { key:"approval", label:"Согласование с клиентом", color:"#d97706", bg:"rgba(217,119,6,.12)"  },
-  { key:"signed",   label:"Договор подписан",        color:"#059669", bg:"rgba(5,150,105,.1)"   },
-  { key:"refuse",   label:"Отказ",                   color:"#dc2626", bg:"rgba(220,38,38,.1)"   },
-  { key:"archive",  label:"Архив",                   color:"#64748b", bg:"rgba(107,114,128,.12)"},
+  { key:"new",      label:"Новый",              color:"#64748b", bg:"#f3f4f6"              },
+  { key:"approval", label:"Согласование сметы", color:"#d97706", bg:"rgba(217,119,6,.12)"  },
+  { key:"signed",   label:"Договор подписан",   color:"#059669", bg:"rgba(5,150,105,.1)"   },
+  { key:"refuse",   label:"Потерян",            color:"#dc2626", bg:"rgba(220,38,38,.1)"   },
+  { key:"work",     label:"В работе",           color:"#2563eb", bg:"#eff6ff"              },
+  { key:"paused",   label:"Приостановлен",      color:"#d97706", bg:"rgba(217,119,6,.1)"   },
+  { key:"done",     label:"Выполнен",           color:"#059669", bg:"#ecfdf5"              },
+  { key:"cancel",   label:"Расторгнут",         color:"#dc2626", bg:"rgba(220,38,38,.12)"  },
+  { key:"archive",  label:"Архив",              color:"#64748b", bg:"rgba(107,114,128,.12)"},
 ];
+// Производственный статус → единый (производство перевешивает статус сделки, когда объект в работе)
+const PROD_TO_DEAL = { active:"work", paused:"paused", done:"done", cancel:"cancel" };
 const OBJECTS_KEY         = "titovstroy-objects";
 const OBJECTS_BACKUPS_KEY = "titovstroy-objects-backups";
 const PRODUCTIONS_KEY         = "titovstroy-productions";   // производственные карточки объектов
@@ -4031,7 +4039,7 @@ function MainApp({ currentUser, setCurrentUser }) {
     return [...objects]
       .filter(o=>!o.deletedAt) // скрываем мягко-удалённые из основного списка
       .filter(o=>{
-        if(objectFilterStatus && (o.status||"new")!==objectFilterStatus) return false;
+        // фильтр по статусу применяется в рендере через unifiedStatusOf (единый статус)
         if(objectFilterType && (o.objType||"Вторичка")!==objectFilterType) return false;
         if(objectFilterManager && (o.manager||"")!==objectFilterManager) return false;
         if(objectDateFrom && (o.createdAt||0) < new Date(objectDateFrom).getTime()) return false;
@@ -4113,6 +4121,16 @@ function MainApp({ currentUser, setCurrentUser }) {
     }
     return entries;
   }, [finProjects, financeTx, matchFpToObject]);
+
+  // ЕДИНЫЙ статус объекта для списка: производственный статус (В работе/Приостановлен/
+  // Выполнен/Расторгнут) перевешивает статус сделки; иначе — статус объекта как есть.
+  // Ничего не записывает — только вычисляет для отображения.
+  const unifiedStatusOf = useCallback((o) => {
+    const pr = productions.find(p=>p.objectId===o.id);
+    const pe = prodEntries.find(e=>e.objectId===o.id);
+    const ps = pr?.prodStatus || pe?.prodStatusDefault || "";
+    return PROD_TO_DEAL[ps] || o.status || "new";
+  }, [productions, prodEntries]);
 
   // Мемоизированный фильтрованный/сортированный список смет
   const filteredEstimates = useMemo(() => {
@@ -11062,8 +11080,8 @@ ${reqBlock}`;
                   ["Статус","Клиент","Телефон","Адрес","Тип","Площадь","Менеджер","Дата создания","Смет (шт)","Сумма смет","Договоров"],
                   filteredObjects.map(o=>{
                     const ests=estimates.filter(e=>e.objectId===o.id);
-                    const cons=contracts.filter(c=>c.objectId===o.id);
-                    const st=DEAL_STATUSES.find(s=>s.key===(o.status||"new"))||DEAL_STATUSES[0];
+                    const cons=contracts.filter(c=>c.objectId===o.id && !c.deletedAt && c.type!=="podryad" && c.type!=="podryad_annex");
+                    const st=DEAL_STATUSES.find(s=>s.key===unifiedStatusOf(o))||DEAL_STATUSES[0];
                     return [st.label,o.clientName||"",o.clientPhone||"",o.address||"",o.objType||"",o.area||"",o.manager||"",o.createdAt?new Date(o.createdAt).toLocaleDateString("ru-RU"):"",ests.length,Math.round(ests.reduce((s,e)=>s+(e.total||0),0)),cons.length];
                   })
                 )} title="Экспорт в Excel" style={{background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:8,padding:"8px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>⬇ Excel</button>
@@ -11077,9 +11095,9 @@ ${reqBlock}`;
               {/* Фильтр по статусу */}
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 <button onClick={()=>setObjectFilterStatus("")}
-                  style={{background:!objectFilterStatus?"#2563eb":"rgba(0,0,0,.03)",color:!objectFilterStatus?"#fff":"#94a3b8",border:`1px solid ${!objectFilterStatus?"#2563eb":"#e2e8f0"}`,borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Все ({objects.length})</button>
+                  style={{background:!objectFilterStatus?"#2563eb":"rgba(0,0,0,.03)",color:!objectFilterStatus?"#fff":"#94a3b8",border:`1px solid ${!objectFilterStatus?"#2563eb":"#e2e8f0"}`,borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Все ({objects.filter(o=>!o.deletedAt).length})</button>
                 {DEAL_STATUSES.map(s=>{
-                  const cnt = objects.filter(o=>(o.status||"new")===s.key).length;
+                  const cnt = objects.filter(o=>!o.deletedAt && unifiedStatusOf(o)===s.key).length;
                   if(!cnt && objectFilterStatus!==s.key) return null;
                   return (
                     <button key={s.key} onClick={()=>setObjectFilterStatus(v=>v===s.key?"":s.key)}
@@ -11120,23 +11138,39 @@ ${reqBlock}`;
                 </div>
               )}
 
-              {/* Плитки объектов — как в «Производстве» */}
-              <div style={{fontSize:12,color:"#94a3b8"}}>Объектов: {filteredObjects.length}</div>
+              {/* Плитки объектов — как в «Производстве». Статус единый: производство перевешивает сделку. */}
+              {(()=>{
+              const usRows = filteredObjects.filter(o=>!objectFilterStatus||unifiedStatusOf(o)===objectFilterStatus);
+              // Проекты из Финансов без объекта — тоже показываем (клик = создать объект, с подтверждением)
+              const orphanFps = prodEntries.filter(e=>!e.objectId).filter(e=>{
+                const pr = productions.find(p=>p.objectId===e.key);
+                const us = PROD_TO_DEAL[pr?.prodStatus||e.prodStatusDefault]||"new";
+                if(objectFilterStatus && us!==objectFilterStatus) return false;
+                if(objectFilterType||objectFilterManager) return false; // тип/сотрудник у финпроекта не заданы
+                const q=(objectSearch||"").toLowerCase().trim();
+                if(q && ![e.name,e.address,e.contractNo].some(v=>v&&String(v).toLowerCase().includes(q))) return false;
+                return true;
+              });
+              return (<>
+              <div style={{fontSize:12,color:"#94a3b8"}}>Объектов: {usRows.length}{orphanFps.length>0?` · проектов из Финансов без объекта: ${orphanFps.length}`:""}</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>
-              {filteredObjects.map(obj=>{
-                const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"new"))||DEAL_STATUSES[0];
+              {usRows.map(obj=>{
+                const st = DEAL_STATUSES.find(s=>s.key===unifiedStatusOf(obj))||DEAL_STATUSES[0];
                 const objEsts = estimates.filter(e=>e.objectId===obj.id);
                 const objCons = contracts.filter(c=>c.objectId===obj.id && !c.deletedAt);
+                const objConsClient = objCons.filter(c=>c.type!=="podryad"&&c.type!=="podryad_annex"); // без договоров подряда
                 // сумма объекта = все сметы (основная + доп. сметы)
                 const total = objEsts.reduce((s,e)=>s+(e.total||0),0);
-                // Финансы/производство, если объект уже в работе (те же данные, что в «Производстве»)
+                // Финансы/производство, если объект уже в работе (те же данные, что в «Производстве»);
+                // для лида — тот же блок, но бюджет = сумма смет (карточки везде одинаковые)
                 const pe = prodEntries.find(e=>e.objectId===obj.id);
                 const pr = productions.find(p=>p.objectId===obj.id);
+                const fin = pe || { budget: total, income: 0, expense: 0, debt: total, margin: null, _est: true };
                 const sts = pr?.stages||[];
                 const doneSt = sts.filter(s=>s.status==="done").length;
                 const prog = sts.length?Math.round(doneSt/sts.length*100):0;
-                const fill = pe&&pe.budget>0?Math.min(100,Math.round(pe.income/pe.budget*100)):0;
-                const mCol = pe?.margin==null?"#94a3b8":pe.margin>=30?"#059669":pe.margin>=0?"#f59e0b":"#dc2626";
+                const fill = fin.budget>0?Math.min(100,Math.round(fin.income/fin.budget*100)):0;
+                const mCol = fin.margin==null?"#94a3b8":fin.margin>=30?"#059669":fin.margin>=0?"#f59e0b":"#dc2626";
                 return (
                   <div key={obj.id} onClick={()=>{ setCurrentObject({...obj}); setObjectTab("workspace"); }}
                     style={{background:"#fff",border:"1px solid #eef2f7",borderRadius:16,cursor:"pointer",boxShadow:"0 1px 3px rgba(15,23,42,.07)",transition:"box-shadow .15s,transform .15s",overflow:"hidden",display:"flex",flexDirection:"column"}}
@@ -11160,46 +11194,40 @@ ${reqBlock}`;
                           )}
                         </div>
                       </div>
-                      {/* Финансовый блок — как в «Производстве» (если объект в работе), иначе сумма смет */}
-                      {pe ? (
-                        <div style={{marginBottom:10}}>
-                          {pe.budget>0 ? <>
-                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
-                              <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{fmt(pe.income)} <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>из {fmt(pe.budget)} ₸</span></span>
-                              <span style={{fontSize:12,fontWeight:800,color:fill>=100?"#059669":"#2563eb"}}>{fill}%</span>
-                            </div>
-                            <div style={{height:6,background:"#f1f5f9",borderRadius:4,overflow:"hidden"}}>
-                              <div style={{width:fill+"%",height:"100%",background:fill>=100?"linear-gradient(90deg,#059669,#34d399)":"linear-gradient(90deg,#2563eb,#60a5fa)",borderRadius:4,transition:"width .3s"}}/>
-                            </div>
-                          </> : <div><span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{pe.income>0?fmt(pe.income)+" ₸":"—"}</span><span style={{fontSize:10,color:"#94a3b8",marginLeft:7}}>бюджет не указан</span></div>}
-                          <div style={{borderTop:"1px solid #f1f5f9",marginTop:10}}>
-                            {[["Долг",pe.debt>0?fmt(pe.debt)+" ₸":"—",pe.debt>0?"#dc2626":"#94a3b8"],
-                              ["Расходы",pe.expense>0?fmt(pe.expense)+" ₸":"—",pe.expense>0?"#dc2626":"#94a3b8"]
-                            ].map(([l,v,c])=>(
-                              <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9"}}>
-                                <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>{l}</span>
-                                <span style={{fontSize:13,fontWeight:700,color:c}}>{v}</span>
-                              </div>
-                            ))}
+                      {/* Финансовый блок — единый вид для всех карточек (как в «Производстве»).
+                          У лида бюджет = сумма смет (помечено «смета»), оплаты ещё нет. */}
+                      <div style={{marginBottom:10}}>
+                        {fin.budget>0 ? <>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
+                            <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{fmt(fin.income)} <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>из {fmt(fin.budget)} ₸{fin._est?" · смета":""}</span></span>
+                            <span style={{fontSize:12,fontWeight:800,color:fill>=100?"#059669":"#2563eb"}}>{fill}%</span>
                           </div>
-                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:pe.margin==null?"#f8fafc":pe.margin>=30?"#f0fdf4":pe.margin>=0?"#fffbeb":"#fef2f2",borderRadius:10,padding:"8px 12px",marginTop:8}}>
-                            <span style={{fontSize:11,fontWeight:700,color:"#475569"}}>Маржа</span>
-                            <span style={{display:"flex",alignItems:"center",gap:7}}>
-                              <span style={{fontSize:14,fontWeight:800,color:mCol}}>{pe.income>0?fmt(pe.income-pe.expense)+" ₸":"—"}</span>
-                              {pe.margin!=null&&<span style={{fontSize:10,fontWeight:800,color:"#fff",background:mCol,borderRadius:6,padding:"2px 7px"}}>{pe.margin}%</span>}
-                            </span>
+                          <div style={{height:6,background:"#f1f5f9",borderRadius:4,overflow:"hidden"}}>
+                            <div style={{width:fill+"%",height:"100%",background:fill>=100?"linear-gradient(90deg,#059669,#34d399)":"linear-gradient(90deg,#2563eb,#60a5fa)",borderRadius:4,transition:"width .3s"}}/>
                           </div>
+                        </> : <div><span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{fin.income>0?fmt(fin.income)+" ₸":"—"}</span><span style={{fontSize:10,color:"#94a3b8",marginLeft:7}}>{fin._est?"нет сметы":"бюджет не указан"}</span></div>}
+                        <div style={{borderTop:"1px solid #f1f5f9",marginTop:10}}>
+                          {[["Долг",fin.debt>0?fmt(fin.debt)+" ₸":"—",fin.debt>0?"#dc2626":"#94a3b8"],
+                            ["Расходы",fin.expense>0?fmt(fin.expense)+" ₸":"—",fin.expense>0?"#dc2626":"#94a3b8"]
+                          ].map(([l,v,c])=>(
+                            <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9"}}>
+                              <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>{l}</span>
+                              <span style={{fontSize:13,fontWeight:700,color:c}}>{v}</span>
+                            </div>
+                          ))}
                         </div>
-                      ) : (
-                        <div style={{marginBottom:10}}>
-                          <span style={{fontSize:16,fontWeight:800,color:"#0f172a"}}>{total>0?fmt(total)+" ₸":"—"}</span>
-                          <span style={{fontSize:10,color:"#94a3b8",marginLeft:7}}>по сметам</span>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:fin.margin==null?"#f8fafc":fin.margin>=30?"#f0fdf4":fin.margin>=0?"#fffbeb":"#fef2f2",borderRadius:10,padding:"8px 12px",marginTop:8}}>
+                          <span style={{fontSize:11,fontWeight:700,color:"#475569"}}>Маржа</span>
+                          <span style={{display:"flex",alignItems:"center",gap:7}}>
+                            <span style={{fontSize:14,fontWeight:800,color:mCol}}>{fin.income>0?fmt(fin.income-fin.expense)+" ₸":"—"}</span>
+                            {fin.margin!=null&&<span style={{fontSize:10,fontWeight:800,color:"#fff",background:mCol,borderRadius:6,padding:"2px 7px"}}>{fin.margin}%</span>}
+                          </span>
                         </div>
-                      )}
-                      {/* Футер */}
+                      </div>
+                      {/* Футер (договоры — только клиентские, без подряда) */}
                       <div style={{marginTop:"auto",display:"flex",flexWrap:"wrap",gap:"4px 10px",fontSize:11,color:"#64748b",borderTop:"1px solid #f1f5f9",paddingTop:10}}>
                         <span>📋 {objEsts.length} смет</span>
-                        <span>📄 {objCons.length} дог.</span>
+                        <span>📄 {objConsClient.length} дог.</span>
                         {sts.length>0&&<span>🔨 {doneSt}/{sts.length} эт. · {prog}%</span>}
                         {obj.manager&&<span>👤 {obj.manager}</span>}
                         {obj.createdAt&&<span>📅 {fmtDate(obj.createdAt)}</span>}
@@ -11208,7 +11236,66 @@ ${reqBlock}`;
                   </div>
                 );
               })}
+              {/* Проекты из Финансов, у которых ещё нет объекта: клик = создать объект (с подтверждением) */}
+              {orphanFps.map(e=>{
+                const pr = productions.find(p=>p.objectId===e.key);
+                const usKey = PROD_TO_DEAL[pr?.prodStatus||e.prodStatusDefault]||"new";
+                const st = DEAL_STATUSES.find(s=>s.key===usKey)||DEAL_STATUSES[0];
+                const fill = e.budget>0?Math.min(100,Math.round(e.income/e.budget*100)):0;
+                const mCol = e.margin==null?"#94a3b8":e.margin>=30?"#059669":e.margin>=0?"#f59e0b":"#dc2626";
+                return (
+                  <div key={e.key} onClick={()=>{
+                      if(!window.confirm(`«${e.name}» — проект из Финансов, объекта у него ещё нет.\nСоздать объект со статусом «${st.label}»?`)) return;
+                      const newObj = { id: Date.now().toString(), clientName: e.name||"Проект", clientPhone:"", address: e.address||"", objType:"Вторичка", status: usKey, manager: currentUser.name, createdAt: Date.now(), createdById: currentUser.id, updatedAt: Date.now(), _fromFinProject: e.fpId };
+                      saveObjects([...objectsRef.current, newObj]);
+                      writeAudit(currentUser,"создал объект из финпроекта","object",newObj.id,newObj.clientName);
+                      setCurrentObject(newObj); setObjectTab("workspace");
+                    }}
+                    style={{background:"#fff",border:"1px dashed #cbd5e1",borderRadius:16,cursor:"pointer",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+                    <div style={{height:4,background:`linear-gradient(90deg,${st.color},${st.color}99)`,flexShrink:0}}/>
+                    <div style={{padding:"14px 16px",flex:1,display:"flex",flexDirection:"column"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:14,fontWeight:800,color:"#0f172a",lineHeight:1.3}}>{e.name}</div>
+                          {e.contractNo&&<div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>№{String(e.contractNo).replace(/^№+/,"")}</div>}
+                          {e.address&&<div style={{fontSize:11.5,color:"#64748b",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>📍 {e.address}</div>}
+                        </div>
+                        <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap",flexShrink:0}}>{st.label}</span>
+                      </div>
+                      <div style={{marginBottom:10}}>
+                        {e.budget>0 ? <>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
+                            <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{fmt(e.income)} <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>из {fmt(e.budget)} ₸</span></span>
+                            <span style={{fontSize:12,fontWeight:800,color:fill>=100?"#059669":"#2563eb"}}>{fill}%</span>
+                          </div>
+                          <div style={{height:6,background:"#f1f5f9",borderRadius:4,overflow:"hidden"}}><div style={{width:fill+"%",height:"100%",background:fill>=100?"linear-gradient(90deg,#059669,#34d399)":"linear-gradient(90deg,#2563eb,#60a5fa)",borderRadius:4}}/></div>
+                        </> : <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{e.income>0?fmt(e.income)+" ₸":"—"}</span>}
+                        <div style={{borderTop:"1px solid #f1f5f9",marginTop:10}}>
+                          {[["Долг",e.debt>0?fmt(e.debt)+" ₸":"—",e.debt>0?"#dc2626":"#94a3b8"],["Расходы",e.expense>0?fmt(e.expense)+" ₸":"—",e.expense>0?"#dc2626":"#94a3b8"]].map(([l,v,c])=>(
+                            <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9"}}>
+                              <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:c}}>{v}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:e.margin==null?"#f8fafc":e.margin>=30?"#f0fdf4":e.margin>=0?"#fffbeb":"#fef2f2",borderRadius:10,padding:"8px 12px",marginTop:8}}>
+                          <span style={{fontSize:11,fontWeight:700,color:"#475569"}}>Маржа</span>
+                          <span style={{display:"flex",alignItems:"center",gap:7}}>
+                            <span style={{fontSize:14,fontWeight:800,color:mCol}}>{e.income>0?fmt(e.income-e.expense)+" ₸":"—"}</span>
+                            {e.margin!=null&&<span style={{fontSize:10,fontWeight:800,color:"#fff",background:mCol,borderRadius:6,padding:"2px 7px"}}>{e.margin}%</span>}
+                          </span>
+                        </div>
+                      </div>
+                      <div style={{marginTop:"auto",display:"flex",flexWrap:"wrap",gap:"4px 10px",fontSize:11,color:"#64748b",borderTop:"1px solid #f1f5f9",paddingTop:10}}>
+                        <span>💼 проект из Финансов</span>
+                        <span style={{color:"#2563eb",fontWeight:700}}>+ создать объект</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
               </div>
+              </>);
+              })()}
             </div>
           )}
 
