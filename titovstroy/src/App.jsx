@@ -4127,11 +4127,16 @@ function MainApp({ currentUser, setCurrentUser }) {
   // ЕДИНЫЙ статус объекта для списка: производственный статус (В работе/Приостановлен/
   // Выполнен/Расторгнут) перевешивает статус сделки; иначе — статус объекта как есть.
   // Ничего не записывает — только вычисляет для отображения.
-  const unifiedStatusOf = useCallback((o) => {
+  // Статус ОБЪЕКТА — главный (объект первичен, финансы/производство вторичны).
+  // Показываем ровно то, что задано в карточке объекта, ничем не перебивая.
+  const unifiedStatusOf = useCallback((o) => o.status || "new", []);
+  // Что «подсказывает» производство/финансы — используется только как рекомендация
+  // в панели проверки статусов (не влияет на отображение автоматически).
+  const suggestedStatusOf = useCallback((o) => {
     const pr = productions.find(p=>p.objectId===o.id);
     const pe = prodEntries.find(e=>e.objectId===o.id);
     const ps = pr?.prodStatus || pe?.prodStatusDefault || "";
-    return PROD_TO_DEAL[ps] || o.status || "new";
+    return PROD_TO_DEAL[ps] || null;
   }, [productions, prodEntries]);
 
   // Мемоизированный фильтрованный/сортированный список смет
@@ -11132,58 +11137,6 @@ ${reqBlock}`;
                 </div>
               )}
 
-              {/* Проверка статусов: где показываемый статус (произв./финпроект) отличается от статуса в карточке.
-                  Ничего не меняет само — только показывает и даёт принять решение по каждому объекту. */}
-              {(()=>{
-                const conflicts = objects.filter(o=>!o.deletedAt).map(o=>{
-                  const dbKey = o.status||"new";
-                  const usKey = unifiedStatusOf(o);
-                  if(usKey===dbKey) return null;
-                  const pr = productions.find(p=>p.objectId===o.id);
-                  const pe = prodEntries.find(e=>e.objectId===o.id);
-                  const source = pr?.prodStatus ? `карточка производства (статус «${(PROD_STATUSES_LABELS[pr.prodStatus]||pr.prodStatus)}»)` : pe?.finStatus ? `проект в Финансах (статус «${pe.finStatus}»)` : "—";
-                  return { obj:o, dbKey, usKey, source };
-                }).filter(Boolean);
-                if(!conflicts.length) return null;
-                return (
-                  <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:"10px 14px"}}>
-                    <div onClick={()=>setStatusConflictsOpen(v=>!v)} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",userSelect:"none"}}>
-                      <span style={{fontSize:13,fontWeight:700,color:"#92400e"}}>⚠ Проверка статусов: {conflicts.length} объект(ов), где статус карточки не совпадает с производством/финансами</span>
-                      <span style={{marginLeft:"auto",fontSize:12,color:"#b45309",fontWeight:600}}>{statusConflictsOpen?"▲ свернуть":"▼ показать"}</span>
-                    </div>
-                    {statusConflictsOpen && (
-                      <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:10}}>
-                        {conflicts.map(({obj,dbKey,usKey,source})=>{
-                          const dbSt=DEAL_STATUSES.find(s=>s.key===dbKey)||DEAL_STATUSES[0];
-                          const usSt=DEAL_STATUSES.find(s=>s.key===usKey)||DEAL_STATUSES[0];
-                          return (
-                            <div key={obj.id} style={{background:"#fff",border:"1px solid #fde68a",borderRadius:8,padding:"10px 12px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                              <div style={{minWidth:0,flex:1}}>
-                                <div style={{fontWeight:700,fontSize:13,color:"#0f172a"}}>{obj.clientName||"Без клиента"}{obj.address?` · ${obj.address}`:""}</div>
-                                <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>Показывается из-за: {source}</div>
-                              </div>
-                              <span style={{fontSize:10,fontWeight:700,color:dbSt.color,background:dbSt.bg,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap"}}>в карточке: {dbSt.label}</span>
-                              <span style={{fontSize:12,color:"#94a3b8"}}>→</span>
-                              <span style={{fontSize:10,fontWeight:700,color:usSt.color,background:usSt.bg,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap"}}>показано: {usSt.label}</span>
-                              {currentUser.role!=="viewer" && (
-                                <button onClick={()=>{ saveObjects(objectsRef.current.map(x=>x.id===obj.id?{...x,status:usKey,updatedAt:Date.now()}:x)); writeAudit(currentUser,"принял статус "+usSt.label,"object",obj.id,obj.clientName||obj.address||""); }}
-                                  style={{background:"#ecfdf5",color:"#059669",border:"1px solid rgba(5,150,105,.25)",borderRadius:6,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                                  Принять «{usSt.label}»
-                                </button>
-                              )}
-                              <button onClick={()=>{ setCurrentObject({...obj}); setObjectTab("workspace"); }}
-                                style={{background:"none",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:6,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                                Открыть
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-
               {objects.length===0 && (
                 <div style={{textAlign:"center",padding:"60px 0",color:"#94a3b8"}}>
                   <div style={{fontSize:48,marginBottom:12}}>📦</div>
@@ -11433,29 +11386,8 @@ ${reqBlock}`;
               return upd;
             });
 
-            return (
-              <div>
-                {/* Вкладки карточки объекта: Информация · Сметы · Документы · производство */}
-                <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap",borderBottom:"1px solid #e2e8f0"}}>
-                  {[
-                    ["info","ℹ️ Информация"],
-                    ["documents",`📄 Документы (${objEsts.length+objCons.length+reports.filter(r=>r.objectId===obj.id).length})`],
-                    ["launch","🚀 Запуск"],
-                    ["stages","🔨 Этапы"],
-                    ["finance","💰 Финансы"],
-                    ["journal","📖 Журнал"],
-                    ["defects","⚠️ Замечания"],
-                    ["handover","🏁 Сдача"],
-                  ].map(([k,l])=>(
-                    <button key={k} onClick={()=>setObjWsTab(k)}
-                      style={{background:objWsTab===k?"#fff":"transparent",border:"1px solid",borderColor:objWsTab===k?"#e2e8f0":"transparent",borderBottom:objWsTab===k?"1px solid #fff":"1px solid transparent",marginBottom:-1,borderRadius:"10px 10px 0 0",padding:"9px 14px",fontSize:13,fontWeight:objWsTab===k?700:500,color:objWsTab===k?"#0f172a":"#64748b",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                      {l}
-                    </button>
-                  ))}
-                </div>
-
-                {objWsTab==="info" && (
-                <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
+            const clientCardNode = (
+                <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10,boxSizing:"border-box"}}>
                   {/* Статус */}
                   <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                     {DEAL_STATUSES.map(s=>(
@@ -11568,7 +11500,28 @@ ${reqBlock}`;
                   </div>
                   )}
                 </div>
-                )}
+            );
+
+            return (
+              <div>
+                {/* Вкладки карточки объекта: Информация · Сметы · Документы · производство */}
+                <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap",borderBottom:"1px solid #e2e8f0"}}>
+                  {[
+                    ["info","ℹ️ Информация"],
+                    ["documents",`📄 Документы (${objEsts.length+objCons.length+reports.filter(r=>r.objectId===obj.id).length})`],
+                    ["launch","🚀 Запуск"],
+                    ["stages","🔨 Этапы"],
+                    ["finance","💰 Финансы"],
+                    ["journal","📖 Журнал"],
+                    ["defects","⚠️ Замечания"],
+                    ["handover","🏁 Сдача"],
+                  ].map(([k,l])=>(
+                    <button key={k} onClick={()=>setObjWsTab(k)}
+                      style={{background:objWsTab===k?"#fff":"transparent",border:"1px solid",borderColor:objWsTab===k?"#e2e8f0":"transparent",borderBottom:objWsTab===k?"1px solid #fff":"1px solid transparent",marginBottom:-1,borderRadius:"10px 10px 0 0",padding:"9px 14px",fontSize:13,fontWeight:objWsTab===k?700:500,color:objWsTab===k?"#0f172a":"#64748b",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
 
                 {objWsTab==="documents" && (
                 <div style={{marginTop:0}}>
@@ -11776,6 +11729,7 @@ ${reqBlock}`;
                   <ProductionModule
                     embedObjectId={obj.id}
                     embedTab={objWsTab}
+                    clientInfoCard={clientCardNode}
                     objects={objects}
                     entries={prodEntries}
                     allObjects={objects}
