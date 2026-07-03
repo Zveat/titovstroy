@@ -11596,34 +11596,16 @@ ${reqBlock}`;
                                   <button title="Сформировать акт выполненных работ (Р-1) по этой смете" onClick={()=>openAvrBuilder(obj,est)}
                                     style={{background:"rgba(124,58,237,.08)",color:"#7c3aed",border:"1px solid rgba(124,58,237,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>📋 Акт</button>
                                 )}
-                                {currentUser.role!=="viewer" && !isChild && (()=>{
-                                  // Подряд: новый договор ИЛИ приложение к существующему договору подрядчика.
-                                  // Подрядчик подписывает договор один раз, дальше на каждый объект — приложение.
-                                  const podMains = contracts.filter(c=>c.type==="podryad" && !c.deletedAt);
-                                  const openPodryad = (v)=>{
+                                {currentUser.role!=="viewer" && !isChild && (
+                                  <button title="Договор подряда с подрядчиком (работы из этой сметы, суммы редактируются). Подрядчика и «новый договор / приложение» выбираешь в редакторе." onClick={()=>{
                                     const ws = estimateToWorks(est);
+                                    const podCount = contractsRef.current.filter(c=>c.type==="podryad").length;
                                     setObjectReturnId(obj.id);
-                                    if(v==="new"){
-                                      const podCount = contractsRef.current.filter(c=>c.type==="podryad").length;
-                                      setCurrentContract({id:Date.now().toString(),type:"podryad",number:String(1012+podCount),date:new Date().toISOString().slice(0,10),city:"Караганда",clientId:"",contragentId:contragentsRef.current[0]?.id||"",works:ws,objectId:obj.id,objectAddress:obj.address||"",appendix:1,note:"",createdBy:currentUser.name,createdById:currentUser.id});
-                                    } else {
-                                      const main = contractsRef.current.find(c=>c.id===v); if(!main) return;
-                                      const anxCount = contractsRef.current.filter(c=>c.type==="podryad_annex" && normCN(c.mainNumber)===normCN(main.number)).length;
-                                      setCurrentContract({id:Date.now().toString(),type:"podryad_annex",number:"",mainNumber:main.number,mainDate:main.date,appendix:String(2+anxCount),date:new Date().toISOString().slice(0,10),city:main.city||"Караганда",clientId:"",contragentId:main.contragentId||"",works:ws,objectId:obj.id,objectAddress:obj.address||"",note:"",createdBy:currentUser.name,createdById:currentUser.id});
-                                    }
+                                    setCurrentContract({id:Date.now().toString(),type:"podryad",number:String(1012+podCount),date:new Date().toISOString().slice(0,10),city:"Караганда",clientId:"",contragentId:contragentsRef.current[0]?.id||"",works:ws,objectId:obj.id,objectAddress:obj.address||"",appendix:1,note:"",createdBy:currentUser.name,createdById:currentUser.id});
                                     setContractTab("editor"); setScreen("contracts");
-                                  };
-                                  if(podMains.length===0){
-                                    return <button title="Договор подряда с подрядчиком (работы из этой сметы, суммы редактируются)" onClick={()=>openPodryad("new")}
-                                      style={{background:"rgba(124,58,237,.08)",color:"#7c3aed",border:"1px solid rgba(124,58,237,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>👷 Подряд</button>;
-                                  }
-                                  return <select defaultValue="" title="Новый договор подряда или приложение к существующему договору подрядчика" onChange={e=>{ const v=e.target.value; e.target.value=""; if(v) openPodryad(v); }}
-                                    style={{background:"rgba(124,58,237,.08)",color:"#7c3aed",border:"1px solid rgba(124,58,237,.2)",borderRadius:4,padding:"2px 6px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>
-                                    <option value="">👷 Подряд ▾</option>
-                                    <option value="new">➕ Новый договор подряда</option>
-                                    {podMains.map(p=>{ const cn=contragents.find(x=>x.id===p.contragentId); return <option key={p.id} value={p.id}>↳ Приложение к №{p.number}{cn?.name?` (${cn.name})`:""}</option>; })}
-                                  </select>;
-                                })()}
+                                  }}
+                                    style={{background:"rgba(124,58,237,.08)",color:"#7c3aed",border:"1px solid rgba(124,58,237,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>👷 Подряд</button>
+                                )}
                                 {currentUser.role!=="viewer" && !isChild && (
                                   <button title="Создать доп. смету к этой смете" onClick={()=>{ setObjectReturnId(obj.id); newSupplementaryEstimate(est); }}
                                     style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>+ Доп. смета</button>
