@@ -3995,12 +3995,20 @@ function MainApp({ currentUser, setCurrentUser }) {
     };
   };
   // завести проект в финансах из объекта (или открыть существующий). Доп. соглашение
-  // не плодит новый проект — открывает проект основного договора и обновляет его бюджет.
-  const startFinProjFromObject = (obj, contract) => {
+  // не плодит новый проект — обновляет бюджет проекта основного договора СРАЗУ
+  // (сохраняет), чтобы доп. работы отразились без ручного «Сохранить».
+  const startFinProjFromObject = async (obj, contract) => {
     const main = mainContractOf(contract);
     const existing = main ? finProjectsRef.current.find(p=>normCN(p.contractNo)===normCN(main.number)) : null;
     setScreen("finance"); setFinanceTab("projects");
-    setFinProjModal(existing ? {...existing, budget: finBudgetOfContract(main)} : finProjDraftFromObject(obj, contract));
+    if (existing) {
+      const nb = finBudgetOfContract(main);
+      const upd = { ...existing, budget: nb };
+      if (Number(existing.budget) !== nb) { try { await saveFinanceProjects(finProjectsRef.current.map(p=>p.id===existing.id?upd:p)); } catch(e) {} }
+      setFinProjModal(upd);
+    } else {
+      setFinProjModal(finProjDraftFromObject(obj, contract));
+    }
   };
 
   const [objectTab, setObjectTab] = useState("list"); // list | workspace
