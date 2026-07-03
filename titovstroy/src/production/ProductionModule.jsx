@@ -712,6 +712,29 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) 
     patch({ stages: [...stages, { id: genId(), cat: newCat.trim() || "Прочее", name: newName.trim(), unit: "", qty: 0, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: 0, costPlan: 0 }] });
     setNewName("");
   };
+  // Подтянуть позиции из ВСЕХ смет объекта (включая доп. сметы) в этапы.
+  // Существующие этапы сохраняют статус/сроки/ответственного, обновляются лишь
+  // плановые суммы; новые позиции добавляются; ручные этапы (которых нет в смете) остаются.
+  const syncFromEstimates = () => {
+    const built = buildStagesFromEstimate(objId) || [];
+    if (!built.length) { alert("В сметах объекта нет позиций для переноса в этапы."); return; }
+    const keyOf = s => ((s.cat || "") + "|" + (s.name || "")).toLowerCase().trim();
+    const usedKeys = new Set();
+    const result = stages.map(s => {
+      const b = built.find(x => keyOf(x) === keyOf(s));
+      if (!b) return s; // этап добавлен вручную (в сметах его нет) — не трогаем
+      usedKeys.add(keyOf(b));
+      return { ...s, unit: b.unit || s.unit, qty: b.qty, priceClient: b.priceClient, costPlan: b.costPlan };
+    });
+    let added = 0;
+    for (const b of built) {
+      if (usedKeys.has(keyOf(b))) continue;
+      added++;
+      result.push({ id: genId(), cat: b.cat, name: b.name, unit: b.unit || "", qty: b.qty, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: b.priceClient, costPlan: b.costPlan });
+    }
+    patch({ stages: result });
+    alert(added ? `Добавлено новых позиций из смет: ${added}. Суммы существующих этапов обновлены.` : "Новых позиций нет. Суммы существующих этапов обновлены.");
+  };
   const inWorkDays = (s) => s.factStart ? Math.max(0, Math.round((_dayStart(s.factEnd || new Date()) - _dayStart(s.factStart)) / 864e5)) + 1 : null;
   const dInp = { border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 7px", fontSize: 12, fontFamily: "inherit", outline: "none", color: "#0f172a", width: "100%", boxSizing: "border-box" };
 
@@ -736,7 +759,11 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 12 }}>Этапы и сроки ({stages.length})</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Этапы и сроки ({stages.length})</div>
+          <button onClick={syncFromEstimates} title="Подтянуть позиции из всех смет объекта (включая доп. сметы). Статус и сроки существующих этапов сохраняются."
+            style={{ background: "#eff6ff", color: "#2563eb", border: "1px solid rgba(37,99,235,.2)", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>🔄 Обновить из смет</button>
+        </div>
         {stages.length === 0 ? (
           <div style={{ textAlign: "center", color: "#94a3b8", padding: "20px 0", fontSize: 13 }}>Добавьте работу вручную ниже.</div>
         ) : (
