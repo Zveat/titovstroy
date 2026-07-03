@@ -717,15 +717,23 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) 
   // плановые суммы; новые позиции добавляются; ручные этапы (которых нет в смете) остаются.
   const syncFromEstimates = () => {
     const built = buildStagesFromEstimate(objId) || [];
-    if (!built.length) { alert("В сметах объекта нет позиций для переноса в этапы."); return; }
     const keyOf = s => ((s.cat || "") + "|" + (s.name || "")).toLowerCase().trim();
+    const builtKeys = new Set(built.map(keyOf));
+    // Позиции, которых в сметах больше нет (смету/доп. смету удалили или изменили):
+    // ими считаем этапы с плановыми суммами; ручные этапы без сумм не трогаем.
+    const gone = stages.filter(s => !builtKeys.has(keyOf(s)) && (Number(s.priceClient) > 0 || Number(s.costPlan) > 0));
+    if (!built.length && !gone.length) { alert("В сметах объекта нет позиций для переноса в этапы."); return; }
+    let removeGone = false;
+    if (gone.length) removeGone = window.confirm(`В сметах больше нет ${gone.length} позиций (например: «${gone[0].name}»).\n\nОК — удалить эти этапы (ручные без сумм не трогаются)\nОтмена — оставить как есть`);
     const usedKeys = new Set();
-    const result = stages.map(s => {
-      const b = built.find(x => keyOf(x) === keyOf(s));
-      if (!b) return s; // этап добавлен вручную (в сметах его нет) — не трогаем
-      usedKeys.add(keyOf(b));
-      return { ...s, unit: b.unit || s.unit, qty: b.qty, priceClient: b.priceClient, costPlan: b.costPlan };
-    });
+    const result = stages
+      .filter(s => !(removeGone && gone.includes(s)))
+      .map(s => {
+        const b = built.find(x => keyOf(x) === keyOf(s));
+        if (!b) return s; // этап добавлен вручную (в сметах его нет) — не трогаем
+        usedKeys.add(keyOf(b));
+        return { ...s, unit: b.unit || s.unit, qty: b.qty, priceClient: b.priceClient, costPlan: b.costPlan };
+      });
     let added = 0;
     for (const b of built) {
       if (usedKeys.has(keyOf(b))) continue;
@@ -733,7 +741,10 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) 
       result.push({ id: genId(), cat: b.cat, name: b.name, unit: b.unit || "", qty: b.qty, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: b.priceClient, costPlan: b.costPlan });
     }
     patch({ stages: result });
-    alert(added ? `Добавлено новых позиций из смет: ${added}. Суммы существующих этапов обновлены.` : "Новых позиций нет. Суммы существующих этапов обновлены.");
+    const parts = [];
+    if (added) parts.push(`добавлено: ${added}`);
+    if (removeGone && gone.length) parts.push(`удалено: ${gone.length}`);
+    alert(parts.length ? `Готово (${parts.join(", ")}). Суммы этапов обновлены по сметам.` : "Новых позиций нет. Суммы существующих этапов обновлены.");
   };
   const inWorkDays = (s) => s.factStart ? Math.max(0, Math.round((_dayStart(s.factEnd || new Date()) - _dayStart(s.factStart)) / 864e5)) + 1 : null;
   const dInp = { border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 7px", fontSize: 12, fontFamily: "inherit", outline: "none", color: "#0f172a", width: "100%", boxSizing: "border-box" };
@@ -1098,8 +1109,9 @@ function FinanceTab({ prod, patch, fmt, finSummary }) {
   const mCol = (p) => p >= 30 ? "#059669" : p >= 0 ? "#d97706" : "#dc2626";
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* Данные из Финансов (бюджет, оплаты, расходы) */}
-      {finSummary && (
+      {/* Сводка: если есть финпроект — по факту (бюджет/оплаты/расходы),
+          иначе — по плану из сметы/этапов (объект ещё не в производстве/финансах). */}
+      {finSummary ? (
         <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>💰 Финансовый проект{finSummary.contractNo ? ` ${String(finSummary.contractNo).replace(/^№+/, "№")}` : ""}</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8 }}>
@@ -1109,6 +1121,24 @@ function FinanceTab({ prod, patch, fmt, finSummary }) {
               ["Долг", finSummary.debt > 0 ? fmt(finSummary.debt) + " ₸" : "—", finSummary.debt > 0 ? "#dc2626" : "#94a3b8", finSummary.debt > 0 ? "#fef2f2" : "#f8fafc"],
               ["Расходы", finSummary.expense > 0 ? fmt(finSummary.expense) + " ₸" : "—", "#dc2626", "#fef2f2"],
               ["Маржа", finSummary.margin != null ? (fmt(finSummary.income - finSummary.expense) + " ₸ / " + finSummary.margin + "%") : "—", finSummary.margin != null ? mCol(finSummary.margin) : "#94a3b8", "#f0fdf4"],
+            ].map(([l, v, c, bg]) => (
+              <div key={l} style={{ background: bg, borderRadius: 10, padding: "10px 12px", border: `1px solid ${c}22` }}>
+                <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".03em", marginBottom: 3 }}>{l}</div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: c }}>{v}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>📐 План по смете</div>
+          <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 10 }}>Проект в Финансах ещё не заведён (оплаты/расходы появятся, когда объект пойдёт в работу).</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8 }}>
+            {[
+              ["Выручка (план)", tot.priceClient > 0 ? fmt(tot.priceClient) + " ₸" : "—", "#2563eb", "#eff6ff"],
+              ["Себестоимость (план)", tot.costPlan > 0 ? fmt(tot.costPlan) + " ₸" : "—", "#dc2626", "#fef2f2"],
+              ["Маржа (план)", tot.priceClient > 0 ? (fmt(mPlanSumTot) + " ₸ / " + mPlanTot + "%") : "—", tot.priceClient > 0 ? mCol(mPlanTot) : "#94a3b8", "#f0fdf4"],
+              ...(tot.costFact > 0 ? [["Маржа (факт)", fmt(mFactSumTot) + " ₸ / " + mFactTot + "%", mCol(mFactTot || 0), "#f0fdf4"]] : []),
             ].map(([l, v, c, bg]) => (
               <div key={l} style={{ background: bg, borderRadius: 10, padding: "10px 12px", border: `1px solid ${c}22` }}>
                 <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".03em", marginBottom: 3 }}>{l}</div>
