@@ -3959,26 +3959,48 @@ function MainApp({ currentUser, setCurrentUser }) {
   // открыть объект из финансов
   const openObjectFromFinance = (obj) => { if(!obj) return; setCurrentObject({...obj}); setObjectTab("workspace"); setScreen("objects"); };
   // построить черновик фин-проекта из объекта+договора
+  // Основной клиентский договор проекта: доп. соглашения (annex) относятся к нему.
+  // Подряд (podryad/podryad_annex) — это себестоимость, в проект Финансов не идёт.
+  const mainContractOf = (c) => {
+    if (!c) return null;
+    if (c.type === "annex" && c.mainNumber) {
+      return contractsRef.current.find(x => !x.deletedAt && x.number && normCN(x.number) === normCN(c.mainNumber)
+        && x.type !== "podryad" && x.type !== "podryad_annex") || c;
+    }
+    return c;
+  };
+  // Бюджет проекта = сумма основного договора + всех его доп. соглашений (доп. работы увеличивают бюджет).
+  const _worksSum = (works) => (works || []).reduce((s, w) => s + ((Number(w.quantity) || 0) * (Number(w.price) || 0)), 0);
+  const finBudgetOfContract = (main) => {
+    if (!main) return 0;
+    const own = _worksSum(main.works);
+    const annex = main.number ? contractsRef.current
+      .filter(x => !x.deletedAt && x.type === "annex" && x.mainNumber && normCN(x.mainNumber) === normCN(main.number))
+      .reduce((s, x) => s + _worksSum(x.works), 0) : 0;
+    return own + annex;
+  };
   const finProjDraftFromObject = (obj, contract) => {
-    const conTotal = (contract?.works||[]).reduce((s,w)=>s+((Number(w.quantity)||0)*(Number(w.price)||0)),0);
+    const main = mainContractOf(contract);
     return {
-      id:"", contractNo: contract?.number||"",
+      id:"", contractNo: main?.number||"",
       client: obj?.clientType==="юр" ? "Юр лицо" : "Физ лицо",
       category: obj?.objType || "Вторичка",
       description: [obj?.clientName, obj?.address, obj?.clientPhone].filter(Boolean).join(" | "),
-      budget: conTotal||0,
+      budget: finBudgetOfContract(main)||0,
       status:"активен", rawStatus:"в работе",
-      createdAt: contract?.date || new Date().toISOString().slice(0,10),
+      createdAt: main?.date || new Date().toISOString().slice(0,10),
       closedAt:"", b24:"нет",
-      contractSigned: contract ? "да" : "нет",
+      contractSigned: main ? "да" : "нет",
       avr:"нет", comment:"", objectId: obj?.id||"",
     };
   };
-  // завести проект в финансах из объекта (или открыть существующий)
+  // завести проект в финансах из объекта (или открыть существующий). Доп. соглашение
+  // не плодит новый проект — открывает проект основного договора и обновляет его бюджет.
   const startFinProjFromObject = (obj, contract) => {
-    const existing = contract ? finProjectsRef.current.find(p=>normCN(p.contractNo)===normCN(contract.number)) : null;
+    const main = mainContractOf(contract);
+    const existing = main ? finProjectsRef.current.find(p=>normCN(p.contractNo)===normCN(main.number)) : null;
     setScreen("finance"); setFinanceTab("projects");
-    setFinProjModal(existing ? {...existing} : finProjDraftFromObject(obj, contract));
+    setFinProjModal(existing ? {...existing, budget: finBudgetOfContract(main)} : finProjDraftFromObject(obj, contract));
   };
 
   const [objectTab, setObjectTab] = useState("list"); // list | workspace
@@ -11616,7 +11638,7 @@ ${reqBlock}`;
                       const ca2 = contragents.find(x=>x.id===c.contragentId);
                       const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
                       const stC = CONTRACT_STATUSES.find(x=>x.key===(c.contractStatus||"draft"))||CONTRACT_STATUSES[0];
-                      const TLABEL = {repair_fiz:"Договор",annex:"Доп. соглашение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронь",podryad:"👷 Договор подряда"};
+                      const TLABEL = {repair_fiz:"Договор ремонта",annex:"Доп. соглашение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронь",podryad:"👷 Договор подряда"};
                       const isAnnex = c.type==="annex" || c.type==="podryad_annex";
                       const conTitle = isAnnex
                         ? `${c.type==="podryad_annex"?"Приложение":"Доп. соглашение"} №${c.appendix||2}`+(c.mainNumber?` к договору №${c.mainNumber}`:"")
@@ -11642,9 +11664,13 @@ ${reqBlock}`;
                                   style={{background:"#e2e8f0",color:"#334155",border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>
                                 <button onClick={()=>generateContractGDoc(c,cl2,ca2)}
                                   style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>
-                                {currentUser.role==="admin" && (()=>{ const exists=finProjectsRef.current.find(p=>normCN(p.contractNo)===normCN(c.number));
-                                  return <button onClick={()=>startFinProjFromObject(obj,c)} title={exists?"Открыть проект в финансах":"Завести проект в финансах"}
-                                    style={{background:exists?"#f0fdf4":"rgba(5,150,105,.1)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 {exists?"В финансах ✓":"В финансы"}</button>;
+                                {currentUser.role==="admin" && c.type!=="podryad" && c.type!=="podryad_annex" && (()=>{
+                                  const main = mainContractOf(c);
+                                  const exists = finProjectsRef.current.find(p=>normCN(p.contractNo)===normCN(main?.number));
+                                  const isAnx = c.type==="annex";
+                                  return <button onClick={()=>startFinProjFromObject(obj,c)}
+                                    title={isAnx ? (exists?"Обновить проект основного договора (учесть доп. соглашение)":"Завести проект по основному договору (с учётом доп. соглашения)") : (exists?"Открыть проект в финансах":"Завести проект в финансах")}
+                                    style={{background:exists?"#f0fdf4":"rgba(5,150,105,.1)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 {isAnx ? (exists?"В проект ✓":"В проект") : (exists?"В финансах ✓":"В финансы")}</button>;
                                 })()}
                                 {(currentUser.role==="admin"||(currentUser.role==="user"&&c.createdBy===currentUser.name)) && (
                                   <button onClick={()=>{ if(window.confirm("Удалить договор?")) saveContracts(contractsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
