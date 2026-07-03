@@ -60,7 +60,7 @@ export default function ProductionModule({
   onSaveProduction, onDeleteProduction, onToggleClientShare, buildStagesFromEstimate,
   finProjects, financeTx,
   fmt, genId, currentUser,
-  embedObjectId, embedTab, // встроенный режим: карточка одного объекта внутри раздела «Объекты»
+  embedObjectId, embedTab, clientInfoCard, // встроенный режим: карточка одного объекта внутри раздела «Объекты»
 }) {
   // карта запись производства по ключу записи (objectId реального объекта или "fp:<id>")
   const entryByKey = useMemo(() => { const m = {}; for (const e of entries) m[e.key] = e; return m; }, [entries]);
@@ -159,7 +159,7 @@ export default function ProductionModule({
     if (!openObj || !openProd) return <div style={{ color: "#94a3b8", fontSize: 13, padding: "16px 4px" }}>Нет данных производства.</div>;
     return (
       <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-        {embedTab === "info" && <InfoTab prod={openProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={patchProd} onToggleClientShare={onToggleClientShare} currentUser={currentUser} />}
+        {embedTab === "info" && <InfoTab prod={openProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={patchProd} onToggleClientShare={onToggleClientShare} currentUser={currentUser} clientInfoCard={clientInfoCard} />}
         {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист запуска объекта" />}
         {embedTab === "handover" && <ChecklistTab kind="checklistHandover" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист сдачи объекта" />}
         {embedTab === "stages" && <StagesTab prod={openProd} patch={patchProd} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} />}
@@ -441,7 +441,7 @@ export default function ProductionModule({
 const _dayStart = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); };
 // Телефон → формат для wa.me (КЗ: 8XXXXXXXXXX → 7XXXXXXXXXX)
 const _waPhone = (p) => { let d = (p || "").replace(/\D/g, ""); if (d.length === 11 && d[0] === "8") d = "7" + d.slice(1); else if (d.length === 10) d = "7" + d; return d; };
-function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientShare, currentUser }) {
+function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientShare, currentUser, clientInfoCard }) {
   const objEstimates = estimates.filter(e => e.objectId === obj.id);
   // Только клиентские договоры: подряд (с рабочим) — это себестоимость, в метрику «Договоры» не входит
   const objContracts = contracts.filter(c => c.objectId === obj.id && !c.deletedAt && c.type !== "podryad" && c.type !== "podryad_annex");
@@ -485,7 +485,7 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientSh
     </div>
   );
   const Metric = ({ label, value, sub, color = "#0f172a" }) => (
-    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "13px 15px" }}>
+    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "13px 15px", minHeight: 86, boxSizing: "border-box", display: "flex", flexDirection: "column", justifyContent: "center" }}>
       <div style={{ fontSize: 10.5, color: "#94a3b8", marginBottom: 5, textTransform: "uppercase", letterSpacing: ".03em", fontWeight: 700 }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 800, color, lineHeight: 1.1, overflowWrap: "anywhere" }}>{value}</div>
       {sub && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>{sub}</div>}
@@ -516,18 +516,11 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientSh
           <div style={{ height: 8, background: "#f1f5f9", borderRadius: 5, overflow: "hidden" }}><div style={{ width: stageProg + "%", height: "100%", background: "#059669", borderRadius: 5, transition: "width .3s" }} /></div>
         </div>
       )}
+      {/* Клиент и объект — статус уже выбирается тут, поэтому в «Производственной информации» ниже статус-кнопки не дублируются */}
+      {clientInfoCard}
       {/* Производственные поля */}
-      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>Производственная информация</div>
-          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-            {PROD_STATUSES.map(s => {
-              const active = (prod.prodStatus || "active") === s.key;
-              return <button key={s.key} onClick={() => patch({ prodStatus: s.key })}
-                style={{ border: `1px solid ${active ? s.color : "#e2e8f0"}`, background: active ? s.bg : "#fff", color: active ? s.color : "#94a3b8", borderRadius: 20, padding: "4px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", transition: "all .1s" }}>{s.label}</button>;
-            })}
-          </div>
-        </div>
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 14 }}>Производственная информация</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           {fld("Ответственный прораб / менеджер", "responsible")}
           {fld("Доступ (ключ, код, пропуск)", "access")}
