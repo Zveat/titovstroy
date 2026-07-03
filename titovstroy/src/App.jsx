@@ -3546,11 +3546,21 @@ function PublicProgress({ token }) {
       </div>
     )}
 
-    {/* Документы (договоры + акты) */}
-    {docs && ((docs.contracts || []).length > 0 || (docs.acts || []).length > 0) && (
+    {/* Документы (сметы + договоры + акты) */}
+    {docs && ((docs.contracts || []).length > 0 || (docs.acts || []).length > 0 || (docs.estimates || []).length > 0) && (
       <div style={card}>
         <div style={h}>Документы</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {(docs.estimates || []).map((d, i) => (
+            <button key={"e" + i} onClick={() => openHtml(d.html)} style={docBtn}>
+              <span style={{ fontSize: 16, flexShrink: 0 }}>📋</span>
+              <span style={{ flex: 1, textAlign: "left", minWidth: 0 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", display: "block" }}>{d.title}</span>
+                {d.total > 0 && <span style={{ fontSize: 11, color: "#64748b" }}>{fmt(d.total)} ₸{d.date ? ` · ${new Date(d.date).toLocaleDateString("ru-RU")}` : ""}</span>}
+              </span>
+              <span style={{ fontSize: 11, color: "#2563eb", fontWeight: 700, flexShrink: 0 }}>Открыть ↗</span>
+            </button>
+          ))}
           {(docs.contracts || []).map((d, i) => (
             <button key={"c" + i} onClick={() => openHtml(d.html)} style={docBtn}>
               <span style={{ fontSize: 16, flexShrink: 0 }}>📄</span>
@@ -4795,7 +4805,7 @@ ${reqBlock}`;
     if (_docsPubTimer.current) clearTimeout(_docsPubTimer.current);
     _docsPubTimer.current = setTimeout(() => { shared.forEach(o => { try { _publishDocsRef.current?.(o.id); } catch {} }); }, 1500);
     return () => { if (_docsPubTimer.current) clearTimeout(_docsPubTimer.current); };
-  }, [contracts, reports]);
+  }, [contracts, reports, estimates]);
   // Живое авто-обновление: при любом изменении производства/оплат пере-публикуем снимки всех открытых объектов
   const _progPubTimer = useRef(null);
   useEffect(() => {
@@ -4947,6 +4957,34 @@ ${reqBlock}`;
   const saveFinanceProjects = async (list, opts = {}) => {
     return await saveListProtected(FINANCE_PROJECTS_KEY, FINANCE_PROJECTS_BACKUPS_KEY, list, (fl)=>{ finProjectsRef.current = fl; setFinProjects(fl); }, { loadedRef: _financeLoaded, ...opts });
   };
+
+  // БЫСТРОЕ ОБНОВЛЕНИЕ бюджета проектов: при любом изменении договоров (добавили/
+  // изменили/удалили доп. соглашение) бюджет связанного проекта пересчитывается сам:
+  // бюджет = основной договор + все его доп. соглашения. Проекты без договора в
+  // сервисе (импорт из Google-таблиц) не трогаются. Debounce, чтобы не спамить сейвы.
+  const _budgetSyncTimer = useRef(null);
+  useEffect(() => {
+    if (!_financeLoaded.current || !_contractsLoaded.current) return;
+    if (_budgetSyncTimer.current) clearTimeout(_budgetSyncTimer.current);
+    _budgetSyncTimer.current = setTimeout(() => {
+      const fps = finProjectsRef.current;
+      if (!fps.length) return;
+      let changed = false;
+      const updated = fps.map(fp => {
+        if (!fp.contractNo) return fp;
+        const main = contractsRef.current.find(c => c.number && !c.deletedAt
+          && c.type !== "podryad" && c.type !== "podryad_annex" && c.type !== "annex" && c.type !== "design_add"
+          && normCN(c.number) === normCN(fp.contractNo));
+        if (!main) return fp;
+        const nb = finBudgetOfContract(main);
+        if (nb > 0 && Math.round(Number(fp.budget) || 0) !== Math.round(nb)) { changed = true; return { ...fp, budget: nb }; }
+        return fp;
+      });
+      if (changed) saveFinanceProjects(updated);
+    }, 800);
+    return () => { if (_budgetSyncTimer.current) clearTimeout(_budgetSyncTimer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contracts]);
 
   // Бэкапы списков (договоры/клиенты/контрагенты)
   const openListBackups = async (kind) => {
@@ -6502,6 +6540,50 @@ ${reqBlock}`;
     if (t === "annex" || t === "podryad_annex") return `${t === "podryad_annex" ? "Приложение подряда" : "Приложение"} №${c.appendix || 2}` + (c.mainNumber ? ` к №${c.mainNumber}` : "");
     return `${T[t] || "Договор"} ${c.number ? "№" + c.number : "(без номера)"}`;
   };
+  // Смета для клиента: ТОЛЬКО клиентские цены (без себестоимости и маржи)
+  const estimateToClientHtml = (est, obj, title) => {
+    try {
+      const catalog = getEffectiveCatalog();
+      const mm = 1 + (Number(est.markup) || 0) / 100;
+      const rows = Object.entries(est.rows || {}).filter(([, r]) => Number(r?.qty) > 0).map(([key, r]) => {
+        const w = catalog.find(x => x.code === key) || catalog.find(x => x.name === key);
+        if (!w) return null;
+        const qty = Number(r.qty || 0);
+        const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
+        const raw = (r.manualPrice !== undefined && r.manualPrice !== "") ? Number(r.manualPrice) : getPrice(w, qty, r.complexity || "std", cpxPct);
+        const price = Math.round((Number(raw) || 0) * mm);
+        return { cat: w.cat || "Прочее", name: (r.manualName !== undefined ? r.manualName : w.name), unit: (r.manualUnit !== undefined ? r.manualUnit : (w.unit || "м²")), qty, price, sum: Math.round(price * qty) };
+      }).filter(Boolean);
+      if (!rows.length) return null;
+      const subtotal = rows.reduce((s, r) => s + r.sum, 0);
+      const disc = Number(est.discount) || 0;
+      const total = Math.round(est.total || subtotal * (1 - disc / 100));
+      const esc = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const F = n => (Math.round(Number(n) || 0)).toLocaleString("ru-RU");
+      const cats = []; const cmap = {};
+      rows.forEach(r => { if (!cmap[r.cat]) { cmap[r.cat] = { cat: r.cat, items: [] }; cats.push(cmap[r.cat]); } cmap[r.cat].items.push(r); });
+      let body = "";
+      cats.forEach(g => {
+        body += `<tr class="cat"><td colspan="5">${esc(g.cat)}</td></tr>`;
+        g.items.forEach(r => { body += `<tr><td>${esc(r.name)}</td><td class="r">${F(r.qty)}</td><td>${esc(r.unit)}</td><td class="r">${F(r.price)}</td><td class="r">${F(r.sum)}</td></tr>`; });
+      });
+      const d = new Date(est.updatedAt || est.createdAt || Date.now());
+      return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title || "Смета")}</title><style>
+body{font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;margin:24px auto;max-width:820px;padding:0 14px}
+h1{font-size:20px;margin:0 0 4px} .sub{color:#64748b;font-size:13px;margin-bottom:16px}
+table{width:100%;border-collapse:collapse;font-size:13px} th,td{border:1px solid #e2e8f0;padding:6px 8px;text-align:left}
+th{background:#f8fafc;font-size:11px;text-transform:uppercase;color:#64748b} .r{text-align:right;white-space:nowrap}
+tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:uppercase;font-size:11.5px}
+.tot{margin-top:14px;text-align:right;font-size:15px} .tot b{font-size:18px}
+@media print{body{margin:0}}
+</style></head><body>
+<h1>${esc(title || "Смета")}</h1>
+<div class="sub">${esc([obj?.clientName, obj?.address].filter(Boolean).join(" · "))} · ${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}</div>
+<table><thead><tr><th>Наименование работ</th><th class="r">Кол-во</th><th>Ед.</th><th class="r">Цена, ₸</th><th class="r">Сумма, ₸</th></tr></thead><tbody>${body}</tbody></table>
+<div class="tot">${disc > 0 ? `Сумма: ${F(subtotal)} ₸ · скидка ${disc}%<br/>` : ""}Итого: <b>${F(total)} ₸</b></div>
+</body></html>`;
+    } catch (e) { console.warn("estimateToClientHtml err", e); return null; }
+  };
   const publishDocs = async (objectId) => {
     const obj = objectsRef.current.find(o => o.id === objectId);
     if (!obj || !obj.progressShared || !obj.progressToken) return;
@@ -6521,7 +6603,21 @@ ${reqBlock}`;
       try { html = buildAvrHtml({ ...r, lines: (r.lines || []).map(l => ({ ...l, included: true, doneQty: l.doneQty })) }); } catch (e) {}
       return { title: `Акт №${r.actNo || "б/н"}`, date: r.actDate || r.createdAt || null, total: Number(r.total) || 0, html };
     }).filter(x => x.html);
-    try { await storage.set(DOCS_NODE(obj.progressToken), JSON.stringify({ contracts, acts: actsOut, publishedAt: Date.now() })); } catch (e) { console.warn("publishDocs err", e); }
+    // Все сметы объекта (основная + доп.) — клиентские цены, без себестоимости
+    const objEsts = estimatesRef.current.filter(e => e.objectId === objectId);
+    const isMainEst = e => !e.parentId || e.parentId === e.id;
+    const orderedEsts = [
+      ...objEsts.filter(isMainEst).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)),
+      ...objEsts.filter(e => !isMainEst(e)).sort((a, b) => (a.dsNumber || 0) - (b.dsNumber || 0)),
+    ];
+    const mainsCount = orderedEsts.filter(isMainEst).length;
+    let mi = 0;
+    const estimatesOut = orderedEsts.map(e => {
+      const main = isMainEst(e); if (main) mi++;
+      const title = main ? `Смета${mainsCount > 1 ? ` ${mi}` : ""}` : `Доп. смета`;
+      return { title, total: Math.round(e.total) || 0, date: e.updatedAt || e.createdAt || null, html: estimateToClientHtml(e, obj, title) };
+    }).filter(x => x.html);
+    try { await storage.set(DOCS_NODE(obj.progressToken), JSON.stringify({ contracts, estimates: estimatesOut, acts: actsOut, publishedAt: Date.now() })); } catch (e) { console.warn("publishDocs err", e); }
   };
   _publishDocsRef.current = publishDocs;
 
