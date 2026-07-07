@@ -777,8 +777,9 @@ function LoginScreen({ onLogin }) {
 
     if (user) {
       const { password: _pw, ...safeUser } = user; // не храним пароль в сессии
-      try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: safeUser, savedAt: Date.now() })); } catch(e) {}
-      onLogin(safeUser);
+      const sessUser = { ...safeUser, authAt: Date.now() }; // время входа — для инвалидации сессии при смене пароля
+      try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: sessUser, savedAt: Date.now() })); } catch(e) {}
+      onLogin(sessUser);
       return; // компонент размонтируется, setLoading вызывать нельзя
     } else {
       setError("Неверный логин или пароль");
@@ -1776,8 +1777,9 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
   };
   const savePass = async (id) => {
     if (!editingPass?.val?.trim()) return;
-    const updated = users.map(u => u.id === id ? {...u, password: simpleHash(editingPass.val.trim())} : u);
-    setUsers(updated); await saveUsers(updated);
+    // pwChangedAt — метка смены пароля: сессии, вошедшие до этого момента, разлогинятся при загрузке
+    const updated = users.map(u => u.id === id ? {...u, password: simpleHash(editingPass.val.trim()), pwChangedAt: Date.now()} : u);
+    setUsers(updated); await saveUsers(updated); await onUsersChanged();
     setEditingPass(null); setMsg("✓ Пароль изменён"); setTimeout(() => setMsg(""), 2500);
   };
   const saveUser = async () => {
@@ -3852,6 +3854,8 @@ function MainApp({ currentUser, setCurrentUser }) {
 
   // Пользователи для выпадающего списка менеджеров
   const [allUsers, setAllUsers] = useState(DEFAULT_USERS);
+  const allUsersRef = useRef(DEFAULT_USERS);
+  useEffect(() => { allUsersRef.current = allUsers; }, [allUsers]);
 
   // Присутствие { [userId]: lastSeenTs } — пишет каждый, видит только админ
   const [presence, setPresence] = useState({});
@@ -3862,12 +3866,12 @@ function MainApp({ currentUser, setCurrentUser }) {
     const touch = async () => {
       if (stopped || document.visibilityState === "hidden") return;
       try {
-        const r = await storage.getResult(PRESENCE_KEY);
-        let map = {};
-        if (r.status === "found" && r.value) { try { map = JSON.parse(r.value) || {}; } catch {} }
-        map[currentUser.id] = Date.now();
-        await storage.set(PRESENCE_KEY, JSON.stringify(map));
-        if (!stopped) setPresence(map);
+        // Пишем ТОЛЬКО свой ключ presence-<id> — без чтения-изменения общего блока,
+        // иначе параллельные отметки затирают друг друга (человек, зашедший на минуту,
+        // мог вообще пропасть из «был в сети»). Свой ключ никто не перетрёт.
+        const now = Date.now();
+        await storage.set(PRESENCE_KEY + "-" + currentUser.id, String(now));
+        if (!stopped) setPresence(p => ({ ...p, [currentUser.id]: now }));
       } catch {}
     };
     touch();
@@ -3882,8 +3886,19 @@ function MainApp({ currentUser, setCurrentUser }) {
     let stopped = false;
     const pull = async () => {
       try {
-        const r = await storage.getResult(PRESENCE_KEY);
-        if (!stopped && r.status === "found" && r.value) { try { setPresence(JSON.parse(r.value) || {}); } catch {} }
+        const ids = (allUsersRef.current || []).map(u => u.id).filter(Boolean);
+        const map = {};
+        const results = await Promise.all(ids.map(id => storage.getResult(PRESENCE_KEY + "-" + id).catch(() => null)));
+        results.forEach((r, i) => { if (r && r.status === "found" && r.value) { const t = parseInt(r.value, 10); if (t) map[ids[i]] = t; } });
+        // Старый общий блок (обратная совместимость): берём максимум, чтобы историю «был в сети» не потерять
+        try {
+          const legacy = await storage.getResult(PRESENCE_KEY);
+          if (legacy.status === "found" && legacy.value) {
+            const m = JSON.parse(legacy.value) || {};
+            for (const [k, v] of Object.entries(m)) { const t = typeof v === "number" ? v : parseInt(v, 10); if (t && (!map[k] || t > map[k])) map[k] = t; }
+          }
+        } catch {}
+        if (!stopped) setPresence(map);
       } catch {}
     };
     pull();
@@ -5251,8 +5266,14 @@ ${reqBlock}`;
         setCurrentUser(prev=>{
           if(!prev) return prev;
           const fresh=uList.find(x=>x.id===prev.id);
+          // Пароль сменили после входа этой сессии → принудительный выход при загрузке/обновлении
+          if(fresh && fresh.pwChangedAt && fresh.pwChangedAt > (prev.authAt||0)){
+            try{ localStorage.removeItem(SESSION_KEY); }catch(e){}
+            return null;
+          }
           if(!fresh || (fresh.role===prev.role && fresh.name===prev.name)) return prev;
-          const updated={...prev,...fresh};
+          const {password:_pw, ...freshSafe}=fresh; // пароль в сессии не храним
+          const updated={...prev,...freshSafe};
           try{ localStorage.setItem(SESSION_KEY,JSON.stringify({user:updated,savedAt:Date.now()})); }catch(e){}
           return updated;
         });
@@ -12350,10 +12371,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             if(!u) return;
             const list=JSON.parse(u.value);
             setAllUsers(list);
-            // обновляем currentUser если его роль/имя изменились
+            // синхронизируем текущего пользователя и ПРОДЛЕВАЕМ метку входа (authAt),
+            // чтобы тот, кто меняет пароли (в т.ч. свой), не разлогинил сам себя
             const me=list.find(x=>x.id===currentUser.id);
-            if(me && (me.role!==currentUser.role || me.name!==currentUser.name)){
-              const updated={...currentUser,...me};
+            if(me){
+              const {password:_pw, ...meSafe}=me; // пароль в сессии не храним
+              const updated={...currentUser,...meSafe, authAt: Date.now()};
               setCurrentUser(updated);
               try{ localStorage.setItem(SESSION_KEY,JSON.stringify({user:updated,savedAt:Date.now()})); }catch(e){}
             }
