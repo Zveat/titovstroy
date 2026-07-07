@@ -1674,7 +1674,7 @@ function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note })
 
 
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
-function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, onBackupWorkspace=()=>{} }) {
+function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBackupWorkspace=()=>{} }) {
   const [tab, setTab] = useState("users");
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1697,8 +1697,9 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
   const [editingCat, setEditingCat] = useState(null);
   const [editingSub, setEditingSub] = useState(null);
   const [catalogBackupsModal, setCatalogBackupsModal] = useState(null);
-  const [adminEditItem, setAdminEditItem] = useState(null); // {mode:"newClient"|"editClient"|"newCA"|"editCA", data:{}}
-  const [adminSubTab, setAdminSubTab] = useState("list"); // "list"|"clientEditor"|"caEditor"
+  const [adminEditItem, setAdminEditItem] = useState(null); // {mode:"newClient"|"editClient"|"newCA"|"editCA"|"newWorker"|"editWorker", data:{}}
+  const [adminSubTab, setAdminSubTab] = useState("list"); // "list"|"clientEditor"|"caEditor"|"workerEditor"
+  const [workerSearch, setWorkerSearch] = useState(""); // поиск в справочнике подрядчиков
 
   const openCatalogBackups = async () => {
     const bRaw = await storage.get(CATALOG_BACKUPS_KEY);
@@ -1910,7 +1911,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
 
       {/* Табы */}
       <div className="admin-tabs" style={{display:"flex",gap:3,marginBottom:24,background:"#f8fafc",borderRadius:10,padding:4,overflowX:"auto"}}>
-        {[["users","👥 Сотрудники"],["clients","👥 Клиенты"],["contragents","🏢 Реквизиты"],["prices","💰 Прайс-лист"],["backups","🗄 Бэкапы"],["audit","📋 Журнал"]].map(([t,label])=>(
+        {[["users","👥 Сотрудники"],["clients","👥 Клиенты"],["contragents","🏢 Реквизиты"],["workers","🔨 Подрядчики"],["prices","💰 Прайс-лист"],["backups","🗄 Бэкапы"],["audit","📋 Журнал"]].map(([t,label])=>(
           <button key={t} onClick={()=>{ setTab(t); setAdminSubTab("list"); }} style={{
             flex:1,padding:"11px",borderRadius:8,border:"none",cursor:"pointer",
             fontFamily:"inherit",fontSize:12,fontWeight:700,whiteSpace:"nowrap",
@@ -2154,6 +2155,100 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
             }}>← Готово</button>
           </>)}
         </div>
+      ) : tab === "workers" ? (
+        /* СПРАВОЧНИК ПОДРЯДЧИКОВ (рабочих) */
+        (()=>{
+          // статистика по подрядчику: сколько договоров подряда и на какую сумму
+          const workerStats = (wid) => {
+            const cs = (contracts||[]).filter(c=>!c.deletedAt && (c.type==="podryad"||c.type==="podryad_annex") && c.workerId===wid);
+            const sum = cs.reduce((s,c)=>s+(c.works||[]).reduce((a,w)=>a+((Number(w.quantity)||0)*(Number(w.price)||0)),0),0);
+            return { count: cs.length, sum };
+          };
+          const emptyWorker = () => ({ id:Date.now().toString(), name:"", iin:"", doc:"", phone:"", email:"", address:"", spec:"" });
+          const wsearch = (workerSearch||"").trim().toLowerCase();
+          const shown = wsearch
+            ? workers.filter(w => [w.name,w.iin,w.phone,w.spec].filter(Boolean).some(v=>String(v).toLowerCase().includes(wsearch)))
+            : workers;
+          return (
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {adminSubTab === "list" && (<>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <div style={{fontWeight:700,color:"#94a3b8",fontSize:12}}>ПОДРЯДЧИКИ / РАБОЧИЕ ({workers.length})</div>
+              {currentUser.role==="admin" && (
+                <button onClick={()=>{ setAdminEditItem({mode:"newWorker",data:emptyWorker()}); setAdminSubTab("workerEditor"); }}
+                  className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
+              )}
+            </div>
+            {workers.length>3 && (
+              <input className="fi" placeholder="🔍 Поиск по ФИО, ИИН, телефону, специализации…" value={workerSearch} onChange={e=>setWorkerSearch(e.target.value)} />
+            )}
+            {workers.length===0 && (
+              <div style={{textAlign:"center",padding:"28px 0",color:"#94a3b8",background:"#f9fafb",borderRadius:10,border:"1px dashed #e5e7eb",fontSize:13}}>
+                Подрядчиков пока нет<br/>
+                <span style={{fontSize:11,color:"#cbd5e1"}}>Нажмите <b>+ Добавить</b> — или создайте нового прямо в редакторе договора подряда</span>
+              </div>
+            )}
+            {shown.map(w=>{
+              const st = workerStats(w.id);
+              return (
+              <div key={w.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"14px 16px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <span style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>🔨 {w.name||"Без имени"}</span>
+                      {w.spec && <span style={{fontSize:10,fontWeight:700,color:"#059669",background:"#ecfdf5",borderRadius:4,padding:"1px 7px"}}>{w.spec}</span>}
+                    </div>
+                    <div style={{fontSize:12,color:"#94a3b8",marginTop:2}}>
+                      {[w.iin&&("ИИН "+w.iin), w.phone, w.email].filter(Boolean).join(" · ")||"— реквизиты не заполнены"}
+                    </div>
+                    {w.address && <div style={{fontSize:12,color:"#94a3b8",marginTop:1}}>📍 {w.address}</div>}
+                    <div style={{fontSize:11,color:"#64748b",marginTop:4}}>
+                      {st.count>0
+                        ? <>Договоров подряда: <b>{st.count}</b> · на сумму <b>{fmt(st.sum)} ₸</b></>
+                        : <span style={{color:"#cbd5e1"}}>Договоров подряда пока нет</span>}
+                    </div>
+                  </div>
+                  {currentUser.role==="admin" && (
+                    <div style={{display:"flex",gap:5,flexShrink:0}}>
+                      <button onClick={()=>{ setAdminEditItem({mode:"editWorker",data:{...w}}); setAdminSubTab("workerEditor"); }}
+                        style={{background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                      <button onClick={()=>{
+                          const s = workerStats(w.id);
+                          if(s.count>0){ window.alert("Нельзя удалить подрядчика «"+(w.name||"без имени")+"»: он привязан к "+s.count+" договор(ам) подряда. Сначала открепите его от договоров, чтобы ничего не потерялось."); return; }
+                          if(window.confirm("Удалить подрядчика «"+(w.name||"без имени")+"»?")) saveWorkers(workersRef.current.filter(x=>x.id!==w.id),{removedIds:[w.id],allowEmpty:true});
+                        }}
+                        style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+              );
+            })}
+          </>)}
+          {adminSubTab === "workerEditor" && adminEditItem && (<>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <button onClick={()=>setAdminSubTab("list")} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:18}}>←</button>
+              <span style={{fontWeight:700,fontSize:15,color:"#0f172a"}}>{adminEditItem.mode==="newWorker"?"Новый подрядчик":"Редактировать подрядчика"}</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              {[["ФИО","name"],["ИИН","iin"],["№ документа","doc"],["Специализация","spec"],["Телефон","phone"],["Email","email"],["Адрес","address"]].map(([label,field])=>(
+                <div key={field} style={field==="address"?{gridColumn:"1/-1"}:undefined}>
+                  <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>{label}{field==="name"?" *":""}</div>
+                  <input className="fi" value={adminEditItem.data[field]||""} onChange={e=>setAdminEditItem(p=>({...p,data:{...p.data,[field]:e.target.value}}))} placeholder={label}/>
+                </div>
+              ))}
+            </div>
+            <button className="btn btn-g" onClick={()=>{
+              const d = {...adminEditItem.data, name:(adminEditItem.data.name||"").trim()};
+              if(!d.name){ window.alert("Укажите ФИО подрядчика"); return; }
+              const list = adminEditItem.mode==="newWorker" ? [...workers,d] : workers.map(x=>x.id===d.id?d:x);
+              saveWorkers(list);
+              setAdminSubTab("list");
+            }}>← Готово</button>
+          </>)}
+        </div>
+          );
+        })()
       ) : tab === "prices" ? (
         /* ПРАЙС-ЛИСТ */
         <div style={{paddingBottom:90}}>
@@ -3707,7 +3802,7 @@ function MainApp({ currentUser, setCurrentUser }) {
 
   // Экраны: "list" | "editor" | "contracts"
   // Руководитель по умолчанию попадает на финансы
-  const [screen, setScreen] = useState(currentUser?.role==="manager" ? "finance" : "dashboard");
+  const [screen, setScreen] = useState(currentUser?.role==="manager" ? "finance" : currentUser?.role==="foreman" ? "objects" : "dashboard");
   const [navHistory, setNavHistory] = useState([]); // стек навигации для кнопки «Назад»
 
   const _applyNavState = (s) => {
@@ -3957,7 +4052,8 @@ function MainApp({ currentUser, setCurrentUser }) {
       const obj = c.objectId ? objects.find(o=>o.id===c.objectId) : null;
       const conTotal = (c.works||[]).reduce((s,w)=>s+((Number(w.quantity)||0)*(Number(w.price)||0)),0);
       const agg = obj ? estAgg[obj.id] : null;
-      const planTotal = conTotal>0 ? conTotal : (agg ? agg.total : 0);
+      // ПЛАН = ВСЕ сметы объекта (основная + доп.) — доп. сметы сразу в плане; если смет нет — сумма работ договора
+      const planTotal = (agg && agg.total>0) ? agg.total : conTotal;
       const planCost = agg ? agg.cost : 0;
       const planMargin = planTotal>0 ? planTotal - planCost : 0;
       const planMarginPct = planTotal>0 ? Math.round(planMargin/planTotal*100) : null;
@@ -4848,6 +4944,55 @@ ${reqBlock}`;
     }
     // Каждая строка = конкретная работа (наименование), cat = блок-заголовок
     return order.map(k => ({ cat: map[k].cat, name: map[k].name, unit: map[k].unit, qty: Math.round(map[k].qty * 100) / 100, priceClient: Math.round(map[k].priceClient), costPlan: Math.round(map[k].costPlan) }));
+  }, [estimates]);
+
+  // АВТО-СИНХРОНИЗАЦИЯ этапов производства со сметами (без кнопок):
+  // добавил позицию в смету/доп. смету → она сама появляется в Этапах и «Финансах по этапам»;
+  // удалил смету/позицию → сметные этапы сами исчезают. Статус/сроки/ответственный
+  // существующих этапов сохраняются. НЕ трогаем: ручные этапы (в т.ч. с введённой
+  // вручную ценой, если имени нет в каталоге) и импортные карточки без объекта (fp:).
+  const _stageSyncTimer = useRef(null);
+  useEffect(() => {
+    if (!_estimatesLoaded.current || !_contractsLoaded.current) return;
+    if (_stageSyncTimer.current) clearTimeout(_stageSyncTimer.current);
+    _stageSyncTimer.current = setTimeout(() => {
+      const prods = productionsRef.current;
+      if (!prods.length) return;
+      const keyOf = s => ((s.cat || "") + "|" + (s.name || "")).toLowerCase().trim();
+      // имена из каталога — по ним отличаем сметные этапы от ручных (у легаси-этапов нет флага fromEst)
+      const catKeys = new Set(getEffectiveCatalog().map(w => ((w.cat || "") + "|" + (w.name || "")).toLowerCase().trim()));
+      let anyChanged = false;
+      const updated = prods.map(p => {
+        if (!p.objectId || String(p.objectId).startsWith("fp:")) return p;
+        if (!estimatesRef.current.some(e => e.objectId === p.objectId)) return p; // у объекта нет смет — не трогаем
+        const built = buildStagesFromEstimate(p.objectId);
+        const builtKeys = new Set(built.map(keyOf));
+        const cur = p.stages || [];
+        let changed = false;
+        // удаляем только сметные этапы (флаг fromEst или имя из каталога), которых больше нет в сметах
+        const kept = cur.filter(s => builtKeys.has(keyOf(s)) || !(s.fromEst || catKeys.has(keyOf(s))));
+        if (kept.length !== cur.length) changed = true;
+        const used = new Set();
+        const next = kept.map(s => {
+          const b = built.find(x => keyOf(x) === keyOf(s));
+          if (!b) return s;
+          used.add(keyOf(b));
+          if (s.qty !== b.qty || s.priceClient !== b.priceClient || s.costPlan !== b.costPlan || (b.unit && s.unit !== b.unit)) { changed = true; return { ...s, unit: b.unit || s.unit, qty: b.qty, priceClient: b.priceClient, costPlan: b.costPlan, fromEst: true }; }
+          return s;
+        });
+        for (const b of built) {
+          if (used.has(keyOf(b))) continue;
+          changed = true;
+          next.push({ id: genId(), cat: b.cat, name: b.name, unit: b.unit || "", qty: b.qty, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: b.priceClient, costPlan: b.costPlan, fromEst: true });
+        }
+        if (!changed) return p;
+        anyChanged = true;
+        return { ...p, stages: next, updatedAt: Date.now() };
+      });
+      if (anyChanged) saveProductions(updated);
+    }, 1200);
+    return () => { if (_stageSyncTimer.current) clearTimeout(_stageSyncTimer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [estimates]);
 
   // Миграция: перенести все проекты из Финансов в Производство (один раз)
@@ -7379,7 +7524,6 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     return [
       ...(isAdmin||isMgr||isUser ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
       { id:"objects", icon:"📦", label:"Объекты" },
-      ...(isAdmin||isMgr||isForeman ? [{ id:"production", icon:"🏗", label:"Производство" }] : []),
       ...(!isViewer&&!isForeman ? [{ id:"contracts", icon:"📄", label:"Прочие документы", short:"Документы" }] : []),
       ...(isAdmin||isMgr ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
       ...(isAdmin||isMgr ? [{ id:"finance", icon:"💰", label:"Финансы" }] : []),
@@ -7392,9 +7536,11 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
   const _isAdmin = _r === "admin", _isMgr = _r === "manager", _isForeman = _r === "foreman", _isUser = _r === "user", _isViewer = _r === "viewer";
   // Эффективный экран с учётом ограничений роли
   const effScreen = (() => {
-    if (_isViewer && (screen==="dashboard"||screen==="analytics"||screen==="admin"||screen==="deals"||screen==="finance"||screen==="production")) return "objects";
-    if (_isForeman && (screen==="analytics"||screen==="finance"||screen==="contracts"||screen==="dashboard"||screen==="admin")) return "production";
-    if (_isUser && (screen==="analytics"||screen==="finance"||screen==="production"||screen==="admin")) return "objects";
+    // «Производство» объединено с «Объекты» — отдельного экрана больше нет, все ведёт в Объекты
+    if (screen==="production") return "objects";
+    if (_isViewer && (screen==="dashboard"||screen==="analytics"||screen==="admin"||screen==="deals"||screen==="finance")) return "objects";
+    if (_isForeman && (screen==="analytics"||screen==="finance"||screen==="contracts"||screen==="dashboard"||screen==="admin")) return "objects";
+    if (_isUser && (screen==="analytics"||screen==="finance"||screen==="admin")) return "objects";
     if (!_isAdmin && !_isMgr && screen==="finance") return "objects";
     if (!_isAdmin && screen==="admin") return "objects";
     return screen;
@@ -7813,7 +7959,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   {label:"Открытых замечаний", value:_prodKpi.defects, sub:"незакрытые дефекты", icon:"⚠️", accent:_prodKpi.defects>0?"#d97706":"#059669"},
                 ].map((s,i)=>(
                   <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden",cursor:"pointer"}}
-                    onClick={()=>setScreen("production")}
+                    onClick={()=>setScreen("objects")}
                     onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
                     onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)";}}>
                     <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:s.accent,opacity:.85}}/>
@@ -12218,6 +12364,11 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           contragents={contragents}
           saveContragents={saveContragents}
           contragentsRef={contragentsRef}
+          workers={workers}
+          saveWorkers={saveWorkers}
+          workersRef={workersRef}
+          contracts={contracts}
+          fmt={fmt}
           onBackupWorkspace={openWorkspaceBackups}
         />
       )}
