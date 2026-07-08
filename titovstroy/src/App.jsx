@@ -1902,7 +1902,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
   };
 
   return (
-    <div className="page">
+    <div className="page" style={{maxWidth:1320}}>
       <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"24px 28px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
         <div style={{position:"absolute",top:-30,right:-30,width:160,height:160,borderRadius:"50%",background:"rgba(59,130,246,.08)"}}/>
         <div style={{position:"relative",zIndex:1}}>
@@ -1930,7 +1930,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
       ) : tab === "users" ? (
         <div>
           {/* Список сотрудников */}
-          <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(360px,1fr))",gap:10,marginBottom:20,alignItems:"start"}}>
             {users.map(u => (
               <div key={u.id} style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"16px 18px"}}>
                 <div className="user-row" style={{display:"flex",alignItems:"center",gap:12}}>
@@ -2036,6 +2036,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
               )}
             </div>
             {clients.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#334155",fontSize:13}}>Клиентов пока нет</div>}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:10,alignItems:"start"}}>
             {clients.map(c=>(
               <div key={c.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"14px 16px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -2061,6 +2062,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                 </div>
               </div>
             ))}
+            </div>
           </>)}
           {adminSubTab === "clientEditor" && adminEditItem && (<>
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -2109,6 +2111,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                   className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
               )}
             </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:10,alignItems:"start"}}>
             {contragents.map(c=>(
               <div key={c.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"14px 16px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -2128,6 +2131,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                 </div>
               </div>
             ))}
+            </div>
           </>)}
           {adminSubTab === "caEditor" && adminEditItem && (<>
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -2190,6 +2194,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                 <span style={{fontSize:11,color:"#cbd5e1"}}>Нажмите <b>+ Добавить</b> — или создайте нового прямо в редакторе договора подряда</span>
               </div>
             )}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(340px,1fr))",gap:10,alignItems:"start"}}>
             {shown.map(w=>{
               const st = workerStats(w.id);
               return (
@@ -2226,6 +2231,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
               </div>
               );
             })}
+            </div>
           </>)}
           {adminSubTab === "workerEditor" && adminEditItem && (<>
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -9712,7 +9718,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   {navHistory.length > 0 && <button onClick={goBack} style={{background:"none",border:"1px solid rgba(255,255,255,.4)",borderRadius:6,padding:"4px 12px",cursor:"pointer",fontSize:14,color:"#fff",alignSelf:"center"}}>← Назад</button>}
                   {(()=>{
                     const projIncH={};
-                    for(const t of financeTx){ if(t.included===false)continue; const cn=(t.contractNo||"").trim(); if(!cn)continue; if(t.type==="income") projIncH[cn]=(projIncH[cn]||0)+(Number(t.amount)||0); }
+                    for(const t of financeTx){ if(t.deletedAt||t.included===false)continue; const cn=(t.contractNo||"").trim(); if(!cn)continue; if(t.type==="income") projIncH[cn]=(projIncH[cn]||0)+(Number(t.amount)||0); }
                     const debtH = finProjects.filter(p=>(p.rawStatus||p.status)!=="отменен").reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projIncH[p.contractNo]||0)),0);
                     return <>
                       <div style={{textAlign:"right"}}>
@@ -10369,7 +10375,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               const n = v => Number(v)||0;
               // приход по проектам (для дебиторки)
               const projInc={};
-              for(const t of financeTx){ if(t.included===false)continue; const cn=(t.contractNo||"").trim(); if(!cn)continue; if(t.type==="income") projInc[cn]=(projInc[cn]||0)+(Number(t.amount)||0); }
+              for(const t of financeTx){ if(t.deletedAt||t.included===false)continue; const cn=(t.contractNo||"").trim(); if(!cn)continue; if(t.type==="income") projInc[cn]=(projInc[cn]||0)+(Number(t.amount)||0); }
               // ── Денежные средства по типам счетов ──
               const byType = { cash:0, bank:0, card:0, ewallet:0 };
               accounts.forEach(a=>{ const tp=a.accType||"bank"; byType[tp]=(byType[tp]||0)+(balances[a.name]||0); });
@@ -10594,7 +10600,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             {financeTab==="projects" && (()=>{
               const projStats = {};
               for (const t of financeTx) {
-                if (t.included===false) continue;
+                if (t.deletedAt || t.included===false) continue;
                 const cn = (t.contractNo||"").trim();
                 if (!cn) continue;
                 if (!projStats[cn]) projStats[cn] = { income:0, expense:0 };
