@@ -4990,8 +4990,10 @@ ${reqBlock}`;
         const builtKeys = new Set(built.map(keyOf));
         const cur = p.stages || [];
         let changed = false;
-        // удаляем только сметные этапы (флаг fromEst или имя из каталога), которых больше нет в сметах
-        const kept = cur.filter(s => builtKeys.has(keyOf(s)) || !(s.fromEst || catKeys.has(keyOf(s))));
+        // удаляем сметные этапы, которых больше нет в сметах. Сметный = флаг fromEst,
+        // либо имя из каталога, либо есть плановая сумма (ручные этапы «+ добавить» всегда с нулём —
+        // их не трогаем). Это ловит и старые этапы без флага fromEst (напр. каталог изменился/скрыт).
+        const kept = cur.filter(s => builtKeys.has(keyOf(s)) || !(s.fromEst || catKeys.has(keyOf(s)) || Number(s.priceClient) > 0 || Number(s.costPlan) > 0));
         if (kept.length !== cur.length) changed = true;
         const used = new Set();
         const next = kept.map(s => {
