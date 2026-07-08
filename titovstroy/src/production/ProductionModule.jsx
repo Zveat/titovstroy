@@ -791,6 +791,8 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) 
                         <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="+ примечание"
                           style={{ marginTop: 6, width: "100%", border: "none", borderBottom: "1px dashed #e2e8f0", fontSize: 11, color: "#64748b", fontFamily: "inherit", outline: "none", padding: "1px 0", background: "transparent" }} />
                       </div>
+                      <button onClick={() => { if (window.confirm(`Удалить этап «${s.name || "без названия"}»?\n\nВажно: если эта работа ещё есть в смете объекта — этап вернётся при следующей синхронизации. Чтобы убрать навсегда, удалите работу из сметы.`)) patch({ stages: stages.filter(x => x.id !== s.id) }); }}
+                        title="Удалить этап" style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "0 2px", flexShrink: 0, alignSelf: "flex-start" }}>×</button>
                     </div>
                   );
                 })}
