@@ -7547,7 +7547,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       { id:"objects", icon:"📦", label:"Объекты" },
       ...(!isViewer&&!isForeman ? [{ id:"contracts", icon:"📄", label:"Прочие документы", short:"Документы" }] : []),
       ...(isAdmin||isMgr ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
-      ...(isAdmin||isMgr ? [{ id:"finance", icon:"💰", label:"Финансы" }] : []),
+      ...(isAdmin||isMgr||isUser ? [{ id:"finance", icon:"💰", label:"Финансы" }] : []),
       ...(isAdmin ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
     ];
   }, [currentUser.role]);
@@ -7561,8 +7561,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     if (screen==="production") return "objects";
     if (_isViewer && (screen==="dashboard"||screen==="analytics"||screen==="admin"||screen==="deals"||screen==="finance")) return "objects";
     if (_isForeman && (screen==="analytics"||screen==="finance"||screen==="contracts"||screen==="dashboard"||screen==="admin")) return "objects";
-    if (_isUser && (screen==="analytics"||screen==="finance"||screen==="admin")) return "objects";
-    if (!_isAdmin && !_isMgr && screen==="finance") return "objects";
+    if (_isUser && (screen==="analytics"||screen==="admin")) return "objects";
+    // Замерщик доходит до экрана «Финансы», но внутри видит пометку «доступ закрыт» (см. рендер раздела finance)
+    if (!_isAdmin && !_isMgr && !_isUser && screen==="finance") return "objects";
     if (!_isAdmin && screen==="admin") return "objects";
     return screen;
   })();
@@ -9601,7 +9602,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       })()}
 
       {/* ── ЭКРАН: ФИНАНСЫ (независимый учёт ДДС + P&L) ── */}
-      {effScreen === "finance" && (()=>{
+      {effScreen === "finance" && _isUser && (
+        <div style={{maxWidth:520,margin:"48px auto",textAlign:"center",background:"#fff",border:"1px solid #e2e8f0",borderRadius:16,padding:"40px 28px",boxShadow:"0 1px 3px rgba(15,23,42,.07)"}}>
+          <div style={{fontSize:44,marginBottom:14}}>🔒</div>
+          <div style={{fontWeight:800,fontSize:18,color:"#0f172a",marginBottom:8}}>Доступ закрыт</div>
+          <div style={{fontSize:13,color:"#64748b",lineHeight:1.5}}>Раздел «Финансы» доступен только руководству.<br/>Если нужен доступ — обратитесь к администратору.</div>
+        </div>
+      )}
+      {effScreen === "finance" && !_isUser && (()=>{
         const fM = n => new Intl.NumberFormat("ru-RU").format(Math.round(n||0));
         const now = new Date();
         const periodStart = (()=>{
@@ -11859,7 +11867,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                   <button title="Сформировать акт выполненных работ (Р-1) по этой смете" onClick={()=>openAvrBuilder(obj,est)}
                                     style={{background:"rgba(124,58,237,.08)",color:"#7c3aed",border:"1px solid rgba(124,58,237,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>📋 Акт</button>
                                 )}
-                                {currentUser.role!=="viewer" && !isChild && (
+                                {currentUser.role!=="viewer" && !_isUser && !isChild && (
                                   <button title="Договор подряда с подрядчиком (работы из этой сметы, суммы редактируются). Подрядчика и «новый договор / приложение» выбираешь в редакторе." onClick={()=>{
                                     const ws = estimateToWorks(est);
                                     const podCount = contractsRef.current.filter(c=>c.type==="podryad").length;
@@ -11914,14 +11922,17 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       const conTitle = isAnnex
                         ? `${c.type==="podryad_annex"?"Приложение":"Доп. соглашение"} №${c.appendix||2}`+(c.mainNumber?` к договору №${c.mainNumber}`:"")
                         : `${TLABEL[c.type||"repair_fiz"]||"Договор"} №${c.number||"б/н"}`;
+                      // Замерщику подряд виден, но открывать нельзя (себестоимость)
+                      const _podLocked = _isUser && (c.type==="podryad"||c.type==="podryad_annex");
                       return (
-                        <div key={c.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 16px",cursor:"pointer",transition:"all .12s",marginLeft:isAnnex?16:0,borderLeft:isAnnex?"3px solid #ede9fe":"1px solid #e5e7eb"}}
-                          onClick={()=>{ setCurrentContract({...c}); setObjectReturnId(obj.id); setContractTab("editor"); setScreen("contracts"); }}>
+                        <div key={c.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 16px",cursor:_podLocked?"default":"pointer",transition:"all .12s",marginLeft:isAnnex?16:0,borderLeft:isAnnex?"3px solid #ede9fe":"1px solid #e5e7eb",opacity:_podLocked?.75:1}}
+                          onClick={_podLocked?undefined:()=>{ setCurrentContract({...c}); setObjectReturnId(obj.id); setContractTab("editor"); setScreen("contracts"); }}>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                                 {isAnnex && <span style={{fontSize:10,fontWeight:700,color:"#7c3aed",background:"rgba(124,58,237,.08)",borderRadius:3,padding:"1px 6px"}}>{c.type==="podryad_annex"?"Прил. подряда":"Доп. согл."}</span>}
                                 <span style={{fontWeight:600,fontSize:13,color:"#0f172a"}}>{conTitle}</span>
+                                {_podLocked && <span title="Доступ закрыт" style={{fontSize:11}}>🔒</span>}
                                 <span style={{fontSize:10,fontWeight:700,color:stC.color,background:stC.bg,borderRadius:4,padding:"1px 6px"}}>{stC.label}</span>
                               </div>
                               <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>
@@ -11931,10 +11942,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
                               <div style={{fontWeight:800,fontSize:15,color:"#0f172a"}}>{fmt(total)} ₸</div>
                               <div style={{display:"flex",gap:4}} onClick={e=>e.stopPropagation()}>
-                                <button onClick={()=>generateContractPdf(c,cl2,ca2)}
-                                  style={{background:"#e2e8f0",color:"#334155",border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>
-                                <button onClick={()=>generateContractGDoc(c,cl2,ca2)}
-                                  style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>
+                                {!_podLocked && <button onClick={()=>generateContractPdf(c,cl2,ca2)}
+                                  style={{background:"#e2e8f0",color:"#334155",border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>}
+                                {!_podLocked && <button onClick={()=>generateContractGDoc(c,cl2,ca2)}
+                                  style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>}
                                 {currentUser.role==="admin" && c.type!=="podryad" && c.type!=="podryad_annex" && (()=>{
                                   const main = mainContractOf(c);
                                   const exists = finProjectsRef.current.find(p=>normCN(p.contractNo)===normCN(main?.number));
@@ -12020,8 +12031,16 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 })()}
                 </>)}
 
+                {/* Замерщику вкладка «Финансы» объекта закрыта — показываем пометку */}
+                {objWsTab==="finance" && _isUser && (
+                  <div style={{maxWidth:480,margin:"32px auto",textAlign:"center",background:"#f9fafb",border:"1px dashed #e5e7eb",borderRadius:12,padding:"32px 24px"}}>
+                    <div style={{fontSize:38,marginBottom:12}}>🔒</div>
+                    <div style={{fontWeight:800,fontSize:16,color:"#0f172a",marginBottom:6}}>Доступ закрыт</div>
+                    <div style={{fontSize:13,color:"#64748b",lineHeight:1.5}}>Финансы по объекту доступны только руководству.</div>
+                  </div>
+                )}
                 {/* Производственные вкладки (и производственная часть «Информации») — встроенный модуль Производства */}
-                {["info","launch","stages","finance","journal","defects","handover"].includes(objWsTab) && (
+                {["info","launch","stages","finance","journal","defects","handover"].includes(objWsTab) && !(objWsTab==="finance" && _isUser) && (
                   <div style={{marginTop: objWsTab==="info" ? 14 : 0}}>
                   <ProductionModule
                     embedObjectId={obj.id}
@@ -12165,14 +12184,16 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
                     const isPod = c.type==="podryad" || c.type==="podryad_annex";
                     const workerName = isPod ? workerNameOf(c) : "";
+                    // Замерщику подряд виден, но открывать нельзя (себестоимость)
+                    const _podLocked = _isUser && isPod;
                     return (
                       <div key={c.id}>
                         {isChild && <div style={{display:"flex",alignItems:"center",gap:6,marginLeft:26,marginBottom:2,marginTop:4}}>
                           <div style={{width:2,height:14,background:"#e2e8f0",borderRadius:2,flexShrink:0}}/>
                           <span style={{fontSize:10,color:"#7c3aed",fontWeight:700,background:"rgba(124,58,237,.08)",borderRadius:3,padding:"1px 6px"}}>Приложение №{c.appendix||2}</span>
                         </div>}
-                        <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:8,padding:"14px 18px",cursor:"pointer",transition:"all .15s",marginLeft:isChild?26:0,borderLeft:isChild?"3px solid #ede9fe":(isPod?"3px solid #10b981":"1px solid #e5e7eb")}}
-                          onClick={()=>{ setCurrentContract({...c}); setContractTab("editor"); }}>
+                        <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:8,padding:"14px 18px",cursor:_podLocked?"default":"pointer",transition:"all .15s",marginLeft:isChild?26:0,borderLeft:isChild?"3px solid #ede9fe":(isPod?"3px solid #10b981":"1px solid #e5e7eb"),opacity:_podLocked?.75:1}}
+                          onClick={_podLocked?undefined:()=>{ setCurrentContract({...c}); setContractTab("editor"); }}>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
@@ -12185,6 +12206,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                 <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>
                                   {contractTitle(c)}{isPod && workerName ? ` — ${workerName}` : ""}
                                 </div>
+                                {_podLocked && <span title="Доступ закрыт" style={{fontSize:12,flexShrink:0}}>🔒</span>}
                                 {(()=>{ const s=CONTRACT_STATUSES.find(x=>x.key===(c.contractStatus||"draft"))||CONTRACT_STATUSES[0]; return <span style={{fontSize:10,fontWeight:700,color:s.color,background:s.bg,borderRadius:4,padding:"1px 7px",flexShrink:0,whiteSpace:"nowrap"}}>{s.label}</span>; })()}
                                 {!isChild && kidsCount>0 && <span style={{fontSize:10,fontWeight:700,color:"#7c3aed",background:"rgba(124,58,237,.08)",borderRadius:4,padding:"1px 7px",flexShrink:0,whiteSpace:"nowrap"}}>приложений: {kidsCount}</span>}
                               </div>
@@ -12201,20 +12223,20 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             <div style={{textAlign:"right",flexShrink:0}}>
                               <div style={{fontWeight:800,fontSize:16,color:"#0f172a"}}>{fmt(total)} ₸</div>
                               <div style={{display:"flex",gap:5,marginTop:6}}>
-                                {c.type==="podryad" && !isChild && currentUser.role!=="viewer" && (
+                                {c.type==="podryad" && !isChild && currentUser.role!=="viewer" && !_isUser && (
                                   <button title="Создать доп. приложение к этому договору подряда" onClick={e=>{e.stopPropagation(); createPodryadAnnex(c);}}
                                     style={{background:"#ecfdf5",color:"#059669",border:"1px solid rgba(5,150,105,.25)",borderRadius:5,padding:"3px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ Приложение</button>
                                 )}
-                                <button onClick={e=>{e.stopPropagation();
+                                {!_podLocked && <button onClick={e=>{e.stopPropagation();
                                   const cl = contractClients.find(x=>x.id===c.clientId);
                                   const ca2 = contragents.find(x=>x.id===c.contragentId);
                                   generateContractPdf(c, cl, ca2);
-                                }} style={{background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>
-                                <button onClick={e=>{e.stopPropagation();
+                                }} style={{background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>}
+                                {!_podLocked && <button onClick={e=>{e.stopPropagation();
                                   const cl = contractClients.find(x=>x.id===c.clientId);
                                   const ca2 = contragents.find(x=>x.id===c.contragentId);
                                   generateContractGDoc(c, cl, ca2);
-                                }} style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>
+                                }} style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>}
                                 {(currentUser.role==="admin" || (currentUser.role==="user" && c.createdBy===currentUser.name)) && (
                                   <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить в корзину?")){ saveContracts(contractsRef.current.map(x=>x.id===c.id?{...x,deletedAt:Date.now()}:x)); writeAudit(currentUser,"удалил договор","contract",c.id,c.contractNo||c.objectName||""); }}}
                                     style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
