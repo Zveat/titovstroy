@@ -1929,8 +1929,8 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
         </div>
       ) : tab === "users" ? (
         <div>
-          {/* Список сотрудников */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(360px,1fr))",gap:10,marginBottom:20,alignItems:"start"}}>
+          {/* Список сотрудников — карточки богатые (роль, онлайн, кнопки), поэтому шире: 2 колонки */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(480px,1fr))",gap:10,marginBottom:20,alignItems:"start"}}>
             {users.map(u => (
               <div key={u.id} style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"16px 18px"}}>
                 <div className="user-row" style={{display:"flex",alignItems:"center",gap:12}}>
