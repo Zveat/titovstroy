@@ -5014,9 +5014,7 @@ ${reqBlock}`;
         anyChanged = true;
         return { ...p, stages: next, updatedAt: Date.now() };
       });
-      // ВАЖНО: replace:true — карточки производства без id (ключ objectId), а мердж по id
-      // в обычном режиме даёт пусто → блок «пусто поверх» молча отменял сохранение (этапы не удалялись).
-      if (anyChanged) saveProductions(updated, { replace: true });
+      if (anyChanged) saveProductions(updated);
     }, 1200);
     return () => { if (_stageSyncTimer.current) clearTimeout(_stageSyncTimer.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
