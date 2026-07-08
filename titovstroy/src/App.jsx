@@ -4985,7 +4985,9 @@ ${reqBlock}`;
       let anyChanged = false;
       const updated = prods.map(p => {
         if (!p.objectId || String(p.objectId).startsWith("fp:")) return p;
-        if (!estimatesRef.current.some(e => e.objectId === p.objectId)) return p; // у объекта нет смет — не трогаем
+        // НЕ пропускаем объект без смет: иначе сметные этапы удалённых смет висят вечно.
+        // built станет [] → сметные этапы (fromEst/каталог/плановая сумма) уберутся, ручные останутся.
+        // Верхний guard _estimatesLoaded не даёт стирать этапы, пока сметы не загружены из базы.
         const built = buildStagesFromEstimate(p.objectId);
         const builtKeys = new Set(built.map(keyOf));
         const cur = p.stages || [];
