@@ -7857,16 +7857,17 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           const incMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&_inMonth(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
           return {count:active.length,totalInc,totalDebt,totalBudget,margin,incMonth};
         })() : null;
-        // ── Production KPIs (из единого источника prodEntries: одна запись на финпроект) ──
+        // ── Production KPIs (Объекты = Производство: считаем из единого object.status) ──
+        // Источник истины — статус объекта. Сроки (planEndDate/factEndDate) и дефекты берём
+        // из производственной карточки объекта (productions по objectId), но состояние — по статусу.
         const _prodKpi = (_isAdmin||_isMgr) ? (() => {
           const _ds = d => { const x=new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
           const today = _ds(new Date());
-          const prodByKey = {}; for(const p of (productions||[])) prodByKey[p.objectId]=p;
-          const statusOf = e => (prodByKey[e.key]?.prodStatus) || e.prodStatusDefault;
-          const inWork = prodEntries.filter(e=>statusOf(e)==="active").length;
-          const overdue = prodEntries.filter(e=>{const p=prodByKey[e.key]; return statusOf(e)==="active"&&p?.planEndDate&&_ds(p.planEndDate)<today&&!p?.factEndDate;}).length;
-          const doneMonth = prodEntries.filter(e=>{ if(statusOf(e)!=="done") return false; const p=prodByKey[e.key]; const dt=p?.factEndDate||e.closedAt; return dt&&_inMonth(new Date(dt).getTime()); }).length;
-          const defects = prodEntries.reduce((s,e)=>s+((prodByKey[e.key]?.defects||[]).filter(d=>!d.done).length),0);
+          const prodByObj = {}; for(const p of (productions||[])) prodByObj[p.objectId]=p;
+          const inWork = liveObjects.filter(o=>o.status==="work").length;
+          const overdue = liveObjects.filter(o=>{ if(o.status!=="work") return false; const p=prodByObj[o.id]; return p?.planEndDate&&_ds(p.planEndDate)<today&&!p?.factEndDate; }).length;
+          const doneMonth = liveObjects.filter(o=>{ if(o.status!=="done") return false; const p=prodByObj[o.id]; const dt=p?.factEndDate?new Date(p.factEndDate).getTime():(o.updatedAt||0); return dt&&_inMonth(dt); }).length;
+          const defects = liveObjects.reduce((s,o)=>s+((prodByObj[o.id]?.defects||[]).filter(d=>!d.done).length),0);
           return {inWork,overdue,doneMonth,defects};
         })() : null;
         return (
@@ -7975,9 +7976,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               <div style={{fontSize:12,fontWeight:700,color:"#64748b",marginBottom:10,textTransform:"uppercase",letterSpacing:".05em"}}>🏗 Производство</div>
               <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14}}>
                 {[
-                  {label:"В работе", value:_prodKpi.inWork, sub:"активных производств", icon:"🔨", accent:"#2563eb"},
+                  {label:"В работе", value:_prodKpi.inWork, sub:"объектов в статусе «В работе»", icon:"🔨", accent:"#2563eb"},
                   {label:"Просрочено", value:_prodKpi.overdue, sub:"плановый срок истёк", icon:"🚨", accent:_prodKpi.overdue>0?"#dc2626":"#059669"},
-                  {label:"Сдано за "+monthName, value:_prodKpi.doneMonth, sub:"фактически завершено", icon:"✅", accent:"#059669"},
+                  {label:"Сдано за "+monthName, value:_prodKpi.doneMonth, sub:"объектов завершено", icon:"✅", accent:"#059669"},
                   {label:"Открытых замечаний", value:_prodKpi.defects, sub:"незакрытые дефекты", icon:"⚠️", accent:_prodKpi.defects>0?"#d97706":"#059669"},
                 ].map((s,i)=>(
                   <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden",cursor:"pointer"}}
@@ -9357,14 +9358,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               const incMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&_inM(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
               const expMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="expense"&&_inM(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
               const today = _ds(new Date());
-              // Производство — из единого источника prodEntries (одна запись на финпроект)
+              // Производство — Объекты = Производство: считаем из единого object.status
+              // (сроки/дефекты — из производственной карточки объекта, состояние — по статусу)
               const _pbk = {}; for(const p of (productions||[])) _pbk[p.objectId]=p;
-              const _stOf = e => (_pbk[e.key]?.prodStatus) || e.prodStatusDefault;
-              const prodActive = prodEntries.filter(e=>_stOf(e)==="active").length;
-              const prodOverdue = prodEntries.filter(e=>{const p=_pbk[e.key]; return _stOf(e)==="active"&&p?.planEndDate&&_ds(p.planEndDate)<today&&!p?.factEndDate;}).length;
-              const prodDoneMonth = prodEntries.filter(e=>{ if(_stOf(e)!=="done") return false; const p=_pbk[e.key]; const dt=p?.factEndDate||e.closedAt; return dt&&_inM(new Date(dt).getTime()); }).length;
-              const prodDefects = prodEntries.reduce((s,e)=>s+((_pbk[e.key]?.defects||[]).filter(d=>!d.done).length),0);
-              if(activeFp.length===0 && prodEntries.length===0) return null;
+              const prodActive = liveObjects.filter(o=>o.status==="work").length;
+              const prodOverdue = liveObjects.filter(o=>{ if(o.status!=="work") return false; const p=_pbk[o.id]; return p?.planEndDate&&_ds(p.planEndDate)<today&&!p?.factEndDate; }).length;
+              const prodDoneMonth = liveObjects.filter(o=>{ if(o.status!=="done") return false; const p=_pbk[o.id]; const dt=p?.factEndDate?new Date(p.factEndDate).getTime():(o.updatedAt||0); return dt&&_inM(dt); }).length;
+              const prodDefects = liveObjects.reduce((s,o)=>s+((_pbk[o.id]?.defects||[]).filter(d=>!d.done).length),0);
+              const prodAnyCount = liveObjects.filter(o=>o.status==="work"||o.status==="paused"||o.status==="done").length;
+              if(activeFp.length===0 && prodAnyCount===0) return null;
               const finCards = [
                 ["Сумма контрактов", fmt(Math.round(totalBudget))+" ₸", activeFp.length+" активных проектов", "#2563eb"],
                 ["Получено", fmt(Math.round(totalInc))+" ₸", recvPct+"% от контрактов", "#059669"],
@@ -9374,9 +9376,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 ["Денежный поток за месяц", fmt(Math.round(incMonth-expMonth))+" ₸", "приход "+fmt(Math.round(incMonth))+" − расход "+fmt(Math.round(expMonth)), incMonth-expMonth>=0?"#059669":"#dc2626"],
               ];
               const prodCards = [
-                ["В работе", prodActive, "активных производств", "#2563eb"],
+                ["В работе", prodActive, "объектов в статусе «В работе»", "#2563eb"],
                 ["Просрочено", prodOverdue, "срок истёк", prodOverdue>0?"#dc2626":"#059669"],
-                ["Сдано за месяц", prodDoneMonth, "фактически завершено", "#059669"],
+                ["Сдано за месяц", prodDoneMonth, "объектов завершено", "#059669"],
                 ["Открытых замечаний", prodDefects, "незакрытые дефекты", prodDefects>0?"#d97706":"#059669"],
               ];
               const Card = ([l,v,s,c],i)=>(
@@ -9394,9 +9396,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   </div>
                   {activeFp.length>0 && <>
                     <div style={{fontSize:10,color:"#059669",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>💰 Финансы по проектам</div>
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:prodEntries.length>0?16:0}}>{finCards.map(Card)}</div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:prodAnyCount>0?16:0}}>{finCards.map(Card)}</div>
                   </>}
-                  {prodEntries.length>0 && <>
+                  {prodAnyCount>0 && <>
                     <div style={{fontSize:10,color:"#d97706",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>🏗 Производство</div>
                     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>{prodCards.map(Card)}</div>
                   </>}
