@@ -1933,7 +1933,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(480px,1fr))",gap:10,marginBottom:20,alignItems:"start"}}>
             {users.map(u => (
               <div key={u.id} style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"16px 18px"}}>
-                <div className="user-row" style={{display:"flex",alignItems:"center",gap:12}}>
+                <div className="user-row" style={{display:"flex",alignItems:"flex-start",gap:12}}>
                   {/* Аватар */}
                   <div style={{width:42,height:42,borderRadius:10,background:"#eff6ff",border:"1px solid #eff6ff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:18}}>
                     {u.role==="admin"?"👑":u.role==="viewer"?"👁":u.role==="manager"?"🧑‍💼":"👤"}
@@ -2036,7 +2036,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
               )}
             </div>
             {clients.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#334155",fontSize:13}}>Клиентов пока нет</div>}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:10,alignItems:"start"}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:10}}>
             {clients.map(c=>(
               <div key={c.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"14px 16px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -2111,7 +2111,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                   className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
               )}
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:10,alignItems:"start"}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:10}}>
             {contragents.map(c=>(
               <div key={c.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"14px 16px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -2194,7 +2194,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                 <span style={{fontSize:11,color:"#cbd5e1"}}>Нажмите <b>+ Добавить</b> — или создайте нового прямо в редакторе договора подряда</span>
               </div>
             )}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(340px,1fr))",gap:10,alignItems:"start"}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(340px,1fr))",gap:10}}>
             {shown.map(w=>{
               const st = workerStats(w.id);
               return (
@@ -2404,7 +2404,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
               <thead>
                 <tr style={{background:"#ffffff",position:"sticky",top:0,zIndex:5}}>
                   {["Подкатегория","Название работы","Ед.","Себестоимость ₸","Маржа %","Цена для клиента ₸","Цена от ₸","Валовая прибыль ₸",""].map((h,i)=>(
-                    <th key={i} style={{padding:"10px 12px",textAlign:i>=3&&i<=7?"right":"left",fontSize:10,fontWeight:700,color:h==="Цена от ₸"?"#b8904a":"#94a3b8",textTransform:"uppercase",letterSpacing:.5,borderBottom:"2px solid #e5e7eb",whiteSpace:"normal",overflowWrap:"anywhere",wordBreak:"break-word",lineHeight:1.2,verticalAlign:"bottom"}}>
+                    <th key={i} style={{padding:"10px 12px",textAlign:i>=3&&i<=7?"right":"left",fontSize:10,fontWeight:700,color:h==="Цена от ₸"?"#b8904a":"#94a3b8",textTransform:"uppercase",letterSpacing:.5,borderBottom:"2px solid #e5e7eb",whiteSpace:"normal",overflowWrap:"normal",wordBreak:"keep-all",lineHeight:1.2,verticalAlign:"bottom"}}>
                       {h}
                     </th>
                   ))}
@@ -11920,7 +11920,25 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     </div>
                   )}
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                    {objCons.map(c=>{
+                    {(()=>{
+                      // Приложения идут СРАЗУ под своим договором. Подряд — только под договором подряда,
+                      // ремонт/дизайн — только под своим (приложение подряда НЕ попадает под договор ремонта).
+                      const _normNum = s => String(s||"").trim().toLowerCase().replace(/[\s№#]/g,"");
+                      const _isChildC = c => c.type==="annex"||c.type==="design_add"||c.type==="podryad_annex";
+                      const _isPodC = c => c.type==="podryad"||c.type==="podryad_annex";
+                      const _rootsC = objCons.filter(c=>!_isChildC(c));
+                      const _findParent = ch => {
+                        const fam = _rootsC.filter(p=>_isPodC(p)===_isPodC(ch)); // та же «семья» (подряд/не подряд)
+                        if(ch.mainNumber){ const m=fam.find(p=>_normNum(p.number)===_normNum(ch.mainNumber)); if(m) return m; }
+                        return fam.length===1 ? fam[0] : null; // если родитель один — привязываем к нему
+                      };
+                      const _kids = {}; const _claimed = new Set();
+                      objCons.forEach(c=>{ if(_isChildC(c)){ const p=_findParent(c); if(p){ (_kids[p.id]||(_kids[p.id]=[])).push(c); _claimed.add(c.id); } } });
+                      Object.values(_kids).forEach(a=>a.sort((x,y)=>(x.appendix||0)-(y.appendix||0)));
+                      const _ordered = [];
+                      _rootsC.forEach(p=>{ _ordered.push(p); (_kids[p.id]||[]).forEach(ch=>_ordered.push(ch)); });
+                      objCons.forEach(c=>{ if(_isChildC(c) && !_claimed.has(c.id)) _ordered.push(c); }); // сироты — в конец
+                      return _ordered.map(c=>{
                       const cl2 = contractClients.find(x=>x.id===c.clientId);
                       const ca2 = contragents.find(x=>x.id===c.contragentId);
                       const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
@@ -11930,8 +11948,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       const conTitle = isAnnex
                         ? `${c.type==="podryad_annex"?"Приложение":"Доп. соглашение"} №${c.appendix||2}`+(c.mainNumber?` к договору №${c.mainNumber}`:"")
                         : `${TLABEL[c.type||"repair_fiz"]||"Договор"} №${c.number||"б/н"}`;
+                      const _isPod = c.type==="podryad"||c.type==="podryad_annex";
+                      const _workerName = _isPod ? ((workers.find(w=>w.id===c.workerId)?.name)||c.worker?.name||"") : "";
                       // Замерщику подряд виден, но открывать нельзя (себестоимость)
-                      const _podLocked = _isUser && (c.type==="podryad"||c.type==="podryad_annex");
+                      const _podLocked = _isUser && _isPod;
                       return (
                         <div key={c.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 16px",cursor:_podLocked?"default":"pointer",transition:"all .12s",marginLeft:isAnnex?16:0,borderLeft:isAnnex?"3px solid #ede9fe":"1px solid #e5e7eb",opacity:_podLocked?.75:1}}
                           onClick={_podLocked?undefined:()=>{ setCurrentContract({...c}); setObjectReturnId(obj.id); setContractTab("editor"); setScreen("contracts"); }}>
@@ -11944,7 +11964,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                 <span style={{fontSize:10,fontWeight:700,color:stC.color,background:stC.bg,borderRadius:4,padding:"1px 6px"}}>{stC.label}</span>
                               </div>
                               <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>
-                                {cl2?.name||c.estClient||"Клиент не выбран"} · {new Date(c.date||Date.now()).toLocaleDateString("ru-RU")} · {(c.works||[]).length} позиций
+                                {_isPod ? (_workerName ? `🔨 ${_workerName}` : "Подрядчик не выбран") : (cl2?.name||c.estClient||"Клиент не выбран")} · {new Date(c.date||Date.now()).toLocaleDateString("ru-RU")} · {(c.works||[]).length} позиций
                               </div>
                             </div>
                             <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
@@ -11971,7 +11991,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                           </div>
                         </div>
                       );
-                    })}
+                    });
+                    })()}
                   </div>
                 </div>
 
