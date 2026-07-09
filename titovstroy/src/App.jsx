@@ -633,19 +633,21 @@ const _race = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(_T
 const _fbKey = (k) => k.replace(/[^a-zA-Z0-9_]/g, "_"); // Firebase: только буквы/цифры/_
 const _TS_SUFFIX = "__wts"; // timestamp последней локальной записи
 const _DIRTY_SUFFIX = "__dirty"; // флаг: последняя запись в облако НЕ прошла — локальная копия новее
-// Согласование локальной («грязной») копии с облаком: для СПИСКОВ записей с id
-// объединяем по id и берём более свежую по updatedAt. Так незасинканная локальная
-// правка НЕ теряется, но и устаревшая локальная копия НЕ прячет более свежий сервер
-// (частая причина «данные откатились» после сбоя облака). Не-списки — прежнее поведение.
+// Согласование локальной («грязной») копии с облаком: для СПИСКОВ записей с id (или
+// objectId — у production-записей нет id, они живут по objectId, см. emptyProduction)
+// объединяем по идентификатору и берём более свежую по updatedAt. Так незасинканная
+// локальная правка НЕ теряется, но и устаревшая локальная копия НЕ прячет более свежий
+// сервер (частая причина «данные откатились» после сбоя облака). Не-списки — прежнее поведение.
 function _reconcileDirty(localStr, cloudStr) {
   try {
     const L = JSON.parse(localStr);
     const C = JSON.parse(cloudStr);
-    const okList = a => Array.isArray(a) && a.every(x => x && typeof x === "object" && x.id != null);
+    const idOf = x => (x && typeof x === "object") ? (x.id != null ? x.id : x.objectId) : undefined;
+    const okList = a => Array.isArray(a) && a.every(x => idOf(x) != null);
     if (okList(L) && okList(C)) {
       const map = new Map();
-      for (const e of C) map.set(e.id, e);
-      for (const e of L) { const ex = map.get(e.id); if (!ex || _ts(e.updatedAt) >= _ts(ex.updatedAt)) map.set(e.id, e); }
+      for (const e of C) map.set(idOf(e), e);
+      for (const e of L) { const k = idOf(e); const ex = map.get(k); if (!ex || _ts(e.updatedAt) >= _ts(ex.updatedAt)) map.set(k, e); }
       return JSON.stringify([...map.values()]);
     }
   } catch (e) {}
@@ -821,16 +823,23 @@ function LoginScreen({ onLogin }) {
     }
     setLoading(true); setError("");
 
-    // Загружаем пользователей с таймаутом 1.5 сек, иначе используем DEFAULT_USERS
-    let users = DEFAULT_USERS;
-    let loadedFromStorage = false;
-    try {
-      const res = await Promise.race([
-        storage.get(USERS_KEY),
-        new Promise(resolve => setTimeout(() => resolve(null), 1500))
-      ]);
-      if (res) { users = JSON.parse(res.value); loadedFromStorage = true; }
-    } catch(e) {}
+    // Загружаем пользователей. КРИТИЧНО различать "база подтверждённо пуста" (первый
+    // запуск — можно войти дефолтным admin) и "база недоступна" (сеть моргнула) — раньше
+    // оба случая тихо падали на DEFAULT_USERS по таймауту в 1.5с, а значит логин/пароль
+    // из бандла (admin/titov2024) реально пускал в систему при любом сетевом сбое, даже
+    // если настоящий пароль давно сменили. Теперь при "unavailable" — честная ошибка,
+    // без входа по дефолтным кредам.
+    let users, loadedFromStorage = false;
+    const res = await storage.getResult(USERS_KEY);
+    if (res.status === "found") {
+      try { users = JSON.parse(res.value); loadedFromStorage = true; } catch(e) { users = DEFAULT_USERS; }
+    } else if (res.status === "empty") {
+      users = DEFAULT_USERS;
+    } else {
+      setError("Не удалось подключиться к базе. Проверьте интернет и попробуйте снова.");
+      setLoading(false);
+      return;
+    }
 
     const candidate = users.find(u => u.login.toLowerCase() === login.trim().toLowerCase());
     const ok = candidate ? await verifyPassword(password, candidate.password) : false;
@@ -920,13 +929,6 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-// PriceWorkCard — not used in new table UI, kept for AdminPanel legacy
-function PriceWorkCard({ w, initTiers, initFixed, onRename, onDelete }) {
-  return null;
-}
-
-
-
 function AuditTab() {
   const [auditLog, setAuditLog] = useState([]);
   const [auditLoading, setAuditLoading] = useState(true);
@@ -1004,562 +1006,6 @@ function AuditTab() {
   );
 }
 
-function AdminPanel({ currentUser, onClose }) {
-  const [tab, setTab] = useState("users"); // "users" | "prices"
-  const [users, setUsers]     = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving]   = useState(false);
-  const [newLogin, setNewLogin]   = useState("");
-  const [newName, setNewName]     = useState("");
-  const [newPass, setNewPass]     = useState("");
-  const [newRole, setNewRole]     = useState("user");
-  const [editingPass, setEditingPass] = useState(null);
-  const [editingUser, setEditingUser] = useState(null);
-  const [msg, setMsg] = useState("");
-  // Прайс-лист
-  const [localPrices, setLocalPrices] = useState(null);
-  const [savedOverrides, setSavedOverrides] = useState({});
-  const [localCatalog, setLocalCatalog] = useState(null); // {renames, custom, hiddenCodes}
-  const [priceSearch, setPriceSearch] = useState("");
-  const [priceMsg, setPriceMsg] = useState("");
-  const [priceSaving, setPriceSaving] = useState(false);
-  // Форма новой позиции
-  const [showAddWork, setShowAddWork] = useState(false);
-  const [newWork, setNewWork] = useState({cat:"", sub:"", name:"", unit:"м²"});
-  // Редактирование категорий/подкатегорий
-  const [editingCat, setEditingCat] = useState(null);   // {key, val} — key = оригинальное имя
-  const [editingSub, setEditingSub] = useState(null);   // {cat, key, val}
-
-  const _priceAutoSaveModal = useRef(null);
-  useEffect(() => {
-    if (!localPrices) return;
-    if (_priceAutoSaveModal.current) clearTimeout(_priceAutoSaveModal.current);
-    _priceAutoSaveModal.current = setTimeout(() => { savePrices(); }, 2000);
-    return () => clearTimeout(_priceAutoSaveModal.current);
-  }, [localPrices]);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await storage.get(USERS_KEY);
-        setUsers(res ? JSON.parse(res.value) : DEFAULT_USERS);
-      } catch { setUsers(DEFAULT_USERS); }
-      // Загружаем каталог
-      try {
-        const cat = await storage.get(CATALOG_KEY);
-        if (cat) { const parsed = JSON.parse(cat.value); setCatalogOverrides(parsed); setLocalCatalog(parsed); }
-        else setLocalCatalog({ renames:{}, custom:[], hiddenCodes:[] });
-      } catch { setLocalCatalog({ renames:{}, custom:[], hiddenCodes:[] }); }
-      // Загружаем переопределения цен и инициализируем localPrices
-      try {
-        const pr = await storage.get(PRICES_KEY);
-        const ov = pr ? JSON.parse(pr.value) : {};
-        setSavedOverrides(ov);
-        const allWorks = getEffectiveCatalog();
-        const lp = {};
-        for (const w of allWorks) {
-          const saved = ov[w.code];
-          lp[w.code] = {
-            tiers: saved?.tiers !== undefined ? saved.tiers.map(t=>({...t})) : (w.tiers||[]).map(t=>({...t})),
-            fixedPrice: saved?.fixedPrice !== undefined ? String(saved.fixedPrice) : w.fixedPrice !== undefined ? String(w.fixedPrice) : ""
-          };
-        }
-        setLocalPrices(lp);
-      } catch {}
-      setLoading(false);
-    })();
-  }, []);
-
-  const saveUsers = async (list) => {
-    setSaving(true);
-    await storage.set(USERS_KEY, JSON.stringify(list));
-    setSaving(false);
-  };
-
-  const addUser = async () => {
-    if (!newLogin.trim() || !newPass.trim() || !newName.trim()) { setMsg("Заполните все поля"); return; }
-    if (users.find(u => u.login.toLowerCase() === newLogin.trim().toLowerCase())) { setMsg("Логин уже занят"); return; }
-    const u = { id: genId(), login: newLogin.trim(), password: simpleHash(newPass.trim()), name: newName.trim(), role: newRole };
-    const updated = [...users, u];
-    setUsers(updated);
-    await saveUsers(updated);
-    setNewLogin(""); setNewName(""); setNewPass(""); setNewRole("user");
-    setMsg("✓ Пользователь добавлен");
-    setTimeout(() => setMsg(""), 2500);
-  };
-
-  const removeUser = async (id) => {
-    if (id === currentUser.id) { setMsg("Нельзя удалить себя"); setTimeout(()=>setMsg(""),2000); return; }
-    const updated = users.filter(u => u.id !== id);
-    setUsers(updated);
-    await saveUsers(updated);
-  };
-
-  const savePass = async (id) => {
-    if (!editingPass?.val?.trim()) return;
-    const updated = users.map(u => u.id === id ? {...u, password: simpleHash(editingPass.val.trim())} : u);
-    setUsers(updated);
-    await saveUsers(updated);
-    setEditingPass(null);
-    setMsg("✓ Пароль изменён");
-    setTimeout(() => setMsg(""), 2500);
-  };
-
-  const saveUser = async () => {
-    if (!editingUser?.name?.trim() || !editingUser?.login?.trim()) return;
-    const conflict = users.find(u => u.id !== editingUser.id && u.login.toLowerCase() === editingUser.login.trim().toLowerCase());
-    if (conflict) { setMsg("Логин уже занят"); setTimeout(()=>setMsg(""),2000); return; }
-    const updated = users.map(u => u.id === editingUser.id ? {...u, name: editingUser.name.trim(), login: editingUser.login.trim(), role: (editingUser.id===currentUser.id ? u.role : (editingUser.role||u.role||"user"))} : u);
-    setUsers(updated);
-    await saveUsers(updated);
-    setEditingUser(null);
-    setMsg("✓ Сохранено");
-    setTimeout(() => setMsg(""), 2500);
-  };
-
-  const savePrices = async () => {
-    setPriceSaving(true);
-    // Берём то что уже было сохранено раньше
-    const overrides = {...savedOverrides};
-    // Применяем ТОЛЬКО то что пользователь реально трогал в этой сессии (из кэша)
-    for (const [code, src] of Object.entries(priceCardCache)) {
-      const allW = getEffectiveCatalog();
-      const w = allW.find(x => x.code === code);
-      if (!w) continue;
-      const validTiers = (src.tiers||[])
-        .filter(t => t.price!==""&&t.price!==undefined&&!isNaN(Number(t.price))&&t.min!==""&&t.max!=="")
-        .map(t=>({min:Number(t.min),max:Number(t.max),price:Number(t.price)}));
-      if (validTiers.length > 0) {
-        overrides[code] = {tiers: validTiers};
-      } else if (src.fixedPrice!==""&&src.fixedPrice!==undefined&&!isNaN(Number(src.fixedPrice))) {
-        overrides[code] = {fixedPrice: Number(src.fixedPrice), tiers:[]};
-      } else {
-        delete overrides[code];
-      }
-    }
-    await storage.set(PRICES_KEY, JSON.stringify(overrides));
-    setPriceOverrides(overrides);
-    setSavedOverrides(overrides);
-    Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
-    setPriceSaving(false);
-    setPriceMsg("✓ Прайс сохранён!");
-    setTimeout(()=>setPriceMsg(""),3000);
-  };
-
-  const saveCatalog = async (cat) => {
-    await storage.set(CATALOG_KEY, JSON.stringify(cat));
-    setCatalogOverrides(cat);
-    setLocalCatalog(cat);
-    // Переинициализируем localPrices для новых позиций
-    const allWorks = getEffectiveCatalog();
-    setLocalPrices(prev => {
-      const lp = {...(prev||{})};
-      for (const w of allWorks) {
-        if (!lp[w.code]) lp[w.code] = { tiers:(w.tiers||[]).map(t=>({...t})), fixedPrice: w.fixedPrice!=null?String(w.fixedPrice):"" };
-      }
-      return lp;
-    });
-  };
-
-  const renameWork = async (code, newName) => {
-    const cur = _catalogOverrides;
-    const next = withCatalogOverrides(cur, { renames: { ...(cur.renames||{}), [code]: newName } });
-    await saveCatalog(next);
-  };
-
-  const addCustomWork = async () => {
-    const finalCat = newWork.cat === "__new__" ? (newWork.catNew||"").trim() : newWork.cat.trim();
-    const finalSub = newWork.sub === "__new__" ? (newWork.subNew||"").trim() : newWork.sub.trim();
-    if (!newWork.name.trim() || !finalCat || !finalSub) return;
-    const code = "CUSTOM-" + Date.now();
-    const cost = Number(newWork.cost) || 0;
-    const marginPct = Math.min(99, Math.max(0, Number(newWork.margin) || 40));
-    const fixedPrice = cost > 0 ? Math.round(cost / (1 - marginPct / 100)) : null;
-    const work = { code, cat:finalCat, sub:finalSub, name:newWork.name.trim(), unit:newWork.unit||"м²", tiers:[], cost, margin: marginPct/100, fixedPrice };
-    const cat = { ...(localCatalog||{}), custom: [...((localCatalog||{}).custom||[]), work] };
-    await saveCatalog(cat);
-    setNewWork({cat:"", catNew:"", sub:"", subNew:"", name:"", unit:"м²", cost:"", margin:40});
-    setShowAddWork(false);
-    Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
-  };
-
-  const deleteCustomWork = async (code) => {
-    const cat = { ...(localCatalog||{}), custom: ((localCatalog||{}).custom||[]).filter(w=>w.code!==code) };
-    await saveCatalog(cat);
-    Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
-  };
-
-  const renameCat = async (origKey, newCat) => {
-    if (!newCat.trim()) return;
-    // Читаем напрямую из _catalogOverrides (не из localCatalog — может быть stale)
-    const cur = _catalogOverrides;
-    const cr = { ...(cur.catRenames||{}), [origKey]: newCat.trim() };
-    const currentName = (cur.catRenames||{})[origKey] || origKey;
-    const custom = (cur.custom||[]).map(w => w.cat===currentName ? {...w,cat:newCat.trim()} : w);
-    const next = withCatalogOverrides(cur, { catRenames:cr, custom });
-    await saveCatalog(next);
-    setEditingCat(null);
-    Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
-  };
-
-  const renameSub = async (origCatKey, origSubKey, newSub) => {
-    if (!newSub.trim()) return;
-    const cur = _catalogOverrides;
-    const key = origCatKey+"|"+origSubKey;
-    const sr = { ...(cur.subRenames||{}), [key]: newSub.trim() };
-    const curCat = (cur.catRenames||{})[origCatKey] || origCatKey;
-    const curSub = (cur.subRenames||{})[key] || origSubKey;
-    const custom = (cur.custom||[]).map(w =>
-      w.cat===curCat && w.sub===curSub ? {...w,sub:newSub.trim()} : w
-    );
-    const next = withCatalogOverrides(cur, { subRenames:sr, custom });
-    await saveCatalog(next);
-    setEditingSub(null);
-    Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
-  };
-
-  const deleteCat = async (origCatKey) => {
-    // origCatKey = original name. hiddenCats stores originals.
-    const hc = [...new Set([...((localCatalog||{}).hiddenCats||[]), origCatKey])];
-    const curName = (localCatalog?.catRenames||{})[origCatKey] || origCatKey;
-    const custom = ((localCatalog||{}).custom||[]).filter(w => w.cat!==curName);
-    await saveCatalog({ ...(localCatalog||{}), hiddenCats:hc, custom });
-    Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
-  };
-
-  const deleteSub = async (origCatKey, origSubKey) => {
-    const key = origCatKey+"|"+origSubKey;
-    const hs = [...new Set([...((localCatalog||{}).hiddenSubs||[]), key])];
-    const curCat = (localCatalog?.catRenames||{})[origCatKey] || origCatKey;
-    const curSub = (localCatalog?.subRenames||{})[key] || origSubKey;
-    const custom = ((localCatalog||{}).custom||[]).filter(w => !(w.cat===curCat && w.sub===curSub));
-    await saveCatalog({ ...(localCatalog||{}), hiddenSubs:hs, custom });
-    Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
-  };
-
-  const roleLabel = r => r==="admin"?"👑 Админ":r==="viewer"?"👁 Наблюдатель":r==="manager"?"🧑‍💼 Руководитель":r==="foreman"?"🔨 Прораб":"👤 Замерщик";
-
-  return (
-    <div style={{position:"fixed",inset:0,background:"rgba(17,24,39,.4)",backdropFilter:"blur(2px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:16,fontFamily:"'Inter','Segoe UI',sans-serif"}}>
-      <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:12,boxShadow:"0 20px 60px rgba(0,0,0,.12)",padding:"24px 28px",maxWidth:520,width:"100%",height:"88vh",display:"flex",flexDirection:"column",position:"relative"}}>
-
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-          <div style={{fontWeight:800,fontSize:16,color:"#0f172a"}}>⚙️ Администрирование</div>
-          <button onClick={onClose} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:20}}>×</button>
-        </div>
-
-        {/* Вкладки */}
-        <div style={{display:"flex",gap:4,marginBottom:16,background:"#e2e8f0",borderRadius:8,padding:4}}>
-          {[["users","👥 Сотрудники"],["prices","💰 Прайс-лист"]].map(([t,label])=>(
-            <button key={t} onClick={()=>setTab(t)} style={{
-              flex:1,padding:"8px",borderRadius:8,border:"none",cursor:"pointer",
-              fontFamily:"inherit",fontSize:12,fontWeight:700,
-              background: tab===t ? "#f3f4f6" : "transparent",
-              color: tab===t ? "#0f172a" : "#64748b",transition:"all .1s"
-            }}>{label}</button>
-          ))}
-        </div>
-
-        {loading ? <div style={{textAlign:"center",padding:"30px 0",color:"#94a3b8"}}>Загрузка...</div> : tab === "users" ? (
-          <div style={{flex:1,overflowY:"auto"}}>
-          <>
-            {/* Список */}
-            <div style={{marginBottom:20}}>
-              {users.map(u => (
-                <div key={u.id} style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:9,padding:"12px 14px",marginBottom:8}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
-                    <div style={{flex:1}}>
-                      <div style={{fontWeight:700,fontSize:13,color:"#0f172a"}}>{u.name}</div>
-                      <div style={{fontSize:12,color:"#94a3b8",marginTop:1}}>
-                        @{u.login} · {roleLabel(u.role)}
-                        {u.id === currentUser.id && <span style={{color:"#94a3b8",marginLeft:6}}>(вы)</span>}
-                      </div>
-                    </div>
-                    <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                      <button
-                        onClick={()=>{setEditingUser(editingUser?.id===u.id?null:{id:u.id,name:u.name,login:u.login,role:u.role||"user"});setEditingPass(null);}}
-                        style={{background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:8,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
-                        ✏ Изменить
-                      </button>
-                      <button
-                        onClick={()=>{setEditingPass(editingPass?.id===u.id?null:{id:u.id,val:""});setEditingUser(null);}}
-                        style={{background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:8,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
-                        🔑
-                      </button>
-                      {u.id !== currentUser.id && (
-                        <button onClick={()=>removeUser(u.id)}
-                          style={{background:"rgba(220,38,38,.1)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:8,padding:"4px 8px",fontSize:11,cursor:"pointer"}}>✕</button>
-                      )}
-                    </div>
-                  </div>
-                  {editingUser?.id === u.id && (
-                    <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:8}}>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                        <div>
-                          <div style={{fontSize:10,color:"#94a3b8",marginBottom:3}}>Имя</div>
-                          <input style={{width:"100%",background:"#f8fafc",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:8,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"}}
-                            value={editingUser.name} onChange={e=>setEditingUser(p=>({...p,name:e.target.value}))}/>
-                        </div>
-                        <div>
-                          <div style={{fontSize:10,color:"#94a3b8",marginBottom:3}}>Логин</div>
-                          <input style={{width:"100%",background:"#f8fafc",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:8,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"}}
-                            value={editingUser.login} onChange={e=>setEditingUser(p=>({...p,login:e.target.value}))}/>
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{fontSize:10,color:"#94a3b8",marginBottom:3}}>Роль</div>
-                        <select style={{width:"100%",background:"#f8fafc",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:8,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none",cursor:"pointer"}}
-                          value={editingUser.role||"user"} onChange={e=>setEditingUser(p=>({...p,role:e.target.value}))} disabled={u.id===currentUser.id}>
-                          <option value="user">👤 Замерщик</option>
-                          <option value="foreman">🔨 Прораб</option>
-                          <option value="manager">🧑‍💼 Руководитель</option>
-                          <option value="admin">👑 Администратор</option>
-                          <option value="viewer">👁 Наблюдатель</option>
-                        </select>
-                        {u.id===currentUser.id && <div style={{fontSize:10,color:"#94a3b8",marginTop:3}}>Нельзя менять свою роль</div>}
-                      </div>
-                      <button onClick={saveUser}
-                        style={{background:"#2563eb",color:"#f3f4f6",border:"none",borderRadius:8,padding:"8px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                        Сохранить изменения
-                      </button>
-                    </div>
-                  )}
-                  {editingPass?.id === u.id && (
-                    <div style={{marginTop:10,display:"flex",gap:8}}>
-                      <input
-                        style={{flex:1,background:"#f8fafc",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:8,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"}}
-                        placeholder="Новый пароль"
-                        value={editingPass.val}
-                        onChange={e=>setEditingPass(p=>({...p,val:e.target.value}))}
-                      />
-                      <button onClick={()=>savePass(u.id)}
-                        style={{background:"#2563eb",color:"#f3f4f6",border:"none",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                        Сохранить
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* Добавить */}
-            <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:9,padding:"14px 16px"}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",letterSpacing:.8,textTransform:"uppercase",marginBottom:10}}>+ Новый пользователь</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-                <input style={{background:"#ffffff",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none"}} placeholder="Имя" value={newName} onChange={e=>setNewName(e.target.value)}/>
-                <input style={{background:"#ffffff",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none"}} placeholder="Логин" value={newLogin} onChange={e=>setNewLogin(e.target.value)}/>
-                <input style={{background:"#ffffff",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none"}} placeholder="Пароль" value={newPass} onChange={e=>setNewPass(e.target.value)}/>
-                <select style={{background:"#ffffff",border:"1px solid #e2e8f0",color:"#94a3b8",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none",cursor:"pointer"}} value={newRole} onChange={e=>setNewRole(e.target.value)}>
-                  <option value="user">👤 Замерщик</option>
-                  <option value="manager">🧑‍💼 Руководитель</option>
-                  <option value="admin">👑 Администратор</option>
-                  <option value="viewer">👁 Наблюдатель</option>
-                </select>
-              </div>
-              <button onClick={addUser} className="btn btn-g" style={{width:"100%",marginTop:4}}>
-                + Добавить
-              </button>
-            </div>
-
-            {msg && <div style={{marginTop:12,textAlign:"center",fontSize:12,color: msg.startsWith("✓") ? "#059669" : "#dc2626"}}>{msg}</div>}
-            {saving && <div style={{textAlign:"center",fontSize:11,color:"#94a3b8",marginTop:8}}>💾 Сохранение...</div>}
-          </>
-          </div>
-        ) : (
-          /* ═══ ВКЛАДКА ПРАЙС-ЛИСТ ═══ */
-          <div style={{display:"flex",flexDirection:"column",height:"calc(88vh - 160px)"}}>
-            {!localPrices ? <div style={{textAlign:"center",padding:30,color:"#94a3b8"}}>Загрузка...</div> : null}
-            {localPrices && <>
-              {/* Поиск — фиксированный */}
-              <input
-                style={{width:"100%",boxSizing:"border-box",background:"#ffffff",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:7,padding:"8px 12px",fontFamily:"inherit",fontSize:12,outline:"none",marginBottom:8}}
-                placeholder="🔍 Поиск по названию..."
-                value={priceSearch}
-                onChange={e=>setPriceSearch(e.target.value)}
-              />
-              {/* Список — скроллится */}
-              <div className="price-scroll" style={{flex:1,overflowY:"scroll",paddingRight:4,scrollbarWidth:"auto",scrollbarColor:"#d1d5db #f3f4f6"}}>
-                <style>{`
-                  .price-scroll::-webkit-scrollbar{width:10px}
-                  .price-scroll::-webkit-scrollbar-track{background:#e5e7eb;border-radius:5px}
-                  .price-scroll::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:5px;min-height:40px}
-                  .price-scroll::-webkit-scrollbar-thumb:hover{background:#9ca3af}
-                `}</style>
-                {(() => {
-                  const allWorks = getEffectiveCatalog();
-                  const q = priceSearch.toLowerCase();
-                  const filtered = allWorks.filter(w =>
-                    !q || w.name.toLowerCase().includes(q) || w.sub.toLowerCase().includes(q) || w.cat.toLowerCase().includes(q)
-                  );
-                  const groups = {};
-                  for (const w of filtered) {
-                    const key = w.cat + " / " + w.sub;
-                    if (!groups[key]) groups[key] = [];
-                    groups[key].push(w);
-                  }
-                  // Группируем по категории отдельно для заголовков кат.
-                  // Группируем с сохранением оригинальных ключей
-                  const catGroups = {}; // displayCat -> { _origCat, subs: { displaySub -> { _origSub, works[] } } }
-                  for (const w of filtered) {
-                    if (!catGroups[w.cat]) catGroups[w.cat] = { _origCat: w._origCat||w.cat, subs:{} };
-                    if (!catGroups[w.cat].subs[w.sub]) catGroups[w.cat].subs[w.sub] = { _origSub: w._origSub||w.sub, works:[] };
-                    catGroups[w.cat].subs[w.sub].works.push(w);
-                  }
-                  const btnS = {background:"transparent",border:"none",cursor:"pointer",padding:"2px 5px",fontSize:11,lineHeight:1};
-                  return Object.entries(catGroups).map(([cat, catData]) => {
-                    const origCat = catData._origCat;
-                    return (
-                    <div key={cat} style={{marginBottom:16}}>
-                      {/* Заголовок категории */}
-                      {editingCat?.key===origCat ? (
-                        <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:6}}>
-                          <input autoFocus value={editingCat.val}
-                            onChange={e=>setEditingCat(p=>({...p,val:e.target.value}))}
-                            onKeyDown={e=>{if(e.key==="Enter")renameCat(origCat,editingCat.val);if(e.key==="Escape")setEditingCat(null);}}
-                            style={{flex:1,background:"#f8fafc",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:5,padding:"3px 8px",fontFamily:"inherit",fontSize:11,fontWeight:700,outline:"none"}}/>
-                          <button onClick={()=>renameCat(origCat,editingCat.val)} style={{...btnS,color:"#059669"}}>✓</button>
-                          <button onClick={()=>setEditingCat(null)} style={{...btnS,color:"#94a3b8"}}>✕</button>
-                        </div>
-                      ) : (
-                        <div style={{display:"flex",alignItems:"center",gap:4,padding:"4px 0",borderBottom:"1px solid #e2e8f0",marginBottom:6}}>
-                          <span style={{fontSize:10,fontWeight:700,color:"#94a3b8",letterSpacing:.8,textTransform:"uppercase",flex:1}}>{cat}</span>
-                          <button onClick={()=>setEditingCat({key:origCat,val:cat})} title="Переименовать категорию" style={{...btnS,color:"#94a3b8"}}>✏️</button>
-                          <button onClick={()=>{ if(window.confirm(`Удалить всю категорию "${cat}"?`)) deleteCat(origCat); }} title="Удалить категорию" style={{...btnS,color:"#dc2626"}}>🗑</button>
-                        </div>
-                      )}
-                      {/* Подкатегории */}
-                      {Object.entries(catData.subs).map(([sub, subData]) => {
-                        const origSub = subData._origSub;
-                        return (
-                        <div key={sub} style={{marginBottom:10}}>
-                          {editingSub?.cat===origCat&&editingSub?.key===origSub ? (
-                            <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:4,paddingLeft:8}}>
-                              <input autoFocus value={editingSub.val}
-                                onChange={e=>setEditingSub(p=>({...p,val:e.target.value}))}
-                                onKeyDown={e=>{if(e.key==="Enter")renameSub(origCat,origSub,editingSub.val);if(e.key==="Escape")setEditingSub(null);}}
-                                style={{flex:1,background:"#f8fafc",border:"1px solid #e2e8f0",color:"#94a3b8",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",fontSize:10,outline:"none"}}/>
-                              <button onClick={()=>renameSub(origCat,origSub,editingSub.val)} style={{...btnS,color:"#059669"}}>✓</button>
-                              <button onClick={()=>setEditingSub(null)} style={{...btnS,color:"#94a3b8"}}>✕</button>
-                            </div>
-                          ) : (
-                            <div style={{display:"flex",alignItems:"center",gap:3,paddingLeft:8,marginBottom:4}}>
-                              <span style={{fontSize:9,fontWeight:700,color:"#94a3b8",letterSpacing:.8,textTransform:"uppercase",flex:1}}>{sub}</span>
-                              <button onClick={()=>setEditingSub({cat:origCat,key:origSub,val:sub})} title="Переименовать подкатегорию" style={{...btnS,color:"#334155",fontSize:10}}>✏️</button>
-                              <button onClick={()=>{ if(window.confirm(`Удалить подкатегорию "${sub}"?`)) deleteSub(origCat,origSub); }} title="Удалить подкатегорию" style={{...btnS,color:"#dc2626",fontSize:10}}>🗑</button>
-                            </div>
-                          )}
-                          {subData.works.map(w => (
-                            <PriceWorkCard key={w.code} w={w}
-                              initTiers={localPrices?.[w.code]?.tiers || []}
-                              initFixed={localPrices?.[w.code]?.fixedPrice || ""}
-                              onRename={newName => renameWork(w.code, newName)}
-                              onDelete={()=>{
-                                if(w.code.startsWith("CUSTOM-")) deleteCustomWork(w.code);
-                                else {
-                                  const hc = [...new Set([...((localCatalog||{}).hiddenCodes||[]), w.code])];
-                                  saveCatalog({...(localCatalog||{}), hiddenCodes:hc});
-                                }
-                              }}
-                            />
-                          ))}
-                        </div>
-                        );
-                      })}
-                    </div>
-                    );
-                  });
-                })()}
-                {/* Форма добавления новой позиции */}
-                <div style={{marginTop:8,border:"1px dashed #eff6ff",borderRadius:8,padding:"10px 12px",marginBottom:8}}>
-                  {!showAddWork ? (
-                    <button onClick={()=>setShowAddWork(true)} className="btn btn-g" style={{width:"100%"}}>
-                      ＋ Добавить позицию в каталог
-                    </button>
-                  ) : (() => {
-                    const allW = getEffectiveCatalog();
-                    const cats = [...new Set(allW.map(w=>w.cat))];
-                    const subs = newWork.cat ? [...new Set(allW.filter(w=>w.cat===newWork.cat).map(w=>w.sub))] : [];
-                    const inpStyle = {background:"#f8fafc",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:8,padding:"6px 9px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%",boxSizing:"border-box"};
-                    const selStyle = {...inpStyle, cursor:"pointer"};
-                    return (
-                      <div>
-                        <div style={{fontSize:11,fontWeight:600,color:"#334155",marginBottom:10}}>Новая позиция</div>
-
-                        {/* Категория */}
-                        <div style={{marginBottom:6}}>
-                          <div style={{fontSize:10,color:"#94a3b8",marginBottom:3}}>Категория</div>
-                          <select value={newWork.cat} onChange={e=>setNewWork(p=>({...p,cat:e.target.value,sub:""}))} style={selStyle}>
-                            <option value="">— выбрать существующую —</option>
-                            {cats.map(c=><option key={c} value={c}>{c}</option>)}
-                            <option value="__new__">＋ Новая категория...</option>
-                          </select>
-                          {newWork.cat==="__new__" && (
-                            <input autoFocus placeholder="Введите название категории" value={newWork.catNew||""}
-                              onChange={e=>setNewWork(p=>({...p,catNew:e.target.value}))}
-                              style={{...inpStyle,marginTop:4}}/>
-                          )}
-                        </div>
-
-                        {/* Подкатегория */}
-                        <div style={{marginBottom:6}}>
-                          <div style={{fontSize:10,color:"#94a3b8",marginBottom:3}}>Подкатегория</div>
-                          <select value={newWork.sub} onChange={e=>setNewWork(p=>({...p,sub:e.target.value}))} style={selStyle}
-                            disabled={!newWork.cat||newWork.cat==="__new__"&&!newWork.catNew}>
-                            <option value="">— выбрать существующую —</option>
-                            {subs.map(s=><option key={s} value={s}>{s}</option>)}
-                            <option value="__new__">＋ Новая подкатегория...</option>
-                          </select>
-                          {newWork.sub==="__new__" && (
-                            <input autoFocus placeholder="Введите название подкатегории" value={newWork.subNew||""}
-                              onChange={e=>setNewWork(p=>({...p,subNew:e.target.value}))}
-                              style={{...inpStyle,marginTop:4}}/>
-                          )}
-                        </div>
-
-                        {/* Название и единица */}
-                        <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:6,marginBottom:10}}>
-                          <div>
-                            <div style={{fontSize:10,color:"#94a3b8",marginBottom:3}}>Название работы</div>
-                            <input placeholder="напр. Укладка паркета" value={newWork.name}
-                              onChange={e=>setNewWork(p=>({...p,name:e.target.value}))}
-                              style={inpStyle}/>
-                          </div>
-                          <div>
-                            <div style={{fontSize:10,color:"#94a3b8",marginBottom:3}}>Единица</div>
-                            <select value={newWork.unit} onChange={e=>setNewWork(p=>({...p,unit:e.target.value}))} style={{...selStyle,width:80}}>
-                              {["м²","м.п.","шт","усл.","кг","л"].map(u=><option key={u} value={u}>{u}</option>)}
-                            </select>
-                          </div>
-                        </div>
-
-                        <div style={{display:"flex",gap:6}}>
-                          <button onClick={addCustomWork}
-                            style={{flex:1,background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px",fontFamily:"inherit",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-                            ✓ Добавить
-                          </button>
-                          <button onClick={()=>{setShowAddWork(false);setNewWork({cat:"",sub:"",name:"",unit:"м²"});}}
-                            style={{background:"rgba(220,38,38,.1)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:8,padding:"7px 12px",fontFamily:"inherit",fontSize:12,cursor:"pointer"}}>
-                            Отмена
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
-              {/* Индикатор автосохранения */}
-              <div style={{paddingTop:10,borderTop:"1px solid #e2e8f0",marginTop:6}}>
-                {priceMsg && <div style={{textAlign:"center",fontSize:12,color:"#059669",fontWeight:700,marginBottom:6}}>{priceMsg}</div>}
-                {priceSaving && <div style={{textAlign:"center",fontSize:11,color:"#94a3b8"}}>💾 Сохранение...</div>}
-              </div>
-            </>}
-          </div>
-        )}
-      </div>
-
-    </div>
-  );
-}
 
 // ─── КОМПОНЕНТ КП (используется в модале и при печати) ───────────────────────
 function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note }) {
@@ -4963,7 +4409,21 @@ ${reqBlock}`;
     let prev = {};
     try { const r = await storage.getResult(PROGRESS_NODE(obj.progressToken)); if (r.status === "found" && r.value) prev = JSON.parse(r.value); } catch {}
     const snap = buildProgressSnapshot(objectId, prev);
-    if (snap) { try { await storage.set(PROGRESS_NODE(obj.progressToken), JSON.stringify(snap)); } catch (e) { console.warn("publishProgress err", e); } }
+    if (!snap) return;
+    // Клиент мог отправить замечание прямо в эту ноду, пока мы считали снимок (submitRemark
+    // тоже пишет всю ноду целиком) — без этой подстраховки republish затёр бы его. Перед
+    // записью перечитываем ноду ещё раз и добираем замечания, которых не было в prev.
+    try {
+      const r2 = await storage.getResult(PROGRESS_NODE(obj.progressToken));
+      if (r2.status === "found" && r2.value) {
+        const fresh = JSON.parse(r2.value);
+        const freshRemarks = Array.isArray(fresh.clientRemarks) ? fresh.clientRemarks : [];
+        const known = new Set((snap.clientRemarks || []).map(rm => rm.id));
+        const missing = freshRemarks.filter(rm => rm.id && !known.has(rm.id)).map(rm => ({ id: rm.id, text: rm.text, ts: rm.ts, done: !!rm.done }));
+        if (missing.length) snap.clientRemarks = [...snap.clientRemarks, ...missing];
+      }
+    } catch {}
+    try { await storage.set(PROGRESS_NODE(obj.progressToken), JSON.stringify(snap)); } catch (e) { console.warn("publishProgress err", e); }
   }, [buildProgressSnapshot]);
   const publishProgressRef = useRef(); publishProgressRef.current = publishProgress;
   const _publishDocsRef = useRef(null); // назначается ниже (после генераторов договоров/актов)
@@ -11454,12 +10914,11 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         };
 
         const saveObjField = async (obj, patch) => {
-          const updated = {...obj, ...patch, updatedAt: Date.now()};
-          const list = objectsRef.current.map(x=>x.id===obj.id?updated:x);
-          await saveObjects(list);
-          setCurrentObject(updated);
-          // При подписании договора (статус «Заключён») автоматически заводим
-          // проект в Финансах — объект становится «в работе» и появляется в Производстве.
+          // При подписании договора (статус «Заключён») СНАЧАЛА заводим зависимости —
+          // проект в Финансах и карточку Производства, и только при их успехе меняем
+          // статус объекта. Раньше статус сохранялся первым шагом, а зависимости —
+          // отдельно: при сбое сети объект тихо оставался «подписан» без финпроекта и
+          // без производства. Теперь либо всё получилось, либо статус вообще не меняется.
           if (patch.status === "signed") {
             // Существование проекта проверяем по СВЕЖИМ данным с сервера, а не по локальному
             // кэшу (finProjectsRef.current): Финансы грузятся в память только у admin/manager,
@@ -11477,18 +10936,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               if (!exists) {
                 const contract = contractsRef.current.find(c => c.objectId === obj.id) || null;
                 const estTotal = estimates.filter(e => e.objectId === obj.id).reduce((s, e) => s + (Number(e.total) || 0), 0);
-                const draft = finProjDraftFromObject(updated, contract);
+                const draft = finProjDraftFromObject(obj, contract);
                 const proj = { ...draft, id: genId(), budget: draft.budget || estTotal || 0, status: "новый", rawStatus: "новый" };
                 await saveFinanceProjects([...projList, proj], { loadedRef: null });
               }
-            } catch (e) {
-              console.warn("auto-create finProject err", e);
-              // Статус объекта уже сохранён — молча проглатывать ошибку нельзя, иначе объект
-              // тихо остаётся «в работе» без проекта в Финансах. Даём понятную подсказку с ручным путём.
-              alert("Объект переведён в статус «Договор подписан», но проект в Финансах создать не удалось (нет связи с базой). Проверьте Финансы — при необходимости создайте проект вручную кнопкой «💰 В финансы» на договоре.");
-            }
-            // Авто-создать карточку производства со статусом «новый»
-            try {
               const hasProd = productionsRef.current.some(p => p.objectId === obj.id);
               if (!hasProd) {
                 const prod = emptyProduction(obj.id, genId);
@@ -11496,10 +10947,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 await saveProductions([...productionsRef.current, prod], { replace: true });
               }
             } catch (e) {
-              console.warn("auto-create production err", e);
-              alert("Объект переведён в статус «Договор подписан», но карточку в Производстве создать не удалось (нет связи с базой). Откройте вкладку «Этапы» объекта ещё раз, чтобы попробовать снова.");
+              console.warn("auto-create finProject/production err", e);
+              alert("Не удалось перевести в статус «Договор подписан»: не получилось создать проект в Финансах и карточку Производства (нет связи с базой). Статус НЕ изменён — попробуйте ещё раз.");
+              return;
             }
           }
+          const updated = {...obj, ...patch, updatedAt: Date.now()};
+          const list = objectsRef.current.map(x=>x.id===obj.id?updated:x);
+          await saveObjects(list);
+          setCurrentObject(updated);
         };
 
         return (
@@ -12214,8 +11670,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 })()}
                 </>)}
 
-                {/* Замерщику вкладка «Финансы» объекта закрыта — показываем пометку */}
-                {objWsTab==="finance" && _isUser && (
+                {/* Вкладка «Финансы» объекта закрыта всем, кроме admin/manager — показываем пометку.
+                    Раньше проверялся только _isUser: foreman и viewer открывали FinanceTab (бюджет/
+                    долг/маржа) совершенно свободно, хотя по ролевой модели финансы им не положены. */}
+                {objWsTab==="finance" && !(_isAdmin||_isMgr) && (
                   <div style={{maxWidth:480,margin:"32px auto",textAlign:"center",background:"#f9fafb",border:"1px dashed #e5e7eb",borderRadius:12,padding:"32px 24px"}}>
                     <div style={{fontSize:38,marginBottom:12}}>🔒</div>
                     <div style={{fontWeight:800,fontSize:16,color:"#0f172a",marginBottom:6}}>Доступ закрыт</div>
@@ -12223,7 +11681,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   </div>
                 )}
                 {/* Производственные вкладки (и производственная часть «Информации») — встроенный модуль Производства */}
-                {["info","launch","stages","finance","journal","defects","handover"].includes(objWsTab) && !(objWsTab==="finance" && _isUser) && (
+                {["info","launch","stages","finance","journal","defects","handover"].includes(objWsTab) && !(objWsTab==="finance" && !(_isAdmin||_isMgr)) && (
                   <div style={{marginTop: objWsTab==="info" ? 14 : 0}}>
                   <ProductionModule
                     embedObjectId={obj.id}
