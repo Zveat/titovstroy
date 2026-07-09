@@ -10194,8 +10194,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 const cn = normCN(t.contractNo);
                 if (!cn) continue;
                 if (!projStats[cn]) projStats[cn] = { income:0, expense:0 };
-                if (t.type==="income") projStats[cn].income += t.amount||0;
-                else if (t.type==="expense") projStats[cn].expense += t.amount||0;
+                if (t.type==="income") projStats[cn].income += Number(t.amount)||0;
+                else if (t.type==="expense") projStats[cn].expense += Number(t.amount)||0;
               }
               const sorted = [...finProjects].sort((a,b)=>(a.createdAt||"").localeCompare(b.createdAt||""));
               const allStatuses = [...new Set(sorted.map(p=>p.rawStatus||p.status).filter(Boolean))];
