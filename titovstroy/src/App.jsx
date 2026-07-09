@@ -2060,14 +2060,17 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                     </button>
                   </div>
                 )}
-                {editingPass?.id === u.id && (
-                  <div style={{marginTop:14,paddingTop:14,borderTop:"1px solid #e2e8f0",display:"flex",gap:8}}>
-                    <input className="fi" placeholder="Новый пароль" value={editingPass.val} onChange={e=>setEditingPass(p=>({...p,val:e.target.value}))}/>
-                    <button onClick={()=>savePass(u.id)} style={{background:"#2563eb",color:"#f3f4f6",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                      Сохранить
-                    </button>
+                {editingPass?.id === u.id && (()=>{ const weak = editingPass.val ? passwordTooWeak(editingPass.val) : null; return (
+                  <div style={{marginTop:14,paddingTop:14,borderTop:"1px solid #e2e8f0"}}>
+                    <div style={{display:"flex",gap:8}}>
+                      <input className="fi" placeholder="Новый пароль" value={editingPass.val} onChange={e=>setEditingPass(p=>({...p,val:e.target.value}))}/>
+                      <button onClick={()=>savePass(u.id)} disabled={!!weak} style={{background:weak?"#cbd5e1":"#2563eb",color:"#f3f4f6",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:weak?"default":"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                        Сохранить
+                      </button>
+                    </div>
+                    {weak && <div style={{marginTop:6,fontSize:11,color:"#dc2626"}}>{weak}</div>}
                   </div>
-                )}
+                ); })()}
               </div>
             ))}
           </div>
