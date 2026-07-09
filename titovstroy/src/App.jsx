@@ -4985,10 +4985,28 @@ ${reqBlock}`;
     await onSaveProduction({ ...base, defects: [...add, ...defects], updatedAt: Date.now() });
   }, [genId, onSaveProduction]);
   const syncRemarksRef = useRef(); syncRemarksRef.current = syncClientRemarks;
+  // Доступ реально ещё активен (включён и срок 60 дней не истёк). Раньше срок проверялся
+  // только на клиентской странице (косметически) — сама нода в базе продолжала жить и
+  // обновляться фоновой republish'ей вечно, то есть по прямому запросу к базе с истёкшим
+  // токеном данные оставались доступны. Теперь фоновые публикации тоже проверяют срок.
+  const _progActive = (o) => !!(o.progressShared && o.progressToken && (!o.progressExpiresAt || Date.now() <= o.progressExpiresAt));
+  // Отозвать доступ (ручной revoke или истёкший срок) — гасим обе ноды, не только PROGRESS_NODE,
+  // иначе документы клиента (DOCS_NODE) остаются читаемы по старому токену бессрочно.
+  const _revokeProgressAccess = useCallback(async (token) => {
+    try { await storage.set(PROGRESS_NODE(token), JSON.stringify({ revoked: true })); } catch {}
+    try { await storage.set(DOCS_NODE(token), JSON.stringify({ revoked: true })); } catch {}
+  }, []);
   // Опрос замечаний клиента раз в минуту (клиент пишет прямо в ноду — производственных событий нет)
   useEffect(() => {
     const tick = () => {
       objectsRef.current.filter(o => o.progressShared && o.progressToken).forEach(async o => {
+        // Срок истёк — гасим доступ насовсем вместо очередной republish'и (иначе «истёк» был
+        // бы виден только в интерфейсе, а сама нода продолжала бы обновляться в базе).
+        if (o.progressExpiresAt && Date.now() > o.progressExpiresAt) {
+          try { await saveObjects([...objectsRef.current.filter(x => x.id !== o.id), { ...o, progressShared: false, updatedAt: Date.now() }]); } catch {}
+          try { await _revokeProgressAccess(o.progressToken); } catch {}
+          return;
+        }
         try { await syncRemarksRef.current?.(o.id); } catch {}
         try { await publishProgressRef.current?.(o.id); } catch {}
         try { await _publishDocsRef.current?.(o.id); } catch {}
@@ -4996,7 +5014,7 @@ ${reqBlock}`;
     };
     const iv = setInterval(tick, 60000);
     return () => clearInterval(iv);
-  }, []);
+  }, [saveObjects, _revokeProgressAccess]);
   // Включить/выключить доступ клиента; возвращает ссылку (или null при выключении)
   const toggleClientShare = useCallback(async (objectId) => {
     const obj = objectsRef.current.find(o => o.id === objectId);
@@ -5005,7 +5023,7 @@ ${reqBlock}`;
     if (obj.progressShared && obj.progressToken) {
       const token = obj.progressToken;
       await saveObjects([...objectsRef.current.filter(o => o.id !== objectId), { ...obj, progressShared: false, updatedAt: Date.now() }]);
-      try { await storage.set(PROGRESS_NODE(token), JSON.stringify({ revoked: true })); } catch {}
+      await _revokeProgressAccess(token);
       return null;
     }
     const token = obj.progressToken || (genId() + Math.random().toString(36).slice(2, 10));
@@ -5017,11 +5035,11 @@ ${reqBlock}`;
     if (snap) { try { await storage.set(PROGRESS_NODE(token), JSON.stringify(snap)); } catch {} }
     try { await _publishDocsRef.current?.(objectId); } catch {}
     return linkOf(token);
-  }, [saveObjects, buildProgressSnapshot]);
+  }, [saveObjects, buildProgressSnapshot, _revokeProgressAccess]);
   // Публикация документов клиента (договоры/акты) при их изменении — для открытых объектов
   const _docsPubTimer = useRef(null);
   useEffect(() => {
-    const shared = objectsRef.current.filter(o => o.progressShared && o.progressToken);
+    const shared = objectsRef.current.filter(_progActive);
     if (!shared.length) return;
     if (_docsPubTimer.current) clearTimeout(_docsPubTimer.current);
     _docsPubTimer.current = setTimeout(() => { shared.forEach(o => { try { _publishDocsRef.current?.(o.id); } catch {} }); }, 1500);
@@ -5030,7 +5048,7 @@ ${reqBlock}`;
   // Живое авто-обновление: при любом изменении производства/оплат пере-публикуем снимки всех открытых объектов
   const _progPubTimer = useRef(null);
   useEffect(() => {
-    const shared = objectsRef.current.filter(o => o.progressShared && o.progressToken);
+    const shared = objectsRef.current.filter(_progActive);
     if (!shared.length) return;
     if (_progPubTimer.current) clearTimeout(_progPubTimer.current);
     _progPubTimer.current = setTimeout(() => { shared.forEach(async o => { try { await syncRemarksRef.current?.(o.id); } catch {} publishProgressRef.current?.(o.id); }); }, 1200);
@@ -11463,13 +11481,23 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 const proj = { ...draft, id: genId(), budget: draft.budget || estTotal || 0, status: "новый", rawStatus: "новый" };
                 await saveFinanceProjects([...projList, proj], { loadedRef: null });
               }
-            } catch (e) { console.warn("auto-create finProject err", e); }
+            } catch (e) {
+              console.warn("auto-create finProject err", e);
+              // Статус объекта уже сохранён — молча проглатывать ошибку нельзя, иначе объект
+              // тихо остаётся «в работе» без проекта в Финансах. Даём понятную подсказку с ручным путём.
+              alert("Объект переведён в статус «Договор подписан», но проект в Финансах создать не удалось (нет связи с базой). Проверьте Финансы — при необходимости создайте проект вручную кнопкой «💰 В финансы» на договоре.");
+            }
             // Авто-создать карточку производства со статусом «новый»
-            const hasProd = productionsRef.current.some(p => p.objectId === obj.id);
-            if (!hasProd) {
-              const prod = emptyProduction(obj.id, genId);
-              prod.prodStatus = "new";
-              await saveProductions([...productionsRef.current, prod], { replace: true });
+            try {
+              const hasProd = productionsRef.current.some(p => p.objectId === obj.id);
+              if (!hasProd) {
+                const prod = emptyProduction(obj.id, genId);
+                prod.prodStatus = "new";
+                await saveProductions([...productionsRef.current, prod], { replace: true });
+              }
+            } catch (e) {
+              console.warn("auto-create production err", e);
+              alert("Объект переведён в статус «Договор подписан», но карточку в Производстве создать не удалось (нет связи с базой). Откройте вкладку «Этапы» объекта ещё раз, чтобы попробовать снова.");
             }
           }
         };
@@ -11636,8 +11664,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         </div>
                       </div>
                       {/* Финансовый блок — единый вид для всех карточек (как в «Производстве»).
-                          У лида бюджет = сумма смет (помечено «смета»), оплаты ещё нет. */}
-                      <div style={{marginBottom:10}}>
+                          У лида бюджет = сумма смет (помечено «смета»), оплаты ещё нет.
+                          Видно только admin/manager — у остальных ролей нет доступа к финансам вообще. */}
+                      {(_isAdmin||_isMgr) && <div style={{marginBottom:10}}>
                         {fin.budget>0 ? <>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
                             <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{fmt(fin.income)} <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>из {fmt(fin.budget)} ₸{fin._est?" · смета":""}</span></span>
@@ -11664,7 +11693,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             {fin.margin!=null&&<span style={{fontSize:10,fontWeight:800,color:"#fff",background:mCol,borderRadius:6,padding:"2px 7px"}}>{fin.margin}%</span>}
                           </span>
                         </div>
-                      </div>
+                      </div>}
                       {/* Футер (договоры — только клиентские, без подряда) */}
                       <div style={{marginTop:"auto",display:"flex",flexWrap:"wrap",gap:"4px 10px",fontSize:11,color:"#64748b",borderTop:"1px solid #f1f5f9",paddingTop:10}}>
                         <span>📋 {objEsts.length} смет</span>
@@ -11703,7 +11732,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         </div>
                         <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap",flexShrink:0}}>{st.label}</span>
                       </div>
-                      <div style={{marginBottom:10}}>
+                      {(_isAdmin||_isMgr) && <div style={{marginBottom:10}}>
                         {e.budget>0 ? <>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
                             <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{fmt(e.income)} <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>из {fmt(e.budget)} ₸</span></span>
@@ -11725,7 +11754,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             {e.margin!=null&&<span style={{fontSize:10,fontWeight:800,color:"#fff",background:mCol,borderRadius:6,padding:"2px 7px"}}>{e.margin}%</span>}
                           </span>
                         </div>
-                      </div>
+                      </div>}
                       <div style={{marginTop:"auto",display:"flex",flexWrap:"wrap",gap:"4px 10px",fontSize:11,color:"#64748b",borderTop:"1px solid #f1f5f9",paddingTop:10}}>
                         <span>💼 проект из Финансов</span>
                         <span style={{color:"#2563eb",fontWeight:700}}>+ создать объект</span>
