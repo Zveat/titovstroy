@@ -572,7 +572,9 @@ function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, currentUser 
       {onToggleClientShare && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>👁 Доступ клиента к прогрессу{shared && <span style={{ fontSize: 11, color: "#059669", fontWeight: 700 }}> · открыт</span>}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>👁 Доступ клиента к прогрессу{shared && <span style={{ fontSize: 11, color: "#059669", fontWeight: 700 }}> · открыт</span>}
+              {shared && obj.progressExpiresAt && <span style={{ fontSize: 10.5, color: "#94a3b8", fontWeight: 500 }}> (до {new Date(obj.progressExpiresAt).toLocaleDateString("ru-RU")})</span>}
+            </div>
             <button disabled={shareBusy} onClick={async () => { setShareBusy(true); const link = await onToggleClientShare(obj.id); setShareLink(link); setShareBusy(false); }}
               style={{ background: shared ? "rgba(220,38,38,.08)" : "#ecfdf5", color: shared ? "#dc2626" : "#059669", border: "1px solid " + (shared ? "rgba(220,38,38,.2)" : "rgba(5,150,105,.25)"), borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: shareBusy ? "default" : "pointer", opacity: shareBusy ? .6 : 1, fontFamily: "inherit", whiteSpace: "nowrap" }}>
               {shared ? "Закрыть доступ" : "Открыть доступ клиенту"}
