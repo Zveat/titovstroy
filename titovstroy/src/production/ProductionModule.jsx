@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, Fragment } from "react";
 import { STAGE_STATUSES, emptyProduction } from "./constants.js";
+import { normCN } from "../utils.js";
 
 // ─────────────────────────────────────────────────────────────────────────
 // ПРОИЗВОДСТВО — управление и контроль объектов в работе.
@@ -33,7 +34,10 @@ const groupByCat = (rows) => {
   return order.map(c => [c, g[c]]);
 };
 
-const _normCN = (s) => String(s||"").trim().toLowerCase().replace(/\s+/g,"");
+// Нормализация номера договора — ЕДИНАЯ с App.jsx (normCN из utils.js): убираем не только
+// пробелы, но и № и #. Раньше здесь была своя усечённая версия (только пробелы) — из-за неё
+// «№1012» и «1012» считались разными, и операции/проект могли не сойтись в финвкладке объекта,
+// хотя в разделе Финансы (где normCN) — сходились. Теперь один источник истины.
 
 export default function ProductionModule({
   objects, entries = [], allObjects, unlinkedProjects, estimates, contracts, productions,
@@ -84,7 +88,7 @@ export default function ProductionModule({
     if (fp) return fp;
     const objContracts = (contracts||[]).filter(c => c.objectId === openObj.id);
     for (const c of objContracts) {
-      fp = finProjects.find(p => _normCN(p.contractNo) === _normCN(c.number));
+      fp = finProjects.find(p => normCN(p.contractNo) === normCN(c.number));
       if (fp) return fp;
     }
     if (openObj.clientName && openObj.clientName.length > 2) {
@@ -98,8 +102,8 @@ export default function ProductionModule({
 
   const finSummary = useMemo(() => {
     if (!finProj) return null;
-    const cn = _normCN(finProj.contractNo);
-    const txList = (financeTx||[]).filter(t => !t.deletedAt && t.included !== false && _normCN(t.contractNo) === cn);
+    const cn = normCN(finProj.contractNo);
+    const txList = (financeTx||[]).filter(t => !t.deletedAt && t.included !== false && normCN(t.contractNo) === cn);
     const income = txList.filter(t => t.type === "income").reduce((s,t) => s+(Number(t.amount)||0), 0);
     const expense = txList.filter(t => t.type === "expense").reduce((s,t) => s+(Number(t.amount)||0), 0);
     const budget = Number(finProj.budget) || 0;
