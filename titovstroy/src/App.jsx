@@ -6483,24 +6483,20 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       : (docLabel+" №"+num+" "+clientName+(dateStr?" от "+dateStr:"")+".docx").replace(/[<>:"/\\|?*]/g,"_");
 
     try {
-    if (!window.docx) {
-      try {
-        await new Promise((res, rej) => {
-          const s = document.createElement("script");
-          s.src = "https://unpkg.com/docx@7.8.2/build/index.js";
-          s.onload = () => { if(window.docx) res(); else rej(new Error("docx not in window")); };
-          s.onerror = () => rej(new Error("cdn_unreachable"));
-          document.head.appendChild(s);
-        });
-      } catch (loadErr) {
-        // Сервис генерации DOCX грузится с внешнего CDN (unpkg.com) — если он недоступен
-        // (нет интернета, заблокирован сетью), явно объясняем, что делать, вместо тихого сбоя.
-        alert("Не удалось загрузить сервис генерации DOCX (unpkg.com недоступен).\n\nПроверьте интернет-соединение и попробуйте ещё раз. Если проблема повторяется — воспользуйтесь кнопками 📄 PDF или 📋 GDoc вместо DOCX.");
-        return;
-      }
+    // Раньше библиотека docx грузилась скриптом с unpkg.com в момент клика — если CDN
+    // недоступен (нет интернета, блокировка сетью), генерация DOCX ломалась целиком. Теперь
+    // docx — обычная npm-зависимость проекта, Vite выносит её в отдельный чанк и грузит
+    // с того же домена, что и остальное приложение (тот же CDN, что и всё остальное, не
+    // сторонний unpkg.com) — динамический import(), а не script-инъекция.
+    let D;
+    try {
+      const mod = await import("docx");
+      D = mod.Document ? mod : (mod.default && mod.default.Document ? mod.default : mod);
+    } catch (loadErr) {
+      alert("Не удалось загрузить сервис генерации DOCX.\n\nПроверьте интернет-соединение и попробуйте ещё раз. Если проблема повторяется — воспользуйтесь кнопками 📄 PDF или 📋 GDoc вместо DOCX.");
+      return;
     }
-    const D = window.docx;
-    if (!D || !D.Document) { alert("Не удалось загрузить сервис генерации DOCX (unpkg.com недоступен).\n\nПроверьте интернет-соединение и попробуйте ещё раз. Если проблема повторяется — воспользуйтесь кнопками 📄 PDF или 📋 GDoc вместо DOCX."); return; }
+    if (!D || !D.Document) { alert("Не удалось загрузить сервис генерации DOCX.\n\nПроверьте интернет-соединение и попробуйте ещё раз. Если проблема повторяется — воспользуйтесь кнопками 📄 PDF или 📋 GDoc вместо DOCX."); return; }
     const TNR = "Times New Roman";
     const mmT = mm => Math.round(mm * 56.692);
     const hp = pt => pt * 2;
@@ -8764,6 +8760,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   try {
                     // сохраняем отметки клиента (просмотры/принятие) при переотправке
                     let prev = {}; try { const pr = await storage.getResult("titovstroy-kp-"+currentId); if (pr.status==="found" && pr.value) prev = JSON.parse(pr.value); } catch {}
+                    // Клиент мог принять КП (или открыть его) прямо в это окно, пока мы готовили
+                    // снимок — перечитываем ноду ещё раз перед записью, иначе republish затрёт
+                    // acceptedAt/viewCount более свежими, чем то, что мы прочитали в prev.
+                    try { const pr2 = await storage.getResult("titovstroy-kp-"+currentId); if (pr2.status==="found" && pr2.value) { const fresh = JSON.parse(pr2.value); if ((fresh.viewCount||0) > (prev.viewCount||0) || fresh.acceptedAt) prev = fresh; } } catch {}
                     const snap = { proj, kpItems, fromItems:kpFromItems, discount, discAmt, final, note, publishedAt:Date.now(), viewedAt:prev.viewedAt, viewCount:prev.viewCount, acceptedAt:prev.acceptedAt };
                     const res = await storage.set("titovstroy-kp-"+currentId, JSON.stringify(snap));
                     const link = window.location.origin + window.location.pathname + "#/kp/" + currentId;
@@ -10938,13 +10938,19 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 const estTotal = estimates.filter(e => e.objectId === obj.id).reduce((s, e) => s + (Number(e.total) || 0), 0);
                 const draft = finProjDraftFromObject(obj, contract);
                 const proj = { ...draft, id: genId(), budget: draft.budget || estTotal || 0, status: "новый", rawStatus: "новый" };
-                await saveFinanceProjects([...projList, proj], { loadedRef: null });
+                // saveListProtected при блокировке (loadedRef/база недоступна/"пусто поверх")
+                // молча возвращает undefined БЕЗ throw — try/catch сам по себе это не ловит,
+                // нужно явно проверить результат, иначе статус менялся бы, даже если проект
+                // на самом деле не создан.
+                const fpRes = await saveFinanceProjects([...projList, proj], { loadedRef: null });
+                if (!fpRes) throw new Error("saveFinanceProjects заблокирован");
               }
               const hasProd = productionsRef.current.some(p => p.objectId === obj.id);
               if (!hasProd) {
                 const prod = emptyProduction(obj.id, genId);
                 prod.prodStatus = "new";
-                await saveProductions([...productionsRef.current, prod], { replace: true });
+                const prodRes = await saveProductions([...productionsRef.current, prod], { replace: true });
+                if (!prodRes) throw new Error("saveProductions заблокирован");
               }
             } catch (e) {
               console.warn("auto-create finProject/production err", e);
