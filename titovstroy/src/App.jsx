@@ -3317,8 +3317,8 @@ function PublicProgress({ token }) {
     setRmBusy(false);
   };
   const wrap = (children) => (
-    <div style={{ minHeight: "100vh", background: "#eef2f7", padding: "0 0 40px", boxSizing: "border-box", fontFamily: "'Golos Text','Segoe UI',sans-serif", color: "#0f172a" }}>
-      <div style={{ maxWidth: 560, margin: "0 auto" }}>{children}</div>
+    <div style={{ minHeight: "100vh", background: "linear-gradient(180deg,#f2f4f8 0%,#e8ebf0 100%)", padding: "0 0 32px", boxSizing: "border-box", fontFamily: "'Golos Text','Segoe UI',sans-serif", color: "#0f172a", WebkitFontSmoothing: "antialiased" }}>
+      <div style={{ maxWidth: 600, margin: "0 auto" }}>{children}</div>
     </div>
   );
 
@@ -3346,83 +3346,138 @@ function PublicProgress({ token }) {
   const pay = s.payment || {};
   const remarks = Array.isArray(s.clientRemarks) ? s.clientRemarks : [];
   const daysLeft = (s.planEndDate && !s.factEndDate) ? Math.ceil((new Date(s.planEndDate).getTime() - Date.now()) / 86400000) : null;
+  // Настройки видимости (старые снимки без vis → показываем всё, как раньше)
+  const vis = s.vis || {};
+  const showStages = vis.stages !== false, showPay = vis.payments !== false, showRemarks = vis.remarks !== false;
+  // Текущий этап = первый невыполненный; следующий = за ним. Для акцента «сейчас в работе / далее».
+  const _curIdx = _stg.findIndex(st => (st.status || "todo") !== "done");
+  const curStage = _curIdx >= 0 ? _stg[_curIdx] : null;
+  const nextStage = _curIdx >= 0 ? _stg[_curIdx + 1] : null;
   // Группировка этапов по категории (черновые / чистовые / санузел …)
   const groups = []; const gmap = {};
   for (const st of (s.stages || [])) { const c = st.cat || "Работы"; if (!gmap[c]) { gmap[c] = { cat: c, items: [] }; groups.push(gmap[c]); } gmap[c].items.push(st); }
-  const card = { background: "#fff", borderRadius: 16, padding: "16px 18px", margin: "0 12px 14px" };
-  const h = { fontWeight: 800, fontSize: 15, marginBottom: 10 };
-  const docBtn = { display: "flex", alignItems: "center", gap: 10, width: "100%", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "11px 12px", cursor: "pointer", fontFamily: "inherit" };
+  // ── Премиальная палитра/стили публичной страницы ──
+  const BRASS = "#b8904a", INK = "#0f172a", MUT = "#64748b", FAINT = "#94a3b8", GREEN = "#059669", BLUE = "#2563eb";
+  const card = { background: "#fff", borderRadius: 20, padding: "18px 20px", margin: "0 14px 14px", boxShadow: "0 6px 22px -12px rgba(15,23,42,.16)", border: "1px solid rgba(15,23,42,.04)", boxSizing: "border-box" };
+  const h = { fontWeight: 800, fontSize: 15.5, marginBottom: 12, letterSpacing: "-.01em", color: INK };
+  const docBtn = { display: "flex", alignItems: "center", gap: 12, width: "100%", background: "#f8fafc", border: "1px solid #eef1f5", borderRadius: 13, padding: "11px 12px", cursor: "pointer", fontFamily: "inherit", textAlign: "left", transition: "background .15s,border-color .15s" };
+  // Кольцо прогресса (SVG)
+  const _R = 42, _C = 2 * Math.PI * _R;
+  const Ring = () => (
+    <div style={{ position: "relative", width: 104, height: 104, flexShrink: 0 }}>
+      <svg width="104" height="104" viewBox="0 0 104 104">
+        <circle cx="52" cy="52" r={_R} fill="none" stroke="#eef1f5" strokeWidth="9" />
+        <circle cx="52" cy="52" r={_R} fill="none" stroke="url(#pg)" strokeWidth="9" strokeLinecap="round"
+          strokeDasharray={_C} strokeDashoffset={_C * (1 - pct / 100)} transform="rotate(-90 52 52)" style={{ transition: "stroke-dashoffset .6s ease" }} />
+        <defs><linearGradient id="pg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#34d399" /><stop offset="1" stopColor={GREEN} /></linearGradient></defs>
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ fontSize: 27, fontWeight: 900, color: INK, lineHeight: 1, letterSpacing: "-.02em" }}>{pct}<span style={{ fontSize: 14 }}>%</span></div>
+        <div style={{ fontSize: 10, color: FAINT, fontWeight: 600, marginTop: 2 }}>готово</div>
+      </div>
+    </div>
+  );
+  // Узел таймлайна этапа (готов / текущий / предстоит)
+  const stageNode = (status, isCurrent) => {
+    if (status === "done") return { bg: BRASS, brd: BRASS, mark: "✓", ring: "none" };
+    if (isCurrent) return { bg: BLUE, brd: BLUE, mark: "", ring: "0 0 0 4px rgba(37,99,235,.16)" };
+    return { bg: "#fff", brd: "#cbd5e1", mark: "", ring: "none" };
+  };
 
   return wrap(<>
-    {/* Шапка — тёмная, по ширине как карточки */}
-    <div style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)", color: "#fff", padding: "20px 20px 22px", margin: "12px 12px 14px", borderRadius: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-        <div style={{ width: 34, height: 34, borderRadius: 9, background: "#b8904a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 900, color: "#0c0e1a" }}>T</div>
-        <div style={{ fontSize: 17, fontWeight: 800, flex: 1, minWidth: 0 }}>TitovStroy <span style={{ color: "#94a3b8", fontWeight: 600 }}>· ремонт</span></div>
-        <button onClick={refresh} disabled={refreshing} title="Обновить данные"
-          style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.1)", border: "1px solid rgba(255,255,255,.18)", color: "#e2e8f0", borderRadius: 9, padding: "7px 11px", fontSize: 12.5, fontWeight: 700, cursor: refreshing ? "default" : "pointer", fontFamily: "inherit", flexShrink: 0 }}>
-          <span style={{ display: "inline-block", transition: "transform .6s ease", transform: refreshing ? "rotate(360deg)" : "none" }}>⟳</span>
-          {refreshing ? "Обновляю…" : "Обновить"}
+    {/* Шапка */}
+    <div style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e293b 62%,#2a3446 100%)", color: "#fff", padding: "22px 22px 24px", margin: "14px 14px 14px", borderRadius: 22, position: "relative", overflow: "hidden", boxShadow: "0 12px 32px -14px rgba(15,23,42,.55)" }}>
+      <div style={{ position: "absolute", top: -45, right: -35, width: 160, height: 160, borderRadius: "50%", background: "radial-gradient(circle, rgba(184,144,74,.24), transparent 70%)" }} />
+      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 11, marginBottom: 18 }}>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: BRASS, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 21, fontWeight: 900, color: "#0c0e1a", boxShadow: "0 4px 14px rgba(184,144,74,.45)" }}>T</div>
+        <div style={{ fontSize: 17, fontWeight: 800, flex: 1, minWidth: 0, letterSpacing: "-.01em" }}>TitovStroy <span style={{ color: FAINT, fontWeight: 600 }}>· ремонт</span></div>
+        <button onClick={refresh} disabled={refreshing} title="Обновить"
+          style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.1)", border: "1px solid rgba(255,255,255,.16)", color: "#e2e8f0", borderRadius: 10, padding: "7px 12px", fontSize: 12.5, fontWeight: 700, cursor: refreshing ? "default" : "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+          <span style={{ display: "inline-block", transition: "transform .6s ease", transform: refreshing ? "rotate(360deg)" : "none" }}>⟳</span>{refreshing ? "" : "Обновить"}
         </button>
       </div>
-      <div style={{ fontSize: 11.5, color: "#94a3b8", marginBottom: 3 }}>Ваш объект</div>
-      <div style={{ fontSize: 21, fontWeight: 900, lineHeight: 1.15 }}>{s.objectAddress || s.clientName || "Ремонт"}</div>
-      {s.managerName && <div style={{ fontSize: 12.5, color: "#cbd5e1", marginTop: 10 }}>Менеджер: <b style={{ color: "#fff" }}>{s.managerName}</b></div>}
+      <div style={{ position: "relative", fontSize: 10.5, color: FAINT, marginBottom: 5, textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 700 }}>Ваш объект</div>
+      <div style={{ position: "relative", fontSize: 22, fontWeight: 900, lineHeight: 1.15, letterSpacing: "-.02em" }}>{s.objectAddress || s.clientName || "Ремонт"}</div>
+      {s.managerName && <div style={{ position: "relative", fontSize: 12.5, color: "#cbd5e1", marginTop: 13, display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.07)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 20, padding: "5px 12px" }}>Менеджер: <b style={{ color: "#fff" }}>{s.managerName}</b></div>}
     </div>
 
     {/* Сообщение от компании */}
     {s.clientMessage && s.clientMessage.text && (
-      <div style={{ background: "#fff", borderRadius: 16, padding: "14px 16px", margin: "0 12px 14px", borderLeft: "4px solid #b8904a" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
+      <div style={{ ...card, borderLeft: `4px solid ${BRASS}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <span style={{ fontSize: 15 }}>💬</span>
-          <span style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>Сообщение от компании</span>
-          {s.clientMessage.updatedAt && <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: "auto" }}>{new Date(s.clientMessage.updatedAt).toLocaleDateString("ru-RU")}</span>}
+          <span style={{ fontSize: 13, fontWeight: 800, color: INK }}>Сообщение от компании</span>
+          {s.clientMessage.updatedAt && <span style={{ fontSize: 11, color: FAINT, marginLeft: "auto" }}>{new Date(s.clientMessage.updatedAt).toLocaleDateString("ru-RU")}</span>}
         </div>
-        <div style={{ fontSize: 13.5, color: "#334155", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{s.clientMessage.text}</div>
+        <div style={{ fontSize: 14, color: "#334155", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{s.clientMessage.text}</div>
       </div>
     )}
 
-    {/* Прогресс */}
+    {/* Готовность — кольцо + факты */}
     <div style={card}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-        <span style={{ fontWeight: 800, fontSize: 15 }}>Готовность объекта</span>
-        <span style={{ fontWeight: 900, fontSize: 24, color: "#2563eb" }}>{pct}%</span>
-      </div>
-      <div style={{ height: 14, background: "#e2e8f0", borderRadius: 8, overflow: "hidden" }}>
-        <div style={{ width: pct + "%", height: "100%", background: "linear-gradient(90deg,#22c55e,#16a34a)", borderRadius: 8, transition: "width .4s" }} />
-      </div>
-      <div style={{ display: "flex", gap: "6px 16px", flexWrap: "wrap", marginTop: 12, fontSize: 12.5, color: "#64748b" }}>
-        {(_stg.length > 0) && <span>Этапов готово: <b style={{ color: "#334155" }}>{_doneN} из {_stg.length}</b></span>}
-        {s.startDate && <span>Старт: <b style={{ color: "#334155" }}>{dt(s.startDate)}</b></span>}
-        {s.planEndDate && <span>План сдачи: <b style={{ color: "#334155" }}>{dt(s.planEndDate)}</b></span>}
-        {s.factEndDate ? <span style={{ color: "#059669", fontWeight: 700 }}>✓ Сдан {dt(s.factEndDate)}</span>
-          : daysLeft != null && <span style={{ color: daysLeft < 0 ? "#dc2626" : "#334155" }}>{daysLeft < 0 ? `Просрочка ${-daysLeft} дн.` : `Осталось ~${daysLeft} дн.`}</span>}
+      <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+        <Ring />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 15.5, fontWeight: 800, color: INK, marginBottom: 9, letterSpacing: "-.01em" }}>Готовность объекта</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12.5, color: MUT }}>
+            {(_stg.length > 0) && <div>Этапов готово: <b style={{ color: INK }}>{_doneN} из {_stg.length}</b></div>}
+            {s.startDate && <div>Старт: <b style={{ color: INK }}>{dt(s.startDate)}</b></div>}
+            {s.planEndDate && <div>План сдачи: <b style={{ color: INK }}>{dt(s.planEndDate)}</b></div>}
+            {s.factEndDate ? <div style={{ color: GREEN, fontWeight: 700 }}>✓ Сдан {dt(s.factEndDate)}</div>
+              : daysLeft != null && <div style={{ color: daysLeft < 0 ? "#dc2626" : INK, fontWeight: daysLeft < 0 ? 700 : 400 }}>{daysLeft < 0 ? `Просрочка ${-daysLeft} дн.` : `Осталось ~${daysLeft} дн.`}</div>}
+          </div>
+        </div>
       </div>
     </div>
 
-    {/* Этапы — сгруппированы по категориям */}
+    {/* Сейчас в работе / Далее */}
+    {showStages && !s.factEndDate && (curStage || nextStage) && (
+      <div style={{ display: "flex", gap: 12, margin: "0 14px 14px", flexWrap: "wrap" }}>
+        {curStage && (
+          <div style={{ flex: "1 1 210px", background: "linear-gradient(135deg,#eff6ff,#f5f9ff)", border: "1px solid #bfdbfe", borderRadius: 18, padding: "14px 16px", boxShadow: "0 8px 22px -14px rgba(37,99,235,.4)" }}>
+            <div style={{ fontSize: 10.5, fontWeight: 800, color: BLUE, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>🔨 Сейчас в работе</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: INK, lineHeight: 1.25, letterSpacing: "-.01em" }}>{curStage.name}</div>
+            <div style={{ fontSize: 11.5, color: MUT, marginTop: 4 }}>{curStage.cat}{curStage.planEnd ? ` · до ${dt(curStage.planEnd)}` : ""}</div>
+          </div>
+        )}
+        {nextStage && (
+          <div style={{ flex: "1 1 210px", background: "#fff", border: "1px solid #eef1f5", borderRadius: 18, padding: "14px 16px", boxShadow: "0 8px 22px -16px rgba(15,23,42,.2)" }}>
+            <div style={{ fontSize: 10.5, fontWeight: 800, color: FAINT, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>⏭ Далее</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#334155", lineHeight: 1.25, letterSpacing: "-.01em" }}>{nextStage.name}</div>
+            <div style={{ fontSize: 11.5, color: FAINT, marginTop: 4 }}>{nextStage.cat}</div>
+          </div>
+        )}
+      </div>
+    )}
+
+    {/* Ход работ — таймлайн */}
+    {showStages && (
     <div style={card}>
-      <div style={h}>Этапы работ</div>
-      {groups.length === 0 && <div style={{ color: "#94a3b8", fontSize: 13, padding: "8px 0" }}>Этапы появятся по мере старта работ.</div>}
+      <div style={h}>Ход работ</div>
+      {groups.length === 0 && <div style={{ color: FAINT, fontSize: 13, padding: "8px 0" }}>Этапы появятся по мере старта работ.</div>}
       {groups.map((g, gi) => {
         const dn = g.items.filter(x => (x.status || "todo") === "done").length;
         return (
-          <div key={gi} style={{ marginBottom: gi < groups.length - 1 ? 14 : 0 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-              <span style={{ fontSize: 12, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em" }}>{g.cat}</span>
-              <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>{dn}/{g.items.length}</span>
+          <div key={gi} style={{ marginBottom: gi < groups.length - 1 ? 18 : 0 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ fontSize: 11.5, fontWeight: 800, color: BRASS, textTransform: "uppercase", letterSpacing: ".05em" }}>{g.cat}</span>
+              <span style={{ fontSize: 11, color: FAINT, fontWeight: 700, background: "#f8fafc", borderRadius: 20, padding: "2px 9px" }}>{dn}/{g.items.length}</span>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+            <div style={{ position: "relative" }}>
+              <div style={{ position: "absolute", left: 10, top: 14, bottom: 14, width: 2, background: "#eef1f5" }} />
               {g.items.map((st, i) => {
-                const cfg = _PROG_ST[st.status] || _PROG_ST.todo;
+                const status = st.status || "todo";
+                const isCur = !!(curStage && st === curStage);
+                const nd = stageNode(status, isCur);
+                const cfg = _PROG_ST[status] || _PROG_ST.todo;
                 return (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: cfg.bg, borderRadius: 10 }}>
-                    <span style={{ fontSize: 15, flexShrink: 0 }}>{cfg.i}</span>
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 13, padding: "7px 0", position: "relative" }}>
+                    <div style={{ width: 22, height: 22, borderRadius: "50%", background: nd.bg, border: `2px solid ${nd.brd}`, boxShadow: nd.ring, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#fff", fontWeight: 900, zIndex: 1 }}>{nd.mark}</div>
                     <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "#0f172a" }}>{st.name}</div>
+                      <div style={{ fontSize: 13.5, fontWeight: isCur ? 800 : 600, color: status === "done" ? "#475569" : INK }}>{st.name}</div>
                       <div style={{ fontSize: 11, color: cfg.c, fontWeight: 700, marginTop: 1 }}>{cfg.l}{st.planEnd ? ` · до ${dt(st.planEnd)}` : ""}</div>
                     </div>
-                    {Number(st.priceClient) > 0 && <div style={{ fontSize: 12.5, fontWeight: 800, color: "#334155", flexShrink: 0 }}>{fmt(st.priceClient)} ₸</div>}
+                    {Number(st.priceClient) > 0 && <div style={{ fontSize: 12.5, fontWeight: 800, color: MUT, flexShrink: 0 }}>{fmt(st.priceClient)} ₸</div>}
                   </div>
                 );
               })}
@@ -3431,49 +3486,51 @@ function PublicProgress({ token }) {
         );
       })}
     </div>
-
-    {/* Оплата */}
-    {(pay.budget > 0 || pay.paid > 0) && (
-      <div style={card}>
-        <div style={h}>Оплата по договору</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13.5 }}>
-          <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#64748b" }}>Сумма договора</span><b>{fmt(pay.budget)} ₸</b></div>
-          <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#64748b" }}>Оплачено</span><b style={{ color: "#059669" }}>{fmt(pay.paid)} ₸</b></div>
-          <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #f1f5f9", paddingTop: 8 }}><span style={{ color: "#64748b" }}>Остаток</span><b style={{ color: pay.remaining > 0 ? "#dc2626" : "#059669" }}>{fmt(pay.remaining)} ₸</b></div>
-        </div>
-      </div>
     )}
 
+    {/* Оплата */}
+    {showPay && (pay.budget > 0 || pay.paid > 0) && (() => {
+      const fill = pay.budget > 0 ? Math.min(100, Math.round((pay.paid || 0) / pay.budget * 100)) : 0;
+      return (
+      <div style={card}>
+        <div style={h}>Оплата по договору</div>
+        {pay.budget > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 7 }}>
+              <span style={{ fontSize: 19, fontWeight: 900, color: GREEN, letterSpacing: "-.01em" }}>{fmt(pay.paid)} <span style={{ fontSize: 12, fontWeight: 600, color: FAINT }}>из {fmt(pay.budget)} ₸</span></span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: fill >= 100 ? GREEN : BLUE }}>{fill}%</span>
+            </div>
+            <div style={{ height: 9, background: "#eef1f5", borderRadius: 6, overflow: "hidden" }}>
+              <div style={{ width: fill + "%", height: "100%", background: `linear-gradient(90deg,#34d399,${GREEN})`, borderRadius: 6, transition: "width .5s" }} />
+            </div>
+          </div>
+        )}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 13.5, paddingTop: pay.budget > 0 ? 12 : 0, borderTop: pay.budget > 0 ? "1px solid #f1f5f9" : "none" }}>
+          <span style={{ color: MUT }}>Остаток к оплате</span><b style={{ color: pay.remaining > 0 ? "#dc2626" : GREEN, fontSize: 15.5 }}>{fmt(pay.remaining)} ₸</b>
+        </div>
+      </div>
+      );
+    })()}
+
     {/* Документы (сметы + договоры + акты) */}
-    {docs && ((docs.contracts || []).length > 0 || (docs.acts || []).length > 0 || (docs.estimates || []).length > 0) && (
+    {vis.docs !== false && docs && ((docs.contracts || []).length > 0 || (docs.acts || []).length > 0 || (docs.estimates || []).length > 0) && (
       <div style={card}>
         <div style={h}>Документы</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {(docs.estimates || []).map((d, i) => (
-            <button key={"e" + i} onClick={() => openHtml(d.html)} style={docBtn}>
-              <span style={{ fontSize: 16, flexShrink: 0 }}>📋</span>
-              <span style={{ flex: 1, textAlign: "left", minWidth: 0 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", display: "block" }}>{d.title}</span>
-                {d.total > 0 && <span style={{ fontSize: 11, color: "#64748b" }}>{fmt(d.total)} ₸{d.date ? ` · ${new Date(d.date).toLocaleDateString("ru-RU")}` : ""}</span>}
+          {[
+            ...(docs.estimates || []).map(d => ({ ...d, ic: "📋" })),
+            ...(docs.contracts || []).map(d => ({ ...d, ic: "📄" })),
+            ...(docs.acts || []).map(d => ({ ...d, ic: "🧾" })),
+          ].map((d, i) => (
+            <button key={i} onClick={() => openHtml(d.html)} style={docBtn}
+              onMouseEnter={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#cbd5e1"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "#f8fafc"; e.currentTarget.style.borderColor = "#eef1f5"; }}>
+              <span style={{ width: 36, height: 36, borderRadius: 10, background: "#fff", border: "1px solid #eef1f5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 }}>{d.ic}</span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: INK, display: "block" }}>{d.title}</span>
+                {d.total > 0 && <span style={{ fontSize: 11, color: MUT }}>{fmt(d.total)} ₸{d.date ? ` · ${new Date(d.date).toLocaleDateString("ru-RU")}` : ""}</span>}
               </span>
-              <span style={{ fontSize: 11, color: "#2563eb", fontWeight: 700, flexShrink: 0 }}>Открыть ↗</span>
-            </button>
-          ))}
-          {(docs.contracts || []).map((d, i) => (
-            <button key={"c" + i} onClick={() => openHtml(d.html)} style={docBtn}>
-              <span style={{ fontSize: 16, flexShrink: 0 }}>📄</span>
-              <span style={{ flex: 1, textAlign: "left", fontSize: 13, fontWeight: 600, color: "#0f172a", minWidth: 0 }}>{d.title}</span>
-              <span style={{ fontSize: 11, color: "#2563eb", fontWeight: 700, flexShrink: 0 }}>Открыть ↗</span>
-            </button>
-          ))}
-          {(docs.acts || []).map((d, i) => (
-            <button key={"a" + i} onClick={() => openHtml(d.html)} style={docBtn}>
-              <span style={{ fontSize: 16, flexShrink: 0 }}>🧾</span>
-              <span style={{ flex: 1, textAlign: "left", minWidth: 0 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", display: "block" }}>{d.title}</span>
-                {d.total > 0 && <span style={{ fontSize: 11, color: "#64748b" }}>{fmt(d.total)} ₸{d.date ? ` · ${new Date(d.date).toLocaleDateString("ru-RU")}` : ""}</span>}
-              </span>
-              <span style={{ fontSize: 11, color: "#2563eb", fontWeight: 700, flexShrink: 0 }}>Открыть ↗</span>
+              <span style={{ fontSize: 11.5, color: BLUE, fontWeight: 700, flexShrink: 0 }}>Открыть ↗</span>
             </button>
           ))}
         </div>
@@ -3481,34 +3538,34 @@ function PublicProgress({ token }) {
     )}
 
     {/* Замечания от клиента */}
+    {showRemarks && (
     <div style={card}>
       <div style={h}>Замечания и пожелания</div>
-      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>Напишите, если что-то нужно поправить или уточнить — замечание попадёт прорабу.</div>
-      <div style={{ display: "flex", gap: 6, marginBottom: remarks.length ? 12 : 0 }}>
-        <textarea value={rmText} onChange={e => setRmText(e.target.value)} placeholder="Например: в спальне переделать угол у окна…" rows={2}
-          style={{ flex: 1, border: "1px solid #cbd5e1", borderRadius: 10, padding: "9px 11px", fontSize: 13, fontFamily: "inherit", outline: "none", resize: "vertical" }} />
-      </div>
+      <div style={{ fontSize: 12.5, color: FAINT, marginBottom: 12, lineHeight: 1.45 }}>Напишите, если что-то нужно поправить или уточнить — замечание попадёт прорабу.</div>
+      <textarea value={rmText} onChange={e => setRmText(e.target.value)} placeholder="Например: в спальне переделать угол у окна…" rows={2}
+        style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e2e8f0", borderRadius: 13, padding: "11px 13px", fontSize: 13.5, fontFamily: "inherit", outline: "none", resize: "vertical", marginBottom: 10 }} />
       <button onClick={submitRemark} disabled={!rmText.trim() || rmBusy}
-        style={{ width: "100%", background: (!rmText.trim() || rmBusy) ? "#cbd5e1" : "#2563eb", color: "#fff", border: "none", borderRadius: 10, padding: "11px", fontSize: 13.5, fontWeight: 700, cursor: (!rmText.trim() || rmBusy) ? "default" : "pointer", fontFamily: "inherit", marginBottom: remarks.length ? 14 : 0 }}>
+        style={{ width: "100%", background: (!rmText.trim() || rmBusy) ? "#cbd5e1" : `linear-gradient(135deg,${BLUE},#1d4ed8)`, color: "#fff", border: "none", borderRadius: 13, padding: "12px", fontSize: 14, fontWeight: 800, cursor: (!rmText.trim() || rmBusy) ? "default" : "pointer", fontFamily: "inherit", boxShadow: (!rmText.trim() || rmBusy) ? "none" : "0 8px 20px -10px rgba(37,99,235,.6)" }}>
         {rmBusy ? "Отправляю…" : "Отправить замечание"}
       </button>
-      {rmSent && <div style={{ fontSize: 12.5, color: "#059669", fontWeight: 700, marginTop: 8 }}>✓ Замечание отправлено, спасибо!</div>}
+      {rmSent && <div style={{ fontSize: 12.5, color: GREEN, fontWeight: 700, marginTop: 10, textAlign: "center" }}>✓ Замечание отправлено, спасибо!</div>}
       {remarks.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
           {remarks.slice().reverse().map((rm, i) => (
-            <div key={rm.id || i} style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "9px 11px", background: rm.done ? "#ecfdf5" : "#f8fafc", borderRadius: 10, border: "1px solid " + (rm.done ? "#a7f3d0" : "#e2e8f0") }}>
-              <span style={{ fontSize: 14, flexShrink: 0, color: rm.done ? "#059669" : "#f59e0b" }}>{rm.done ? "✓" : "⏳"}</span>
+            <div key={rm.id || i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 12px", background: rm.done ? "#f0fdf4" : "#f8fafc", borderRadius: 12, border: "1px solid " + (rm.done ? "#bbf7d0" : "#eef1f5") }}>
+              <span style={{ fontSize: 14, flexShrink: 0, color: rm.done ? GREEN : "#f59e0b", marginTop: 1 }}>{rm.done ? "✓" : "⏳"}</span>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 13, color: "#0f172a" }}>{rm.text}</div>
-                <div style={{ fontSize: 10.5, color: rm.done ? "#059669" : "#f59e0b", fontWeight: 700, marginTop: 2 }}>{rm.done ? "Выполнено" : "В работе"}{rm.ts ? ` · ${new Date(rm.ts).toLocaleDateString("ru-RU")}` : ""}</div>
+                <div style={{ fontSize: 13, color: INK, lineHeight: 1.4 }}>{rm.text}</div>
+                <div style={{ fontSize: 10.5, color: rm.done ? GREEN : "#f59e0b", fontWeight: 700, marginTop: 3 }}>{rm.done ? "Выполнено" : "В работе"}{rm.ts ? ` · ${new Date(rm.ts).toLocaleDateString("ru-RU")}` : ""}</div>
               </div>
             </div>
           ))}
         </div>
       )}
     </div>
+    )}
 
-    <div style={{ textAlign: "center", fontSize: 11.5, color: "#94a3b8", marginTop: 18 }}>TitovStroy · ремонт и отделка{s.publishedAt ? ` · обновлено ${new Date(s.publishedAt).toLocaleDateString("ru-RU")}` : ""}</div>
+    <div style={{ textAlign: "center", fontSize: 11.5, color: FAINT, marginTop: 20, paddingBottom: 4 }}>TitovStroy · ремонт и отделка{s.publishedAt ? ` · обновлено ${new Date(s.publishedAt).toLocaleDateString("ru-RU")}` : ""}</div>
   </>);
 }
 
@@ -4692,13 +4749,20 @@ ${reqBlock}`;
     const clientMessage = (cm && typeof cm === "object" && String(cm.text || "").trim())
       ? { text: String(cm.text).trim(), updatedAt: cm.updatedAt || null }
       : (typeof cm === "string" && cm.trim() ? { text: cm.trim(), updatedAt: null } : null);
+    // Настройки видимости для клиента (по умолчанию всё включено). Скрытые разделы НЕ
+    // просто прячутся в интерфейсе — их данные вообще не кладём в снимок, чтобы не утекли
+    // даже при прямом чтении ноды.
+    const cv = obj.clientVis || {};
+    const showPay = cv.payments !== false, showStages = cv.stages !== false, showRemarks = cv.remarks !== false, showDocs = cv.docs !== false;
     return {
       v: 2, objectAddress: obj.address || "", clientName: obj.clientName || "", managerName: obj.manager || "",
       startDate: prod.startDate || "", planEndDate: prod.planEndDate || "", factEndDate: prod.factEndDate || "",
       progressPct, doneStages: doneCnt, totalStages: stages.length,
-      stages: stages.map(st => ({ name: st.manualName || st.name || "Этап", cat: st.cat || "Работы", status: st.status || "todo", planEnd: st.planEnd || "", priceClient: Number(st.priceClient) || 0 })),
-      payment: { budget, paid, remaining: Math.max(0, budget - paid) },
-      handover, clientRemarks, clientMessage,
+      // vis — что показывать клиенту (публичная страница читает эти флаги)
+      vis: { payments: showPay, docs: showDocs, stages: showStages, remarks: showRemarks },
+      stages: showStages ? stages.map(st => ({ name: st.manualName || st.name || "Этап", cat: st.cat || "Работы", status: st.status || "todo", planEnd: st.planEnd || "", priceClient: Number(st.priceClient) || 0 })) : [],
+      payment: showPay ? { budget, paid, remaining: Math.max(0, budget - paid) } : null,
+      handover, clientRemarks: showRemarks ? clientRemarks : [], clientMessage,
       // Срок жизни ссылки — жёстко зафиксирован в объекте при включении доступа (не продлевается
       // здесь автоматически: buildProgressSnapshot вызывается и фоновой минутной republish'ей).
       expiresAt: obj.progressExpiresAt || null,
@@ -4798,6 +4862,17 @@ ${reqBlock}`;
     try { await _publishDocsRef.current?.(objectId); } catch {}
     return linkOf(token);
   }, [saveObjects, buildProgressSnapshot, _revokeProgressAccess]);
+  // Настройки видимости кабинета: что показывать клиенту (платежи/документы/этапы/замечания).
+  // По умолчанию всё включено. Сразу пере-публикуем снимок и документы, чтобы клиент увидел.
+  const setClientVis = useCallback(async (objectId, patch) => {
+    const obj = objectsRef.current.find(o => o.id === objectId);
+    if (!obj) return;
+    const clientVis = { ...(obj.clientVis || {}), ...patch };
+    await saveObjects([...objectsRef.current.filter(o => o.id !== objectId), { ...obj, clientVis, updatedAt: Date.now() }]);
+    setCurrentObject(p => (p && p.id === objectId) ? { ...p, clientVis } : p);
+    try { await publishProgressRef.current?.(objectId); } catch {}
+    try { await _publishDocsRef.current?.(objectId); } catch {}
+  }, [saveObjects]);
   // Публикация документов клиента (договоры/акты) при их изменении — для открытых объектов
   const _docsPubTimer = useRef(null);
   useEffect(() => {
@@ -6662,6 +6737,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
   const publishDocs = async (objectId) => {
     const obj = objectsRef.current.find(o => o.id === objectId);
     if (!obj || !obj.progressShared || !obj.progressToken) return;
+    // Документы отключены в настройках видимости — пишем пустую ноду, чтобы клиент не видел
+    // старые документы после выключения тумблера.
+    if (obj.clientVis && obj.clientVis.docs === false) {
+      try { await storage.set(DOCS_NODE(obj.progressToken), JSON.stringify({ contracts: [], estimates: [], acts: [], publishedAt: Date.now() })); } catch {}
+      return;
+    }
     // Только клиентские документы объекта (как в карточке объекта): договор с клиентом
     // по этому объекту + его доп. приложения. Договоры ПОДРЯДА (компания↔рабочий) и прочие
     // внутренние документы клиенту НЕ показываем.
@@ -12040,6 +12121,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     onSaveProduction={onSaveProduction}
                     onDeleteProduction={onDeleteProduction}
                     onToggleClientShare={toggleClientShare}
+                    onSetClientVis={setClientVis}
                     buildStagesFromEstimate={buildStagesFromEstimate}
                     finProjects={finProjects}
                     financeTx={financeTx}
