@@ -897,16 +897,19 @@ const OBJ_FIELD_META = {
 };
 const _objLabel = (o) => (o?.clientName || o?.address || o?.objType || "Объект");
 // Логируем изменения значимых полей объекта (по патчу): только реально изменившиеся.
+// Весь хелпер в try/catch: журнал ни при каких условиях не должен мешать сохранению данных.
 const logObjChange = (user, obj, patch, source = "manual") => {
-  for (const f of Object.keys(patch || {})) {
-    if (f === "updatedAt") continue;
-    const before = obj ? obj[f] : undefined;
-    const after = patch[f];
-    if (before === after) continue;
-    const meta = OBJ_FIELD_META[f];
-    if (!meta) continue;
-    logChange(user, { entity: "object", entityId: obj?.id || "", objectId: obj?.id || "", label: _objLabel(obj), field: meta.label, action: "изменил", old: meta.fmt(before), new: meta.fmt(after), source });
-  }
+  try {
+    for (const f of Object.keys(patch || {})) {
+      if (f === "updatedAt") continue;
+      const before = obj ? obj[f] : undefined;
+      const after = patch[f];
+      if (before === after) continue;
+      const meta = OBJ_FIELD_META[f];
+      if (!meta) continue;
+      logChange(user, { entity: "object", entityId: obj?.id || "", objectId: obj?.id || "", label: _objLabel(obj), field: meta.label, action: "изменил", old: meta.fmt(before), new: meta.fmt(after), source });
+    }
+  } catch (e) { console.warn("logObjChange failed", e); }
 };
 // Сумма договора (для журнала): сумма позиций, иначе м²-расчёт, иначе totalCost.
 const contractAmount = (c) => {
@@ -919,14 +922,17 @@ const _tng = (n) => (Math.round(Number(n) || 0)).toLocaleString("ru-RU") + " ₸
 const _finTypeLbl = { income: "поступление", expense: "расход", transfer: "перевод" };
 const _cStatusLbl = (v) => (CONTRACT_STATUSES.find(s => s.key === (v || "draft")) || {}).label || v || "—";
 // Логируем сохранение договора: создание, изменение суммы, изменение статуса.
+// Весь хелпер в try/catch: журнал не должен мешать сохранению договора.
 const logContractSave = (user, oldC, newC) => {
-  const label = newC?.contractNo || newC?.number || newC?.objectName || "Договор";
-  const objectId = newC?.objectId || "";
-  if (!oldC) { logChange(user, { entity: "contract", entityId: newC?.id || "", objectId, label, action: "создал договор", new: _tng(contractAmount(newC)) }); return; }
-  const oa = Math.round(contractAmount(oldC)), na = Math.round(contractAmount(newC));
-  if (oa !== na) logChange(user, { entity: "contract", entityId: newC.id, objectId, label, field: "сумма договора", action: "изменил", old: _tng(oa), new: _tng(na) });
-  const os = oldC.contractStatus || "draft", ns = newC.contractStatus || "draft";
-  if (os !== ns) logChange(user, { entity: "contract", entityId: newC.id, objectId, label, field: "статус договора", action: "изменил", old: _cStatusLbl(os), new: _cStatusLbl(ns) });
+  try {
+    const label = newC?.contractNo || newC?.number || newC?.objectName || "Договор";
+    const objectId = newC?.objectId || "";
+    if (!oldC) { logChange(user, { entity: "contract", entityId: newC?.id || "", objectId, label, action: "создал договор", new: _tng(contractAmount(newC)) }); return; }
+    const oa = Math.round(contractAmount(oldC)), na = Math.round(contractAmount(newC));
+    if (oa !== na) logChange(user, { entity: "contract", entityId: newC.id, objectId, label, field: "сумма договора", action: "изменил", old: _tng(oa), new: _tng(na) });
+    const os = oldC.contractStatus || "draft", ns = newC.contractStatus || "draft";
+    if (os !== ns) logChange(user, { entity: "contract", entityId: newC.id, objectId, label, field: "статус договора", action: "изменил", old: _cStatusLbl(os), new: _cStatusLbl(ns) });
+  } catch (e) { console.warn("logContractSave failed", e); }
 };
 
 // Экспорт в CSV (Excel открывает напрямую; BOM + ; для русской локали)
