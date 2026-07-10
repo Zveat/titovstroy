@@ -4,7 +4,7 @@ import { getDatabase, ref, get, set } from "firebase/database";
 import ProductionModule from "./production/ProductionModule.jsx";
 import { emptyProduction } from "./production/constants.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad } from "./utils.js";
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
 function useDebounce(value, ms) {
@@ -80,6 +80,220 @@ function DangerConfirmModal() {
           <button className="btn btn-o" style={{padding:"9px 20px"}} onClick={()=>close(false)}>Отмена</button>
           <button className="btn btn-red" disabled={!ok} style={{padding:"9px 20px",opacity:ok?1:.5,cursor:ok?"pointer":"default"}} onClick={()=>close(true)}>Удалить</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Панель проблем: «Что горит сегодня» (дашборд) и «Проверка базы» (Админка) ──
+// Чисто презентационная: получает уже посчитанные и отфильтрованные проблемы (из
+// computeIssues), группирует по разделу, клик по строке зовёт onNav, кнопка «скрыть
+// до завтра» (если проблема dismissable и передан onDismiss) — onDismiss(id).
+const _ISSUE_GROUPS = ["Производство", "Финансы", "Клиенты", "Данные"];
+function IssuePanel({ issues, onNav, onDismiss, emptyText = "✓ Всё чисто — проблем не найдено" }) {
+  const reds = issues.filter(i => i.sev === "red").length;
+  const yellows = issues.length - reds;
+  if (!issues.length) {
+    return (
+      <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:14, padding:"18px 20px", display:"flex", alignItems:"center", gap:10 }}>
+        <span style={{ fontSize:22 }}>✅</span>
+        <span style={{ fontSize:14, fontWeight:700, color:"#059669" }}>{emptyText}</span>
+      </div>
+    );
+  }
+  const byGroup = {};
+  for (const i of issues) (byGroup[i.group] || (byGroup[i.group] = [])).push(i);
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+        {reds>0 && <span style={{ fontSize:12, fontWeight:800, color:"#fff", background:"#dc2626", borderRadius:20, padding:"3px 11px" }}>🔴 {reds} критичных</span>}
+        {yellows>0 && <span style={{ fontSize:12, fontWeight:800, color:"#92610f", background:"#fef3c7", border:"1px solid #fde68a", borderRadius:20, padding:"3px 11px" }}>🟡 {yellows} предупреждений</span>}
+      </div>
+      {_ISSUE_GROUPS.filter(g => byGroup[g]).map(g => (
+        <div key={g} style={{ background:"#fff", border:"1px solid #eef2f7", borderRadius:14, overflow:"hidden" }}>
+          <div style={{ fontSize:11.5, fontWeight:800, color:"#64748b", textTransform:"uppercase", letterSpacing:".04em", padding:"10px 16px", borderBottom:"1px solid #f1f5f9", background:"#f8fafc" }}>{g} · {byGroup[g].length}</div>
+          {byGroup[g].map(i => (
+            <div key={i.id} onClick={() => onNav && onNav(i.nav)}
+              style={{ display:"flex", alignItems:"center", gap:12, padding:"11px 16px", borderBottom:"1px solid #f6f8fa", cursor: onNav?"pointer":"default", transition:"background .12s" }}
+              onMouseEnter={e=>{ if(onNav) e.currentTarget.style.background="#f8fafc"; }}
+              onMouseLeave={e=>{ e.currentTarget.style.background="transparent"; }}>
+              <span style={{ width:6, height:6, borderRadius:"50%", background: i.sev==="red"?"#dc2626":"#f59e0b", flexShrink:0 }} />
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:13.5, fontWeight:700, color:"#0f172a", lineHeight:1.3 }}>{i.title}</div>
+                {i.detail && <div style={{ fontSize:11.5, color:"#94a3b8", marginTop:2, overflow:"hidden", textOverflow:"ellipsis" }}>{i.detail}</div>}
+              </div>
+              {onDismiss && i.dismissable && (
+                <button onClick={e=>{ e.stopPropagation(); onDismiss(i.id); }} title="Скрыть до завтра"
+                  style={{ background:"none", border:"1px solid #e2e8f0", color:"#94a3b8", borderRadius:7, padding:"4px 9px", fontSize:11, fontWeight:600, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap", flexShrink:0 }}>до завтра</button>
+              )}
+              {onNav && <span style={{ color:"#cbd5e1", fontSize:16, flexShrink:0 }}>›</span>}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── КАЛЕНДАРЬ ПРОИЗВОДСТВА: общий таймлайн этапов (по объектам / по прорабам) ──
+// Read-only v1: показывает загрузку, пересечения, просрочки и перегруз бригад. Клик по
+// этапу открывает объект. Перетаскивание/инлайн-редактирование — отдельным заходом.
+const _CAL_ST = { todo:{ l:"Не начат", c:"#94a3b8" }, progress:{ l:"В работе", c:"#2563eb" }, done:{ l:"Готово", c:"#059669" }, delayed:{ l:"Задержка", c:"#dc2626" } };
+const _CAL_DAY = 864e5;
+const _calDayStart = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
+function ProductionCalendar({ objects, productions, onOpenObject }) {
+  const [groupBy, setGroupBy] = useState("object"); // "object" | "foreman"
+  const [windowDays, setWindowDays] = useState(30);  // 14 | 30 | 90
+  const [anchor, setAnchor] = useState(() => _calDayStart(Date.now()) - 3*_CAL_DAY);
+  const [fForeman, setFForeman] = useState("");
+  const [fStatus, setFStatus] = useState("");
+  const today = _calDayStart(Date.now());
+
+  const allStages = useMemo(() => buildCalendarStages(objects, productions, { now: Date.now() }), [objects, productions]);
+  const foremen = useMemo(() => [...new Set(allStages.map(s => s.responsible || "— без прораба —"))].sort((a,b)=>a.localeCompare(b)), [allStages]);
+  const load = useMemo(() => foremanLoad(allStages, { threshold: 3 }), [allStages]);
+  const overloadedForemen = Object.keys(load).filter(f => load[f].overloaded);
+
+  const stages = allStages.filter(s =>
+    (!fForeman || (s.responsible || "— без прораба —") === fForeman) &&
+    (!fStatus || (fStatus === "overdue" ? s.overdue : s.status === fStatus)));
+
+  const startMs = anchor, endMs = anchor + windowDays*_CAL_DAY;
+  const inWindow = stages.filter(s => s.end >= startMs && s.start <= endMs);
+
+  const rowsMap = {};
+  for (const s of inWindow) {
+    const key = groupBy === "object" ? s.objId : (s.responsible || "— без прораба —");
+    if (!rowsMap[key]) rowsMap[key] = { key, label: groupBy === "object" ? s.objLabel : (s.responsible || "— без прораба —"), objId: s.objId, items: [] };
+    rowsMap[key].items.push(s);
+  }
+  const rows = Object.values(rowsMap).sort((a,b) => a.label.localeCompare(b.label));
+
+  const PX = windowDays <= 14 ? 34 : windowDays <= 30 ? 20 : 8;
+  const chartW = windowDays * PX;
+  const NAME_W = 172, ROW_H = 40;
+  const xOf = ms => Math.round((_calDayStart(ms) - startMs)/_CAL_DAY) * PX;
+  const clampX = x => Math.max(0, Math.min(chartW, x));
+  // Недельные метки в шапке
+  const ticks = [];
+  for (let d = startMs; d <= endMs; d += 7*_CAL_DAY) ticks.push(d);
+  const fmtD = ms => new Date(ms).toLocaleDateString("ru-RU", { day:"2-digit", month:"2-digit" });
+
+  const ctrlBtn = (active) => ({ border:"1px solid "+(active?"#0f172a":"#e2e8f0"), background:active?"#0f172a":"#fff", color:active?"#fff":"#64748b", borderRadius:8, padding:"6px 12px", fontSize:12.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" });
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+      {/* Управление */}
+      <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+        <div style={{ display:"flex", gap:4 }}>
+          <button style={ctrlBtn(groupBy==="object")} onClick={()=>setGroupBy("object")}>По объектам</button>
+          <button style={ctrlBtn(groupBy==="foreman")} onClick={()=>setGroupBy("foreman")}>По прорабам</button>
+        </div>
+        <div style={{ display:"flex", gap:4 }}>
+          {[[14,"2 нед"],[30,"Месяц"],[90,"3 мес"]].map(([d,l])=>(
+            <button key={d} style={ctrlBtn(windowDays===d)} onClick={()=>setWindowDays(d)}>{l}</button>
+          ))}
+        </div>
+        <div style={{ display:"flex", gap:4 }}>
+          <button style={ctrlBtn(false)} onClick={()=>setAnchor(a=>a-Math.round(windowDays/2)*_CAL_DAY)} title="Назад">←</button>
+          <button style={ctrlBtn(false)} onClick={()=>setAnchor(_calDayStart(Date.now())-3*_CAL_DAY)}>Сегодня</button>
+          <button style={ctrlBtn(false)} onClick={()=>setAnchor(a=>a+Math.round(windowDays/2)*_CAL_DAY)} title="Вперёд">→</button>
+        </div>
+        <select value={fForeman} onChange={e=>setFForeman(e.target.value)} style={{ border:"1px solid #e2e8f0", borderRadius:8, padding:"6px 10px", fontSize:12.5, fontFamily:"inherit", cursor:"pointer", color:"#0f172a" }}>
+          <option value="">Все прорабы</option>
+          {foremen.map(f => <option key={f} value={f}>{f}{load[f]?.overloaded?" ⚠":""}</option>)}
+        </select>
+        <select value={fStatus} onChange={e=>setFStatus(e.target.value)} style={{ border:"1px solid #e2e8f0", borderRadius:8, padding:"6px 10px", fontSize:12.5, fontFamily:"inherit", cursor:"pointer", color:"#0f172a" }}>
+          <option value="">Все статусы</option>
+          <option value="todo">Не начат</option>
+          <option value="progress">В работе</option>
+          <option value="done">Готово</option>
+          <option value="overdue">Только просрочки</option>
+        </select>
+      </div>
+
+      {/* Перегруз бригад */}
+      {overloadedForemen.length > 0 && (
+        <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:10, padding:"10px 14px", display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+          <span style={{ fontSize:12.5, fontWeight:800, color:"#dc2626" }}>⚠ Перегруз:</span>
+          {overloadedForemen.map(f => (
+            <button key={f} onClick={()=>{ setGroupBy("foreman"); setFForeman(f); }} style={{ background:"#fff", border:"1px solid #fecaca", color:"#dc2626", borderRadius:20, padding:"3px 11px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+              {f} · до {load[f].peak} одновременно
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Таймлайн */}
+      {rows.length === 0 ? (
+        <div style={{ textAlign:"center", color:"#94a3b8", padding:"50px 0", fontSize:14, background:"#fff", border:"1px solid #eef2f7", borderRadius:14 }}>
+          В этом окне нет этапов с датами. Проставьте плановые даты у работ (вкладка «Этапы» объекта) или сдвиньте период.
+        </div>
+      ) : (
+        <div style={{ background:"#fff", border:"1px solid #eef2f7", borderRadius:14, overflow:"auto" }}>
+          <div style={{ minWidth: NAME_W + chartW }}>
+            {/* Шапка с датами */}
+            <div style={{ display:"flex", position:"sticky", top:0, background:"#f8fafc", borderBottom:"1px solid #e2e8f0", zIndex:2 }}>
+              <div style={{ width:NAME_W, flexShrink:0, padding:"8px 12px", fontSize:11, fontWeight:800, color:"#64748b", textTransform:"uppercase", letterSpacing:".03em", borderRight:"1px solid #e2e8f0" }}>{groupBy==="object"?"Объект":"Прораб"}</div>
+              <div style={{ position:"relative", width:chartW, height:32 }}>
+                {ticks.map(t => (
+                  <div key={t} style={{ position:"absolute", left:clampX(xOf(t)), top:0, height:"100%", borderLeft:"1px solid #eef2f7", paddingLeft:4, fontSize:10, color:"#94a3b8", display:"flex", alignItems:"center" }}>{fmtD(t)}</div>
+                ))}
+                {today>=startMs && today<=endMs && <div style={{ position:"absolute", left:xOf(today), top:0, height:"100%", borderLeft:"2px solid #dc2626" }} />}
+              </div>
+            </div>
+            {/* Строки */}
+            {rows.map(row => {
+              const ov = groupBy==="foreman" && load[row.label]?.overloaded;
+              // Раскладка по дорожкам: пересекающиеся этапы не накладываются, а встают друг
+              // под другом — так видно реальную одновременную загрузку (узкое место).
+              const LANE_H = 26;
+              const sorted = [...row.items].sort((a,b)=>a.start-b.start);
+              const laneEnds = []; // конец последнего бара в каждой дорожке
+              const placed = sorted.map(s => {
+                let lane = laneEnds.findIndex(end => end < s.start);
+                if (lane === -1) { lane = laneEnds.length; laneEnds.push(s.end); } else { laneEnds[lane] = s.end; }
+                return { s, lane };
+              });
+              const rowH = Math.max(ROW_H, laneEnds.length*LANE_H + 12);
+              return (
+                <div key={row.key} style={{ display:"flex", borderBottom:"1px solid #f6f8fa" }}>
+                  <div onClick={()=>{ if(groupBy==="object" && onOpenObject) onOpenObject(row.objId); }}
+                    style={{ width:NAME_W, flexShrink:0, padding:"8px 12px", borderRight:"1px solid #f1f5f9", cursor:groupBy==="object"?"pointer":"default", display:"flex", flexDirection:"column", justifyContent:"center" }}>
+                    <div style={{ fontSize:12.5, fontWeight:700, color:"#0f172a", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{row.label}</div>
+                    <div style={{ fontSize:10.5, color: ov?"#dc2626":"#94a3b8", fontWeight: ov?700:500 }}>{row.items.length} этап.{ov?` · перегруз (до ${load[row.label].peak})`:""}</div>
+                  </div>
+                  <div style={{ position:"relative", width:chartW, height:rowH }}>
+                    {today>=startMs && today<=endMs && <div style={{ position:"absolute", left:xOf(today), top:0, bottom:0, borderLeft:"2px solid rgba(220,38,38,.25)" }} />}
+                    {placed.map(({s,lane},idx) => {
+                      const left = clampX(xOf(s.start));
+                      const right = clampX(xOf(s.end) + PX);
+                      const w = Math.max(PX*0.6, right - left);
+                      const col = s.overdue ? _CAL_ST.delayed.c : (_CAL_ST[s.status]||_CAL_ST.todo).c;
+                      return (
+                        <div key={s.stageId+idx} title={`${s.name}\n${s.objLabel}\n${(_CAL_ST[s.status]||_CAL_ST.todo).l}${s.overdue?" · ПРОСРОЧКА":""}${s.responsible?`\n${s.responsible}`:""}`}
+                          onClick={()=>onOpenObject && onOpenObject(s.objId)}
+                          style={{ position:"absolute", left, top:6+lane*LANE_H, height:LANE_H-6, width:w, background:col, borderRadius:6, cursor:"pointer",
+                            border: s.overdue?"1.5px solid #991b1b":"none", boxShadow:"0 1px 2px rgba(0,0,0,.12)", display:"flex", alignItems:"center", padding:"0 6px", overflow:"hidden", opacity: s.status==="done"?0.65:1 }}>
+                          <span style={{ fontSize:10.5, color:"#fff", fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{s.name}{groupBy==="foreman"?` · ${s.objLabel}`:""}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Легенда */}
+      <div style={{ display:"flex", gap:14, flexWrap:"wrap", fontSize:11.5, color:"#64748b" }}>
+        {Object.values(_CAL_ST).map(s => (
+          <span key={s.l} style={{ display:"inline-flex", alignItems:"center", gap:5 }}><span style={{ width:11, height:11, borderRadius:3, background:s.c }} />{s.l}</span>
+        ))}
+        <span style={{ display:"inline-flex", alignItems:"center", gap:5 }}><span style={{ width:11, height:11, borderRadius:3, background:"#dc2626", border:"1.5px solid #991b1b" }} />Просрочка</span>
+        <span style={{ display:"inline-flex", alignItems:"center", gap:5 }}><span style={{ width:2, height:12, background:"#dc2626" }} />Сегодня</span>
       </div>
     </div>
   );
@@ -1192,7 +1406,7 @@ function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note })
 
 
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
-function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBackupWorkspace=()=>{} }) {
+function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBackupWorkspace=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
   const [tab, setTab] = useState("users");
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1433,7 +1647,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
 
       {/* Табы */}
       <div className="admin-tabs" style={{display:"flex",gap:3,marginBottom:24,background:"#f8fafc",borderRadius:10,padding:4,overflowX:"auto"}}>
-        {[["users","👥 Сотрудники"],["clients","👥 Клиенты"],["contragents","🏢 Реквизиты"],["workers","🔨 Подрядчики"],["prices","💰 Прайс-лист"],["backups","🗄 Бэкапы"],["audit","📋 Журнал"]].map(([t,label])=>(
+        {[["users","👥 Сотрудники"],["clients","👥 Клиенты"],["contragents","🏢 Реквизиты"],["workers","🔨 Подрядчики"],["prices","💰 Прайс-лист"],["backups","🗄 Бэкапы"],["audit","📋 Журнал"],["check","🔍 Проверка базы"]].map(([t,label])=>(
           <button key={t} onClick={()=>{ setTab(t); setAdminSubTab("list"); }} style={{
             flex:1,padding:"11px",borderRadius:8,border:"none",cursor:"pointer",
             fontFamily:"inherit",fontSize:12,fontWeight:700,whiteSpace:"nowrap",
@@ -2134,6 +2348,27 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
       )}
 
       {tab === "audit" && <AuditTab />}
+
+      {tab === "check" && (()=>{
+        const reds = checkIssues.filter(i=>i.sev==="red").length;
+        const yellows = checkIssues.length - reds;
+        const verdict = reds>0 ? { color:"#dc2626", bg:"#fef2f2", bd:"#fecaca", icon:"🔴", text:"Есть критичные ошибки — не рекомендуется мерж/релиз до исправления" }
+          : yellows>0 ? { color:"#92610f", bg:"#fffbeb", bd:"#fde68a", icon:"🟡", text:"Есть предупреждения — данные не сломаны, но стоит проверить" }
+          : { color:"#059669", bg:"#f0fdf4", bd:"#bbf7d0", icon:"🟢", text:"База чистая — можно релизить" };
+        return (
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            <div style={{fontSize:12.5,color:"#64748b",lineHeight:1.5}}>Проверка связей и целостности данных перед мержем в <b>main</b>, импортом или чисткой базы. Read-only — ничего не меняет. Клик по проблеме открывает нужную карточку.</div>
+            <div style={{background:verdict.bg,border:`1px solid ${verdict.bd}`,borderRadius:12,padding:"14px 18px",display:"flex",alignItems:"center",gap:12}}>
+              <span style={{fontSize:26}}>{verdict.icon}</span>
+              <div>
+                <div style={{fontSize:15,fontWeight:800,color:verdict.color}}>{reds>0?`${reds} критичных · ${yellows} предупреждений`:yellows>0?`${yellows} предупреждений`:"Проблем не найдено"}</div>
+                <div style={{fontSize:12.5,color:verdict.color,opacity:.9,marginTop:2}}>{verdict.text}</div>
+              </div>
+            </div>
+            <IssuePanel issues={checkIssues} onNav={onNavIssue} emptyText="✓ База чистая — связи и целостность в порядке" />
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -3344,7 +3579,7 @@ function MainApp({ currentUser, setCurrentUser }) {
 
   // Экраны: "list" | "editor" | "contracts"
   // Руководитель по умолчанию попадает на финансы
-  const [screen, setScreen] = useState(currentUser?.role==="manager" ? "finance" : currentUser?.role==="foreman" ? "objects" : "dashboard");
+  const [screen, setScreen] = useState(currentUser?.role==="manager" ? "finance" : "dashboard");
   const [navHistory, setNavHistory] = useState([]); // стек навигации для кнопки «Назад»
 
   const _applyNavState = (s) => {
@@ -3744,6 +3979,47 @@ function MainApp({ currentUser, setCurrentUser }) {
 
   // Только «живые» (не удалённые) объекты — используется в дашборде, аналитике и всех расчётах
   const liveObjects = useMemo(() => objects.filter(o=>!o.deletedAt), [objects]);
+
+  // ── «Что горит» / «Проверка базы»: детектор проблем (read-only, чистая функция из utils) ──
+  const _allIssues = useMemo(() => computeIssues({ objects, productions, finProjects, financeTx, contracts, estimates, clients: contractClients }), [objects, productions, finProjects, financeTx, contracts, estimates, contractClients]);
+  // «Скрыть до завтра» — по устройству (localStorage), без записи в общую базу. { [issueId]: untilTs }.
+  const ISSUE_DISMISS_KEY = "titovstroy-issue-dismissed";
+  const [issueDismissed, setIssueDismissed] = useState(() => {
+    try { const raw = JSON.parse(localStorage.getItem(ISSUE_DISMISS_KEY) || "{}"); const now = Date.now(); const kept = {}; for (const k in raw) if (raw[k] > now) kept[k] = raw[k]; return kept; } catch { return {}; }
+  });
+  const dismissIssueTomorrow = useCallback((id) => {
+    const tomorrow = (() => { const d = new Date(); d.setHours(0,0,0,0); return d.getTime() + 24*60*60*1000; })();
+    setIssueDismissed(prev => { const next = { ...prev, [id]: tomorrow }; try { localStorage.setItem(ISSUE_DISMISS_KEY, JSON.stringify(next)); } catch {} return next; });
+  }, []);
+  // Открыть проблему: перейти в нужную карточку объекта / раздел
+  const openIssue = useCallback((nav) => {
+    if (!nav) return;
+    if (nav.object) {
+      const o = objectsRef.current.find(x => x.id === nav.object);
+      if (o) { setCurrentObject({ ...o }); setObjectTab("workspace"); if (nav.tab) setObjWsTab(nav.tab); setScreen("objects"); return; }
+      setScreen("objects"); return;
+    }
+    if (nav.screen) {
+      setScreen(nav.screen);
+      if (nav.screen === "finance" && nav.tab) setFinanceTab(nav.tab);
+    }
+  }, []);
+  const _issueActive = (i) => !(issueDismissed[i.id] > Date.now()); // не скрыта «до завтра»
+  // Операционные проблемы для дашборда admin/manager (минус скрытые «до завтра»)
+  const _todayIssues = useMemo(() => _allIssues.filter(i => i.scope === "today" && _issueActive(i)), [_allIssues, issueDismissed]);
+  // Целостность данных — для «Проверка базы» в Админке (скрывать нельзя)
+  const _checkIssues = useMemo(() => _allIssues.filter(i => i.scope === "check"), [_allIssues]);
+  // «Мои задачи» прораба: операционные проблемы по ЕГО объектам (ответственный/менеджер/создатель).
+  // Финансовую группу исключаем: прораб финансы не видит, и финпроекты ему не загружаются
+  // (loadFinance только для admin/manager) — иначе «подписан без финпроекта» давал бы ложные
+  // срабатывания на каждом объекте. Прорабу — производство и замечания клиента.
+  const _myIssues = useMemo(() => {
+    const mine = new Set(objects.filter(o => {
+      const p = productions.find(x => x.objectId === o.id);
+      return o.createdById === currentUser.id || o.manager === currentUser.name || (p && p.responsible === currentUser.name);
+    }).map(o => o.id));
+    return _allIssues.filter(i => i.scope === "today" && i.group !== "Финансы" && i.nav && mine.has(i.nav.object) && _issueActive(i));
+  }, [_allIssues, objects, productions, currentUser, issueDismissed]);
 
   // Объекты «в работе» для раздела «Производство»: только те, по которым заведён
   // проект в Финансах (связь по objectId, либо по номеру договора).
@@ -4899,8 +5175,10 @@ ${reqBlock}`;
   }, []);
 
   useEffect(() => { loadEstimates(); loadContracts(); }, []);
-  // Финансы грузим для админа и руководителя
-  useEffect(() => { if (currentUser?.role === "admin" || currentUser?.role === "manager") loadFinance(); }, [currentUser?.role, loadFinance]);
+  // Финансы грузим для админа, руководителя и прораба (прораб видит финансы ВНУТРИ объекта:
+  // вкладка Финансы + карточки. Сам раздел «Финансы» ему всё равно закрыт через effScreen).
+  // Замерщику финансы НЕ грузим — он видит себестоимость/маржу только в смете при заполнении.
+  useEffect(() => { const r = currentUser?.role; if (r === "admin" || r === "manager" || r === "foreman") loadFinance(); }, [currentUser?.role, loadFinance]);
 
   // ── САМОИСЦЕЛЕНИЕ СИНХРОНИЗАЦИИ ──
   const [resyncing, setResyncing] = useState(false);
@@ -4912,7 +5190,7 @@ ${reqBlock}`;
     try {
       await storage.flushDirty();
       await Promise.all([loadEstimates(), loadContracts()]);
-      if (currentUser?.role === "admin" || currentUser?.role === "manager") await loadFinance();
+      if (["admin","manager","foreman"].includes(currentUser?.role)) await loadFinance();
       setDirtyCount(storage.dirtyKeys().length);
     } catch(e) { console.warn("resync err", e); }
     setResyncing(false);
@@ -7151,8 +7429,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     const r = currentUser.role;
     const isAdmin = r === "admin", isMgr = r === "manager", isForeman = r === "foreman", isUser = r === "user", isViewer = r === "viewer";
     return [
-      ...(isAdmin||isMgr||isUser ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
+      ...(isAdmin||isMgr||isUser||isForeman ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
       { id:"objects", icon:"📦", label:"Объекты" },
+      ...(isAdmin||isMgr||isForeman ? [{ id:"calendar", icon:"📅", label:"Календарь" }] : []),
       ...(!isViewer&&!isForeman ? [{ id:"contracts", icon:"📄", label:"Прочие документы", short:"Документы" }] : []),
       ...(isAdmin||isMgr ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
       ...(isAdmin||isMgr||isUser ? [{ id:"finance", icon:"💰", label:"Финансы" }] : []),
@@ -7167,9 +7446,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
   const effScreen = (() => {
     // «Производство» объединено с «Объекты» — отдельного экрана больше нет, все ведёт в Объекты
     if (screen==="production") return "objects";
-    if (_isViewer && (screen==="dashboard"||screen==="analytics"||screen==="admin"||screen==="deals"||screen==="finance")) return "objects";
-    if (_isForeman && (screen==="analytics"||screen==="finance"||screen==="contracts"||screen==="dashboard"||screen==="admin")) return "objects";
-    if (_isUser && (screen==="analytics"||screen==="admin")) return "objects";
+    if (_isViewer && (screen==="dashboard"||screen==="analytics"||screen==="admin"||screen==="deals"||screen==="finance"||screen==="calendar")) return "objects";
+    if (_isForeman && (screen==="analytics"||screen==="finance"||screen==="contracts"||screen==="admin")) return "objects";
+    if (_isUser && (screen==="analytics"||screen==="admin"||screen==="calendar")) return "objects";
     // Замерщик доходит до экрана «Финансы», но внутри видит пометку «доступ закрыт» (см. рендер раздела finance)
     if (!_isAdmin && !_isMgr && !_isUser && screen==="finance") return "objects";
     if (!_isAdmin && screen==="admin") return "objects";
@@ -7424,7 +7703,31 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       {/* ═══════════════════════════════════════════════════════════════════
           ЭКРАН 0: ДАШБОРД
       ═══════════════════════════════════════════════════════════════════ */}
-      {effScreen === "dashboard" && (()=>{
+      {/* ── ГЛАВНАЯ ПРОРАБА: «Мои задачи» (без финансовых KPI — прораб финансы не видит) ── */}
+      {/* ── КАЛЕНДАРЬ ПРОИЗВОДСТВА (admin/manager/foreman) ── */}
+      {effScreen === "calendar" && (
+        <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40}}>
+          <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"22px 26px",marginBottom:20,boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
+            <div style={{fontSize:21,fontWeight:900,color:"#fff",marginBottom:3}}>📅 Календарь производства</div>
+            <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>Загрузка объектов, этапов и прорабов во времени · пересечения и просрочки</div>
+          </div>
+          <ProductionCalendar objects={liveObjects} productions={productions} onOpenObject={(id)=>openIssue({ object:id, tab:"stages" })} />
+        </div>
+      )}
+
+      {/* Главная «Мои задачи» — прораб И замерщик (без финансов: замерщик видит финансы
+          только в смете, прораб — внутри объекта, но не на дашборде). */}
+      {effScreen === "dashboard" && (_isForeman||_isUser) && (
+        <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40}}>
+          <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"24px 28px",marginBottom:24,boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
+            <div style={{fontSize:20,fontWeight:900,color:"#fff",marginBottom:4}}>Мои задачи</div>
+            <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>{new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"})} · <span style={{color:"#bfdbfe",fontWeight:600}}>{currentUser.name}</span></div>
+          </div>
+          <div style={{fontSize:16,fontWeight:900,color:"#0f172a",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>🔥 Что требует внимания по моим объектам</div>
+          <IssuePanel issues={_myIssues} onNav={openIssue} onDismiss={dismissIssueTomorrow} emptyText="✓ По вашим объектам всё в порядке" />
+        </div>
+      )}
+      {effScreen === "dashboard" && !(_isForeman||_isUser) && (()=>{
         const thisMonth = new Date().getMonth();
         const thisYear = new Date().getFullYear();
         const _inMonth = ts => { const d=new Date(ts||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; };
@@ -7525,6 +7828,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               ))}
             </div>
           </div>
+
+          {/* ── ЧТО ГОРИТ СЕГОДНЯ (admin/manager) ── */}
+          {(_isAdmin||_isMgr) && (
+            <div style={{marginBottom:24}}>
+              <div style={{fontSize:16,fontWeight:900,color:"#0f172a",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>🔥 Что горит сегодня</div>
+              <IssuePanel issues={_todayIssues} onNav={openIssue} onDismiss={dismissIssueTomorrow} emptyText="✓ Всё под контролем — срочных задач нет" />
+            </div>
+          )}
 
           {/* KPI карточки */}
           <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14,marginBottom:24}}>
@@ -11128,7 +11439,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       {/* Финансовый блок — единый вид для всех карточек (как в «Производстве»).
                           У лида бюджет = сумма смет (помечено «смета»), оплаты ещё нет.
                           Видно только admin/manager — у остальных ролей нет доступа к финансам вообще. */}
-                      {(_isAdmin||_isMgr) && <div style={{marginBottom:10}}>
+                      {(_isAdmin||_isMgr||_isForeman) && <div style={{marginBottom:10}}>
                         {fin.budget>0 ? <>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
                             <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{fmt(fin.income)} <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>из {fmt(fin.budget)} ₸{fin._est?" · смета":""}</span></span>
@@ -11194,7 +11505,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         </div>
                         <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap",flexShrink:0}}>{st.label}</span>
                       </div>
-                      {(_isAdmin||_isMgr) && <div style={{marginBottom:10}}>
+                      {(_isAdmin||_isMgr||_isForeman) && <div style={{marginBottom:10}}>
                         {e.budget>0 ? <>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
                             <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{fmt(e.income)} <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>из {fmt(e.budget)} ₸</span></span>
@@ -11676,18 +11987,18 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 })()}
                 </>)}
 
-                {/* Вкладка «Финансы» объекта закрыта всем, кроме admin/manager — показываем пометку.
-                    Раньше проверялся только _isUser: foreman и viewer открывали FinanceTab (бюджет/
-                    долг/маржа) совершенно свободно, хотя по ролевой модели финансы им не положены. */}
-                {objWsTab==="finance" && !(_isAdmin||_isMgr) && (
+                {/* Вкладка «Финансы» объекта: видят admin/manager/foreman (руководство + прораб —
+                    финансы ВНУТРИ объекта). Замерщик (user) и viewer — пометка «доступ закрыт».
+                    Замерщик видит себестоимость/маржу только в смете при заполнении, больше нигде. */}
+                {objWsTab==="finance" && !(_isAdmin||_isMgr||_isForeman) && (
                   <div style={{maxWidth:480,margin:"32px auto",textAlign:"center",background:"#f9fafb",border:"1px dashed #e5e7eb",borderRadius:12,padding:"32px 24px"}}>
                     <div style={{fontSize:38,marginBottom:12}}>🔒</div>
                     <div style={{fontWeight:800,fontSize:16,color:"#0f172a",marginBottom:6}}>Доступ закрыт</div>
-                    <div style={{fontSize:13,color:"#64748b",lineHeight:1.5}}>Финансы по объекту доступны только руководству.</div>
+                    <div style={{fontSize:13,color:"#64748b",lineHeight:1.5}}>Финансы по объекту доступны руководству и прорабу.</div>
                   </div>
                 )}
                 {/* Производственные вкладки (и производственная часть «Информации») — встроенный модуль Производства */}
-                {["info","launch","stages","finance","journal","defects","handover"].includes(objWsTab) && !(objWsTab==="finance" && !(_isAdmin||_isMgr)) && (
+                {["info","launch","stages","finance","journal","defects","handover"].includes(objWsTab) && !(objWsTab==="finance" && !(_isAdmin||_isMgr||_isForeman)) && (
                   <div style={{marginTop: objWsTab==="info" ? 14 : 0}}>
                   <ProductionModule
                     embedObjectId={obj.id}
@@ -12062,6 +12373,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           contracts={contracts}
           fmt={fmt}
           onBackupWorkspace={openWorkspaceBackups}
+          checkIssues={_checkIssues}
+          onNavIssue={openIssue}
         />
       )}
 
