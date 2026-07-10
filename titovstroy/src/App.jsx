@@ -703,7 +703,10 @@ const CONTRACTS_KEY  = "titovstroy-contracts";
 const CLIENTS_KEY    = "titovstroy-clients";
 const CONTRAGENTS_KEY= "titovstroy-contragents";
 // ── ФИНАНСЫ (независимый учёт: ДДС + P&L) ──
-const AUDIT_KEY               = "titovstroy-audit";             // журнал действий
+const AUDIT_KEY               = "titovstroy-audit";             // ЛЕГАСИ-журнал (архив, только чтение)
+const AUDIT_INDEX_KEY         = "titovstroy-audit-index";       // список месяцев ["2026-07", ...] (какие помесячные ключи есть)
+const AUDIT_MONTH_KEY         = (ym) => "titovstroy-audit-" + ym; // помесячный журнал (без лимита записей)
+const _auditYM = (ts = Date.now()) => { const d = new Date(ts); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); };
 const FINANCE_TX_KEY          = "titovstroy-finance-tx";        // массив транзакций
 const FINANCE_TX_BACKUPS_KEY  = "titovstroy-finance-tx-backups";
 const FINANCE_META_KEY        = "titovstroy-finance-meta";      // {accounts, income, expense}
@@ -836,16 +839,94 @@ function clearLoginAttempts(login) {
   try { localStorage.setItem(LOGIN_ATTEMPTS_KEY, JSON.stringify(all)); } catch {}
 }
 
-// Аудит: записываем событие {ts, userId, userName, action, entity, entityId, detail}
-// Хранится как массив, ограниченный 500 последними записями (ротация).
-const writeAudit = async (user, action, entity, entityId, detail="") => {
+// Аудит-журнал. Структурная запись изменения:
+//   {ts, userId, by, entity, entityId, label, objectId, field, action, old, new, detail, source}
+//   entity: object|contract|estimate|finance_tx|user|client|stage|publish|document
+//   source: manual (вручную) | import (импорт) | autosync (автосинк) | cabinet (клиентский кабинет)
+// Хранится ПОМЕСЯЧНО (titovstroy-audit-ГГГГ-ММ, без лимита) + индекс существующих месяцев.
+// Старый ключ titovstroy-audit больше НЕ пишется — он остаётся архивом (читается в общем журнале).
+const logChange = async (user, ev = {}) => {
   try {
-    const raw = await storage.get(AUDIT_KEY);
-    const prev = raw ? JSON.parse(raw.value) : [];
-    const entry = { ts:Date.now(), userId:user?.id||"?", by:user?.name||"?", action, entity, entityId:entityId||"", detail };
-    const next = [entry, ...prev].slice(0, 500);
-    await storage.set(AUDIT_KEY, JSON.stringify(next));
-  } catch(e) { console.warn("audit write failed", e); }
+    const ts = ev.ts || Date.now();
+    const ym = _auditYM(ts);
+    const entry = {
+      ts,
+      userId: user?.id || "?",
+      by: user?.name || "?",
+      entity: ev.entity || "",
+      entityId: ev.entityId || "",
+      label: ev.label || "",
+      objectId: ev.objectId || "",
+      field: ev.field || "",
+      action: ev.action || "",
+      old: ev.old !== undefined ? ev.old : "",
+      new: ev.new !== undefined ? ev.new : "",
+      detail: ev.detail || "",
+      source: ev.source || "manual",
+    };
+    const mk = AUDIT_MONTH_KEY(ym);
+    // читаем прямо перед записью — минимизируем окно гонки при одновременных правках
+    const raw = await storage.get(mk);
+    let arr = [];
+    if (raw) { try { const p = JSON.parse(raw.value); if (Array.isArray(p)) arr = p; } catch {} }
+    await storage.set(mk, JSON.stringify([entry, ...arr]));
+    // индекс месяцев — дописываем только когда появился новый месяц
+    try {
+      const ir = await storage.get(AUDIT_INDEX_KEY);
+      let idx = [];
+      if (ir) { try { const p = JSON.parse(ir.value); if (Array.isArray(p)) idx = p; } catch {} }
+      if (!idx.includes(ym)) { idx = [...new Set([ym, ...idx])].sort().reverse(); await storage.set(AUDIT_INDEX_KEY, JSON.stringify(idx)); }
+    } catch {}
+  } catch (e) { console.warn("audit write failed", e); }
+};
+// Обратная совместимость: старые вызовы writeAudit(user, action, entity, entityId, detail).
+const writeAudit = (user, action, entity, entityId, detail = "") =>
+  logChange(user, { action, entity, entityId, detail });
+
+// Человекочитаемые поля объекта для журнала (форматируем «было/стало»)
+const OBJ_FIELD_META = {
+  status:      { label: "статус",        fmt: (v) => (DEAL_STATUSES.find(s => s.key === v) || {}).label || v || "—" },
+  clientName:  { label: "клиент",        fmt: (v) => v || "—" },
+  address:     { label: "адрес",         fmt: (v) => v || "—" },
+  objType:     { label: "тип объекта",   fmt: (v) => v || "—" },
+  phone:       { label: "телефон",       fmt: (v) => v || "—" },
+  responsible: { label: "ответственный", fmt: (v) => v || "—" },
+  foreman:     { label: "прораб",        fmt: (v) => v || "—" },
+  planEndDate: { label: "план сдачи",    fmt: (v) => v ? new Date(v).toLocaleDateString("ru-RU") : "—" },
+  startDate:   { label: "старт",         fmt: (v) => v ? new Date(v).toLocaleDateString("ru-RU") : "—" },
+};
+const _objLabel = (o) => (o?.clientName || o?.address || o?.objType || "Объект");
+// Логируем изменения значимых полей объекта (по патчу): только реально изменившиеся.
+const logObjChange = (user, obj, patch, source = "manual") => {
+  for (const f of Object.keys(patch || {})) {
+    if (f === "updatedAt") continue;
+    const before = obj ? obj[f] : undefined;
+    const after = patch[f];
+    if (before === after) continue;
+    const meta = OBJ_FIELD_META[f];
+    if (!meta) continue;
+    logChange(user, { entity: "object", entityId: obj?.id || "", objectId: obj?.id || "", label: _objLabel(obj), field: meta.label, action: "изменил", old: meta.fmt(before), new: meta.fmt(after), source });
+  }
+};
+// Сумма договора (для журнала): сумма позиций, иначе м²-расчёт, иначе totalCost.
+const contractAmount = (c) => {
+  const ws = (c?.works || []).reduce((s, w) => s + ((Number(w.quantity) || 0) * (Number(w.price) || 0)), 0);
+  if (ws) return ws;
+  if (c?.priceType === "sqm") return Math.round((Number(c?.pricePerSqm) || 0) * (Number(c?.area) || 0)) || 0;
+  return Number(c?.totalCost) || 0;
+};
+const _tng = (n) => (Math.round(Number(n) || 0)).toLocaleString("ru-RU") + " ₸";
+const _finTypeLbl = { income: "поступление", expense: "расход", transfer: "перевод" };
+const _cStatusLbl = (v) => (CONTRACT_STATUSES.find(s => s.key === (v || "draft")) || {}).label || v || "—";
+// Логируем сохранение договора: создание, изменение суммы, изменение статуса.
+const logContractSave = (user, oldC, newC) => {
+  const label = newC?.contractNo || newC?.number || newC?.objectName || "Договор";
+  const objectId = newC?.objectId || "";
+  if (!oldC) { logChange(user, { entity: "contract", entityId: newC?.id || "", objectId, label, action: "создал договор", new: _tng(contractAmount(newC)) }); return; }
+  const oa = Math.round(contractAmount(oldC)), na = Math.round(contractAmount(newC));
+  if (oa !== na) logChange(user, { entity: "contract", entityId: newC.id, objectId, label, field: "сумма договора", action: "изменил", old: _tng(oa), new: _tng(na) });
+  const os = oldC.contractStatus || "draft", ns = newC.contractStatus || "draft";
+  if (os !== ns) logChange(user, { entity: "contract", entityId: newC.id, objectId, label, field: "статус договора", action: "изменил", old: _cStatusLbl(os), new: _cStatusLbl(ns) });
 };
 
 // Экспорт в CSV (Excel открывает напрямую; BOM + ; для русской локали)
@@ -1169,79 +1250,176 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-function AuditTab() {
-  const [auditLog, setAuditLog] = useState([]);
-  const [auditLoading, setAuditLoading] = useState(true);
-  const [filterSection, setFilterSection] = useState("");
-  useEffect(()=>{
-    (async()=>{
-      setAuditLoading(true);
-      const r = await storage.get(AUDIT_KEY);
-      if(r){ try{ setAuditLog(JSON.parse(r.value)); }catch{} }
-      setAuditLoading(false);
+// Метаданные журнала (используются и общим журналом, и срезом по объекту)
+const AUDIT_SECTION_META = {
+  finance_tx: { label: "Финансы",   color: "#059669", bg: "#d1fae5", icon: "💰" },
+  object:     { label: "Объекты",   color: "#2563eb", bg: "#dbeafe", icon: "🏗" },
+  contract:   { label: "Договора",  color: "#7c3aed", bg: "#ede9fe", icon: "📋" },
+  estimate:   { label: "Сметы",     color: "#0891b2", bg: "#cffafe", icon: "🧮" },
+  stage:      { label: "Этапы",     color: "#ea580c", bg: "#ffedd5", icon: "🛠" },
+  publish:    { label: "Кабинет",   color: "#0d9488", bg: "#ccfbf1", icon: "🌐" },
+  document:   { label: "Документы", color: "#4f46e5", bg: "#e0e7ff", icon: "📄" },
+  client:     { label: "Клиенты",   color: "#db2777", bg: "#fce7f3", icon: "🧑" },
+  user:       { label: "Польз-ли",  color: "#d97706", bg: "#fef3c7", icon: "👤" },
+};
+const AUDIT_SOURCE_META = {
+  manual:   { label: "вручную",  color: "#64748b" },
+  import:   { label: "импорт",   color: "#7c3aed" },
+  autosync: { label: "автосинк", color: "#0891b2" },
+  cabinet:  { label: "кабинет",  color: "#d97706" },
+};
+// Иконка/цвет по смыслу действия (работает и со старыми текстовыми, и с новыми записями)
+const _auditActionMeta = (action = "") => {
+  const a = String(action).toLowerCase();
+  if (/(созда|добав)/.test(a))            return { icon: "➕", color: "#059669" };
+  if (/удали/.test(a))                     return { icon: "🗑", color: "#dc2626" };
+  if (/восстанов/.test(a))                 return { icon: "♻️", color: "#059669" };
+  if (/(назнач)/.test(a))                  return { icon: "👷", color: "#d97706" };
+  if (/(опубликова|публик|доступ)/.test(a))return { icon: "🌐", color: "#0d9488" };
+  if (/(измен|редактир|обнов|перенёс|перенес)/.test(a)) return { icon: "✏️", color: "#2563eb" };
+  return { icon: "📝", color: "#64748b" };
+};
+const _auditVal = (v) => (v === null || v === undefined || v === "") ? "—" : String(v);
+
+// Журнал изменений. Без objectId — общий (Админка, только админ), с помесячным выбором и фильтрами.
+// С objectId — компактный срез по конкретному объекту (все месяцы + архив).
+function AuditTab({ objectId = null }) {
+  const embed = !!objectId;
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [months, setMonths] = useState([]);      // ["2026-07", ...] newest-first
+  const [month, setMonth] = useState("");         // выбранный; "__legacy__" = архив
+  const [fEntity, setFEntity] = useState("");
+  const [fUser, setFUser] = useState("");
+  const [q, setQ] = useState("");
+
+  const readKey = async (k) => { try { const r = await storage.get(k); if (r) { const p = JSON.parse(r.value); if (Array.isArray(p)) return p; } } catch {} return []; };
+
+  // Индекс месяцев (для селектора / обхода при embed)
+  useEffect(() => {
+    (async () => {
+      let idx = await readKey(AUDIT_INDEX_KEY);
+      if (!Array.isArray(idx)) idx = [];
+      const cur = _auditYM();
+      idx = [...new Set([cur, ...idx])].sort().reverse();
+      setMonths(idx);
+      if (!embed) setMonth((m) => m || idx[0] || cur);
     })();
-  }, []);
+  }, [embed]);
 
-  const SECTION_META = {
-    finance_tx: { label:"Финансы",    color:"#059669", bg:"#d1fae5", icon:"💰" },
-    object:     { label:"Объекты",    color:"#2563eb", bg:"#dbeafe", icon:"🏗" },
-    contract:   { label:"Договора",   color:"#7c3aed", bg:"#ede9fe", icon:"📋" },
-    user:       { label:"Польз-ли",   color:"#d97706", bg:"#fef3c7", icon:"👤" },
+  // Загрузка записей
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      let out = [];
+      if (embed) {
+        // все месяцы (макс. 12 последних) + архив, фильтр по объекту
+        const keys = [...months.slice(0, 12).map(AUDIT_MONTH_KEY), AUDIT_KEY];
+        for (const k of keys) out.push(...await readKey(k));
+        out = out.filter(e => (e.objectId && e.objectId === objectId) || e.entityId === objectId);
+      } else {
+        if (!month) { setLoading(false); return; }
+        out = month === "__legacy__" ? await readKey(AUDIT_KEY) : await readKey(AUDIT_MONTH_KEY(month));
+      }
+      out.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+      setRows(out);
+      setLoading(false);
+    })();
+  }, [embed, objectId, month, months]);
+
+  const users = [...new Set(rows.map(e => e.by).filter(Boolean))];
+  const sections = [...new Set(rows.map(e => e.entity).filter(Boolean))];
+  const filtered = rows.filter(e => {
+    if (fEntity && e.entity !== fEntity) return false;
+    if (fUser && e.by !== fUser) return false;
+    if (q) {
+      const hay = [e.by, e.label, e.detail, e.field, e.action, e.old, e.new].map(x => String(x || "").toLowerCase()).join(" ");
+      if (!hay.includes(q.toLowerCase().trim())) return false;
+    }
+    return true;
+  });
+
+  const monthLabel = (ym) => {
+    if (ym === "__legacy__") return "🗄 Архив (старое)";
+    const [y, m] = ym.split("-");
+    const nm = ["", "янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"][+m] || m;
+    return `${nm} ${y}`;
   };
-  const ACTION_META = {
-    "создал операцию":      { icon:"➕", color:"#059669" },
-    "изменил операцию":     { icon:"✏️", color:"#2563eb" },
-    "удалил операцию":      { icon:"🗑", color:"#dc2626" },
-    "создал объект":        { icon:"➕", color:"#059669" },
-    "изменил объект":       { icon:"✏️", color:"#2563eb" },
-    "удалил объект":        { icon:"🗑", color:"#dc2626" },
-    "восстановил объект":   { icon:"♻️", color:"#059669" },
-    "создал договор":       { icon:"➕", color:"#059669" },
-    "изменил договор":      { icon:"✏️", color:"#2563eb" },
-    "удалил договор":       { icon:"🗑", color:"#dc2626" },
-    "восстановил договор":  { icon:"♻️", color:"#059669" },
-    "создал пользователя":  { icon:"➕", color:"#059669" },
-    "изменил пользователя": { icon:"✏️", color:"#2563eb" },
-  };
 
-  const sections = [...new Set(auditLog.map(e=>e.entity).filter(Boolean))];
-  const filtered = filterSection ? auditLog.filter(e=>e.entity===filterSection) : auditLog;
-
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:6}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:8}}>
-        <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>Журнал действий</div>
-        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-          <button onClick={()=>setFilterSection("")} style={{fontSize:11,padding:"3px 10px",borderRadius:20,border:"1px solid #e2e8f0",background:filterSection===""?"#0f172a":"#f8fafc",color:filterSection===""?"#fff":"#64748b",cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Все</button>
-          {sections.map(s=>{ const m=SECTION_META[s]; if(!m) return null; return (
-            <button key={s} onClick={()=>setFilterSection(s===filterSection?"":s)} style={{fontSize:11,padding:"3px 10px",borderRadius:20,border:`1px solid ${m.color}40`,background:filterSection===s?m.color:m.bg,color:filterSection===s?"#fff":m.color,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>{m.icon} {m.label}</button>
-          );})}
-          <span style={{fontSize:11,color:"#94a3b8"}}>{filtered.length} событий</span>
+  const renderEntry = (e, i) => {
+    const sm = AUDIT_SECTION_META[e.entity] || { label: e.entity || "—", color: "#64748b", bg: "#f1f5f9", icon: "📝" };
+    const am = _auditActionMeta(e.action);
+    const src = AUDIT_SOURCE_META[e.source] || null;
+    const _hasVal = (v) => v !== undefined && v !== null && v !== "";
+    const showDiff = _hasVal(e.old) || _hasVal(e.new);
+    return (
+      <div key={i} style={{ background: "#fff", border: "1px solid #f1f5f9", borderRadius: 10, padding: "10px 13px", display: "flex", gap: 10, alignItems: "flex-start" }}>
+        <div style={{ width: 32, height: 32, borderRadius: 8, background: sm.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>{sm.icon}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 3 }}>
+            <span style={{ fontSize: 9.5, fontWeight: 700, color: sm.color, background: sm.bg, padding: "1px 7px", borderRadius: 20, border: `1px solid ${sm.color}30` }}>{sm.label}</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: am.color }}>{am.icon} {e.action}{e.field ? <span style={{ color: "#0f172a" }}> · {e.field}</span> : null}</span>
+            {src && <span style={{ fontSize: 9.5, fontWeight: 700, color: src.color, background: src.color + "14", padding: "1px 7px", borderRadius: 20 }}>{src.label}</span>}
+          </div>
+          {e.label && <div style={{ fontSize: 12, color: "#334155", marginBottom: showDiff ? 4 : 0, overflowWrap: "break-word" }}>{e.label}</div>}
+          {showDiff && (
+            <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", fontSize: 12, marginBottom: 2 }}>
+              <span style={{ background: "#fef2f2", color: "#b91c1c", padding: "1px 8px", borderRadius: 6, textDecoration: "line-through", overflowWrap: "anywhere" }}>{_auditVal(e.old)}</span>
+              <span style={{ color: "#94a3b8" }}>→</span>
+              <span style={{ background: "#f0fdf4", color: "#15803d", padding: "1px 8px", borderRadius: 6, fontWeight: 700, overflowWrap: "anywhere" }}>{_auditVal(e.new)}</span>
+            </div>
+          )}
+          <div style={{ fontSize: 11.5, color: "#0f172a" }}><b style={{ color: "#2563eb" }}>{e.by}</b>{e.detail ? <span style={{ color: "#64748b", fontWeight: 400 }}> · {e.detail}</span> : null}</div>
+        </div>
+        <div style={{ fontSize: 11, color: "#94a3b8", whiteSpace: "nowrap", flexShrink: 0, textAlign: "right" }}>
+          <div>{new Date(e.ts).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit" })}</div>
+          <div>{new Date(e.ts).toLocaleString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</div>
         </div>
       </div>
-      {auditLoading && <div style={{color:"#94a3b8",textAlign:"center",padding:"30px 0"}}>Загрузка...</div>}
-      {!auditLoading && filtered.length===0 && <div style={{color:"#94a3b8",textAlign:"center",padding:"30px 0"}}>Событий пока нет</div>}
-      {filtered.map((e,i)=>{
-        const sm = SECTION_META[e.entity]||{ label:e.entity||"—", color:"#64748b", bg:"#f1f5f9", icon:"📝" };
-        const am = ACTION_META[e.action]||{ icon:"📝", color:"#64748b" };
-        return (
-          <div key={i} style={{background:"#fff",border:"1px solid #f1f5f9",borderRadius:10,padding:"10px 14px",display:"flex",gap:10,alignItems:"flex-start"}}>
-            <div style={{width:34,height:34,borderRadius:8,background:sm.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{sm.icon}</div>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:3}}>
-                <span style={{fontSize:10,fontWeight:700,color:sm.color,background:sm.bg,padding:"1px 7px",borderRadius:20,border:`1px solid ${sm.color}30`}}>{sm.label}</span>
-                <span style={{fontSize:12,fontWeight:700,color:am.color}}>{am.icon} {e.action}</span>
-              </div>
-              <div style={{fontSize:12,color:"#0f172a"}}><b style={{color:"#2563eb"}}>{e.by}</b>{e.detail ? <span style={{color:"#64748b",fontWeight:400}}> · {e.detail}</span> : null}</div>
-            </div>
-            <div style={{fontSize:11,color:"#94a3b8",whiteSpace:"nowrap",flexShrink:0,textAlign:"right"}}>
-              <div>{new Date(e.ts).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit"})}</div>
-              <div>{new Date(e.ts).toLocaleString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</div>
-            </div>
-          </div>
-        );
-      })}
-      {auditLog.length>0&&<button onClick={()=>downloadCSV("audit_"+new Date().toISOString().slice(0,10)+".csv",["Дата","Кто","Раздел","Действие","Детали"],auditLog.map(e=>[new Date(e.ts).toLocaleString("ru-RU"),e.by,SECTION_META[e.entity]?.label||e.entity||"",e.action,e.detail||""]))} style={{alignSelf:"flex-start",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⬇ Экспорт журнала</button>}
+    );
+  };
+
+  const selStyle = { fontSize: 12, padding: "5px 9px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", color: "#334155", fontFamily: "inherit", cursor: "pointer" };
+
+  if (embed) {
+    // Компактный срез по объекту
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {loading && <div style={{ color: "#94a3b8", textAlign: "center", padding: "20px 0", fontSize: 13 }}>Загрузка журнала…</div>}
+        {!loading && filtered.length === 0 && <div style={{ color: "#94a3b8", textAlign: "center", padding: "20px 0", fontSize: 13 }}>Изменений по объекту пока нет</div>}
+        {filtered.map(renderEntry)}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a" }}>Журнал изменений</div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <select value={month} onChange={e => setMonth(e.target.value)} style={selStyle}>
+            {months.map(ym => <option key={ym} value={ym}>{monthLabel(ym)}</option>)}
+            <option value="__legacy__">{monthLabel("__legacy__")}</option>
+          </select>
+          <select value={fUser} onChange={e => setFUser(e.target.value)} style={selStyle}>
+            <option value="">Все пользователи</option>
+            {users.map(u => <option key={u} value={u}>{u}</option>)}
+          </select>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Поиск: объект, договор…" style={{ ...selStyle, cursor: "text", minWidth: 150 }} />
+        </div>
+      </div>
+      {/* Фильтр по разделу */}
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
+        <button onClick={() => setFEntity("")} style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, border: "1px solid #e2e8f0", background: fEntity === "" ? "#0f172a" : "#f8fafc", color: fEntity === "" ? "#fff" : "#64748b", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>Все</button>
+        {sections.map(s => { const m = AUDIT_SECTION_META[s]; if (!m) return null; return (
+          <button key={s} onClick={() => setFEntity(s === fEntity ? "" : s)} style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, border: `1px solid ${m.color}40`, background: fEntity === s ? m.color : m.bg, color: fEntity === s ? "#fff" : m.color, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>{m.icon} {m.label}</button>
+        ); })}
+        <span style={{ fontSize: 11, color: "#94a3b8" }}>{filtered.length} событий</span>
+      </div>
+      {loading && <div style={{ color: "#94a3b8", textAlign: "center", padding: "30px 0" }}>Загрузка…</div>}
+      {!loading && filtered.length === 0 && <div style={{ color: "#94a3b8", textAlign: "center", padding: "30px 0" }}>Событий не найдено</div>}
+      {filtered.map(renderEntry)}
+      {filtered.length > 0 && <button onClick={() => downloadCSV("journal_" + (month === "__legacy__" ? "archive" : month) + ".csv", ["Дата", "Кто", "Раздел", "Действие", "Поле", "Было", "Стало", "Источник", "Объект/детали"], filtered.map(e => [new Date(e.ts).toLocaleString("ru-RU"), e.by, AUDIT_SECTION_META[e.entity]?.label || e.entity || "", e.action, e.field || "", _auditVal(e.old), _auditVal(e.new), AUDIT_SOURCE_META[e.source]?.label || e.source || "", e.label || e.detail || ""]))} style={{ alignSelf: "flex-start", background: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", marginTop: 4 }}>⬇ Экспорт (CSV)</button>}
     </div>
   );
 }
@@ -1818,7 +1996,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                         style={{background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
                     )}
                     {(currentUser.role==="admin"||(currentUser.role==="user"&&c.createdById===currentUser.id))&&(
-                      <button onClick={async ()=>{ if(await confirmTyped("Удалить клиента «"+(c.name||"без имени")+"»?\nЭто действие нельзя отменить через интерфейс.")) saveClients(clientsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
+                      <button onClick={async ()=>{ if(await confirmTyped("Удалить клиента «"+(c.name||"без имени")+"»?\nЭто действие нельзя отменить через интерфейс.")){ saveClients(clientsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); logChange(currentUser,{entity:"client",entityId:c.id,label:c.name||"без имени",action:"удалил клиента",detail:c.phone||""}); } }}
                         style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                     )}
                   </div>
@@ -4245,6 +4423,8 @@ function MainApp({ currentUser, setCurrentUser }) {
     if ((exists.status || "new") !== (updated.status || "new")) {
       const lbl = (STATUSES.find(s => s.key === (updated.status || "new")) || {}).label || updated.status;
       push(`статус → «${lbl}»`);
+      const oldLbl = (STATUSES.find(s => s.key === (exists.status || "new")) || {}).label || exists.status || "—";
+      logChange(currentUser, { entity: "estimate", entityId: updated.id || "", objectId: updated.objectId || "", label: `Смета${updated.dsNumber ? ` (ДС №${updated.dsNumber})` : ""}`, field: "статус", action: "изменил смету", old: oldLbl, new: lbl });
     }
     const last = hist[hist.length - 1];
     const recentEdit = last && last.by === by && last.action === "редактировал" && (now - last.ts) < 10 * 60 * 1000;
@@ -4862,6 +5042,7 @@ ${reqBlock}`;
       const token = obj.progressToken;
       await saveObjects([...objectsRef.current.filter(o => o.id !== objectId), { ...obj, progressShared: false, updatedAt: Date.now() }]);
       await _revokeProgressAccess(token);
+      logChange(currentUser, { entity: "publish", entityId: objectId, objectId, label: _objLabel(obj), action: "закрыл доступ клиенту" });
       return null;
     }
     const token = obj.progressToken || (genId() + Math.random().toString(36).slice(2, 10));
@@ -4872,6 +5053,7 @@ ${reqBlock}`;
     const snap = buildProgressSnapshot(objectId, {});
     if (snap) { try { await storage.set(PROGRESS_NODE(token), JSON.stringify(snap)); } catch {} }
     try { await _publishDocsRef.current?.(objectId); } catch {}
+    logChange(currentUser, { entity: "publish", entityId: objectId, objectId, label: _objLabel(obj), action: "открыл доступ клиенту" });
     return linkOf(token);
   }, [saveObjects, buildProgressSnapshot, _revokeProgressAccess]);
   // Настройки видимости кабинета: что показывать клиенту (платежи/документы/этапы/замечания).
@@ -4884,7 +5066,14 @@ ${reqBlock}`;
     setCurrentObject(p => (p && p.id === objectId) ? { ...p, clientVis } : p);
     try { await publishProgressRef.current?.(objectId); } catch {}
     try { await _publishDocsRef.current?.(objectId); } catch {}
-  }, [saveObjects]);
+    // журнал: каждый переключённый раздел видимости
+    const VIS_LBL = { payments: "оплата", docs: "документы", stages: "этапы работ", remarks: "замечания" };
+    for (const f of Object.keys(patch || {})) {
+      const before = (obj.clientVis || {})[f] !== false, after = patch[f] !== false;
+      if (before === after) continue;
+      logChange(currentUser, { entity: "publish", entityId: objectId, objectId, label: _objLabel(obj), field: "видимость: " + (VIS_LBL[f] || f), action: "изменил доступ", old: before ? "показано" : "скрыто", new: after ? "показано" : "скрыто" });
+    }
+  }, [saveObjects, currentUser]);
   // Публикация документов клиента (договоры/акты) при их изменении — для открытых объектов
   const _docsPubTimer = useRef(null);
   useEffect(() => {
@@ -11062,10 +11251,16 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   isAdvance:m.type==="income"?!!m.isAdvance:false,
                   included:m.included!==false, opuMonth:m.opuMonth, createdAt:m.createdAt||ts, updatedAt:Date.now() };
                 const isNew = !m.id;
+                const _oldTx = m.id ? financeTxRef.current.find(x=>x.id===m.id) : null;
                 setFinTxModal(null);
                 // merge (replace:false) — не перезатираем облако: операции с других устройств не теряются
                 saveFinanceTx([tx],{replace:false});
-                writeAudit(currentUser, isNew?"создал операцию":"изменил операцию", "finance_tx", tx.id, `${tx.type} ${Math.round(tx.amount)} ₸ ${tx.category||""}`);
+                // журнал: привязываем к объекту по номеру договора, если получается
+                const _oid = (tx.contractNo && (contractsRef.current.find(c=>normCN(c.number||"")===normCN(tx.contractNo)||normCN(c.contractNo||"")===normCN(tx.contractNo))||{}).objectId) || "";
+                const _tl = _finTypeLbl[tx.type] || tx.type;
+                const _lbl = `${_tl}${tx.category?` · ${tx.category}`:""}${tx.contractNo?` · дог. ${tx.contractNo}`:""}`;
+                if (isNew) logChange(currentUser, { entity:"finance_tx", entityId:tx.id, objectId:_oid, label:_lbl, action:"создал операцию", new:_tng(tx.amount) });
+                else logChange(currentUser, { entity:"finance_tx", entityId:tx.id, objectId:_oid, label:_lbl, field:"сумма", action:"изменил операцию", old:_tng(_oldTx?.amount), new:_tng(tx.amount) });
               };
               const del = ()=>{
                 if(!m.id) return; if(!confirm("Переместить операцию в корзину?")) return;
@@ -11073,7 +11268,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 const deleted={...ex,deletedAt:Date.now(),updatedAt:Date.now()};
                 setFinTxModal(null);
                 saveFinanceTx([deleted],{replace:false});
-                writeAudit(currentUser,"удалил операцию","finance_tx",m.id,`${m.type} ${Math.round(Number(m.amount)||0)} ₸`);
+                const _doid = (ex.contractNo && (contractsRef.current.find(c=>normCN(c.number||"")===normCN(ex.contractNo)||normCN(c.contractNo||"")===normCN(ex.contractNo))||{}).objectId) || "";
+                const _dtl = _finTypeLbl[ex.type] || ex.type;
+                logChange(currentUser, { entity:"finance_tx", entityId:m.id, objectId:_doid, label:`${_dtl}${ex.category?` · ${ex.category}`:""}`, action:"удалил операцию", old:_tng(ex.amount) });
               };
               return (
                 <div onClick={()=>{setFinCatOpen(false);setFinTxModal(null);}} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.55)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
@@ -11392,6 +11589,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           const list = objectsRef.current.map(x=>x.id===obj.id?updated:x);
           await saveObjects(list);
           setCurrentObject(updated);
+          logObjChange(currentUser, obj, patch);
         };
 
         return (
@@ -11550,7 +11748,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
                           <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap"}}>{st.label}</span>
                           {(currentUser.role==="admin"||(currentUser.role==="user"&&obj.createdById===currentUser.id)) && (
-                            <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить объект в корзину?")){ saveObjects(objectsRef.current.map(x=>x.id===obj.id?{...x,deletedAt:Date.now()}:x)); writeAudit(currentUser,"удалил объект","object",obj.id,obj.clientName||obj.address||obj.objType||""); }}}
+                            <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить объект в корзину?")){ saveObjects(objectsRef.current.map(x=>x.id===obj.id?{...x,deletedAt:Date.now()}:x)); logChange(currentUser,{entity:"object",entityId:obj.id,objectId:obj.id,label:_objLabel(obj),action:"удалил объект"}); }}}
                               title="В корзину (можно восстановить)" style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.15)",borderRadius:6,padding:"2px 7px",fontSize:11,cursor:"pointer",fontFamily:"inherit",marginTop:2}}>🗑</button>
                           )}
                         </div>
@@ -11870,6 +12068,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     ["journal","📖 Журнал"],
                     ["defects","⚠️ Замечания"],
                     ["handover","🏁 Сдача"],
+                    ...(_isAdmin ? [["changes","🧾 Изменения"]] : []),
                   ].map(([k,l])=>(
                     <button key={k} onClick={()=>setObjWsTab(k)}
                       style={{background:objWsTab===k?"#fff":"transparent",border:"1px solid",borderColor:objWsTab===k?"#e2e8f0":"transparent",borderBottom:objWsTab===k?"1px solid #fff":"1px solid transparent",marginBottom:-1,borderRadius:"10px 10px 0 0",padding:"9px 14px",fontSize:13,fontWeight:objWsTab===k?700:500,color:objWsTab===k?"#0f172a":"#64748b",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
@@ -12116,6 +12315,13 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     <div style={{fontSize:13,color:"#64748b",lineHeight:1.5}}>Финансы по объекту доступны руководству и прорабу.</div>
                   </div>
                 )}
+                {/* Журнал изменений по объекту (только админ) */}
+                {objWsTab==="changes" && _isAdmin && (
+                  <div style={{marginTop:8}}>
+                    <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Кто и когда менял статус, сумму, оплаты, сроки, прораба и доступ клиента по этому объекту.</div>
+                    <AuditTab objectId={obj.id} />
+                  </div>
+                )}
                 {/* Производственные вкладки (и производственная часть «Информации») — встроенный модуль Производства */}
                 {["info","launch","stages","finance","journal","defects","handover"].includes(objWsTab) && !(objWsTab==="finance" && !(_isAdmin||_isMgr||_isForeman)) && (
                   <div style={{marginTop: objWsTab==="info" ? 14 : 0}}>
@@ -12140,6 +12346,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     fmt={fmt}
                     genId={genId}
                     currentUser={currentUser}
+                    onAudit={(ev)=>logChange(currentUser, ev)}
                   />
                   </div>
                 )}
@@ -12316,7 +12523,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                   generateContractGDoc(c, cl, ca2);
                                 }} style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>}
                                 {(currentUser.role==="admin" || (currentUser.role==="user" && c.createdBy===currentUser.name)) && (
-                                  <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить в корзину?")){ saveContracts(contractsRef.current.map(x=>x.id===c.id?{...x,deletedAt:Date.now()}:x)); writeAudit(currentUser,"удалил договор","contract",c.id,c.contractNo||c.objectName||""); }}}
+                                  <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить в корзину?")){ saveContracts(contractsRef.current.map(x=>x.id===c.id?{...x,deletedAt:Date.now()}:x)); logChange(currentUser,{entity:"contract",entityId:c.id,objectId:c.objectId||"",label:c.contractNo||c.objectName||"Договор",action:"удалил договор"}); }}}
                                     style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                                 )}
                               </div>
@@ -12407,10 +12614,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   setContractTab("list");
                 }}
                 onSave={async ()=>{
-                  const isNewContract = !contracts.find(x=>x.id===currentContract.id);
+                  const _oldC = contracts.find(x=>x.id===currentContract.id) || null;
                   const list = contracts.filter(x=>x.id!==currentContract.id);
                   await saveContracts([...list, currentContract]);
-                  writeAudit(currentUser, isNewContract?"создал договор":"изменил договор", "contract", currentContract.id, currentContract.contractNo||currentContract.number||currentContract.objectName||"");
+                  logContractSave(currentUser, _oldC, currentContract);
                   if (objectReturnId) {
                     const obj = objectsRef.current.find(x=>x.id===objectReturnId);
                     setObjectReturnId(null);
