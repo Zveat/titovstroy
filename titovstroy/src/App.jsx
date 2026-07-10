@@ -3317,8 +3317,8 @@ function PublicProgress({ token }) {
     setRmBusy(false);
   };
   const wrap = (children) => (
-    <div style={{ minHeight: "100vh", background: "linear-gradient(180deg,#f2f4f8 0%,#e8ebf0 100%)", padding: "0 0 32px", boxSizing: "border-box", fontFamily: "'Golos Text','Segoe UI',sans-serif", color: "#0f172a", WebkitFontSmoothing: "antialiased" }}>
-      <div style={{ maxWidth: 600, margin: "0 auto" }}>{children}</div>
+    <div style={{ minHeight: "100vh", width: "100%", overflowX: "hidden", background: "linear-gradient(180deg,#f2f4f8 0%,#e8ebf0 100%)", padding: "0 0 32px", boxSizing: "border-box", fontFamily: "'Golos Text','Segoe UI',sans-serif", color: "#0f172a", WebkitFontSmoothing: "antialiased" }}>
+      <div style={{ maxWidth: 600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>{children}</div>
     </div>
   );
 
@@ -3349,10 +3349,10 @@ function PublicProgress({ token }) {
   // Настройки видимости (старые снимки без vis → показываем всё, как раньше)
   const vis = s.vis || {};
   const showStages = vis.stages !== false, showPay = vis.payments !== false, showRemarks = vis.remarks !== false;
-  // Текущий этап = первый невыполненный; следующий = за ним. Для акцента «сейчас в работе / далее».
-  const _curIdx = _stg.findIndex(st => (st.status || "todo") !== "done");
-  const curStage = _curIdx >= 0 ? _stg[_curIdx] : null;
-  const nextStage = _curIdx >= 0 ? _stg[_curIdx + 1] : null;
+  // Работы идут ПАРАЛЛЕЛЬНО и НЕ по порядку списка. Поэтому «сейчас в работе» — это ВСЕ этапы
+  // со статусом progress, а «задержки» — delayed. Никакой ложной последовательности «текущий→следующий».
+  const inWork = _stg.filter(st => (st.status || "todo") === "progress");
+  const delayedStages = _stg.filter(st => (st.status || "todo") === "delayed");
   // Группировка этапов по категории (черновые / чистовые / санузел …)
   const groups = []; const gmap = {};
   for (const st of (s.stages || [])) { const c = st.cat || "Работы"; if (!gmap[c]) { gmap[c] = { cat: c, items: [] }; groups.push(gmap[c]); } gmap[c].items.push(st); }
@@ -3360,7 +3360,7 @@ function PublicProgress({ token }) {
   const BRASS = "#b8904a", INK = "#0f172a", MUT = "#64748b", FAINT = "#94a3b8", GREEN = "#059669", BLUE = "#2563eb";
   const card = { background: "#fff", borderRadius: 20, padding: "18px 20px", margin: "0 14px 14px", boxShadow: "0 6px 22px -12px rgba(15,23,42,.16)", border: "1px solid rgba(15,23,42,.04)", boxSizing: "border-box" };
   const h = { fontWeight: 800, fontSize: 15.5, marginBottom: 12, letterSpacing: "-.01em", color: INK };
-  const docBtn = { display: "flex", alignItems: "center", gap: 12, width: "100%", background: "#f8fafc", border: "1px solid #eef1f5", borderRadius: 13, padding: "11px 12px", cursor: "pointer", fontFamily: "inherit", textAlign: "left", transition: "background .15s,border-color .15s" };
+  const docBtn = { display: "flex", alignItems: "center", gap: 12, width: "100%", boxSizing: "border-box", background: "#f8fafc", border: "1px solid #eef1f5", borderRadius: 13, padding: "11px 12px", cursor: "pointer", fontFamily: "inherit", textAlign: "left", transition: "background .15s,border-color .15s" };
   // Кольцо прогресса (SVG)
   const _R = 42, _C = 2 * Math.PI * _R;
   const Ring = () => (
@@ -3377,10 +3377,11 @@ function PublicProgress({ token }) {
       </div>
     </div>
   );
-  // Узел таймлайна этапа (готов / текущий / предстоит)
-  const stageNode = (status, isCurrent) => {
+  // Узел таймлайна этапа (готов / в работе / задержка / предстоит) — по статусу, без «порядка»
+  const stageNode = (status) => {
     if (status === "done") return { bg: BRASS, brd: BRASS, mark: "✓", ring: "none" };
-    if (isCurrent) return { bg: BLUE, brd: BLUE, mark: "", ring: "0 0 0 4px rgba(37,99,235,.16)" };
+    if (status === "progress") return { bg: BLUE, brd: BLUE, mark: "", ring: "0 0 0 4px rgba(37,99,235,.16)" };
+    if (status === "delayed") return { bg: "#dc2626", brd: "#dc2626", mark: "!", ring: "0 0 0 4px rgba(220,38,38,.14)" };
     return { bg: "#fff", brd: "#cbd5e1", mark: "", ring: "none" };
   };
 
@@ -3430,23 +3431,34 @@ function PublicProgress({ token }) {
       </div>
     </div>
 
-    {/* Сейчас в работе / Далее */}
-    {showStages && !s.factEndDate && (curStage || nextStage) && (
-      <div style={{ display: "flex", gap: 12, margin: "0 14px 14px", flexWrap: "wrap" }}>
-        {curStage && (
-          <div style={{ flex: "1 1 210px", background: "linear-gradient(135deg,#eff6ff,#f5f9ff)", border: "1px solid #bfdbfe", borderRadius: 18, padding: "14px 16px", boxShadow: "0 8px 22px -14px rgba(37,99,235,.4)" }}>
-            <div style={{ fontSize: 10.5, fontWeight: 800, color: BLUE, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>🔨 Сейчас в работе</div>
-            <div style={{ fontSize: 15, fontWeight: 800, color: INK, lineHeight: 1.25, letterSpacing: "-.01em" }}>{curStage.name}</div>
-            <div style={{ fontSize: 11.5, color: MUT, marginTop: 4 }}>{curStage.cat}{curStage.planEnd ? ` · до ${dt(curStage.planEnd)}` : ""}</div>
-          </div>
-        )}
-        {nextStage && (
-          <div style={{ flex: "1 1 210px", background: "#fff", border: "1px solid #eef1f5", borderRadius: 18, padding: "14px 16px", boxShadow: "0 8px 22px -16px rgba(15,23,42,.2)" }}>
-            <div style={{ fontSize: 10.5, fontWeight: 800, color: FAINT, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>⏭ Далее</div>
-            <div style={{ fontSize: 15, fontWeight: 800, color: "#334155", lineHeight: 1.25, letterSpacing: "-.01em" }}>{nextStage.name}</div>
-            <div style={{ fontSize: 11.5, color: FAINT, marginTop: 4 }}>{nextStage.cat}</div>
-          </div>
-        )}
+    {/* Сейчас в работе — ВСЕ параллельные этапы (progress) + задержки. Без ложного «далее». */}
+    {showStages && !s.factEndDate && (inWork.length > 0 || delayedStages.length > 0) && (
+      <div style={card}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+          <span style={{ fontSize: 15 }}>🔨</span>
+          <span style={{ fontSize: 15.5, fontWeight: 800, color: INK, letterSpacing: "-.01em" }}>Сейчас в работе</span>
+          <span style={{ fontSize: 11, color: FAINT, marginLeft: "auto" }}>работы идут параллельно</span>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+          {inWork.map((st, i) => (
+            <div key={"w" + i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 13px", background: "linear-gradient(135deg,#eff6ff,#f7faff)", border: "1px solid #dbeafe", borderRadius: 14, boxSizing: "border-box" }}>
+              <span style={{ width: 30, height: 30, borderRadius: 9, background: BLUE, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(37,99,235,.5)" }}>🔨</span>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: INK, lineHeight: 1.25, overflowWrap: "break-word" }}>{st.name}</div>
+                <div style={{ fontSize: 11.5, color: MUT, marginTop: 2 }}>{st.cat}{st.planEnd ? ` · до ${dt(st.planEnd)}` : ""}</div>
+              </div>
+            </div>
+          ))}
+          {delayedStages.map((st, i) => (
+            <div key={"d" + i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 13px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 14, boxSizing: "border-box" }}>
+              <span style={{ width: 30, height: 30, borderRadius: 9, background: "#dc2626", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 900, flexShrink: 0 }}>!</span>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: INK, lineHeight: 1.25, overflowWrap: "break-word" }}>{st.name}</div>
+                <div style={{ fontSize: 11.5, color: "#dc2626", fontWeight: 700, marginTop: 2 }}>Задержка{st.planEnd ? ` · срок был ${dt(st.planEnd)}` : ""}</div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     )}
 
@@ -3467,8 +3479,8 @@ function PublicProgress({ token }) {
               <div style={{ position: "absolute", left: 10, top: 14, bottom: 14, width: 2, background: "#eef1f5" }} />
               {g.items.map((st, i) => {
                 const status = st.status || "todo";
-                const isCur = !!(curStage && st === curStage);
-                const nd = stageNode(status, isCur);
+                const isCur = status === "progress";
+                const nd = stageNode(status);
                 const cfg = _PROG_ST[status] || _PROG_ST.todo;
                 return (
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 13, padding: "7px 0", position: "relative" }}>
@@ -3545,7 +3557,7 @@ function PublicProgress({ token }) {
       <textarea value={rmText} onChange={e => setRmText(e.target.value)} placeholder="Например: в спальне переделать угол у окна…" rows={2}
         style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e2e8f0", borderRadius: 13, padding: "11px 13px", fontSize: 13.5, fontFamily: "inherit", outline: "none", resize: "vertical", marginBottom: 10 }} />
       <button onClick={submitRemark} disabled={!rmText.trim() || rmBusy}
-        style={{ width: "100%", background: (!rmText.trim() || rmBusy) ? "#cbd5e1" : `linear-gradient(135deg,${BLUE},#1d4ed8)`, color: "#fff", border: "none", borderRadius: 13, padding: "12px", fontSize: 14, fontWeight: 800, cursor: (!rmText.trim() || rmBusy) ? "default" : "pointer", fontFamily: "inherit", boxShadow: (!rmText.trim() || rmBusy) ? "none" : "0 8px 20px -10px rgba(37,99,235,.6)" }}>
+        style={{ width: "100%", boxSizing: "border-box", background: (!rmText.trim() || rmBusy) ? "#cbd5e1" : `linear-gradient(135deg,${BLUE},#1d4ed8)`, color: "#fff", border: "none", borderRadius: 13, padding: "12px", fontSize: 14, fontWeight: 800, cursor: (!rmText.trim() || rmBusy) ? "default" : "pointer", fontFamily: "inherit", boxShadow: (!rmText.trim() || rmBusy) ? "none" : "0 8px 20px -10px rgba(37,99,235,.6)" }}>
         {rmBusy ? "Отправляю…" : "Отправить замечание"}
       </button>
       {rmSent && <div style={{ fontSize: 12.5, color: GREEN, fontWeight: 700, marginTop: 10, textAlign: "center" }}>✓ Замечание отправлено, спасибо!</div>}
