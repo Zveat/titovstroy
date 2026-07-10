@@ -94,8 +94,8 @@ const _ISSUE_GROUPS = ["Производство", "Финансы", "Клиен
 const _GRP_ICON = { "Производство":"🔨", "Финансы":"💰", "Клиенты":"👤", "Данные":"🗂" };
 const _ISSUE_CAP = 6; // сколько показывать в группе до «показать все»
 function IssuePanel({ issues, onNav, onDismiss, emptyText = "✓ Всё чисто — проблем не найдено" }) {
-  const [collapsed, setCollapsed] = useState({}); // группа свёрнута целиком
-  const [showAll, setShowAll] = useState({});     // группа показывает все карточки
+  const [openGroups, setOpenGroups] = useState({}); // какие группы РАЗВЁРНУТЫ (по умолчанию все свёрнуты)
+  const [showAll, setShowAll] = useState({});       // группа показывает все карточки
   const reds = issues.filter(i => i.sev === "red").length;
   const yellows = issues.length - reds;
   if (!issues.length) {
@@ -117,19 +117,19 @@ function IssuePanel({ issues, onNav, onDismiss, emptyText = "✓ Всё чист
       {_ISSUE_GROUPS.filter(g => byGroup[g]).map(g => {
         const list = byGroup[g];
         const gReds = list.filter(i=>i.sev==="red").length;
-        const isColl = !!collapsed[g];
+        const isOpen = !!openGroups[g];
         const shown = (showAll[g] || list.length<=_ISSUE_CAP) ? list : list.slice(0, _ISSUE_CAP);
         return (
         <div key={g} style={{ background:"#fff", border:"1px solid #eef2f7", borderRadius:14, overflow:"hidden" }}>
-          <div onClick={()=>setCollapsed(p=>({...p,[g]:!p[g]}))}
-            style={{ display:"flex", alignItems:"center", gap:8, padding:"11px 16px", borderBottom:isColl?"none":"1px solid #f1f5f9", background:"#f8fafc", cursor:"pointer", userSelect:"none" }}>
+          <div onClick={()=>setOpenGroups(p=>({...p,[g]:!p[g]}))}
+            style={{ display:"flex", alignItems:"center", gap:8, padding:"11px 16px", borderBottom:isOpen?"1px solid #f1f5f9":"none", background:"#f8fafc", cursor:"pointer", userSelect:"none" }}>
             <span style={{ fontSize:14 }}>{_GRP_ICON[g]}</span>
             <span style={{ fontSize:12.5, fontWeight:800, color:"#0f172a" }}>{g}</span>
             <span style={{ fontSize:11.5, fontWeight:700, color:"#94a3b8" }}>{list.length}</span>
             {gReds>0 && <span style={{ fontSize:10.5, fontWeight:800, color:"#dc2626", background:"#fef2f2", borderRadius:20, padding:"1px 8px" }}>{gReds} 🔴</span>}
-            <span style={{ marginLeft:"auto", color:"#94a3b8", fontSize:13, transform:isColl?"rotate(-90deg)":"none", transition:"transform .15s" }}>▾</span>
+            <span style={{ marginLeft:"auto", color:"#94a3b8", fontSize:13, transform:isOpen?"none":"rotate(-90deg)", transition:"transform .15s" }}>▾</span>
           </div>
-          {!isColl && (
+          {isOpen && (
             <div style={{ padding:12, display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(270px,1fr))", gap:8 }}>
               {shown.map(i => (
                 <div key={i.id} onClick={() => onNav && onNav(i.nav)}
