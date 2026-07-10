@@ -121,7 +121,8 @@ export default function ProductionModule({
   // он бы показал бюджет/долг/маржу кому угодно. Убран целиком вместе с мёртвым списком.
   if (!openObj || !openProd) return <div style={{ color: "#94a3b8", fontSize: 13, padding: "16px 4px" }}>Нет данных производства.</div>;
   const _objLbl = openObj.clientName || openObj.address || "Объект";
-  const audit = (ev) => { if (onAudit) onAudit({ objectId: openObj.id, label: _objLbl, source: "manual", ...ev }); };
+  // try/catch: журнал не должен мешать сохранению производственных данных
+  const audit = (ev) => { try { if (onAudit) onAudit({ objectId: openObj.id, label: _objLbl, source: "manual", ...ev }); } catch (e) { console.warn("audit failed", e); } };
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
       {embedTab === "info" && <InfoTab prod={openProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={patchProd} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} clientInfoCard={clientInfoCard} audit={audit} />}
