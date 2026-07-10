@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, Fragment } from "react";
+import { useState, useMemo, useEffect, useRef, Fragment } from "react";
 import { STAGE_STATUSES, emptyProduction } from "./constants.js";
 import { normCN } from "../utils.js";
 
@@ -41,9 +41,9 @@ const groupByCat = (rows) => {
 
 export default function ProductionModule({
   objects, entries = [], allObjects, unlinkedProjects, estimates, contracts, productions,
-  onSaveProduction, onDeleteProduction, onToggleClientShare, buildStagesFromEstimate,
+  onSaveProduction, onDeleteProduction, onToggleClientShare, onSetClientVis, buildStagesFromEstimate,
   finProjects, financeTx,
-  fmt, genId, currentUser,
+  fmt, genId, currentUser, onAudit,
   embedObjectId, embedTab, clientInfoCard, // встроенный режим: карточка одного объекта внутри раздела «Объекты»
 }) {
   // карта запись производства по ключу записи (objectId реального объекта или "fp:<id>")
@@ -120,12 +120,14 @@ export default function ProductionModule({
   // никто не попадал, но при случайном повторном использовании компонента без embedObjectId
   // он бы показал бюджет/долг/маржу кому угодно. Убран целиком вместе с мёртвым списком.
   if (!openObj || !openProd) return <div style={{ color: "#94a3b8", fontSize: 13, padding: "16px 4px" }}>Нет данных производства.</div>;
+  const _objLbl = openObj.clientName || openObj.address || "Объект";
+  const audit = (ev) => { if (onAudit) onAudit({ objectId: openObj.id, label: _objLbl, source: "manual", ...ev }); };
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-      {embedTab === "info" && <InfoTab prod={openProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={patchProd} onToggleClientShare={onToggleClientShare} currentUser={currentUser} clientInfoCard={clientInfoCard} />}
+      {embedTab === "info" && <InfoTab prod={openProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={patchProd} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} clientInfoCard={clientInfoCard} audit={audit} />}
       {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист запуска объекта" />}
       {embedTab === "handover" && <ChecklistTab kind="checklistHandover" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист сдачи объекта" />}
-      {embedTab === "stages" && <StagesTab prod={openProd} patch={patchProd} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} />}
+      {embedTab === "stages" && <StagesTab prod={openProd} patch={patchProd} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} audit={audit} />}
       {embedTab === "finance" && <FinanceTab prod={openProd} patch={patchProd} fmt={fmt} finSummary={finSummary} />}
       {embedTab === "journal" && <JournalTab prod={openProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
       {embedTab === "defects" && <DefectsTab prod={openProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
@@ -137,7 +139,7 @@ export default function ProductionModule({
 const _dayStart = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); };
 // Телефон → формат для wa.me (КЗ: 8XXXXXXXXXX → 7XXXXXXXXXX)
 const _waPhone = (p) => { let d = (p || "").replace(/\D/g, ""); if (d.length === 11 && d[0] === "8") d = "7" + d.slice(1); else if (d.length === 10) d = "7" + d; return d; };
-function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientShare, currentUser, clientInfoCard }) {
+function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientShare, onSetClientVis, currentUser, clientInfoCard, audit }) {
   const objEstimates = estimates.filter(e => e.objectId === obj.id);
   // Только клиентские договоры: подряд (с рабочим) — это себестоимость, в метрику «Договоры» не входит
   const objContracts = contracts.filter(c => c.objectId === obj.id && !c.deletedAt && c.type !== "podryad" && c.type !== "podryad_annex");
@@ -173,10 +175,16 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientSh
     if (lt >= 0 && lt <= 3) alerts.push("Плановая сдача " + (lt === 0 ? "сегодня" : ("через " + lt + " дн")));
   }
   const cBtn = { display: "inline-flex", alignItems: "center", gap: 6, textDecoration: "none", border: "none", borderRadius: 9, padding: "10px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" };
-  const fld = (label, key, type = "text") => (
+  const _fldFocus = useRef("");
+  const _fmtFld = (type, v) => type === "date" ? (v ? new Date(v).toLocaleDateString("ru-RU") : "—") : (v || "—");
+  // auditLabel задаётся только для значимых полей (прораб/сроки) — тогда на blur пишем «было→стало»
+  const fld = (label, key, type = "text", auditLabel = null) => (
     <div>
       <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>{label}</div>
-      <input type={type} value={prod[key] || ""} onChange={e => patch({ [key]: e.target.value })}
+      <input type={type} value={prod[key] || ""}
+        onFocus={e => { _fldFocus.current = e.target.value; }}
+        onChange={e => patch({ [key]: e.target.value })}
+        onBlur={e => { if (auditLabel && audit && e.target.value !== _fldFocus.current) audit({ entity: "object", field: auditLabel, action: "изменил", old: _fmtFld(type, _fldFocus.current), new: _fmtFld(type, e.target.value) }); }}
         style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
     </div>
   );
@@ -218,12 +226,12 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientSh
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px" }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 14 }}>Производственная информация</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          {fld("Ответственный прораб / менеджер", "responsible")}
+          {fld("Ответственный прораб / менеджер", "responsible", "text", "прораб")}
           {fld("Доступ (ключ, код, пропуск)", "access")}
           {fld("Дата продажи (подписание договора)", "saleDate", "date")}
-          {fld("Дата начала работ", "startDate", "date")}
-          {fld("Плановая дата окончания", "planEndDate", "date")}
-          {fld("Фактическая дата окончания", "factEndDate", "date")}
+          {fld("Дата начала работ", "startDate", "date", "старт работ")}
+          {fld("Плановая дата окончания", "planEndDate", "date", "план сдачи")}
+          {fld("Фактическая дата окончания", "factEndDate", "date", "факт сдачи")}
         </div>
         <div style={{ marginTop: 12 }}>
           <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Примечания / особенности</div>
@@ -250,19 +258,21 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientSh
       </div>
 
       {/* Клиент: доступ к прогрессу + сообщение */}
-      <ClientAccessBlock obj={obj} prod={prod} patch={patch} onToggleClientShare={onToggleClientShare} currentUser={currentUser} />
+      <ClientAccessBlock obj={obj} prod={prod} patch={patch} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} />
     </div>
   );
 }
 
 // ─── Блок «Клиент»: доступ к прогрессу + сообщение (внизу вкладки «Информация») ───
-function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, currentUser }) {
+function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, onSetClientVis, currentUser }) {
   const [shareLink, setShareLink] = useState(null); // ссылка для клиента после включения доступа
   const [shareBusy, setShareBusy] = useState(false);
   if (currentUser?.role === "viewer") return null;
   const shared = !!(obj.progressShared && obj.progressToken);
   const realUrl = shared ? (window.location.origin + window.location.pathname + "#/progress/" + obj.progressToken) : null;
   const url = realUrl || shareLink;
+  const cv = obj.clientVis || {};
+  const visRows = [["stages","Этапы работ"],["payments","Оплата по договору"],["docs","Документы"],["remarks","Замечания клиента"]];
   return (
     <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 11 }}>
       {onToggleClientShare && (
@@ -283,7 +293,21 @@ function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, currentUser 
               <a href={"https://wa.me/?text=" + encodeURIComponent("Прогресс вашего ремонта: " + url)} target="_blank" rel="noopener" style={{ background: "#25D366", color: "#fff", textDecoration: "none", padding: "7px 11px", borderRadius: 6, fontSize: 12, fontWeight: 700 }}>WhatsApp</a>
             </div>
           )}
-          <div style={{ fontSize: 10.5, color: "#94a3b8" }}>Клиент видит прогресс, этапы, сроки и оплату. Себестоимость, маржа и подрядчики скрыты.</div>
+          <div style={{ fontSize: 10.5, color: "#94a3b8" }}>Клиент видит только то, что отмечено ниже. Себестоимость, маржа и подрядчики скрыты всегда.</div>
+          {/* Настройки видимости — что показывать клиенту (по умолчанию всё включено) */}
+          {onSetClientVis && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
+              {visRows.map(([key, label]) => {
+                const on = cv[key] !== false;
+                return (
+                  <button key={key} onClick={() => onSetClientVis(obj.id, { [key]: !on })}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, background: on ? "#ecfdf5" : "#f1f5f9", color: on ? "#059669" : "#94a3b8", border: "1px solid " + (on ? "rgba(5,150,105,.25)" : "#e2e8f0"), borderRadius: 20, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                    <span>{on ? "☑" : "☐"}</span>{label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
       {onToggleClientShare && <div style={{ borderTop: "1px solid #f1f5f9" }} />}
@@ -400,11 +424,15 @@ function ClientMessageCard({ prod, patch, embedded = false }) {
 }
 
 // ─── ВКЛАДКА: ЭТАПЫ И СРОКИ ───
-function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) {
+function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, audit }) {
   const stages = prod.stages || [];
   const [newName, setNewName] = useState("");
   const [newCat, setNewCat] = useState("");
   const upd = (id, p) => patch({ stages: stages.map(s => s.id === id ? { ...s, ...p } : s) });
+  // Журнал изменений этапа (прораб/срок) — пишем на blur, только если значение реально изменилось
+  const _stFocus = useRef("");
+  const _fmtDate = (v) => v ? new Date(v).toLocaleDateString("ru-RU") : "—";
+  const auditStage = (stage, field, oldV, newV) => { if (audit && oldV !== newV) audit({ entity: "stage", field, action: "изменил", old: oldV || "—", new: newV || "—", detail: `этап: ${stage.name || "без названия"}` }); };
   const addManual = () => {
     if (!newName.trim()) return;
     patch({ stages: [...stages, { id: genId(), cat: newCat.trim() || "Прочее", name: newName.trim(), unit: "", qty: 0, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: 0, costPlan: 0 }] });
@@ -465,6 +493,8 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) 
                             {STAGE_STATUSES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
                           </select>
                           <input value={s.responsible || ""} onChange={e => upd(s.id, { responsible: e.target.value })} placeholder="Ответств."
+                            onFocus={e => { _stFocus.current = e.target.value; }}
+                            onBlur={e => auditStage(s, "прораб этапа", _stFocus.current, e.target.value)}
                             style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 8px", fontSize: 12, fontFamily: "inherit", outline: "none", width: 100 }} />
                           {iw != null && <span style={{ fontSize: 11, color: "#2563eb", fontWeight: 700 }}>🔨 {iw} дн</span>}
                         </div>
@@ -475,7 +505,9 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) 
                           </div>
                           <div>
                             <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 2 }}>Конец план</div>
-                            <input type="date" value={s.planEnd || ""} onChange={e => upd(s.id, { planEnd: e.target.value })} style={dInp} />
+                            <input type="date" value={s.planEnd || ""} onChange={e => upd(s.id, { planEnd: e.target.value })}
+                              onFocus={e => { _stFocus.current = e.target.value; }}
+                              onBlur={e => auditStage(s, "срок этапа (план)", _fmtDate(_stFocus.current), _fmtDate(e.target.value))} style={dInp} />
                           </div>
                           <div>
                             <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 2 }}>Старт факт</div>
