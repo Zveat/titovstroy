@@ -86,11 +86,16 @@ function DangerConfirmModal() {
 }
 
 // ── Панель проблем: «Что горит сегодня» (дашборд) и «Проверка базы» (Админка) ──
-// Чисто презентационная: получает уже посчитанные и отфильтрованные проблемы (из
-// computeIssues), группирует по разделу, клик по строке зовёт onNav, кнопка «скрыть
-// до завтра» (если проблема dismissable и передан onDismiss) — onDismiss(id).
+// Компактные карточки в адаптивную сетку (2+ колонки), группы сворачиваются, длинные
+// группы по умолчанию показывают несколько первых с «показать все» — чтобы панель не
+// растягивалась в бесконечный вертикальный список. Клик по карточке — onNav; «×» —
+// скрыть до завтра (если dismissable и передан onDismiss).
 const _ISSUE_GROUPS = ["Производство", "Финансы", "Клиенты", "Данные"];
+const _GRP_ICON = { "Производство":"🔨", "Финансы":"💰", "Клиенты":"👤", "Данные":"🗂" };
+const _ISSUE_CAP = 6; // сколько показывать в группе до «показать все»
 function IssuePanel({ issues, onNav, onDismiss, emptyText = "✓ Всё чисто — проблем не найдено" }) {
+  const [collapsed, setCollapsed] = useState({}); // группа свёрнута целиком
+  const [showAll, setShowAll] = useState({});     // группа показывает все карточки
   const reds = issues.filter(i => i.sev === "red").length;
   const yellows = issues.length - reds;
   if (!issues.length) {
@@ -104,33 +109,54 @@ function IssuePanel({ issues, onNav, onDismiss, emptyText = "✓ Всё чист
   const byGroup = {};
   for (const i of issues) (byGroup[i.group] || (byGroup[i.group] = [])).push(i);
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
       <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
         {reds>0 && <span style={{ fontSize:12, fontWeight:800, color:"#fff", background:"#dc2626", borderRadius:20, padding:"3px 11px" }}>🔴 {reds} критичных</span>}
         {yellows>0 && <span style={{ fontSize:12, fontWeight:800, color:"#92610f", background:"#fef3c7", border:"1px solid #fde68a", borderRadius:20, padding:"3px 11px" }}>🟡 {yellows} предупреждений</span>}
       </div>
-      {_ISSUE_GROUPS.filter(g => byGroup[g]).map(g => (
+      {_ISSUE_GROUPS.filter(g => byGroup[g]).map(g => {
+        const list = byGroup[g];
+        const gReds = list.filter(i=>i.sev==="red").length;
+        const isColl = !!collapsed[g];
+        const shown = (showAll[g] || list.length<=_ISSUE_CAP) ? list : list.slice(0, _ISSUE_CAP);
+        return (
         <div key={g} style={{ background:"#fff", border:"1px solid #eef2f7", borderRadius:14, overflow:"hidden" }}>
-          <div style={{ fontSize:11.5, fontWeight:800, color:"#64748b", textTransform:"uppercase", letterSpacing:".04em", padding:"10px 16px", borderBottom:"1px solid #f1f5f9", background:"#f8fafc" }}>{g} · {byGroup[g].length}</div>
-          {byGroup[g].map(i => (
-            <div key={i.id} onClick={() => onNav && onNav(i.nav)}
-              style={{ display:"flex", alignItems:"center", gap:12, padding:"11px 16px", borderBottom:"1px solid #f6f8fa", cursor: onNav?"pointer":"default", transition:"background .12s" }}
-              onMouseEnter={e=>{ if(onNav) e.currentTarget.style.background="#f8fafc"; }}
-              onMouseLeave={e=>{ e.currentTarget.style.background="transparent"; }}>
-              <span style={{ width:6, height:6, borderRadius:"50%", background: i.sev==="red"?"#dc2626":"#f59e0b", flexShrink:0 }} />
-              <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:13.5, fontWeight:700, color:"#0f172a", lineHeight:1.3 }}>{i.title}</div>
-                {i.detail && <div style={{ fontSize:11.5, color:"#94a3b8", marginTop:2, overflow:"hidden", textOverflow:"ellipsis" }}>{i.detail}</div>}
-              </div>
-              {onDismiss && i.dismissable && (
-                <button onClick={e=>{ e.stopPropagation(); onDismiss(i.id); }} title="Скрыть до завтра"
-                  style={{ background:"none", border:"1px solid #e2e8f0", color:"#94a3b8", borderRadius:7, padding:"4px 9px", fontSize:11, fontWeight:600, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap", flexShrink:0 }}>до завтра</button>
+          <div onClick={()=>setCollapsed(p=>({...p,[g]:!p[g]}))}
+            style={{ display:"flex", alignItems:"center", gap:8, padding:"11px 16px", borderBottom:isColl?"none":"1px solid #f1f5f9", background:"#f8fafc", cursor:"pointer", userSelect:"none" }}>
+            <span style={{ fontSize:14 }}>{_GRP_ICON[g]}</span>
+            <span style={{ fontSize:12.5, fontWeight:800, color:"#0f172a" }}>{g}</span>
+            <span style={{ fontSize:11.5, fontWeight:700, color:"#94a3b8" }}>{list.length}</span>
+            {gReds>0 && <span style={{ fontSize:10.5, fontWeight:800, color:"#dc2626", background:"#fef2f2", borderRadius:20, padding:"1px 8px" }}>{gReds} 🔴</span>}
+            <span style={{ marginLeft:"auto", color:"#94a3b8", fontSize:13, transform:isColl?"rotate(-90deg)":"none", transition:"transform .15s" }}>▾</span>
+          </div>
+          {!isColl && (
+            <div style={{ padding:12, display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(270px,1fr))", gap:8 }}>
+              {shown.map(i => (
+                <div key={i.id} onClick={() => onNav && onNav(i.nav)}
+                  style={{ position:"relative", border:"1px solid #eef2f7", borderLeft:`3px solid ${i.sev==="red"?"#dc2626":"#f59e0b"}`, borderRadius:10, padding:"9px 11px", paddingRight: (onDismiss&&i.dismissable)?26:11, cursor: onNav?"pointer":"default", transition:"box-shadow .12s,border-color .12s", background:"#fff" }}
+                  onMouseEnter={e=>{ if(onNav){ e.currentTarget.style.boxShadow="0 4px 14px rgba(15,23,42,.08)"; } }}
+                  onMouseLeave={e=>{ e.currentTarget.style.boxShadow="none"; }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#0f172a", lineHeight:1.3 }}>{i.title}</div>
+                  {i.detail && <div style={{ fontSize:11, color:"#94a3b8", marginTop:2, lineHeight:1.35, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{i.detail}</div>}
+                  {onDismiss && i.dismissable && (
+                    <button onClick={e=>{ e.stopPropagation(); onDismiss(i.id); }} title="Скрыть до завтра"
+                      style={{ position:"absolute", top:6, right:6, background:"none", border:"none", color:"#cbd5e1", borderRadius:6, width:20, height:20, fontSize:15, lineHeight:1, cursor:"pointer", fontFamily:"inherit", padding:0 }}
+                      onMouseEnter={e=>{ e.currentTarget.style.color="#dc2626"; e.currentTarget.style.background="#fef2f2"; }}
+                      onMouseLeave={e=>{ e.currentTarget.style.color="#cbd5e1"; e.currentTarget.style.background="none"; }}>×</button>
+                  )}
+                </div>
+              ))}
+              {list.length > _ISSUE_CAP && (
+                <button onClick={()=>setShowAll(p=>({...p,[g]:!p[g]}))}
+                  style={{ gridColumn:"1/-1", justifySelf:"start", background:"none", border:"none", color:"#2563eb", fontSize:12.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit", padding:"2px 0" }}>
+                  {showAll[g] ? "Свернуть" : `Показать все ${list.length} →`}
+                </button>
               )}
-              {onNav && <span style={{ color:"#cbd5e1", fontSize:16, flexShrink:0 }}>›</span>}
             </div>
-          ))}
+          )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
