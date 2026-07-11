@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, useRef, Fragment } from "react";
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, get, set } from "firebase/database";
+import { getDatabase, ref, get, set, runTransaction } from "firebase/database";
 import ProductionModule from "./production/ProductionModule.jsx";
 import { emptyProduction } from "./production/constants.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
@@ -845,6 +845,33 @@ function clearLoginAttempts(login) {
 //   source: manual (вручную) | import (импорт) | autosync (автосинк) | cabinet (клиентский кабинет)
 // Хранится ПОМЕСЯЧНО (titovstroy-audit-ГГГГ-ММ, без лимита) + индекс существующих месяцев.
 // Старый ключ titovstroy-audit больше НЕ пишется — он остаётся архивом (читается в общем журнале).
+// Атомарное добавление записи в помесячный массив журнала.
+// Firebase RTDB-транзакция сериализует одновременные записи → ни одна не теряется.
+// В базе значение ключа — СТРОКА JSON (как во всём storage), поэтому и в транзакции строка.
+const _appendAuditEntry = async (mk, entry) => {
+  if (_fbDb) {
+    try {
+      await _fbAuthReady;
+      const r = ref(_fbDb, _fbKey(mk));
+      const res = await _race(runTransaction(r, (cur) => {
+        let arr = [];
+        if (typeof cur === "string") { try { const p = JSON.parse(cur); if (Array.isArray(p)) arr = p; } catch {} }
+        else if (Array.isArray(cur)) arr = cur; // на случай старого формата (вложенный массив)
+        return JSON.stringify([entry, ...arr]);
+      }), 8000);
+      if (res !== _TIMEOUT) {
+        // синхронизируем локальный резерв со свежим значением
+        try { const v = res?.snapshot?.val(); if (typeof v === "string") { localStorage.setItem(mk, v); localStorage.setItem(mk + _TS_SUFFIX, Date.now().toString()); _mem[mk] = v; } } catch {}
+        return;
+      }
+    } catch (e) { console.warn("audit tx err", e); }
+  }
+  // Резерв (нет Firebase / таймаут транзакции): обычная запись. Одно устройство — гонки нет.
+  const raw = await storage.get(mk);
+  let arr = [];
+  if (raw) { try { const p = JSON.parse(raw.value); if (Array.isArray(p)) arr = p; } catch {} }
+  await storage.set(mk, JSON.stringify([entry, ...arr]));
+};
 const logChange = async (user, ev = {}) => {
   try {
     const ts = ev.ts || Date.now();
@@ -865,11 +892,9 @@ const logChange = async (user, ev = {}) => {
       source: ev.source || "manual",
     };
     const mk = AUDIT_MONTH_KEY(ym);
-    // читаем прямо перед записью — минимизируем окно гонки при одновременных правках
-    const raw = await storage.get(mk);
-    let arr = [];
-    if (raw) { try { const p = JSON.parse(raw.value); if (Array.isArray(p)) arr = p; } catch {} }
-    await storage.set(mk, JSON.stringify([entry, ...arr]));
+    // Добавляем запись АТОМАРНО (Firebase-транзакция), чтобы при одновременных действиях
+    // с разных устройств записи не затирали друг друга (read-modify-write гонка).
+    await _appendAuditEntry(mk, entry);
     // индекс месяцев — дописываем только когда появился новый месяц
     try {
       const ir = await storage.get(AUDIT_INDEX_KEY);
@@ -1616,7 +1641,7 @@ function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note })
 
 
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
-function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBackupWorkspace=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
+function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
   const [tab, setTab] = useState("users");
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2543,8 +2568,37 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
       {/* ── БЭКАПЫ ── */}
       {tab === "backups" && (
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          <div style={{fontWeight:700,color:"#334155",fontSize:14,marginBottom:4}}>Восстановление данных</div>
-          <div style={{fontSize:12,color:"#94a3b8",marginBottom:8}}>Снимки рабочего пространства создаются автоматически. Каждый снимок — это все объекты вместе с их сметами и договорами. Восстановление возвращает всё целиком на выбранный момент.</div>
+          {/* ── ФАЙЛ-БЭКАП: скачать всё в JSON / залить назад / сметы в Excel ── */}
+          <div style={{fontWeight:700,color:"#334155",fontSize:14,marginBottom:2}}>Бэкап в файл (перед мержем / на всякий случай)</div>
+          <div style={{fontSize:12,color:"#94a3b8",marginBottom:4}}>Скачивает ВСЕ рабочие данные (объекты, договоры, сметы, клиенты, финансы, производство, акты, реквизиты, подрядчики) одним JSON-файлом на ваш компьютер. Этим же файлом можно всё вернуть назад.</div>
+          <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"16px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <div style={{minWidth:180,flex:1}}>
+              <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>⬇️ Скачать полный бэкап (JSON)</div>
+              <div style={{fontSize:12,color:"#94a3b8",marginTop:2}}>Файл сохранится на компьютер. Храните его до и после мержа.</div>
+            </div>
+            <button onClick={onExportAll} style={{background:"#0f172a",color:"#fff",border:"none",borderRadius:8,padding:"9px 18px",fontSize:12.5,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",fontWeight:700}}>⬇️ Скачать JSON</button>
+          </div>
+          <div style={{background:"#fff",border:"1px solid #fde68a",borderRadius:10,padding:"16px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <div style={{minWidth:180,flex:1}}>
+              <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>⬆️ Восстановить из файла (JSON)</div>
+              <div style={{fontSize:12,color:"#b45309",marginTop:2}}>Заменит текущие данные данными из файла. Спросит подтверждение «ВОССТАНОВИТЬ». Перед заменой всё уходит в авто-бэкап.</div>
+            </div>
+            <label style={{background:"#fffbeb",color:"#b45309",border:"1px solid #fde68a",borderRadius:8,padding:"9px 18px",fontSize:12.5,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",fontWeight:700}}>
+              ⬆️ Выбрать файл…
+              <input type="file" accept="application/json,.json" style={{display:"none"}} onChange={e=>{ const f=e.target.files?.[0]; e.target.value=""; if(f) onImportAll(f); }} />
+            </label>
+          </div>
+          <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"16px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <div style={{minWidth:180,flex:1}}>
+              <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>📊 Сметы в Excel</div>
+              <div style={{fontSize:12,color:"#94a3b8",marginTop:2}}>Таблица всех смет: название, клиент, адрес, дата, статус, кол-во позиций, сумма. Откроется в Excel.</div>
+            </div>
+            <button onClick={onExportEstimatesXls} style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.25)",borderRadius:8,padding:"9px 18px",fontSize:12.5,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",fontWeight:700}}>📊 Выгрузить сметы</button>
+          </div>
+
+          {/* ── Внутренние авто-снимки Firebase ── */}
+          <div style={{fontWeight:700,color:"#334155",fontSize:14,marginTop:12,marginBottom:2}}>Авто-снимки в базе</div>
+          <div style={{fontSize:12,color:"#94a3b8",marginBottom:4}}>Снимки рабочего пространства создаются автоматически при изменениях. Восстановление возвращает всё целиком на выбранный момент.</div>
           <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"16px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
             <div>
               <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>📦 Объекты, сметы и договора</div>
@@ -3569,6 +3623,17 @@ function PublicProgress({ token }) {
     return { bg: "#fff", brd: "#cbd5e1", mark: "", ring: "none" };
   };
 
+  // ── История для клиента: безопасная лента событий (только клиентские факты из снимка) ──
+  const _tsOf = (d) => { if (!d) return 0; const t = (typeof d === "number") ? d : new Date(d).getTime(); return isNaN(t) ? 0 : t; };
+  const history = [];
+  if (s.startDate) history.push({ ts: _tsOf(s.startDate), icon: "🚀", color: BLUE, text: "Работы начаты" });
+  if (showStages) for (const st of _stg) { if ((st.status || "todo") === "done" && st.factEnd) history.push({ ts: _tsOf(st.factEnd), icon: "✅", color: GREEN, text: `Этап «${st.name}» завершён` }); }
+  if (showPay) for (const p of (Array.isArray(s.payments) ? s.payments : [])) { const t = _tsOf(p.date); if (t) history.push({ ts: t, icon: "💰", color: BRASS, text: "Оплата принята", amount: p.amount }); }
+  if (showRemarks) for (const rm of remarks) { if (rm.done && rm.text) history.push({ ts: _tsOf(rm.ts), icon: "💬", color: GREEN, text: `Замечание выполнено: «${rm.text}»` }); }
+  if (s.factEndDate) history.push({ ts: _tsOf(s.factEndDate), icon: "🏁", color: GREEN, text: "Объект сдан" });
+  if (s.clientMessage && s.clientMessage.updatedAt) history.push({ ts: _tsOf(s.clientMessage.updatedAt), icon: "📣", color: BRASS, text: "Обновлено сообщение от компании" });
+  history.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+
   return wrap(<>
     {/* Шапка */}
     <div style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e293b 62%,#2a3446 100%)", color: "#fff", padding: "22px 22px 24px", margin: "14px 14px 14px", borderRadius: 22, position: "relative", overflow: "hidden", boxShadow: "0 12px 32px -14px rgba(15,23,42,.55)" }}>
@@ -3759,6 +3824,27 @@ function PublicProgress({ token }) {
         </div>
       )}
     </div>
+    )}
+
+    {/* История — безопасная лента событий по объекту */}
+    {history.length > 0 && (
+      <div style={card}>
+        <div style={h}>История</div>
+        <div style={{ position: "relative" }}>
+          <div style={{ position: "absolute", left: 15, top: 14, bottom: 14, width: 2, background: "#eef1f5" }} />
+          {history.map((ev, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "8px 0", position: "relative" }}>
+              <div style={{ width: 32, height: 32, borderRadius: 9, background: "#fff", border: `1px solid ${ev.color}30`, boxShadow: `0 2px 8px -3px ${ev.color}55`, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, zIndex: 1 }}>{ev.icon}</div>
+              <div style={{ minWidth: 0, flex: 1, paddingTop: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: INK, lineHeight: 1.35, overflowWrap: "break-word" }}>
+                  {ev.text}{ev.amount ? <b style={{ color: BRASS }}> {fmt(ev.amount)} ₸</b> : null}
+                </div>
+                {ev.ts ? <div style={{ fontSize: 11.5, color: FAINT, fontWeight: 600, marginTop: 2 }}>{dt(ev.ts)}</div> : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     )}
 
     <div style={{ textAlign: "center", fontSize: 11.5, color: FAINT, marginTop: 20, paddingBottom: 4 }}>TitovStroy · ремонт и отделка{s.publishedAt ? ` · обновлено ${new Date(s.publishedAt).toLocaleDateString("ru-RU")}` : ""}</div>
@@ -4952,14 +5038,28 @@ ${reqBlock}`;
     // даже при прямом чтении ноды.
     const cv = obj.clientVis || {};
     const showPay = cv.payments !== false, showStages = cv.stages !== false, showRemarks = cv.remarks !== false, showDocs = cv.docs !== false;
+    // Индивидуальные ОПЛАТЫ клиента (только доходные операции по договорам объекта) — для «Истории».
+    // Только когда оплаты разрешены к показу. Себестоимость/расходы/подрядчики сюда НЕ попадают —
+    // берём исключительно income-транзакции, привязанные к номерам договоров этого объекта.
+    let payments = [];
+    if (showPay) {
+      try {
+        const objCNs = new Set((contractsRef.current || []).filter(c => c.objectId === objectId).map(c => normCN(c.number || c.contractNo || "")).filter(Boolean));
+        if (objCNs.size) payments = (financeTxRef.current || [])
+          .filter(t => t && !t.deletedAt && t.type === "income" && t.contractNo && objCNs.has(normCN(t.contractNo)))
+          .map(t => ({ date: t.date || t.createdAt || null, amount: Math.round(Number(t.amount) || 0) }))
+          .filter(p => p.amount > 0);
+      } catch {}
+    }
     return {
       v: 2, objectAddress: obj.address || "", clientName: obj.clientName || "", managerName: obj.manager || "",
       startDate: prod.startDate || "", planEndDate: prod.planEndDate || "", factEndDate: prod.factEndDate || "",
       progressPct, doneStages: doneCnt, totalStages: stages.length,
       // vis — что показывать клиенту (публичная страница читает эти флаги)
       vis: { payments: showPay, docs: showDocs, stages: showStages, remarks: showRemarks },
-      stages: showStages ? stages.map(st => ({ name: st.manualName || st.name || "Этап", cat: st.cat || "Работы", status: st.status || "todo", planEnd: st.planEnd || "", priceClient: Number(st.priceClient) || 0 })) : [],
+      stages: showStages ? stages.map(st => ({ name: st.manualName || st.name || "Этап", cat: st.cat || "Работы", status: st.status || "todo", planEnd: st.planEnd || "", factEnd: st.factEnd || "", priceClient: Number(st.priceClient) || 0 })) : [],
       payment: showPay ? { budget, paid, remaining: Math.max(0, budget - paid) } : null,
+      payments: showPay ? payments : [],
       handover, clientRemarks: showRemarks ? clientRemarks : [], clientMessage,
       // Срок жизни ссылки — жёстко зафиксирован в объекте при включении доступа (не продлевается
       // здесь автоматически: buildProgressSnapshot вызывается и фоновой минутной republish'ей).
@@ -4970,23 +5070,33 @@ ${reqBlock}`;
   const publishProgress = useCallback(async (objectId) => {
     const obj = objectsRef.current.find(o => o.id === objectId);
     if (!obj || !obj.progressShared || !obj.progressToken) return;
+    const showRemarks = (obj.clientVis || {}).remarks !== false;
+    // Замечания СКРЫТЫ клиенту → сначала заберём уже присланные замечания в производство,
+    // чтобы они не потерялись, ПЕРЕД тем как вычистить их из публичной ноды.
+    if (!showRemarks) { try { await syncRemarksRef.current?.(objectId); } catch {} }
     let prev = {};
     try { const r = await storage.getResult(PROGRESS_NODE(obj.progressToken)); if (r.status === "found" && r.value) prev = JSON.parse(r.value); } catch {}
     const snap = buildProgressSnapshot(objectId, prev);
     if (!snap) return;
-    // Клиент мог отправить замечание прямо в эту ноду, пока мы считали снимок (submitRemark
-    // тоже пишет всю ноду целиком) — без этой подстраховки republish затёр бы его. Перед
-    // записью перечитываем ноду ещё раз и добираем замечания, которых не было в prev.
-    try {
-      const r2 = await storage.getResult(PROGRESS_NODE(obj.progressToken));
-      if (r2.status === "found" && r2.value) {
-        const fresh = JSON.parse(r2.value);
-        const freshRemarks = Array.isArray(fresh.clientRemarks) ? fresh.clientRemarks : [];
-        const known = new Set((snap.clientRemarks || []).map(rm => rm.id));
-        const missing = freshRemarks.filter(rm => rm.id && !known.has(rm.id)).map(rm => ({ id: rm.id, text: rm.text, ts: rm.ts, done: !!rm.done }));
-        if (missing.length) snap.clientRemarks = [...snap.clientRemarks, ...missing];
-      }
-    } catch {}
+    if (showRemarks) {
+      // Клиент мог отправить замечание прямо в эту ноду, пока мы считали снимок (submitRemark
+      // тоже пишет всю ноду целиком) — без этой подстраховки republish затёр бы его. Перед
+      // записью перечитываем ноду ещё раз и добираем замечания, которых не было в prev.
+      try {
+        const r2 = await storage.getResult(PROGRESS_NODE(obj.progressToken));
+        if (r2.status === "found" && r2.value) {
+          const fresh = JSON.parse(r2.value);
+          const freshRemarks = Array.isArray(fresh.clientRemarks) ? fresh.clientRemarks : [];
+          const known = new Set((snap.clientRemarks || []).map(rm => rm.id));
+          const missing = freshRemarks.filter(rm => rm.id && !known.has(rm.id)).map(rm => ({ id: rm.id, text: rm.text, ts: rm.ts, done: !!rm.done }));
+          if (missing.length) snap.clientRemarks = [...snap.clientRemarks, ...missing];
+        }
+      } catch {}
+    } else {
+      // Раздел «Замечания» скрыт — в публичной ноде замечаний быть НЕ должно даже в сыром JSON.
+      // (buildProgressSnapshot уже ставит [], но подстраховываемся явно — чтобы re-read их не вернул.)
+      snap.clientRemarks = [];
+    }
     try { await storage.set(PROGRESS_NODE(obj.progressToken), JSON.stringify(snap)); } catch (e) { console.warn("publishProgress err", e); }
   }, [buildProgressSnapshot]);
   const publishProgressRef = useRef(); publishProgressRef.current = publishProgress;
@@ -5785,6 +5895,109 @@ ${reqBlock}`;
       let arr = []; try { if (raw?.value) arr = JSON.parse(raw.value); } catch {}
       setWsBackupsModal(Array.isArray(arr) ? arr : []);
     } catch { setWsBackupsModal([]); }
+  };
+
+  // ── ПОЛНЫЙ БЭКАП В ФАЙЛ: выгрузка всех рабочих данных в один JSON и загрузка обратно ──
+  // Работаем НАПРЯМУЮ с ключами хранилища (не с тем, что подгружено в интерфейс), чтобы
+  // бэкап всегда был полным, а восстановление — предсказуемым.
+  const _backupSections = [
+    { k: "objects",         label: "Объекты",           key: OBJECTS_KEY,          bkey: OBJECTS_BACKUPS_KEY },
+    { k: "contracts",       label: "Договоры",          key: CONTRACTS_KEY,        bkey: CONTRACTS_BACKUPS_KEY },
+    { k: "estimates",       label: "Сметы",             key: STORAGE_KEY,          bkey: BACKUPS_KEY },
+    { k: "clients",         label: "Клиенты",           key: CLIENTS_KEY,          bkey: CLIENTS_BACKUPS_KEY },
+    { k: "contragents",     label: "Реквизиты",         key: CONTRAGENTS_KEY,      bkey: CONTRAGENTS_BACKUPS_KEY },
+    { k: "workers",         label: "Подрядчики",        key: WORKERS_KEY,          bkey: WORKERS_BACKUPS_KEY },
+    { k: "productions",     label: "Производство",      key: PRODUCTIONS_KEY,      bkey: PRODUCTIONS_BACKUPS_KEY },
+    { k: "financeTx",       label: "Финансы: операции", key: FINANCE_TX_KEY,       bkey: FINANCE_TX_BACKUPS_KEY },
+    { k: "financeProjects", label: "Финансы: проекты",  key: FINANCE_PROJECTS_KEY, bkey: FINANCE_PROJECTS_BACKUPS_KEY },
+    { k: "reports",         label: "Акты",              key: REPORTS_KEY,          bkey: REPORTS_BACKUPS_KEY },
+  ];
+  const _readArr = async (key) => { try { const r = await storage.getResult(key); if (r.status === "found" && r.value) { const p = JSON.parse(r.value); if (Array.isArray(p)) return p; } } catch {} return []; };
+  // Выгрузка: читаем каждый ключ из базы (авторитетно) и отдаём .json файлом
+  const exportAllJSON = async () => {
+    const data = {};
+    for (const s of _backupSections) data[s.k] = await _readArr(s.key);
+    try { const m = await storage.get(FINANCE_META_KEY); data.financeMeta = m?.value ? JSON.parse(m.value) : null; } catch { data.financeMeta = null; }
+    try { const c = await storage.get(CATALOG_KEY); data.catalog = c?.value ? JSON.parse(c.value) : null; } catch { data.catalog = null; }
+    const snapshot = {
+      _type: "titovstroy-backup", _version: 1,
+      _exportedAt: new Date().toISOString(),
+      _env: IS_DEV_ENV ? "dev" : "prod",
+      _counts: Object.fromEntries(_backupSections.map(s => [s.k, (data[s.k] || []).length])),
+      data,
+    };
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `titovstroy-backup-${IS_DEV_ENV ? "dev" : "prod"}-${stamp}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  };
+  // Загрузка: читаем .json, показываем сводку, требуем ввести «ВОССТАНОВИТЬ»,
+  // перед заменой КАЖДЫЙ раздел уходит в свой авто-бэкап, затем ключ перезаписывается.
+  const importAllJSON = async (file) => {
+    if (!file) return;
+    let snap;
+    try { snap = JSON.parse(await file.text()); } catch { window.alert("Файл не читается как JSON."); return; }
+    if (!snap || snap._type !== "titovstroy-backup" || !snap.data) { window.alert("Это не файл бэкапа TitovStroy."); return; }
+    // База должна быть доступна — иначе восстановление могло бы записаться только локально
+    const probe = await storage.getResult(OBJECTS_KEY);
+    if (probe.status === "unavailable") { window.alert("База сейчас недоступна — восстановление отменено. Проверьте интернет и повторите."); return; }
+    const d = snap.data;
+    const lines = _backupSections.map(s => `• ${s.label}: ${Array.isArray(d[s.k]) ? d[s.k].length : "—"}`).join("\n");
+    const envWarn = IS_DEV_ENV ? "" : "\n\n⚠️ ЭТО БОЕВАЯ БАЗА. Текущие данные будут ЗАМЕНЕНЫ данными из файла.\nПеред заменой каждый раздел уходит в свой авто-бэкап (откат возможен).";
+    const ok = await confirmTyped(`Восстановить ВСЁ из файла бэкапа?\nОт: ${snap._exportedAt || "?"} · база «${snap._env || "?"}»\n\n${lines}${envWarn}`, "ВОССТАНОВИТЬ");
+    if (!ok) return;
+    let done = 0, fail = 0;
+    for (const s of _backupSections) {
+      const list = Array.isArray(d[s.k]) ? d[s.k] : null;
+      if (!list) continue; // нет раздела в файле — не трогаем текущий
+      try {
+        // 1) пред-бэкап текущего значения раздела
+        const cur = await storage.get(s.key);
+        if (cur?.value) {
+          let backups = []; try { const b = await storage.get(s.bkey); if (b?.value) backups = JSON.parse(b.value); } catch {}
+          if (!Array.isArray(backups)) backups = [];
+          let cnt = 0; try { const p = JSON.parse(cur.value); cnt = Array.isArray(p) ? p.length : 0; } catch {}
+          if (!backups[0] || backups[0].data !== cur.value) backups.unshift({ ts: Date.now(), by: currentUser?.name || "", count: cnt, data: cur.value });
+          await storage.set(s.bkey, JSON.stringify(backups.slice(0, 20)));
+        }
+        // 2) перезапись раздела данными из файла
+        await storage.set(s.key, JSON.stringify(list));
+        done++;
+      } catch (e) { console.warn("restore fail", s.k, e); fail++; }
+    }
+    if (d.financeMeta) { try { await storage.set(FINANCE_META_KEY, JSON.stringify(d.financeMeta)); } catch {} }
+    if (d.catalog) { try { await storage.set(CATALOG_KEY, JSON.stringify(d.catalog)); } catch {} }
+    window.alert(`Восстановление завершено: ${done} разделов${fail ? `, ошибок: ${fail}` : ""}.\nСтраница сейчас перезагрузится, чтобы показать восстановленные данные.`);
+    setTimeout(() => window.location.reload(), 1000);
+  };
+  // Выгрузка всех смет отдельной таблицей для Excel (CSV, открывается в Excel напрямую)
+  const exportEstimatesXls = async () => {
+    const ests = await _readArr(STORAGE_KEY);
+    const objs = await _readArr(OBJECTS_KEY);
+    const objById = {}; for (const o of objs) objById[o.id] = o;
+    const stLbl = (k) => (STATUSES.find(s => s.key === (k || "new")) || {}).label || k || "";
+    const rows = ests.map(e => {
+      const obj = e.objectId ? objById[e.objectId] : null;
+      const nPos = Object.values(e.rows || {}).filter(r => Number(r?.qty) > 0).length;
+      return [
+        e.proj?.name || "Без названия",
+        e.proj?.phone || "",
+        obj?.address || e.proj?.address || "",
+        e.proj?.type || "",
+        e.proj?.area ? Number(e.proj.area) : "",
+        e.createdAt ? new Date(e.createdAt).toLocaleDateString("ru-RU") : "",
+        e.dsNumber ? `ДС №${e.dsNumber}` : "основная",
+        stLbl(e.status),
+        nPos,
+        Math.round(Number(e.total) || 0),
+      ];
+    });
+    downloadCSV(`сметы-${new Date().toISOString().slice(0, 10)}.csv`,
+      ["Название", "Телефон", "Адрес объекта", "Тип", "Площадь м²", "Дата", "Вид", "Статус", "Позиций", "Сумма клиенту ₸"],
+      rows);
   };
 
   // Точечно вытащить ТОЛЬКО пропавшие сметы из снимка рабочего пространства,
@@ -12706,6 +12919,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           contracts={contracts}
           fmt={fmt}
           onBackupWorkspace={openWorkspaceBackups}
+          onExportAll={exportAllJSON}
+          onImportAll={importAllJSON}
+          onExportEstimatesXls={exportEstimatesXls}
           checkIssues={_checkIssues}
           onNavIssue={openIssue}
         />
