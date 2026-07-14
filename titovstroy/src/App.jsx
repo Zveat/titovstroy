@@ -553,6 +553,35 @@ const _race = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(_T
 const _fbKey = (k) => k.replace(/[^a-zA-Z0-9_]/g, "_"); // Firebase: только буквы/цифры/_
 const _TS_SUFFIX = "__wts"; // timestamp последней локальной записи
 const _DIRTY_SUFFIX = "__dirty"; // флаг: последняя запись в облако НЕ прошла — локальная копия новее
+// ── REST-ФОЛБЭК ДЛЯ ОБЛАКА ──
+// Firebase SDK ходит по WebSocket — его нередко режут блокировщики рекламы, антивирусы,
+// корпоративные сети и «оптимизаторы» провайдеров. При этом сама база доступна: обычный
+// HTTPS-запрос (fetch) проходит. Поэтому если SDK-запись/чтение не удались — пробуем
+// то же самое через REST API базы. Это устраняет вечное «облако недоступно» на машинах,
+// где заблокирован именно WebSocket, а не Firebase целиком.
+const _restToken = async () => {
+  try { await _fbAuthReady; const u = _fbAuth && _fbAuth.currentUser; return u ? await u.getIdToken() : null; } catch { return null; }
+};
+const _restUrl = (key, token) => firebaseConfig.databaseURL + "/" + _fbKey(key) + ".json" + (token ? "?auth=" + encodeURIComponent(token) : "");
+const _fbRestSet = async (key, value) => {
+  if (!firebaseConfig.databaseURL) return false;
+  try {
+    const token = await _restToken();
+    const r = await _race(fetch(_restUrl(key, token), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) }), 12000);
+    return !!(r && r !== _TIMEOUT && r.ok);
+  } catch { return false; }
+};
+const _fbRestGet = async (key) => {
+  if (!firebaseConfig.databaseURL) return { ok: false };
+  try {
+    const token = await _restToken();
+    const r = await _race(fetch(_restUrl(key, token)), 8000);
+    if (!r || r === _TIMEOUT || !r.ok) return { ok: false };
+    const v = await r.json();
+    // null = ключа нет (это ЧЕСТНЫЙ ответ базы, не ошибка); строка = новый формат; объект = старый
+    return { ok: true, value: v === null ? null : (typeof v === "string" ? v : JSON.stringify(v)) };
+  } catch { return { ok: false }; }
+};
 // Согласование локальной («грязной») копии с облаком: для СПИСКОВ записей с id
 // объединяем по id и берём более свежую по updatedAt. Так незасинканная локальная
 // правка НЕ теряется, но и устаревшая локальная копия НЕ прячет более свежий сервер
@@ -620,7 +649,14 @@ const storage = {
           snap = await _race(get(ref(_fbDb, _fbKey(key))), 8000);
         }
         if (snap === _TIMEOUT) {
-          fbResponded = false; // таймаут — НЕ знаем что в базе
+          // SDK не ответил (WebSocket мог быть заблокирован) — пробуем REST тем же ключом
+          const rr = await _fbRestGet(key);
+          if (rr.ok) {
+            fbResponded = true;
+            if (rr.value !== null) return { value: rr.value, status: "found" };
+          } else {
+            fbResponded = false; // и REST не ответил — НЕ знаем что в базе
+          }
         } else {
           fbResponded = true;
           if (snap && snap.exists()) {
@@ -630,7 +666,15 @@ const storage = {
           }
         }
       }
-    } catch(e) { console.warn("FB get error:", e); fbResponded = false; }
+    } catch(e) {
+      console.warn("FB get error:", e);
+      // Ошибка SDK — последний шанс через REST
+      try {
+        const rr = await _fbRestGet(key);
+        if (rr.ok) { if (rr.value !== null) return { value: rr.value, status: "found" }; fbResponded = true; }
+        else fbResponded = false;
+      } catch { fbResponded = false; }
+    }
     // Резерв: localStorage любой давности
     try { const v = localStorage.getItem(key); if (v) return { value: v, status: "found" }; } catch(e) {}
     if (_mem[key]) return { value: _mem[key], status: "found" };
@@ -667,6 +711,11 @@ const storage = {
           const res2 = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000);
           if (res2 !== _TIMEOUT) { fbOk = true; fbError = null; }
         } catch(e2) { fbError = e2?.message || String(e2); }
+      }
+      // SDK (WebSocket) не смог — пробуем обычным HTTPS-запросом (REST). Часто именно
+      // WebSocket заблокирован блокировщиком/сетью, а сама база доступна.
+      if (!fbOk) {
+        try { if (await _fbRestSet(key, value)) { fbOk = true; fbError = null; } } catch {}
       }
     } else {
       fbError = "firebase not configured";
@@ -5029,7 +5078,9 @@ ${reqBlock}`;
       await storage.flushDirty();
       await Promise.all([loadEstimates(), loadContracts()]);
       if (currentUser?.role === "admin" || currentUser?.role === "manager") await loadFinance();
-      setDirtyCount(storage.dirtyKeys().length);
+      const left = storage.dirtyKeys().length;
+      setDirtyCount(left);
+      if (left === 0) setCloudError(false); // всё дожали — баннер «облако недоступно» больше не актуален
     } catch(e) { console.warn("resync err", e); }
     setResyncing(false);
   }, [resyncing, loadEstimates, loadContracts, loadFinance, currentUser?.role]);
@@ -5037,7 +5088,7 @@ ${reqBlock}`;
   // Авто-флеш зависших правок: при старте, периодически и при возврате сети
   useEffect(() => {
     let stop = false;
-    const flush = () => { if (!stop) storage.flushDirty().then(()=>{ if(!stop) setDirtyCount(storage.dirtyKeys().length); }).catch(()=>{}); };
+    const flush = () => { if (!stop) storage.flushDirty().then(()=>{ if(!stop) { const left = storage.dirtyKeys().length; setDirtyCount(left); if (left === 0) setCloudError(false); } }).catch(()=>{}); };
     flush();
     const iv = setInterval(flush, 90000);
     const onOnline = () => _resyncRef.current && _resyncRef.current();
@@ -7232,9 +7283,10 @@ ${reqBlock}`;
         </div>
       )}
       {!loadError && cloudError && (
-        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:500,background:"#d97706",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
-          ⚠️ Данные сохранены ТОЛЬКО на этом устройстве — облако недоступно. На других устройствах изменений не будет. Проверьте интернет/правила Firebase.
-          <button onClick={()=>setCloudError(false)} style={{background:"#fff",color:"#d97706",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Скрыть</button>
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:500,background:"#d97706",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)",flexWrap:"wrap"}}>
+          ⚠️ Данные сохранены ТОЛЬКО на этом устройстве — облако недоступно{dirtyCount>0?` (несинхронизировано: ${dirtyCount})`:""}. Приложение само дожмёт синхронизацию, когда облако ответит. Если баннер не гаснет — проверьте интернет и отключите блокировщик рекламы для этого сайта.
+          <button onClick={resyncNow} disabled={resyncing} style={{background:"#fff",color:"#d97706",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:resyncing?"default":"pointer",fontFamily:"inherit"}}>{resyncing?"Синхронизирую…":"🔄 Повторить сейчас"}</button>
+          <button onClick={()=>setCloudError(false)} style={{background:"rgba(255,255,255,.25)",color:"#fff",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Скрыть</button>
         </div>
       )}
       {/* Панель администратора */}
