@@ -4828,6 +4828,66 @@ ${reqBlock}`;
     return order.map(k => ({ cat: map[k].cat, name: map[k].name, unit: map[k].unit, qty: Math.round(map[k].qty * 100) / 100, priceClient: Math.round(map[k].priceClient), costPlan: Math.round(map[k].costPlan) }));
   }, [estimates]);
 
+  // АВТО-СИНХРОНИЗАЦИЯ этапов производства со сметами (без кнопок):
+  // добавил позицию в смету/доп. смету → она сама появляется в Этапах и «Финансах по этапам»;
+  // удалил смету/позицию → сметные этапы сами исчезают. Статус/сроки/ответственный
+  // существующих этапов сохраняются. НЕ трогаем: ручные этапы (в т.ч. с введённой
+  // вручную ценой, если имени нет в каталоге) и импортные карточки без объекта (fp:).
+  // РАНЬШЕ в этой ветке этапы подтягивались из сметы ТОЛЬКО ОДИН РАЗ при первом открытии
+  // объекта (когда карточки производства ещё не существовало) — если карточка уже была
+  // создана (например, объект успел побывать «в работе» с пустыми этапами), новые/изменённые
+  // позиции сметы в неё больше не попадали. Отсюда «в производстве нет этапов и сроков», хотя
+  // смета заполнена. Теперь синк идёт постоянно, а не разово.
+  const _stageSyncTimer = useRef(null);
+  useEffect(() => {
+    if (!_estimatesLoaded.current || !_contractsLoaded.current) return;
+    if (_stageSyncTimer.current) clearTimeout(_stageSyncTimer.current);
+    _stageSyncTimer.current = setTimeout(() => {
+      const prods = productionsRef.current;
+      if (!prods.length) return;
+      const keyOf = s => ((s.cat || "") + "|" + (s.name || "")).toLowerCase().trim();
+      // имена из каталога — по ним отличаем сметные этапы от ручных (у легаси-этапов нет флага fromEst)
+      const catKeys = new Set(getEffectiveCatalog().map(w => ((w.cat || "") + "|" + (w.name || "")).toLowerCase().trim()));
+      let anyChanged = false;
+      const updated = prods.map(p => {
+        if (!p.objectId || String(p.objectId).startsWith("fp:")) return p;
+        // НЕ пропускаем объект без смет: иначе сметные этапы удалённых смет висят вечно.
+        // built станет [] → сметные этапы (fromEst/каталог/плановая сумма) уберутся, ручные останутся.
+        // Верхний guard _estimatesLoaded не даёт стирать этапы, пока сметы не загружены из базы.
+        const built = buildStagesFromEstimate(p.objectId);
+        const builtKeys = new Set(built.map(keyOf));
+        const cur = p.stages || [];
+        let changed = false;
+        // удаляем сметные этапы, которых больше нет в сметах. Сметный = флаг fromEst,
+        // либо имя из каталога, либо есть плановая сумма (ручные этапы «+ добавить» всегда с нулём —
+        // их не трогаем). Это ловит и старые этапы без флага fromEst (напр. каталог изменился/скрыт).
+        const kept = cur.filter(s => builtKeys.has(keyOf(s)) || !(s.fromEst || catKeys.has(keyOf(s)) || Number(s.priceClient) > 0 || Number(s.costPlan) > 0 || Number(s.qty) > 0));
+        if (kept.length !== cur.length) changed = true;
+        const used = new Set();
+        const next = kept.map(s => {
+          const b = built.find(x => keyOf(x) === keyOf(s));
+          if (!b) return s;
+          used.add(keyOf(b));
+          if (s.qty !== b.qty || s.priceClient !== b.priceClient || s.costPlan !== b.costPlan || (b.unit && s.unit !== b.unit)) { changed = true; return { ...s, unit: b.unit || s.unit, qty: b.qty, priceClient: b.priceClient, costPlan: b.costPlan, fromEst: true }; }
+          return s;
+        });
+        for (const b of built) {
+          if (used.has(keyOf(b))) continue;
+          changed = true;
+          next.push({ id: genId(), cat: b.cat, name: b.name, unit: b.unit || "", qty: b.qty, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: b.priceClient, costPlan: b.costPlan, fromEst: true });
+        }
+        if (!changed) return p;
+        anyChanged = true;
+        return { ...p, stages: next, updatedAt: Date.now() };
+      });
+      // ВАЖНО: replace:true — карточки производства без id (ключ objectId), а мердж по id
+      // в обычном режиме даёт пусто → блок «пусто поверх» молча отменял сохранение (этапы не удалялись).
+      if (anyChanged) saveProductions(updated, { replace: true });
+    }, 900);
+    return () => { if (_stageSyncTimer.current) clearTimeout(_stageSyncTimer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [estimates]);
+
   // Миграция: перенести все проекты из Финансов в Производство (один раз)
   // Определён ПОСЛЕ buildStagesFromEstimate чтобы избежать temporal dead zone
   const migrateFinanceToProd = useCallback(async () => {
