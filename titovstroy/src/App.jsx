@@ -4509,7 +4509,16 @@ function MainApp({ currentUser, setCurrentUser }) {
   // Ничего не записывает — только вычисляет для отображения.
   // Статус ОБЪЕКТА — главный (объект первичен, финансы/производство вторичны).
   // Показываем ровно то, что задано в карточке объекта, ничем не перебивая.
-  const unifiedStatusOf = useCallback((o) => o.status || "new", []);
+  const unifiedStatusOf = useCallback((o) => {
+    // Статус ПРОИЗВОДСТВА (В работе/Приостановлен/Выполнен/Расторгнут) отражает реальное
+    // состояние объекта и перевешивает статус сделки для ОТОБРАЖЕНИЯ и ФИЛЬТРА. Если карточки
+    // производства нет или её статус ещё «new» — показываем статус объекта как есть.
+    // (Боевые объекты хранят реальный статус в производстве: object.status у многих = "archive",
+    //  а по производству они "done/active" — без этого они ошибочно висели бы в «Архиве».)
+    const pr = productions.find(p => p.objectId === o.id);
+    const derived = pr && PROD_TO_DEAL[pr.prodStatus];
+    return derived || o.status || "new";
+  }, [productions]);
   // Что «подсказывает» производство/финансы — используется только как рекомендация
   // в панели проверки статусов (не влияет на отображение автоматически).
   const suggestedStatusOf = useCallback((o) => {
@@ -8580,7 +8589,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:1}}>
                   {recentObjects.map((o,i,arr)=>{
-                    const st = DEAL_STATUSES.find(s=>s.key===(o.status||"new"))||DEAL_STATUSES[0];
+                    const st = DEAL_STATUSES.find(s=>s.key===unifiedStatusOf(o))||DEAL_STATUSES[0];
                     const val = _objVal(o);
                     return (
                       <div key={o.id} onClick={()=>{ setCurrentObject(o); setObjectTab("info"); setScreen("objects"); }}
@@ -10046,7 +10055,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 <div style={{display:"flex",flexDirection:"column",gap:5}}>
                   {topObjects.map((o,i)=>{
                     const v = objVal(o);
-                    const st = DEAL_STATUSES.find(s=>s.key===(o.status||"new"))||DEAL_STATUSES[0];
+                    const st = DEAL_STATUSES.find(s=>s.key===unifiedStatusOf(o))||DEAL_STATUSES[0];
                     return (
                       <div key={o.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",background:"#f9fafb",borderRadius:8,cursor:"pointer"}}
                         onClick={()=>{setCurrentObject({...o});setObjectTab("workspace");setScreen("objects");}}>
