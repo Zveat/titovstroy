@@ -3961,7 +3961,10 @@ function MainApp({ currentUser, setCurrentUser }) {
       const obj = c.objectId ? objects.find(o=>o.id===c.objectId) : null;
       const conTotal = (c.works||[]).reduce((s,w)=>s+((Number(w.quantity)||0)*(Number(w.price)||0)),0);
       const agg = obj ? estAgg[obj.id] : null;
-      const planTotal = conTotal>0 ? conTotal : (agg ? agg.total : 0);
+      // ПЛАН = ВСЕ сметы объекта (основная + доп.) — доп. сметы сразу попадают в план;
+      // если смет нет, берём сумму работ договора. Раньше приоритет был у договора, из-за
+      // чего доп. сметы «не шли в финансы» (план не менялся при добавлении доп. сметы).
+      const planTotal = (agg && agg.total>0) ? agg.total : conTotal;
       const planCost = agg ? agg.cost : 0;
       const planMargin = planTotal>0 ? planTotal - planCost : 0;
       const planMarginPct = planTotal>0 ? Math.round(planMargin/planTotal*100) : null;
@@ -3972,15 +3975,26 @@ function MainApp({ currentUser, setCurrentUser }) {
   const linkForContractNo = (cn) => contractLinkMap[normCN(cn)] || null;
   // открыть объект из финансов
   const openObjectFromFinance = (obj) => { if(!obj) return; setCurrentObject({...obj}); setObjectTab("workspace"); setScreen("objects"); };
+  // Бюджет проекта = сумма работ основного договора + всех его доп. соглашений (annex).
+  // Раньше бюджет считался ТОЛЬКО по основному договору и не пересчитывался при правках —
+  // из-за этого проект показывал устаревшую сумму (напр. договор урезали, а бюджет остался).
+  const _worksSum = (works) => (works || []).reduce((s, w) => s + ((Number(w.quantity) || 0) * (Number(w.price) || 0)), 0);
+  const finBudgetOfContract = (main) => {
+    if (!main) return 0;
+    const own = _worksSum(main.works);
+    const annex = main.number ? contractsRef.current
+      .filter(x => !x.deletedAt && x.type === "annex" && x.mainNumber && normCN(x.mainNumber) === normCN(main.number))
+      .reduce((s, x) => s + _worksSum(x.works), 0) : 0;
+    return own + annex;
+  };
   // построить черновик фин-проекта из объекта+договора
   const finProjDraftFromObject = (obj, contract) => {
-    const conTotal = (contract?.works||[]).reduce((s,w)=>s+((Number(w.quantity)||0)*(Number(w.price)||0)),0);
     return {
       id:"", contractNo: contract?.number||"",
       client: obj?.clientType==="юр" ? "Юр лицо" : "Физ лицо",
       category: obj?.objType || "Вторичка",
       description: [obj?.clientName, obj?.address, obj?.clientPhone].filter(Boolean).join(" | "),
-      budget: conTotal||0,
+      budget: finBudgetOfContract(contract)||0,
       status:"активен", rawStatus:"в работе",
       createdAt: contract?.date || new Date().toISOString().slice(0,10),
       closedAt:"", b24:"нет",
@@ -3988,11 +4002,20 @@ function MainApp({ currentUser, setCurrentUser }) {
       avr:"нет", comment:"", objectId: obj?.id||"",
     };
   };
-  // завести проект в финансах из объекта (или открыть существующий)
-  const startFinProjFromObject = (obj, contract) => {
+  // завести проект в финансах из объекта (или открыть существующий).
+  // Если проект уже есть — СРАЗУ пересчитываем его бюджет по актуальному договору (+доп.)
+  // и сохраняем, чтобы правки договора/доп. соглашений отразились без ручного «Сохранить».
+  const startFinProjFromObject = async (obj, contract) => {
     const existing = contract ? finProjectsRef.current.find(p=>normCN(p.contractNo)===normCN(contract.number)) : null;
     setScreen("finance"); setFinanceTab("projects");
-    setFinProjModal(existing ? {...existing} : finProjDraftFromObject(obj, contract));
+    if (existing) {
+      const nb = finBudgetOfContract(contract);
+      const upd = { ...existing, budget: nb };
+      if (nb > 0 && Math.round(Number(existing.budget)||0) !== Math.round(nb)) { try { await saveFinanceProjects(finProjectsRef.current.map(p=>p.id===existing.id?upd:p)); } catch(e) {} }
+      setFinProjModal(upd);
+    } else {
+      setFinProjModal(finProjDraftFromObject(obj, contract));
+    }
   };
 
   const [objectTab, setObjectTab] = useState("list"); // list | workspace
@@ -4912,6 +4935,34 @@ ${reqBlock}`;
   const saveFinanceProjects = async (list, opts = {}) => {
     return await saveListProtected(FINANCE_PROJECTS_KEY, FINANCE_PROJECTS_BACKUPS_KEY, list, (fl)=>{ finProjectsRef.current = fl; setFinProjects(fl); }, { loadedRef: _financeLoaded, ...opts });
   };
+
+  // АВТО-ПЕРЕСЧЁТ БЮДЖЕТА ПРОЕКТОВ: при любом изменении договоров (правка позиций,
+  // удаление, доп. соглашение) бюджет связанного проекта пересчитывается сам:
+  // бюджет = основной договор + все его доп. соглашения. Проекты без договора в сервисе
+  // (импорт из Google-таблиц) и проекты без совпадающего договора — НЕ трогаются. Debounce.
+  const _budgetSyncTimer = useRef(null);
+  useEffect(() => {
+    if (!_financeLoaded.current || !_contractsLoaded.current) return;
+    if (_budgetSyncTimer.current) clearTimeout(_budgetSyncTimer.current);
+    _budgetSyncTimer.current = setTimeout(() => {
+      const fps = finProjectsRef.current;
+      if (!fps.length) return;
+      let changed = false;
+      const updated = fps.map(fp => {
+        if (!fp.contractNo) return fp;
+        const main = contractsRef.current.find(c => c.number && !c.deletedAt
+          && c.type !== "podryad" && c.type !== "podryad_annex" && c.type !== "annex" && c.type !== "design_add"
+          && normCN(c.number) === normCN(fp.contractNo));
+        if (!main) return fp;
+        const nb = finBudgetOfContract(main);
+        if (nb > 0 && Math.round(Number(fp.budget) || 0) !== Math.round(nb)) { changed = true; return { ...fp, budget: nb }; }
+        return fp;
+      });
+      if (changed) saveFinanceProjects(updated);
+    }, 800);
+    return () => { if (_budgetSyncTimer.current) clearTimeout(_budgetSyncTimer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contracts]);
 
   // Бэкапы списков (договоры/клиенты/контрагенты)
   const openListBackups = async (kind) => {
