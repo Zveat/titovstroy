@@ -16,8 +16,10 @@
     <!-- Ускоряем установку соединений до того, как понадобятся данные -->
     <link rel="preconnect" href="https://titovstroy-da1cf-default-rtdb.firebaseio.com" crossorigin />
     <link rel="dns-prefetch" href="https://titovstroy-da1cf-default-rtdb.firebaseio.com" />
-    <!-- DOCX-экспорт нужен не сразу — грузим без блокировки рендера -->
-    <script src="https://unpkg.com/html-docx-js@0.3.1/dist/html-docx.js" defer></script>
+    <!-- Сервер анонимной авторизации Firebase: его ответ нужен ДО первого чтения данных,
+         поэтому прогреваем TLS-соединение заранее (домен один для всех Firebase-проектов) -->
+    <link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin />
+    <link rel="dns-prefetch" href="https://identitytoolkit.googleapis.com" />
     <style>
       html,body,#root{margin:0;padding:0;background:#f8fafc;min-height:100vh}
       #boot-splash{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%);z-index:9999;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;transition:opacity .25s ease}

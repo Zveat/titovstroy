@@ -1,9 +1,10 @@
 import { useState, useMemo, useEffect, useCallback, useRef, Fragment } from "react";
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, get, set } from "firebase/database";
+import { getDatabase, ref, get, set, runTransaction } from "firebase/database";
 import ProductionModule from "./production/ProductionModule.jsx";
 import { emptyProduction } from "./production/constants.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad } from "./utils.js";
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
 function useDebounce(value, ms) {
@@ -12,7 +13,9 @@ function useDebounce(value, ms) {
   return dv;
 }
 
-const firebaseConfig = {
+// Боевая база (по умолчанию). НЕ меняется — на продакшне переменных окружения нет,
+// поэтому используется именно этот конфиг, как раньше.
+const _FB_PROD = {
   apiKey:            "AIzaSyCPawCUYGY20SB5cLLszjoNzK5ytew9tCs",
   authDomain:        "titovstroy-da1cf.firebaseapp.com",
   databaseURL:       "https://titovstroy-da1cf-default-rtdb.firebaseio.com",
@@ -21,6 +24,306 @@ const firebaseConfig = {
   messagingSenderId: "736574510792",
   appId:             "1:736574510792:web:b5d243a051caf4887337fd"
 };
+// Конфиг из окружения (Vercel: разные значения для Production/Preview). Если задан
+// VITE_FB_DATABASE_URL — используем его (dev-база на превью-ветке), иначе — боевую.
+const _env = (typeof import.meta !== "undefined" && import.meta.env) ? import.meta.env : {};
+const _FB_ENV = {
+  apiKey:            _env.VITE_FB_API_KEY,
+  authDomain:        _env.VITE_FB_AUTH_DOMAIN,
+  databaseURL:       _env.VITE_FB_DATABASE_URL,
+  projectId:         _env.VITE_FB_PROJECT_ID,
+  storageBucket:     _env.VITE_FB_STORAGE_BUCKET,
+  messagingSenderId: _env.VITE_FB_SENDER_ID,
+  appId:             _env.VITE_FB_APP_ID,
+};
+// Признак dev-окружения: конфиг взят из переменных (значит база — не боевая)
+const IS_DEV_ENV = !!_FB_ENV.databaseURL;
+const firebaseConfig = IS_DEV_ENV ? _FB_ENV : _FB_PROD;
+// Обёртка над window.confirm для опасных массовых операций (восстановление бэкапа,
+// импорт JSON и т.п.): на боевой базе добавляет явное предупреждение перед вопросом,
+// чтобы не восстановить/импортировать что-то не туда по рассеянности.
+const confirmDangerous = (message) => {
+  const prefix = IS_DEV_ENV ? "" : "⚠️ ВЫ В БОЕВОЙ БАЗЕ (реальные данные компании).\n\n";
+  return window.confirm(prefix + message);
+};
+
+// ── Typed-confirm для БЕЗВОЗВРАТНЫХ удалений (без корзины/бэкапа-в-один-клик) ──
+// Императивный API поверх одной модалки, смонтированной один раз в MainApp (как window.confirm,
+// но требует напечатать слово подтверждения — обычный клик по confirm() слишком легко нажать
+// случайно для действия, которое нельзя отменить через интерфейс).
+let _dangerModalResolve = null;
+let _setDangerModalState = null;
+function confirmTyped(message, requireWord = "УДАЛИТЬ") {
+  return new Promise(resolve => {
+    if (!_setDangerModalState) { resolve(window.confirm(message)); return; } // модалка ещё не смонтирована — fallback
+    _dangerModalResolve = resolve;
+    _setDangerModalState({ message, requireWord });
+  });
+}
+function DangerConfirmModal() {
+  const [state, setState] = useState(null);
+  const [val, setVal] = useState("");
+  useEffect(() => { _setDangerModalState = setState; return () => { _setDangerModalState = null; }; }, []);
+  const close = (result) => { const r = _dangerModalResolve; _dangerModalResolve = null; setState(null); setVal(""); if (r) r(result); };
+  if (!state) return null;
+  const ok = val.trim().toUpperCase() === state.requireWord;
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:20}} onClick={()=>close(false)}>
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:"24px 26px",maxWidth:380,width:"100%"}} onClick={e=>e.stopPropagation()}>
+        <div style={{fontSize:32,marginBottom:10,textAlign:"center"}}>🗑️</div>
+        <div style={{fontSize:14,color:"#334155",marginBottom:14,whiteSpace:"pre-line",textAlign:"center"}}>{state.message}</div>
+        <div style={{fontSize:12,color:"#94a3b8",marginBottom:8,textAlign:"center"}}>Чтобы подтвердить, напечатайте <b style={{color:"#dc2626"}}>{state.requireWord}</b>:</div>
+        <input autoFocus className="fi" value={val} onChange={e=>setVal(e.target.value)}
+          onKeyDown={e=>{ if(e.key==="Enter" && ok) close(true); if(e.key==="Escape") close(false); }}
+          style={{width:"100%",textAlign:"center",fontWeight:700,letterSpacing:1,marginBottom:16,boxSizing:"border-box"}}/>
+        <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+          <button className="btn btn-o" style={{padding:"9px 20px"}} onClick={()=>close(false)}>Отмена</button>
+          <button className="btn btn-red" disabled={!ok} style={{padding:"9px 20px",opacity:ok?1:.5,cursor:ok?"pointer":"default"}} onClick={()=>close(true)}>Удалить</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Панель проблем: «Что горит сегодня» (дашборд) и «Проверка базы» (Админка) ──
+// Компактные карточки в адаптивную сетку (2+ колонки), группы сворачиваются, длинные
+// группы по умолчанию показывают несколько первых с «показать все» — чтобы панель не
+// растягивалась в бесконечный вертикальный список. Клик по карточке — onNav; «×» —
+// скрыть до завтра (если dismissable и передан onDismiss).
+const _ISSUE_GROUPS = ["Производство", "Финансы", "Клиенты", "Данные"];
+const _GRP_ICON = { "Производство":"🔨", "Финансы":"💰", "Клиенты":"👤", "Данные":"🗂" };
+const _ISSUE_CAP = 6; // сколько показывать в группе до «показать все»
+function IssuePanel({ issues, onNav, onDismiss, emptyText = "✓ Всё чисто — проблем не найдено" }) {
+  const [openGroups, setOpenGroups] = useState({}); // какие группы РАЗВЁРНУТЫ (по умолчанию все свёрнуты)
+  const [showAll, setShowAll] = useState({});       // группа показывает все карточки
+  const reds = issues.filter(i => i.sev === "red").length;
+  const yellows = issues.length - reds;
+  if (!issues.length) {
+    return (
+      <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:14, padding:"18px 20px", display:"flex", alignItems:"center", gap:10 }}>
+        <span style={{ fontSize:22 }}>✅</span>
+        <span style={{ fontSize:14, fontWeight:700, color:"#059669" }}>{emptyText}</span>
+      </div>
+    );
+  }
+  const byGroup = {};
+  for (const i of issues) (byGroup[i.group] || (byGroup[i.group] = [])).push(i);
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+        {reds>0 && <span style={{ fontSize:12, fontWeight:800, color:"#fff", background:"#dc2626", borderRadius:20, padding:"3px 11px" }}>🔴 {reds} критичных</span>}
+        {yellows>0 && <span style={{ fontSize:12, fontWeight:800, color:"#92610f", background:"#fef3c7", border:"1px solid #fde68a", borderRadius:20, padding:"3px 11px" }}>🟡 {yellows} предупреждений</span>}
+      </div>
+      {_ISSUE_GROUPS.filter(g => byGroup[g]).map(g => {
+        const list = byGroup[g];
+        const gReds = list.filter(i=>i.sev==="red").length;
+        const isOpen = !!openGroups[g];
+        const shown = (showAll[g] || list.length<=_ISSUE_CAP) ? list : list.slice(0, _ISSUE_CAP);
+        return (
+        <div key={g} style={{ background:"#fff", border:"1px solid #eef2f7", borderRadius:14, overflow:"hidden" }}>
+          <div onClick={()=>setOpenGroups(p=>({...p,[g]:!p[g]}))}
+            style={{ display:"flex", alignItems:"center", gap:8, padding:"11px 16px", borderBottom:isOpen?"1px solid #f1f5f9":"none", background:"#f8fafc", cursor:"pointer", userSelect:"none" }}>
+            <span style={{ fontSize:14 }}>{_GRP_ICON[g]}</span>
+            <span style={{ fontSize:12.5, fontWeight:800, color:"#0f172a" }}>{g}</span>
+            <span style={{ fontSize:11.5, fontWeight:700, color:"#94a3b8" }}>{list.length}</span>
+            {gReds>0 && <span style={{ fontSize:10.5, fontWeight:800, color:"#dc2626", background:"#fef2f2", borderRadius:20, padding:"1px 8px" }}>{gReds} 🔴</span>}
+            <span style={{ marginLeft:"auto", color:"#94a3b8", fontSize:13, transform:isOpen?"none":"rotate(-90deg)", transition:"transform .15s" }}>▾</span>
+          </div>
+          {isOpen && (
+            <div style={{ padding:12, display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(270px,1fr))", gap:8 }}>
+              {shown.map(i => (
+                <div key={i.id} onClick={() => onNav && onNav(i.nav)}
+                  style={{ position:"relative", border:"1px solid #eef2f7", borderLeft:`3px solid ${i.sev==="red"?"#dc2626":"#f59e0b"}`, borderRadius:10, padding:"9px 11px", paddingRight: (onDismiss&&i.dismissable)?26:11, cursor: onNav?"pointer":"default", transition:"box-shadow .12s,border-color .12s", background:"#fff" }}
+                  onMouseEnter={e=>{ if(onNav){ e.currentTarget.style.boxShadow="0 4px 14px rgba(15,23,42,.08)"; } }}
+                  onMouseLeave={e=>{ e.currentTarget.style.boxShadow="none"; }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#0f172a", lineHeight:1.3 }}>{i.title}</div>
+                  {i.detail && <div style={{ fontSize:11, color:"#94a3b8", marginTop:2, lineHeight:1.35, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{i.detail}</div>}
+                  {onDismiss && i.dismissable && (
+                    <button onClick={e=>{ e.stopPropagation(); onDismiss(i.id); }} title="Скрыть до завтра"
+                      style={{ position:"absolute", top:6, right:6, background:"none", border:"none", color:"#cbd5e1", borderRadius:6, width:20, height:20, fontSize:15, lineHeight:1, cursor:"pointer", fontFamily:"inherit", padding:0 }}
+                      onMouseEnter={e=>{ e.currentTarget.style.color="#dc2626"; e.currentTarget.style.background="#fef2f2"; }}
+                      onMouseLeave={e=>{ e.currentTarget.style.color="#cbd5e1"; e.currentTarget.style.background="none"; }}>×</button>
+                  )}
+                </div>
+              ))}
+              {list.length > _ISSUE_CAP && (
+                <button onClick={()=>setShowAll(p=>({...p,[g]:!p[g]}))}
+                  style={{ gridColumn:"1/-1", justifySelf:"start", background:"none", border:"none", color:"#2563eb", fontSize:12.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit", padding:"2px 0" }}>
+                  {showAll[g] ? "Свернуть" : `Показать все ${list.length} →`}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── КАЛЕНДАРЬ ПРОИЗВОДСТВА: общий таймлайн этапов (по объектам / по прорабам) ──
+// Read-only v1: показывает загрузку, пересечения, просрочки и перегруз бригад. Клик по
+// этапу открывает объект. Перетаскивание/инлайн-редактирование — отдельным заходом.
+const _CAL_ST = { todo:{ l:"Не начат", c:"#94a3b8" }, progress:{ l:"В работе", c:"#2563eb" }, done:{ l:"Готово", c:"#059669" }, delayed:{ l:"Задержка", c:"#dc2626" } };
+const _CAL_DAY = 864e5;
+const _calDayStart = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
+function ProductionCalendar({ objects, productions, onOpenObject }) {
+  const [groupBy, setGroupBy] = useState("object"); // "object" | "foreman"
+  const [windowDays, setWindowDays] = useState(30);  // 14 | 30 | 90
+  const [anchor, setAnchor] = useState(() => _calDayStart(Date.now()) - 3*_CAL_DAY);
+  const [fForeman, setFForeman] = useState("");
+  const [fStatus, setFStatus] = useState("");
+  const today = _calDayStart(Date.now());
+
+  const allStages = useMemo(() => buildCalendarStages(objects, productions, { now: Date.now() }), [objects, productions]);
+  const foremen = useMemo(() => [...new Set(allStages.map(s => s.responsible || "— без прораба —"))].sort((a,b)=>a.localeCompare(b)), [allStages]);
+  const load = useMemo(() => foremanLoad(allStages, { threshold: 3 }), [allStages]);
+  const overloadedForemen = Object.keys(load).filter(f => load[f].overloaded);
+
+  const stages = allStages.filter(s =>
+    (!fForeman || (s.responsible || "— без прораба —") === fForeman) &&
+    (!fStatus || (fStatus === "overdue" ? s.overdue : s.status === fStatus)));
+
+  const startMs = anchor, endMs = anchor + windowDays*_CAL_DAY;
+  const inWindow = stages.filter(s => s.end >= startMs && s.start <= endMs);
+
+  const rowsMap = {};
+  for (const s of inWindow) {
+    const key = groupBy === "object" ? s.objId : (s.responsible || "— без прораба —");
+    if (!rowsMap[key]) rowsMap[key] = { key, label: groupBy === "object" ? s.objLabel : (s.responsible || "— без прораба —"), objId: s.objId, items: [] };
+    rowsMap[key].items.push(s);
+  }
+  const rows = Object.values(rowsMap).sort((a,b) => a.label.localeCompare(b.label));
+
+  const PX = windowDays <= 14 ? 34 : windowDays <= 30 ? 20 : 8;
+  const chartW = windowDays * PX;
+  const NAME_W = 172, ROW_H = 40;
+  const xOf = ms => Math.round((_calDayStart(ms) - startMs)/_CAL_DAY) * PX;
+  const clampX = x => Math.max(0, Math.min(chartW, x));
+  // Недельные метки в шапке
+  const ticks = [];
+  for (let d = startMs; d <= endMs; d += 7*_CAL_DAY) ticks.push(d);
+  const fmtD = ms => new Date(ms).toLocaleDateString("ru-RU", { day:"2-digit", month:"2-digit" });
+
+  const ctrlBtn = (active) => ({ border:"1px solid "+(active?"#0f172a":"#e2e8f0"), background:active?"#0f172a":"#fff", color:active?"#fff":"#64748b", borderRadius:8, padding:"6px 12px", fontSize:12.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" });
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+      {/* Управление */}
+      <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+        <div style={{ display:"flex", gap:4 }}>
+          <button style={ctrlBtn(groupBy==="object")} onClick={()=>setGroupBy("object")}>По объектам</button>
+          <button style={ctrlBtn(groupBy==="foreman")} onClick={()=>setGroupBy("foreman")}>По прорабам</button>
+        </div>
+        <div style={{ display:"flex", gap:4 }}>
+          {[[14,"2 нед"],[30,"Месяц"],[90,"3 мес"]].map(([d,l])=>(
+            <button key={d} style={ctrlBtn(windowDays===d)} onClick={()=>setWindowDays(d)}>{l}</button>
+          ))}
+        </div>
+        <div style={{ display:"flex", gap:4 }}>
+          <button style={ctrlBtn(false)} onClick={()=>setAnchor(a=>a-Math.round(windowDays/2)*_CAL_DAY)} title="Назад">←</button>
+          <button style={ctrlBtn(false)} onClick={()=>setAnchor(_calDayStart(Date.now())-3*_CAL_DAY)}>Сегодня</button>
+          <button style={ctrlBtn(false)} onClick={()=>setAnchor(a=>a+Math.round(windowDays/2)*_CAL_DAY)} title="Вперёд">→</button>
+        </div>
+        <select value={fForeman} onChange={e=>setFForeman(e.target.value)} style={{ border:"1px solid #e2e8f0", borderRadius:8, padding:"6px 10px", fontSize:12.5, fontFamily:"inherit", cursor:"pointer", color:"#0f172a" }}>
+          <option value="">Все прорабы</option>
+          {foremen.map(f => <option key={f} value={f}>{f}{load[f]?.overloaded?" ⚠":""}</option>)}
+        </select>
+        <select value={fStatus} onChange={e=>setFStatus(e.target.value)} style={{ border:"1px solid #e2e8f0", borderRadius:8, padding:"6px 10px", fontSize:12.5, fontFamily:"inherit", cursor:"pointer", color:"#0f172a" }}>
+          <option value="">Все статусы</option>
+          <option value="todo">Не начат</option>
+          <option value="progress">В работе</option>
+          <option value="done">Готово</option>
+          <option value="overdue">Только просрочки</option>
+        </select>
+      </div>
+
+      {/* Перегруз бригад */}
+      {overloadedForemen.length > 0 && (
+        <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:10, padding:"10px 14px", display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+          <span style={{ fontSize:12.5, fontWeight:800, color:"#dc2626" }}>⚠ Перегруз:</span>
+          {overloadedForemen.map(f => (
+            <button key={f} onClick={()=>{ setGroupBy("foreman"); setFForeman(f); }} style={{ background:"#fff", border:"1px solid #fecaca", color:"#dc2626", borderRadius:20, padding:"3px 11px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+              {f} · до {load[f].peak} одновременно
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Таймлайн */}
+      {rows.length === 0 ? (
+        <div style={{ textAlign:"center", color:"#94a3b8", padding:"50px 0", fontSize:14, background:"#fff", border:"1px solid #eef2f7", borderRadius:14 }}>
+          В этом окне нет этапов с датами. Проставьте плановые даты у работ (вкладка «Этапы» объекта) или сдвиньте период.
+        </div>
+      ) : (
+        <div style={{ background:"#fff", border:"1px solid #eef2f7", borderRadius:14, overflow:"auto" }}>
+          <div style={{ minWidth: NAME_W + chartW }}>
+            {/* Шапка с датами */}
+            <div style={{ display:"flex", position:"sticky", top:0, background:"#f8fafc", borderBottom:"1px solid #e2e8f0", zIndex:2 }}>
+              <div style={{ width:NAME_W, flexShrink:0, padding:"8px 12px", fontSize:11, fontWeight:800, color:"#64748b", textTransform:"uppercase", letterSpacing:".03em", borderRight:"1px solid #e2e8f0" }}>{groupBy==="object"?"Объект":"Прораб"}</div>
+              <div style={{ position:"relative", width:chartW, height:32 }}>
+                {ticks.map(t => (
+                  <div key={t} style={{ position:"absolute", left:clampX(xOf(t)), top:0, height:"100%", borderLeft:"1px solid #eef2f7", paddingLeft:4, fontSize:10, color:"#94a3b8", display:"flex", alignItems:"center" }}>{fmtD(t)}</div>
+                ))}
+                {today>=startMs && today<=endMs && <div style={{ position:"absolute", left:xOf(today), top:0, height:"100%", borderLeft:"2px solid #dc2626" }} />}
+              </div>
+            </div>
+            {/* Строки */}
+            {rows.map(row => {
+              const ov = groupBy==="foreman" && load[row.label]?.overloaded;
+              // Раскладка по дорожкам: пересекающиеся этапы не накладываются, а встают друг
+              // под другом — так видно реальную одновременную загрузку (узкое место).
+              const LANE_H = 26;
+              const sorted = [...row.items].sort((a,b)=>a.start-b.start);
+              const laneEnds = []; // конец последнего бара в каждой дорожке
+              const placed = sorted.map(s => {
+                let lane = laneEnds.findIndex(end => end < s.start);
+                if (lane === -1) { lane = laneEnds.length; laneEnds.push(s.end); } else { laneEnds[lane] = s.end; }
+                return { s, lane };
+              });
+              const rowH = Math.max(ROW_H, laneEnds.length*LANE_H + 12);
+              return (
+                <div key={row.key} style={{ display:"flex", borderBottom:"1px solid #f6f8fa" }}>
+                  <div onClick={()=>{ if(groupBy==="object" && onOpenObject) onOpenObject(row.objId); }}
+                    style={{ width:NAME_W, flexShrink:0, padding:"8px 12px", borderRight:"1px solid #f1f5f9", cursor:groupBy==="object"?"pointer":"default", display:"flex", flexDirection:"column", justifyContent:"center" }}>
+                    <div style={{ fontSize:12.5, fontWeight:700, color:"#0f172a", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{row.label}</div>
+                    <div style={{ fontSize:10.5, color: ov?"#dc2626":"#94a3b8", fontWeight: ov?700:500 }}>{row.items.length} этап.{ov?` · перегруз (до ${load[row.label].peak})`:""}</div>
+                  </div>
+                  <div style={{ position:"relative", width:chartW, height:rowH }}>
+                    {today>=startMs && today<=endMs && <div style={{ position:"absolute", left:xOf(today), top:0, bottom:0, borderLeft:"2px solid rgba(220,38,38,.25)" }} />}
+                    {placed.map(({s,lane},idx) => {
+                      const left = clampX(xOf(s.start));
+                      const right = clampX(xOf(s.end) + PX);
+                      const w = Math.max(PX*0.6, right - left);
+                      const col = s.overdue ? _CAL_ST.delayed.c : (_CAL_ST[s.status]||_CAL_ST.todo).c;
+                      return (
+                        <div key={s.stageId+idx} title={`${s.name}\n${s.objLabel}\n${(_CAL_ST[s.status]||_CAL_ST.todo).l}${s.overdue?" · ПРОСРОЧКА":""}${s.responsible?`\n${s.responsible}`:""}`}
+                          onClick={()=>onOpenObject && onOpenObject(s.objId)}
+                          style={{ position:"absolute", left, top:6+lane*LANE_H, height:LANE_H-6, width:w, background:col, borderRadius:6, cursor:"pointer",
+                            border: s.overdue?"1.5px solid #991b1b":"none", boxShadow:"0 1px 2px rgba(0,0,0,.12)", display:"flex", alignItems:"center", padding:"0 6px", overflow:"hidden", opacity: s.status==="done"?0.65:1 }}>
+                          <span style={{ fontSize:10.5, color:"#fff", fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{s.name}{groupBy==="foreman"?` · ${s.objLabel}`:""}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Легенда */}
+      <div style={{ display:"flex", gap:14, flexWrap:"wrap", fontSize:11.5, color:"#64748b" }}>
+        {Object.values(_CAL_ST).map(s => (
+          <span key={s.l} style={{ display:"inline-flex", alignItems:"center", gap:5 }}><span style={{ width:11, height:11, borderRadius:3, background:s.c }} />{s.l}</span>
+        ))}
+        <span style={{ display:"inline-flex", alignItems:"center", gap:5 }}><span style={{ width:11, height:11, borderRadius:3, background:"#dc2626", border:"1.5px solid #991b1b" }} />Просрочка</span>
+        <span style={{ display:"inline-flex", alignItems:"center", gap:5 }}><span style={{ width:2, height:12, background:"#dc2626" }} />Сегодня</span>
+      </div>
+    </div>
+  );
+}
 let _fbDb = null;
 let _fbAuth = null;
 // Promise resolves when anonymous auth is ready (or immediately if auth unavailable)
@@ -36,6 +339,25 @@ try {
       else { signInAnonymously(_fbAuth).then(resolve).catch(resolve); }
     });
   });
+  // ── Firebase App Check (опционально) ──
+  // Подтверждает Firebase, что запросы идут из настоящего приложения, а не curl'ом по
+  // найденному URL базы. Включается ТОЛЬКО если задана VITE_RECAPTCHA_SITE_KEY — без неё
+  // код просто не трогает App Check, поведение прежнее, ничего не сломается.
+  // Как включить (один раз, в консоли):
+  //  1. https://www.google.com/recaptcha/admin → создать ключ типа reCAPTCHA v3,
+  //     домены — боевой домен и *.vercel.app (для превью).
+  //  2. Firebase Console → Project Settings → App Check → своё веб-приложение → Register →
+  //     provider reCAPTCHA v3 → вставить тот же site key.
+  //  3. В Vercel → Settings → Environment Variables добавить VITE_RECAPTCHA_SITE_KEY
+  //     (тот же site key) для Production и Preview → Redeploy.
+  //  4. В Firebase Console → App Check → Enforce для Realtime Database, когда убедитесь,
+  //     что приложение с новым App Check работает (metrics покажут verified-запросы).
+  if (_env.VITE_RECAPTCHA_SITE_KEY) {
+    import("firebase/app-check").then(({ initializeAppCheck, ReCaptchaV3Provider }) => {
+      try { initializeAppCheck(_fbApp, { provider: new ReCaptchaV3Provider(_env.VITE_RECAPTCHA_SITE_KEY), isTokenAutoRefreshEnabled: true }); }
+      catch(e) { console.warn("App Check init failed", e); }
+    }).catch(()=>{});
+  }
 } catch(e) {}
 
 const WORKS_DATA = [
@@ -206,9 +528,9 @@ const validUntil = () => addWorkdays(new Date(),7).toLocaleDateString("ru-RU",{d
 // Базовая цена для отображения в колонке (без объёма) — первый диапазон или fixedPrice
 // priceOverrides = {code: {fixedPrice?, tiers?}} — загружается из Firebase
 let _priceOverrides = {};
-function setPriceOverrides(o) { _priceOverrides = o || {}; }
+export function setPriceOverrides(o) { _priceOverrides = o || {}; }
 
-function getEffectiveWork(work) {
+export function getEffectiveWork(work) {
   const safe = { ...work, tiers: work.tiers || [] };
   const renamed = _catalogOverrides.renames[safe.code]
     ? { ...safe, name: _catalogOverrides.renames[safe.code] }
@@ -225,14 +547,14 @@ function getEffectiveWork(work) {
   };
 }
 
-function getBasePrice(work) {
+export function getBasePrice(work) {
   const w = getEffectiveWork(work);
   if (w.fixedPrice) return w.fixedPrice;
   if (w.tiers && w.tiers.length > 0) return w.tiers[0].price;
   return null;
 }
 
-function getPrice(work, qty, complexity, cpxPct) {
+export function getPrice(work, qty, complexity, cpxPct) {
   if (!qty || qty <= 0) return null;
   const w = getEffectiveWork(work);
   const mult = cpxPct !== undefined && cpxPct !== null
@@ -253,16 +575,6 @@ function getPrice(work, qty, complexity, cpxPct) {
 // Виртуальная категория для позиций сметы без каталога (восстановленные из актов и пр.)
 const EXTRA_CAT = "Восстановлено из актов";
 
-function groupData(works) {
-  const g = {};
-  for (const w of works) {
-    if (!g[w.cat]) g[w.cat] = {};
-    if (!g[w.cat][w.sub]) g[w.cat][w.sub] = [];
-    g[w.cat][w.sub].push(w);
-  }
-  return g;
-}
-
 // G теперь динамический - пересчитывается через getEffectiveCatalog()
 
 // ─── УТИЛИТЫ ────────────────────────────────────────────────────────────────
@@ -271,30 +583,7 @@ const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2
 const rowCostPerUnit = (r, w) => (r && r.manualCost !== undefined && r.manualCost !== "" && !isNaN(Number(r.manualCost))) ? Number(r.manualCost) : (Number(w?.cost) || 0);
 // Надёжное приведение updatedAt к числу: поддерживает и число (Date.now()), и ISO-строку
 const _ts = v => { if (typeof v === "number") return v; const n = new Date(v).getTime(); return isNaN(n) ? 0 : n; };
-// Сумма прописью (целые тенге) — для актов выполненных работ
-function tengeInWords(num){
-  num = Math.round(Math.abs(Number(num)||0));
-  if(num===0) return "Ноль тенге";
-  const ones=["","один","два","три","четыре","пять","шесть","семь","восемь","девять","десять","одиннадцать","двенадцать","тринадцать","четырнадцать","пятнадцать","шестнадцать","семнадцать","восемнадцать","девятнадцать"];
-  const onesF=["","одна","две","три","четыре","пять","шесть","семь","восемь","девять","десять","одиннадцать","двенадцать","тринадцать","четырнадцать","пятнадцать","шестнадцать","семнадцать","восемнадцать","девятнадцать"];
-  const tens=["","","двадцать","тридцать","сорок","пятьдесят","шестьдесят","семьдесят","восемьдесят","девяносто"];
-  const hund=["","сто","двести","триста","четыреста","пятьсот","шестьсот","семьсот","восемьсот","девятьсот"];
-  const triplet=(n,fem)=>{ const s=[]; const h=Math.floor(n/100), t=Math.floor((n%100)/10), o=n%10;
-    if(h) s.push(hund[h]);
-    if(t>=2){ s.push(tens[t]); if(o) s.push((fem?onesF:ones)[o]); }
-    else { const v=t*10+o; if(v) s.push((fem?onesF:ones)[v]); }
-    return s.join(" "); };
-  const plural=(n,f)=>{ const a=n%10, b=n%100; if(a===1&&b!==11)return f[0]; if(a>=2&&a<=4&&(b<10||b>=20))return f[1]; return f[2]; };
-  const res=[];
-  const mlrd=Math.floor(num/1e9)%1000, mln=Math.floor(num/1e6)%1000, ths=Math.floor(num/1e3)%1000, rest=num%1000;
-  if(mlrd){ res.push(triplet(mlrd,false), plural(mlrd,["миллиард","миллиарда","миллиардов"])); }
-  if(mln){ res.push(triplet(mln,false), plural(mln,["миллион","миллиона","миллионов"])); }
-  if(ths){ res.push(triplet(ths,true), plural(ths,["тысяча","тысячи","тысяч"])); }
-  if(rest){ res.push(triplet(rest,false)); }
-  res.push("тенге");
-  const str=res.join(" ").replace(/\s+/g," ").trim();
-  return str.charAt(0).toUpperCase()+str.slice(1);
-}
+// tengeInWords импортирован из ./utils.js
 // Открыть/распечатать готовый HTML-документ. В обычном браузере открываем новую вкладку,
 // в PWA (standalone) на iOS новые окна не открываются — печатаем через скрытый iframe.
 const openOrPrintHtml = (html, revokeMs = 30000) => {
@@ -367,13 +656,22 @@ const CONTRACT_STATUSES = [
   { key:"archive", label:"Архив",        color:"#64748b", bg:"rgba(107,114,128,.12)"},
 ];
 // Объекты — статусы жизненного цикла
+// Единые статусы объекта (сделка + производство). Ключи старых статусов сохранены,
+// чтобы существующие объекты не потеряли статус: new/approval/signed/refuse/archive.
 const DEAL_STATUSES = [
-  { key:"new",      label:"Черновик",                color:"#64748b", bg:"#f3f4f6"              },
-  { key:"approval", label:"Согласование с клиентом", color:"#d97706", bg:"rgba(217,119,6,.12)"  },
-  { key:"signed",   label:"Договор подписан",        color:"#059669", bg:"rgba(5,150,105,.1)"   },
-  { key:"refuse",   label:"Отказ",                   color:"#dc2626", bg:"rgba(220,38,38,.1)"   },
-  { key:"archive",  label:"Архив",                   color:"#64748b", bg:"rgba(107,114,128,.12)"},
+  { key:"new",      label:"Новый",              color:"#64748b", bg:"#f3f4f6"              },
+  { key:"approval", label:"Согласование сметы", color:"#d97706", bg:"rgba(217,119,6,.12)"  },
+  { key:"signed",   label:"Договор подписан",   color:"#059669", bg:"rgba(5,150,105,.1)"   },
+  { key:"refuse",   label:"Потерян",            color:"#dc2626", bg:"rgba(220,38,38,.1)"   },
+  { key:"work",     label:"В работе",           color:"#2563eb", bg:"#eff6ff"              },
+  { key:"paused",   label:"Приостановлен",      color:"#d97706", bg:"rgba(217,119,6,.1)"   },
+  { key:"done",     label:"Выполнен",           color:"#059669", bg:"#ecfdf5"              },
+  { key:"cancel",   label:"Расторгнут",         color:"#dc2626", bg:"rgba(220,38,38,.12)"  },
+  { key:"archive",  label:"Архив",              color:"#64748b", bg:"rgba(107,114,128,.12)"},
 ];
+// Производственный статус → единый (производство перевешивает статус сделки, когда объект в работе)
+const PROD_TO_DEAL = { active:"work", paused:"paused", done:"done", cancel:"cancel" };
+const PROD_STATUSES_LABELS = { new:"Новый", active:"В работе", paused:"Приостановлен", done:"Выполнен", cancel:"Расторгнут" };
 const OBJECTS_KEY         = "titovstroy-objects";
 const OBJECTS_BACKUPS_KEY = "titovstroy-objects-backups";
 const PRODUCTIONS_KEY         = "titovstroy-productions";   // производственные карточки объектов
@@ -405,7 +703,10 @@ const CONTRACTS_KEY  = "titovstroy-contracts";
 const CLIENTS_KEY    = "titovstroy-clients";
 const CONTRAGENTS_KEY= "titovstroy-contragents";
 // ── ФИНАНСЫ (независимый учёт: ДДС + P&L) ──
-const AUDIT_KEY               = "titovstroy-audit";             // журнал действий
+const AUDIT_KEY               = "titovstroy-audit";             // ЛЕГАСИ-журнал (архив, только чтение)
+const AUDIT_INDEX_KEY         = "titovstroy-audit-index";       // список месяцев ["2026-07", ...] (какие помесячные ключи есть)
+const AUDIT_MONTH_KEY         = (ym) => "titovstroy-audit-" + ym; // помесячный журнал (без лимита записей)
+const _auditYM = (ts = Date.now()) => { const d = new Date(ts); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); };
 const FINANCE_TX_KEY          = "titovstroy-finance-tx";        // массив транзакций
 const FINANCE_TX_BACKUPS_KEY  = "titovstroy-finance-tx-backups";
 const FINANCE_META_KEY        = "titovstroy-finance-meta";      // {accounts, income, expense}
@@ -413,38 +714,7 @@ const FINANCE_META_BACKUPS_KEY= "titovstroy-finance-meta-backups";
 const FINANCE_PROJECTS_KEY         = "titovstroy-finance-projects";   // массив проектов
 const FINANCE_PROJECTS_BACKUPS_KEY = "titovstroy-finance-projects-backups";
 // Справочник финансов по умолчанию (из исходной таблицы)
-const DEFAULT_FIN_META = {
-  accounts: [
-    { id:"acc0", name:"Наличные",    opening:0, accType:"cash" },
-    { id:"acc1", name:"KASPI Pay",   opening:0, accType:"bank" },
-    { id:"acc2", name:"Учет займов", opening:0, accType:"bank" },
-    { id:"acc3", name:"Лч Звеат",    opening:0, accType:"card" },
-  ],
-  // Реестр статей баланса (вводятся вручную) — основные средства, запасы, займы, кредиторка, капитал
-  balanceItems: {
-    inventory:0, collateral:0, loansGivenShort:0, transfersInTransit:0,
-    faTechnika:0, faMebel:0, faInventar:0, faOborud:0, faTransport:0,
-    loansGivenLong:0, financialInvest:0, intangibles:0,
-    payablesMoney:0, payablesNonMoney:0, paymentsThirdParty:0, loansTakenShort:0,
-    creditsLong:0, loansTakenLong:0,
-    foundersContribution:0, otherCapital:0,
-  },
-  income: [
-    { cat:"Основные доходы", subs:["Оплата по договору (вторичка)","Оплата по договору (новостройки)","Оплата по договору  (коммерция)","Частичные работы, услуги"] },
-    { cat:"Дополнительные доходы", subs:["Доп. работы по ходу ремонта","Закупка материалов (наценка)"] },
-    { cat:"Скрытые/косвенные доходы", subs:["Кэшбэк и бонусы от поставщиков","Бонусы от субподрядчиков (наш %)","Услуги по доставке/подъёму"] },
-    { cat:"Финансирование (не выручка)", subs:["Полученный заём (до 1 года)","Полученный заём (от 1 года)","Полученный кредит (от 1 года)","Вклад учредителя"] },
-    { cat:"Возврат займов и активов", subs:["Возврат займа выданного (кратк.)","Возврат займа выданного (долг.)","Возврат залогового платежа","Продажа / реализация запасов","Возврат фин. вложений"] },
-  ],
-  expense: [
-    { cat:"Прямые расходы (COGS / себестоимость)", subs:["Зарплаты рабочих / подрядчиков","Аренда инструмента, спецтехника","Вывоз мусора, уборка","Логистика, доставка"] },
-    { cat:"Косвенные расходы (OPEX / операционные)", subs:["Аренда офиса","ФОТ Директор по производству","ФОТ Управляющий партнер","ФОТ Прораб","Софт (IT, CRM)","Рекрутинг","Телефония, связь","Маркетинг бюджет контекст","Маркетинг бюджет таргет"] },
-    { cat:"Финансовые расходы", subs:["КПН, ИПН","НДС 16%","Налог за сотрудников","Дивиденды учредителям"] },
-    { cat:"Финансовая деятельность (не расход)", subs:["Возврат займа (до 1 года)","Возврат займа (от 1 года)","Погашение кредита (от 1 года)","Возврат вклада учредителю"] },
-    { cat:"Инвестиции (покупка активов)", subs:["Покупка: Техника","Покупка: Мебель","Покупка: Инвентарь","Покупка: Оборудование","Покупка: Транспорт"] },
-    { cat:"Выданные займы и прочие активы", subs:["Выдан займ (до 1 года)","Выдан займ (от 1 года)","Залоговый платёж","Закуп запасов / материалов","Финансовые вложения (долг.)","НМА (нематериальные активы)"] },
-  ],
-};
+// DEFAULT_FIN_META импортирован из ./utils.js
 // Категории, которые НЕ являются P&L (не выручка / не расход) — финансовая и инвестиционная деятельность
 const C_FINANCING_INC = "Финансирование (не выручка)";        // доходы: займы/кредиты/вклады
 const C_ASSET_INC     = "Возврат займов и активов";            // доходы: возврат активов — не P&L, инвест. раздел ДДС
@@ -455,33 +725,21 @@ const FA_SUB_MAP = { "Покупка: Техника":"faTechnika","Покупк
 // Маппинг подкатегорий C_ASSET_OUT / C_ASSET_INC → ключ баланса
 const ASSET_OUT_KEYS = { "Выдан займ (до 1 года)":"loansGivenShort","Выдан займ (от 1 года)":"loansGivenLong","Залоговый платёж":"collateral","Закуп запасов / материалов":"inventory","Финансовые вложения (долг.)":"financialInvest","НМА (нематериальные активы)":"intangibles" };
 const ASSET_INC_KEYS = { "Возврат займа выданного (кратк.)":"loansGivenShort","Возврат займа выданного (долг.)":"loansGivenLong","Возврат залогового платежа":"collateral","Продажа / реализация запасов":"inventory","Возврат фин. вложений":"financialInvest" };
-// Миграция: дописывает недостающие дефолтные категории/подкатегории в сохранённый meta (не трогая пользовательские)
-function mergeFinMeta(saved) {
-  const m = { ...saved };
-  ["income","expense"].forEach(key => {
-    const cur = Array.isArray(m[key]) ? [...m[key]] : [];
-    (DEFAULT_FIN_META[key]||[]).forEach(defCat => {
-      const ex = cur.find(c => c.cat === defCat.cat);
-      if (!ex) { cur.push({ cat: defCat.cat, subs: [...(defCat.subs||[])] }); }
-      else { const subs = Array.isArray(ex.subs) ? [...ex.subs] : []; (defCat.subs||[]).forEach(s => { if (!subs.includes(s)) subs.push(s); }); ex.subs = subs; }
-    });
-    m[key] = cur;
-  });
-  return m;
-}
+// mergeFinMeta импортирован из ./utils.js
 // {renames:{code:name}, catRenames:{"Черновые":"Новое"}, subRenames:{"Черновые|Демонтаж":"Снос"},
 //  hiddenCodes:[], hiddenSubs:["Черновые|Демонтаж"], hiddenCats:["Черновые"],
 //  custom:[{code,cat,sub,name,unit,tiers,fixedPrice}]}
 
-let _catalogOverrides = { renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[] };
+// normCN, CATALOG_DEFAULTS, withCatalogOverrides импортированы из ./utils.js
+let _catalogOverrides = { ...CATALOG_DEFAULTS };
 let _onCatalogChange = null;
 let _catalogCache = null;
-function setCatalogOverrides(o) {
-  _catalogOverrides = { renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], ...(o||{}) };
+export function setCatalogOverrides(o) {
+  _catalogOverrides = withCatalogOverrides(o);
   _catalogCache = null;
   if (_onCatalogChange) _onCatalogChange();
 }
-function getEffectiveCatalog() {
+export function getEffectiveCatalog() {
   if (_catalogCache) return _catalogCache;
   const hc = _catalogOverrides.hiddenCats||[];
   const hs = _catalogOverrides.hiddenSubs||[];
@@ -513,19 +771,193 @@ const DEFAULT_USERS = [
   { id:"2", login:"zamer1",   password:"zamer1",    name:"Замерщик 1",      role:"user"   },
 ];
 
-// Простой хэш
+// Старый "хэш" — на деле обратимая обфускация (base64 + реверс), не защищает пароль
+// при доступе к базе. Оставлен только для проверки паролей, созданных до перехода
+// на sha256Hash ниже (обратная совместимость при входе).
 const simpleHash = (s) => btoa(encodeURIComponent(s)).split("").reverse().join("");
 
-// Аудит: записываем событие {ts, userId, userName, action, entity, entityId, detail}
-// Хранится как массив, ограниченный 500 последними записями (ротация).
-const writeAudit = async (user, action, entity, entityId, detail="") => {
+// ── Пароли: SHA-256 + случайная соль на каждого пользователя ──
+// Формат хранения: "sha256:<соль>:<hex-хэш>". Реальная (необратимая) защита — доступ
+// к базе больше не даёт пароль напрямую, нужен перебор. Соль своя у каждого пароля,
+// чтобы у двух пользователей с одинаковым паролем хэши не совпадали.
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+function randomSaltHex() {
+  const arr = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+async function hashPassword(password) {
+  const salt = randomSaltHex();
+  const hash = await sha256Hex(salt + ":" + password);
+  return `sha256:${salt}:${hash}`;
+}
+// Принимает и НОВЫЙ формат (sha256:соль:хэш), и старые (simpleHash, голый текст —
+// у DEFAULT_USERS) — для плавного перехода без принудительного сброса паролей.
+async function verifyPassword(password, stored) {
+  if (!stored) return false;
+  if (stored.startsWith("sha256:")) {
+    const parts = stored.split(":");
+    if (parts.length !== 3) return false;
+    const [, salt, hash] = parts;
+    return (await sha256Hex(salt + ":" + password)) === hash;
+  }
+  return stored === password || stored === simpleHash(password);
+}
+// Минимальная сложность нового пароля — не пропускаем совсем короткие/тривиальные.
+function passwordTooWeak(pw) {
+  const p = String(pw || "");
+  if (p.length < 6) return "Пароль должен быть не короче 6 символов";
+  if (/^(\d)\1*$/.test(p) || /^(1234|12345|123456|qwerty|password|admin)$/i.test(p)) return "Слишком простой пароль, придумайте другой";
+  return null;
+}
+// ── Блокировка входа после серии неверных попыток (защита от простого перебора) ──
+const LOGIN_ATTEMPTS_KEY = "titovstroy-login-attempts";
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_LOCKOUT_MS = 5 * 60 * 1000;
+function _readLoginAttempts() {
+  try { return JSON.parse(localStorage.getItem(LOGIN_ATTEMPTS_KEY) || "{}"); } catch { return {}; }
+}
+function getLoginLockout(login) {
+  const rec = _readLoginAttempts()[login.toLowerCase()];
+  if (rec && rec.lockUntil && rec.lockUntil > Date.now()) return rec.lockUntil;
+  return null;
+}
+function registerFailedLogin(login) {
+  const key = login.toLowerCase();
+  const all = _readLoginAttempts();
+  const rec = all[key] || { count: 0 };
+  rec.count = (rec.count || 0) + 1;
+  if (rec.count >= LOGIN_MAX_ATTEMPTS) { rec.lockUntil = Date.now() + LOGIN_LOCKOUT_MS; rec.count = 0; }
+  all[key] = rec;
+  try { localStorage.setItem(LOGIN_ATTEMPTS_KEY, JSON.stringify(all)); } catch {}
+}
+function clearLoginAttempts(login) {
+  const all = _readLoginAttempts();
+  delete all[login.toLowerCase()];
+  try { localStorage.setItem(LOGIN_ATTEMPTS_KEY, JSON.stringify(all)); } catch {}
+}
+
+// Аудит-журнал. Структурная запись изменения:
+//   {ts, userId, by, entity, entityId, label, objectId, field, action, old, new, detail, source}
+//   entity: object|contract|estimate|finance_tx|user|client|stage|publish|document
+//   source: manual (вручную) | import (импорт) | autosync (автосинк) | cabinet (клиентский кабинет)
+// Хранится ПОМЕСЯЧНО (titovstroy-audit-ГГГГ-ММ, без лимита) + индекс существующих месяцев.
+// Старый ключ titovstroy-audit больше НЕ пишется — он остаётся архивом (читается в общем журнале).
+// Атомарное добавление записи в помесячный массив журнала.
+// Firebase RTDB-транзакция сериализует одновременные записи → ни одна не теряется.
+// В базе значение ключа — СТРОКА JSON (как во всём storage), поэтому и в транзакции строка.
+const _appendAuditEntry = async (mk, entry) => {
+  if (_fbDb) {
+    try {
+      await _fbAuthReady;
+      const r = ref(_fbDb, _fbKey(mk));
+      const res = await _race(runTransaction(r, (cur) => {
+        let arr = [];
+        if (typeof cur === "string") { try { const p = JSON.parse(cur); if (Array.isArray(p)) arr = p; } catch {} }
+        else if (Array.isArray(cur)) arr = cur; // на случай старого формата (вложенный массив)
+        return JSON.stringify([entry, ...arr]);
+      }), 8000);
+      if (res !== _TIMEOUT) {
+        // синхронизируем локальный резерв со свежим значением
+        try { const v = res?.snapshot?.val(); if (typeof v === "string") { localStorage.setItem(mk, v); localStorage.setItem(mk + _TS_SUFFIX, Date.now().toString()); _mem[mk] = v; } } catch {}
+        return;
+      }
+    } catch (e) { console.warn("audit tx err", e); }
+  }
+  // Резерв (нет Firebase / таймаут транзакции): обычная запись. Одно устройство — гонки нет.
+  const raw = await storage.get(mk);
+  let arr = [];
+  if (raw) { try { const p = JSON.parse(raw.value); if (Array.isArray(p)) arr = p; } catch {} }
+  await storage.set(mk, JSON.stringify([entry, ...arr]));
+};
+const logChange = async (user, ev = {}) => {
   try {
-    const raw = await storage.get(AUDIT_KEY);
-    const prev = raw ? JSON.parse(raw.value) : [];
-    const entry = { ts:Date.now(), userId:user?.id||"?", by:user?.name||"?", action, entity, entityId:entityId||"", detail };
-    const next = [entry, ...prev].slice(0, 500);
-    await storage.set(AUDIT_KEY, JSON.stringify(next));
-  } catch(e) { console.warn("audit write failed", e); }
+    const ts = ev.ts || Date.now();
+    const ym = _auditYM(ts);
+    const entry = {
+      ts,
+      userId: user?.id || "?",
+      by: user?.name || "?",
+      entity: ev.entity || "",
+      entityId: ev.entityId || "",
+      label: ev.label || "",
+      objectId: ev.objectId || "",
+      field: ev.field || "",
+      action: ev.action || "",
+      old: ev.old !== undefined ? ev.old : "",
+      new: ev.new !== undefined ? ev.new : "",
+      detail: ev.detail || "",
+      source: ev.source || "manual",
+    };
+    const mk = AUDIT_MONTH_KEY(ym);
+    // Добавляем запись АТОМАРНО (Firebase-транзакция), чтобы при одновременных действиях
+    // с разных устройств записи не затирали друг друга (read-modify-write гонка).
+    await _appendAuditEntry(mk, entry);
+    // индекс месяцев — дописываем только когда появился новый месяц
+    try {
+      const ir = await storage.get(AUDIT_INDEX_KEY);
+      let idx = [];
+      if (ir) { try { const p = JSON.parse(ir.value); if (Array.isArray(p)) idx = p; } catch {} }
+      if (!idx.includes(ym)) { idx = [...new Set([ym, ...idx])].sort().reverse(); await storage.set(AUDIT_INDEX_KEY, JSON.stringify(idx)); }
+    } catch {}
+  } catch (e) { console.warn("audit write failed", e); }
+};
+// Обратная совместимость: старые вызовы writeAudit(user, action, entity, entityId, detail).
+const writeAudit = (user, action, entity, entityId, detail = "") =>
+  logChange(user, { action, entity, entityId, detail });
+
+// Человекочитаемые поля объекта для журнала (форматируем «было/стало»)
+const OBJ_FIELD_META = {
+  status:      { label: "статус",        fmt: (v) => (DEAL_STATUSES.find(s => s.key === v) || {}).label || v || "—" },
+  clientName:  { label: "клиент",        fmt: (v) => v || "—" },
+  address:     { label: "адрес",         fmt: (v) => v || "—" },
+  objType:     { label: "тип объекта",   fmt: (v) => v || "—" },
+  phone:       { label: "телефон",       fmt: (v) => v || "—" },
+  responsible: { label: "ответственный", fmt: (v) => v || "—" },
+  foreman:     { label: "прораб",        fmt: (v) => v || "—" },
+  planEndDate: { label: "план сдачи",    fmt: (v) => v ? new Date(v).toLocaleDateString("ru-RU") : "—" },
+  startDate:   { label: "старт",         fmt: (v) => v ? new Date(v).toLocaleDateString("ru-RU") : "—" },
+};
+const _objLabel = (o) => (o?.clientName || o?.address || o?.objType || "Объект");
+// Логируем изменения значимых полей объекта (по патчу): только реально изменившиеся.
+// Весь хелпер в try/catch: журнал ни при каких условиях не должен мешать сохранению данных.
+const logObjChange = (user, obj, patch, source = "manual") => {
+  try {
+    for (const f of Object.keys(patch || {})) {
+      if (f === "updatedAt") continue;
+      const before = obj ? obj[f] : undefined;
+      const after = patch[f];
+      if (before === after) continue;
+      const meta = OBJ_FIELD_META[f];
+      if (!meta) continue;
+      logChange(user, { entity: "object", entityId: obj?.id || "", objectId: obj?.id || "", label: _objLabel(obj), field: meta.label, action: "изменил", old: meta.fmt(before), new: meta.fmt(after), source });
+    }
+  } catch (e) { console.warn("logObjChange failed", e); }
+};
+// Сумма договора (для журнала): сумма позиций, иначе м²-расчёт, иначе totalCost.
+const contractAmount = (c) => {
+  const ws = (c?.works || []).reduce((s, w) => s + ((Number(w.quantity) || 0) * (Number(w.price) || 0)), 0);
+  if (ws) return ws;
+  if (c?.priceType === "sqm") return Math.round((Number(c?.pricePerSqm) || 0) * (Number(c?.area) || 0)) || 0;
+  return Number(c?.totalCost) || 0;
+};
+const _tng = (n) => (Math.round(Number(n) || 0)).toLocaleString("ru-RU") + " ₸";
+const _finTypeLbl = { income: "поступление", expense: "расход", transfer: "перевод" };
+const _cStatusLbl = (v) => (CONTRACT_STATUSES.find(s => s.key === (v || "draft")) || {}).label || v || "—";
+// Логируем сохранение договора: создание, изменение суммы, изменение статуса.
+// Весь хелпер в try/catch: журнал не должен мешать сохранению договора.
+const logContractSave = (user, oldC, newC) => {
+  try {
+    const label = newC?.contractNo || newC?.number || newC?.objectName || "Договор";
+    const objectId = newC?.objectId || "";
+    if (!oldC) { logChange(user, { entity: "contract", entityId: newC?.id || "", objectId, label, action: "создал договор", new: _tng(contractAmount(newC)) }); return; }
+    const oa = Math.round(contractAmount(oldC)), na = Math.round(contractAmount(newC));
+    if (oa !== na) logChange(user, { entity: "contract", entityId: newC.id, objectId, label, field: "сумма договора", action: "изменил", old: _tng(oa), new: _tng(na) });
+    const os = oldC.contractStatus || "draft", ns = newC.contractStatus || "draft";
+    if (os !== ns) logChange(user, { entity: "contract", entityId: newC.id, objectId, label, field: "статус договора", action: "изменил", old: _cStatusLbl(os), new: _cStatusLbl(ns) });
+  } catch (e) { console.warn("logContractSave failed", e); }
 };
 
 // Экспорт в CSV (Excel открывает напрямую; BOM + ; для русской локали)
@@ -582,19 +1014,21 @@ const _fbRestGet = async (key) => {
     return { ok: true, value: v === null ? null : (typeof v === "string" ? v : JSON.stringify(v)) };
   } catch { return { ok: false }; }
 };
-// Согласование локальной («грязной») копии с облаком: для СПИСКОВ записей с id
-// объединяем по id и берём более свежую по updatedAt. Так незасинканная локальная
-// правка НЕ теряется, но и устаревшая локальная копия НЕ прячет более свежий сервер
-// (частая причина «данные откатились» после сбоя облака). Не-списки — прежнее поведение.
+// Согласование локальной («грязной») копии с облаком: для СПИСКОВ записей с id (или
+// objectId — у production-записей нет id, они живут по objectId, см. emptyProduction)
+// объединяем по идентификатору и берём более свежую по updatedAt. Так незасинканная
+// локальная правка НЕ теряется, но и устаревшая локальная копия НЕ прячет более свежий
+// сервер (частая причина «данные откатились» после сбоя облака). Не-списки — прежнее поведение.
 function _reconcileDirty(localStr, cloudStr) {
   try {
     const L = JSON.parse(localStr);
     const C = JSON.parse(cloudStr);
-    const okList = a => Array.isArray(a) && a.every(x => x && typeof x === "object" && x.id != null);
+    const idOf = x => (x && typeof x === "object") ? (x.id != null ? x.id : x.objectId) : undefined;
+    const okList = a => Array.isArray(a) && a.every(x => idOf(x) != null);
     if (okList(L) && okList(C)) {
       const map = new Map();
-      for (const e of C) map.set(e.id, e);
-      for (const e of L) { const ex = map.get(e.id); if (!ex || _ts(e.updatedAt) >= _ts(ex.updatedAt)) map.set(e.id, e); }
+      for (const e of C) map.set(idOf(e), e);
+      for (const e of L) { const k = idOf(e); const ex = map.get(k); if (!ex || _ts(e.updatedAt) >= _ts(ex.updatedAt)) map.set(k, e); }
       return JSON.stringify([...map.values()]);
     }
   } catch (e) {}
@@ -781,29 +1215,55 @@ function LoginScreen({ onLogin }) {
   const handleLogin = async () => {
     if (loading) return; // защита от двойной отправки
     if (!login.trim() || !password.trim()) { setError("Введите логин и пароль"); return; }
+    // Блокировка после серии неверных попыток — защита от простого перебора пароля.
+    const lockUntil = getLoginLockout(login.trim());
+    if (lockUntil) {
+      const minLeft = Math.max(1, Math.ceil((lockUntil - Date.now()) / 60000));
+      setError(`Слишком много неверных попыток. Попробуйте снова через ${minLeft} мин.`);
+      return;
+    }
     setLoading(true); setError("");
 
-    // Загружаем пользователей с таймаутом 1.5 сек, иначе используем DEFAULT_USERS
-    let users = DEFAULT_USERS;
-    try {
-      const res = await Promise.race([
-        storage.get(USERS_KEY),
-        new Promise(resolve => setTimeout(() => resolve(null), 1500))
-      ]);
-      if (res) users = JSON.parse(res.value);
-    } catch(e) {}
+    // Загружаем пользователей. КРИТИЧНО различать "база подтверждённо пуста" (первый
+    // запуск — можно войти дефолтным admin) и "база недоступна" (сеть моргнула) — раньше
+    // оба случая тихо падали на DEFAULT_USERS по таймауту в 1.5с, а значит логин/пароль
+    // из бандла (admin/titov2024) реально пускал в систему при любом сетевом сбое, даже
+    // если настоящий пароль давно сменили. Теперь при "unavailable" — честная ошибка,
+    // без входа по дефолтным кредам.
+    let users, loadedFromStorage = false;
+    const res = await storage.getResult(USERS_KEY);
+    if (res.status === "found") {
+      try { users = JSON.parse(res.value); loadedFromStorage = true; } catch(e) { users = DEFAULT_USERS; }
+    } else if (res.status === "empty") {
+      users = DEFAULT_USERS;
+    } else {
+      setError("Не удалось подключиться к базе. Проверьте интернет и попробуйте снова.");
+      setLoading(false);
+      return;
+    }
 
-    const user = users.find(u =>
-      u.login.toLowerCase() === login.trim().toLowerCase() &&
-      (u.password === password || u.password === simpleHash(password))
-    );
+    const candidate = users.find(u => u.login.toLowerCase() === login.trim().toLowerCase());
+    const ok = candidate ? await verifyPassword(password, candidate.password) : false;
 
-    if (user) {
-      const { password: _pw, ...safeUser } = user; // не храним пароль в сессии
-      try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: safeUser, savedAt: Date.now() })); } catch(e) {}
-      onLogin(safeUser);
+    if (ok) {
+      clearLoginAttempts(login.trim());
+      // Тихая миграция: пароль был в старом формате (голый текст/simpleHash) — переписываем
+      // на sha256+соль сразу после успешного входа. Только если реально читали базу (не
+      // DEFAULT_USERS-фолбэк — иначе рискуем затереть настоящий список пользователей).
+      if (loadedFromStorage && !String(candidate.password||"").startsWith("sha256:")) {
+        try {
+          const newHash = await hashPassword(password);
+          const updatedUsers = users.map(u => u.id === candidate.id ? { ...u, password: newHash } : u);
+          await storage.set(USERS_KEY, JSON.stringify(updatedUsers));
+        } catch(e) {}
+      }
+      const { password: _pw, ...safeUser } = candidate; // не храним пароль в сессии
+      const sessUser = { ...safeUser, authAt: Date.now() }; // время входа — для инвалидации сессии при смене пароля
+      try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: sessUser, savedAt: Date.now() })); } catch(e) {}
+      onLogin(sessUser);
       return; // компонент размонтируется, setLoading вызывать нельзя
     } else {
+      registerFailedLogin(login.trim());
       setError("Неверный логин или пароль");
     }
     setLoading(false);
@@ -870,647 +1330,180 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-// PriceWorkCard — not used in new table UI, kept for AdminPanel legacy
-function PriceWorkCard({ w, initTiers, initFixed, onRename, onDelete }) {
-  return null;
-}
+// Метаданные журнала (используются и общим журналом, и срезом по объекту)
+const AUDIT_SECTION_META = {
+  finance_tx: { label: "Финансы",   color: "#059669", bg: "#d1fae5", icon: "💰" },
+  object:     { label: "Объекты",   color: "#2563eb", bg: "#dbeafe", icon: "🏗" },
+  contract:   { label: "Договора",  color: "#7c3aed", bg: "#ede9fe", icon: "📋" },
+  estimate:   { label: "Сметы",     color: "#0891b2", bg: "#cffafe", icon: "🧮" },
+  stage:      { label: "Этапы",     color: "#ea580c", bg: "#ffedd5", icon: "🛠" },
+  publish:    { label: "Кабинет",   color: "#0d9488", bg: "#ccfbf1", icon: "🌐" },
+  document:   { label: "Документы", color: "#4f46e5", bg: "#e0e7ff", icon: "📄" },
+  client:     { label: "Клиенты",   color: "#db2777", bg: "#fce7f3", icon: "🧑" },
+  user:       { label: "Польз-ли",  color: "#d97706", bg: "#fef3c7", icon: "👤" },
+};
+const AUDIT_SOURCE_META = {
+  manual:   { label: "вручную",  color: "#64748b" },
+  import:   { label: "импорт",   color: "#7c3aed" },
+  autosync: { label: "автосинк", color: "#0891b2" },
+  cabinet:  { label: "кабинет",  color: "#d97706" },
+};
+// Иконка/цвет по смыслу действия (работает и со старыми текстовыми, и с новыми записями)
+const _auditActionMeta = (action = "") => {
+  const a = String(action).toLowerCase();
+  if (/(созда|добав)/.test(a))            return { icon: "➕", color: "#059669" };
+  if (/удали/.test(a))                     return { icon: "🗑", color: "#dc2626" };
+  if (/восстанов/.test(a))                 return { icon: "♻️", color: "#059669" };
+  if (/(назнач)/.test(a))                  return { icon: "👷", color: "#d97706" };
+  if (/(опубликова|публик|доступ)/.test(a))return { icon: "🌐", color: "#0d9488" };
+  if (/(измен|редактир|обнов|перенёс|перенес)/.test(a)) return { icon: "✏️", color: "#2563eb" };
+  return { icon: "📝", color: "#64748b" };
+};
+const _auditVal = (v) => (v === null || v === undefined || v === "") ? "—" : String(v);
 
-
-
-function AuditTab() {
-  const [auditLog, setAuditLog] = useState([]);
-  const [auditLoading, setAuditLoading] = useState(true);
-  const [filterSection, setFilterSection] = useState("");
-  useEffect(()=>{
-    (async()=>{
-      setAuditLoading(true);
-      const r = await storage.get(AUDIT_KEY);
-      if(r){ try{ setAuditLog(JSON.parse(r.value)); }catch{} }
-      setAuditLoading(false);
-    })();
-  }, []);
-
-  const SECTION_META = {
-    finance_tx: { label:"Финансы",    color:"#059669", bg:"#d1fae5", icon:"💰" },
-    object:     { label:"Объекты",    color:"#2563eb", bg:"#dbeafe", icon:"🏗" },
-    contract:   { label:"Договора",   color:"#7c3aed", bg:"#ede9fe", icon:"📋" },
-    user:       { label:"Польз-ли",   color:"#d97706", bg:"#fef3c7", icon:"👤" },
-  };
-  const ACTION_META = {
-    "создал операцию":      { icon:"➕", color:"#059669" },
-    "изменил операцию":     { icon:"✏️", color:"#2563eb" },
-    "удалил операцию":      { icon:"🗑", color:"#dc2626" },
-    "создал объект":        { icon:"➕", color:"#059669" },
-    "изменил объект":       { icon:"✏️", color:"#2563eb" },
-    "удалил объект":        { icon:"🗑", color:"#dc2626" },
-    "восстановил объект":   { icon:"♻️", color:"#059669" },
-    "создал договор":       { icon:"➕", color:"#059669" },
-    "изменил договор":      { icon:"✏️", color:"#2563eb" },
-    "удалил договор":       { icon:"🗑", color:"#dc2626" },
-    "восстановил договор":  { icon:"♻️", color:"#059669" },
-    "создал пользователя":  { icon:"➕", color:"#059669" },
-    "изменил пользователя": { icon:"✏️", color:"#2563eb" },
-  };
-
-  const sections = [...new Set(auditLog.map(e=>e.entity).filter(Boolean))];
-  const filtered = filterSection ? auditLog.filter(e=>e.entity===filterSection) : auditLog;
-
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:6}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:8}}>
-        <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>Журнал действий</div>
-        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-          <button onClick={()=>setFilterSection("")} style={{fontSize:11,padding:"3px 10px",borderRadius:20,border:"1px solid #e2e8f0",background:filterSection===""?"#0f172a":"#f8fafc",color:filterSection===""?"#fff":"#64748b",cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Все</button>
-          {sections.map(s=>{ const m=SECTION_META[s]; if(!m) return null; return (
-            <button key={s} onClick={()=>setFilterSection(s===filterSection?"":s)} style={{fontSize:11,padding:"3px 10px",borderRadius:20,border:`1px solid ${m.color}40`,background:filterSection===s?m.color:m.bg,color:filterSection===s?"#fff":m.color,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>{m.icon} {m.label}</button>
-          );})}
-          <span style={{fontSize:11,color:"#94a3b8"}}>{filtered.length} событий</span>
-        </div>
-      </div>
-      {auditLoading && <div style={{color:"#94a3b8",textAlign:"center",padding:"30px 0"}}>Загрузка...</div>}
-      {!auditLoading && filtered.length===0 && <div style={{color:"#94a3b8",textAlign:"center",padding:"30px 0"}}>Событий пока нет</div>}
-      {filtered.map((e,i)=>{
-        const sm = SECTION_META[e.entity]||{ label:e.entity||"—", color:"#64748b", bg:"#f1f5f9", icon:"📝" };
-        const am = ACTION_META[e.action]||{ icon:"📝", color:"#64748b" };
-        return (
-          <div key={i} style={{background:"#fff",border:"1px solid #f1f5f9",borderRadius:10,padding:"10px 14px",display:"flex",gap:10,alignItems:"flex-start"}}>
-            <div style={{width:34,height:34,borderRadius:8,background:sm.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{sm.icon}</div>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:3}}>
-                <span style={{fontSize:10,fontWeight:700,color:sm.color,background:sm.bg,padding:"1px 7px",borderRadius:20,border:`1px solid ${sm.color}30`}}>{sm.label}</span>
-                <span style={{fontSize:12,fontWeight:700,color:am.color}}>{am.icon} {e.action}</span>
-              </div>
-              <div style={{fontSize:12,color:"#0f172a"}}><b style={{color:"#2563eb"}}>{e.by}</b>{e.detail ? <span style={{color:"#64748b",fontWeight:400}}> · {e.detail}</span> : null}</div>
-            </div>
-            <div style={{fontSize:11,color:"#94a3b8",whiteSpace:"nowrap",flexShrink:0,textAlign:"right"}}>
-              <div>{new Date(e.ts).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit"})}</div>
-              <div>{new Date(e.ts).toLocaleString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</div>
-            </div>
-          </div>
-        );
-      })}
-      {auditLog.length>0&&<button onClick={()=>downloadCSV("audit_"+new Date().toISOString().slice(0,10)+".csv",["Дата","Кто","Раздел","Действие","Детали"],auditLog.map(e=>[new Date(e.ts).toLocaleString("ru-RU"),e.by,SECTION_META[e.entity]?.label||e.entity||"",e.action,e.detail||""]))} style={{alignSelf:"flex-start",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⬇ Экспорт журнала</button>}
-    </div>
-  );
-}
-
-function AdminPanel({ currentUser, onClose }) {
-  const [tab, setTab] = useState("users"); // "users" | "prices"
-  const [users, setUsers]     = useState([]);
+// Журнал изменений. Без objectId — общий (Админка, только админ), с помесячным выбором и фильтрами.
+// С objectId — компактный срез по конкретному объекту (все месяцы + архив).
+function AuditTab({ objectId = null }) {
+  const embed = !!objectId;
+  const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving]   = useState(false);
-  const [newLogin, setNewLogin]   = useState("");
-  const [newName, setNewName]     = useState("");
-  const [newPass, setNewPass]     = useState("");
-  const [newRole, setNewRole]     = useState("user");
-  const [editingPass, setEditingPass] = useState(null);
-  const [editingUser, setEditingUser] = useState(null);
-  const [msg, setMsg] = useState("");
-  // Прайс-лист
-  const [localPrices, setLocalPrices] = useState(null);
-  const [savedOverrides, setSavedOverrides] = useState({});
-  const [localCatalog, setLocalCatalog] = useState(null); // {renames, custom, hiddenCodes}
-  const [priceSearch, setPriceSearch] = useState("");
-  const [priceMsg, setPriceMsg] = useState("");
-  const [priceSaving, setPriceSaving] = useState(false);
-  // Форма новой позиции
-  const [showAddWork, setShowAddWork] = useState(false);
-  const [newWork, setNewWork] = useState({cat:"", sub:"", name:"", unit:"м²"});
-  // Редактирование категорий/подкатегорий
-  const [editingCat, setEditingCat] = useState(null);   // {key, val} — key = оригинальное имя
-  const [editingSub, setEditingSub] = useState(null);   // {cat, key, val}
+  const [months, setMonths] = useState([]);      // ["2026-07", ...] newest-first
+  const [month, setMonth] = useState("");         // выбранный; "__legacy__" = архив
+  const [fEntity, setFEntity] = useState("");
+  const [fUser, setFUser] = useState("");
+  const [q, setQ] = useState("");
 
-  const _priceAutoSaveModal = useRef(null);
-  useEffect(() => {
-    if (!localPrices) return;
-    if (_priceAutoSaveModal.current) clearTimeout(_priceAutoSaveModal.current);
-    _priceAutoSaveModal.current = setTimeout(() => { savePrices(); }, 2000);
-    return () => clearTimeout(_priceAutoSaveModal.current);
-  }, [localPrices]);
+  const readKey = async (k) => { try { const r = await storage.get(k); if (r) { const p = JSON.parse(r.value); if (Array.isArray(p)) return p; } } catch {} return []; };
 
+  // Индекс месяцев (для селектора / обхода при embed)
   useEffect(() => {
     (async () => {
-      try {
-        const res = await storage.get(USERS_KEY);
-        setUsers(res ? JSON.parse(res.value) : DEFAULT_USERS);
-      } catch { setUsers(DEFAULT_USERS); }
-      // Загружаем каталог
-      try {
-        const cat = await storage.get(CATALOG_KEY);
-        if (cat) { const parsed = JSON.parse(cat.value); setCatalogOverrides(parsed); setLocalCatalog(parsed); }
-        else setLocalCatalog({ renames:{}, custom:[], hiddenCodes:[] });
-      } catch { setLocalCatalog({ renames:{}, custom:[], hiddenCodes:[] }); }
-      // Загружаем переопределения цен и инициализируем localPrices
-      try {
-        const pr = await storage.get(PRICES_KEY);
-        const ov = pr ? JSON.parse(pr.value) : {};
-        setSavedOverrides(ov);
-        const allWorks = getEffectiveCatalog();
-        const lp = {};
-        for (const w of allWorks) {
-          const saved = ov[w.code];
-          lp[w.code] = {
-            tiers: saved?.tiers !== undefined ? saved.tiers.map(t=>({...t})) : (w.tiers||[]).map(t=>({...t})),
-            fixedPrice: saved?.fixedPrice !== undefined ? String(saved.fixedPrice) : w.fixedPrice !== undefined ? String(w.fixedPrice) : ""
-          };
-        }
-        setLocalPrices(lp);
-      } catch {}
+      let idx = await readKey(AUDIT_INDEX_KEY);
+      if (!Array.isArray(idx)) idx = [];
+      const cur = _auditYM();
+      idx = [...new Set([cur, ...idx])].sort().reverse();
+      setMonths(idx);
+      if (!embed) setMonth((m) => m || idx[0] || cur);
+    })();
+  }, [embed]);
+
+  // Загрузка записей
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      let out = [];
+      if (embed) {
+        // все месяцы (макс. 12 последних) + архив, фильтр по объекту
+        const keys = [...months.slice(0, 12).map(AUDIT_MONTH_KEY), AUDIT_KEY];
+        for (const k of keys) out.push(...await readKey(k));
+        out = out.filter(e => (e.objectId && e.objectId === objectId) || e.entityId === objectId);
+      } else {
+        if (!month) { setLoading(false); return; }
+        out = month === "__legacy__" ? await readKey(AUDIT_KEY) : await readKey(AUDIT_MONTH_KEY(month));
+      }
+      out.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+      setRows(out);
       setLoading(false);
     })();
-  }, []);
+  }, [embed, objectId, month, months]);
 
-  const saveUsers = async (list) => {
-    setSaving(true);
-    await storage.set(USERS_KEY, JSON.stringify(list));
-    setSaving(false);
-  };
-
-  const addUser = async () => {
-    if (!newLogin.trim() || !newPass.trim() || !newName.trim()) { setMsg("Заполните все поля"); return; }
-    if (users.find(u => u.login.toLowerCase() === newLogin.trim().toLowerCase())) { setMsg("Логин уже занят"); return; }
-    const u = { id: genId(), login: newLogin.trim(), password: simpleHash(newPass.trim()), name: newName.trim(), role: newRole };
-    const updated = [...users, u];
-    setUsers(updated);
-    await saveUsers(updated);
-    setNewLogin(""); setNewName(""); setNewPass(""); setNewRole("user");
-    setMsg("✓ Пользователь добавлен");
-    setTimeout(() => setMsg(""), 2500);
-  };
-
-  const removeUser = async (id) => {
-    if (id === currentUser.id) { setMsg("Нельзя удалить себя"); setTimeout(()=>setMsg(""),2000); return; }
-    const updated = users.filter(u => u.id !== id);
-    setUsers(updated);
-    await saveUsers(updated);
-  };
-
-  const savePass = async (id) => {
-    if (!editingPass?.val?.trim()) return;
-    const updated = users.map(u => u.id === id ? {...u, password: simpleHash(editingPass.val.trim())} : u);
-    setUsers(updated);
-    await saveUsers(updated);
-    setEditingPass(null);
-    setMsg("✓ Пароль изменён");
-    setTimeout(() => setMsg(""), 2500);
-  };
-
-  const saveUser = async () => {
-    if (!editingUser?.name?.trim() || !editingUser?.login?.trim()) return;
-    const conflict = users.find(u => u.id !== editingUser.id && u.login.toLowerCase() === editingUser.login.trim().toLowerCase());
-    if (conflict) { setMsg("Логин уже занят"); setTimeout(()=>setMsg(""),2000); return; }
-    const updated = users.map(u => u.id === editingUser.id ? {...u, name: editingUser.name.trim(), login: editingUser.login.trim(), role: (editingUser.id===currentUser.id ? u.role : (editingUser.role||u.role||"user"))} : u);
-    setUsers(updated);
-    await saveUsers(updated);
-    setEditingUser(null);
-    setMsg("✓ Сохранено");
-    setTimeout(() => setMsg(""), 2500);
-  };
-
-  const savePrices = async () => {
-    setPriceSaving(true);
-    // Берём то что уже было сохранено раньше
-    const overrides = {...savedOverrides};
-    // Применяем ТОЛЬКО то что пользователь реально трогал в этой сессии (из кэша)
-    for (const [code, src] of Object.entries(priceCardCache)) {
-      const allW = getEffectiveCatalog();
-      const w = allW.find(x => x.code === code);
-      if (!w) continue;
-      const validTiers = (src.tiers||[])
-        .filter(t => t.price!==""&&t.price!==undefined&&!isNaN(Number(t.price))&&t.min!==""&&t.max!=="")
-        .map(t=>({min:Number(t.min),max:Number(t.max),price:Number(t.price)}));
-      if (validTiers.length > 0) {
-        overrides[code] = {tiers: validTiers};
-      } else if (src.fixedPrice!==""&&src.fixedPrice!==undefined&&!isNaN(Number(src.fixedPrice))) {
-        overrides[code] = {fixedPrice: Number(src.fixedPrice), tiers:[]};
-      } else {
-        delete overrides[code];
-      }
+  const users = [...new Set(rows.map(e => e.by).filter(Boolean))];
+  const sections = [...new Set(rows.map(e => e.entity).filter(Boolean))];
+  const filtered = rows.filter(e => {
+    if (fEntity && e.entity !== fEntity) return false;
+    if (fUser && e.by !== fUser) return false;
+    if (q) {
+      const hay = [e.by, e.label, e.detail, e.field, e.action, e.old, e.new].map(x => String(x || "").toLowerCase()).join(" ");
+      if (!hay.includes(q.toLowerCase().trim())) return false;
     }
-    await storage.set(PRICES_KEY, JSON.stringify(overrides));
-    setPriceOverrides(overrides);
-    setSavedOverrides(overrides);
-    Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
-    setPriceSaving(false);
-    setPriceMsg("✓ Прайс сохранён!");
-    setTimeout(()=>setPriceMsg(""),3000);
+    return true;
+  });
+
+  const monthLabel = (ym) => {
+    if (ym === "__legacy__") return "🗄 Архив (старое)";
+    const [y, m] = ym.split("-");
+    const nm = ["", "янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"][+m] || m;
+    return `${nm} ${y}`;
   };
 
-  const saveCatalog = async (cat) => {
-    await storage.set(CATALOG_KEY, JSON.stringify(cat));
-    setCatalogOverrides(cat);
-    setLocalCatalog(cat);
-    // Переинициализируем localPrices для новых позиций
-    const allWorks = getEffectiveCatalog();
-    setLocalPrices(prev => {
-      const lp = {...(prev||{})};
-      for (const w of allWorks) {
-        if (!lp[w.code]) lp[w.code] = { tiers:(w.tiers||[]).map(t=>({...t})), fixedPrice: w.fixedPrice!=null?String(w.fixedPrice):"" };
-      }
-      return lp;
-    });
-  };
-
-  const renameWork = async (code, newName) => {
-    const cur = _catalogOverrides;
-    const next = { renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], ...cur,
-      renames: { ...(cur.renames||{}), [code]: newName } };
-    await saveCatalog(next);
-  };
-
-  const addCustomWork = async () => {
-    const finalCat = newWork.cat === "__new__" ? (newWork.catNew||"").trim() : newWork.cat.trim();
-    const finalSub = newWork.sub === "__new__" ? (newWork.subNew||"").trim() : newWork.sub.trim();
-    if (!newWork.name.trim() || !finalCat || !finalSub) return;
-    const code = "CUSTOM-" + Date.now();
-    const cost = Number(newWork.cost) || 0;
-    const marginPct = Math.min(99, Math.max(0, Number(newWork.margin) || 40));
-    const fixedPrice = cost > 0 ? Math.round(cost / (1 - marginPct / 100)) : null;
-    const work = { code, cat:finalCat, sub:finalSub, name:newWork.name.trim(), unit:newWork.unit||"м²", tiers:[], cost, margin: marginPct/100, fixedPrice };
-    const cat = { ...(localCatalog||{}), custom: [...((localCatalog||{}).custom||[]), work] };
-    await saveCatalog(cat);
-    setNewWork({cat:"", catNew:"", sub:"", subNew:"", name:"", unit:"м²", cost:"", margin:40});
-    setShowAddWork(false);
-    Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
-  };
-
-  const deleteCustomWork = async (code) => {
-    const cat = { ...(localCatalog||{}), custom: ((localCatalog||{}).custom||[]).filter(w=>w.code!==code) };
-    await saveCatalog(cat);
-    Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
-  };
-
-  const renameCat = async (origKey, newCat) => {
-    if (!newCat.trim()) return;
-    // Читаем напрямую из _catalogOverrides (не из localCatalog — может быть stale)
-    const cur = _catalogOverrides;
-    const cr = { ...(cur.catRenames||{}), [origKey]: newCat.trim() };
-    const currentName = (cur.catRenames||{})[origKey] || origKey;
-    const custom = (cur.custom||[]).map(w => w.cat===currentName ? {...w,cat:newCat.trim()} : w);
-    const next = { renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], ...cur, catRenames:cr, custom };
-    await saveCatalog(next);
-    setEditingCat(null);
-    Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
-  };
-
-  const renameSub = async (origCatKey, origSubKey, newSub) => {
-    if (!newSub.trim()) return;
-    const cur = _catalogOverrides;
-    const key = origCatKey+"|"+origSubKey;
-    const sr = { ...(cur.subRenames||{}), [key]: newSub.trim() };
-    const curCat = (cur.catRenames||{})[origCatKey] || origCatKey;
-    const curSub = (cur.subRenames||{})[key] || origSubKey;
-    const custom = (cur.custom||[]).map(w =>
-      w.cat===curCat && w.sub===curSub ? {...w,sub:newSub.trim()} : w
+  const renderEntry = (e, i) => {
+    const sm = AUDIT_SECTION_META[e.entity] || { label: e.entity || "—", color: "#64748b", bg: "#f1f5f9", icon: "📝" };
+    const am = _auditActionMeta(e.action);
+    const src = AUDIT_SOURCE_META[e.source] || null;
+    const _hasVal = (v) => v !== undefined && v !== null && v !== "";
+    const showDiff = _hasVal(e.old) || _hasVal(e.new);
+    return (
+      <div key={i} style={{ background: "#fff", border: "1px solid #f1f5f9", borderRadius: 10, padding: "10px 13px", display: "flex", gap: 10, alignItems: "flex-start" }}>
+        <div style={{ width: 32, height: 32, borderRadius: 8, background: sm.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>{sm.icon}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 3 }}>
+            <span style={{ fontSize: 9.5, fontWeight: 700, color: sm.color, background: sm.bg, padding: "1px 7px", borderRadius: 20, border: `1px solid ${sm.color}30` }}>{sm.label}</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: am.color }}>{am.icon} {e.action}{e.field ? <span style={{ color: "#0f172a" }}> · {e.field}</span> : null}</span>
+            {src && <span style={{ fontSize: 9.5, fontWeight: 700, color: src.color, background: src.color + "14", padding: "1px 7px", borderRadius: 20 }}>{src.label}</span>}
+          </div>
+          {e.label && <div style={{ fontSize: 12, color: "#334155", marginBottom: showDiff ? 4 : 0, overflowWrap: "break-word" }}>{e.label}</div>}
+          {showDiff && (
+            <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", fontSize: 12, marginBottom: 2 }}>
+              <span style={{ background: "#fef2f2", color: "#b91c1c", padding: "1px 8px", borderRadius: 6, textDecoration: "line-through", overflowWrap: "anywhere" }}>{_auditVal(e.old)}</span>
+              <span style={{ color: "#94a3b8" }}>→</span>
+              <span style={{ background: "#f0fdf4", color: "#15803d", padding: "1px 8px", borderRadius: 6, fontWeight: 700, overflowWrap: "anywhere" }}>{_auditVal(e.new)}</span>
+            </div>
+          )}
+          <div style={{ fontSize: 11.5, color: "#0f172a" }}><b style={{ color: "#2563eb" }}>{e.by}</b>{e.detail ? <span style={{ color: "#64748b", fontWeight: 400 }}> · {e.detail}</span> : null}</div>
+        </div>
+        <div style={{ fontSize: 11, color: "#94a3b8", whiteSpace: "nowrap", flexShrink: 0, textAlign: "right" }}>
+          <div>{new Date(e.ts).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit" })}</div>
+          <div>{new Date(e.ts).toLocaleString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</div>
+        </div>
+      </div>
     );
-    const next = { renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], ...cur, subRenames:sr, custom };
-    await saveCatalog(next);
-    setEditingSub(null);
-    Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
 
-  const deleteCat = async (origCatKey) => {
-    // origCatKey = original name. hiddenCats stores originals.
-    const hc = [...new Set([...((localCatalog||{}).hiddenCats||[]), origCatKey])];
-    const curName = (localCatalog?.catRenames||{})[origCatKey] || origCatKey;
-    const custom = ((localCatalog||{}).custom||[]).filter(w => w.cat!==curName);
-    await saveCatalog({ ...(localCatalog||{}), hiddenCats:hc, custom });
-    Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
-  };
+  const selStyle = { fontSize: 12, padding: "5px 9px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", color: "#334155", fontFamily: "inherit", cursor: "pointer" };
 
-  const deleteSub = async (origCatKey, origSubKey) => {
-    const key = origCatKey+"|"+origSubKey;
-    const hs = [...new Set([...((localCatalog||{}).hiddenSubs||[]), key])];
-    const curCat = (localCatalog?.catRenames||{})[origCatKey] || origCatKey;
-    const curSub = (localCatalog?.subRenames||{})[key] || origSubKey;
-    const custom = ((localCatalog||{}).custom||[]).filter(w => !(w.cat===curCat && w.sub===curSub));
-    await saveCatalog({ ...(localCatalog||{}), hiddenSubs:hs, custom });
-    Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
-  };
-
-  const roleLabel = r => r==="admin"?"👑 Админ":r==="viewer"?"👁 Наблюдатель":r==="manager"?"🧑‍💼 Руководитель":r==="foreman"?"🔨 Прораб":"👤 Замерщик";
+  if (embed) {
+    // Компактный срез по объекту
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {loading && <div style={{ color: "#94a3b8", textAlign: "center", padding: "20px 0", fontSize: 13 }}>Загрузка журнала…</div>}
+        {!loading && filtered.length === 0 && <div style={{ color: "#94a3b8", textAlign: "center", padding: "20px 0", fontSize: 13 }}>Изменений по объекту пока нет</div>}
+        {filtered.map(renderEntry)}
+      </div>
+    );
+  }
 
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(17,24,39,.4)",backdropFilter:"blur(2px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:16,fontFamily:"'Inter','Segoe UI',sans-serif"}}>
-      <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:12,boxShadow:"0 20px 60px rgba(0,0,0,.12)",padding:"24px 28px",maxWidth:520,width:"100%",height:"88vh",display:"flex",flexDirection:"column",position:"relative"}}>
-
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-          <div style={{fontWeight:800,fontSize:16,color:"#0f172a"}}>⚙️ Администрирование</div>
-          <button onClick={onClose} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:20}}>×</button>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a" }}>Журнал изменений</div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <select value={month} onChange={e => setMonth(e.target.value)} style={selStyle}>
+            {months.map(ym => <option key={ym} value={ym}>{monthLabel(ym)}</option>)}
+            <option value="__legacy__">{monthLabel("__legacy__")}</option>
+          </select>
+          <select value={fUser} onChange={e => setFUser(e.target.value)} style={selStyle}>
+            <option value="">Все пользователи</option>
+            {users.map(u => <option key={u} value={u}>{u}</option>)}
+          </select>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Поиск: объект, договор…" style={{ ...selStyle, cursor: "text", minWidth: 150 }} />
         </div>
-
-        {/* Вкладки */}
-        <div style={{display:"flex",gap:4,marginBottom:16,background:"#e2e8f0",borderRadius:8,padding:4}}>
-          {[["users","👥 Сотрудники"],["prices","💰 Прайс-лист"]].map(([t,label])=>(
-            <button key={t} onClick={()=>setTab(t)} style={{
-              flex:1,padding:"8px",borderRadius:8,border:"none",cursor:"pointer",
-              fontFamily:"inherit",fontSize:12,fontWeight:700,
-              background: tab===t ? "#f3f4f6" : "transparent",
-              color: tab===t ? "#0f172a" : "#64748b",transition:"all .1s"
-            }}>{label}</button>
-          ))}
-        </div>
-
-        {loading ? <div style={{textAlign:"center",padding:"30px 0",color:"#94a3b8"}}>Загрузка...</div> : tab === "users" ? (
-          <div style={{flex:1,overflowY:"auto"}}>
-          <>
-            {/* Список */}
-            <div style={{marginBottom:20}}>
-              {users.map(u => (
-                <div key={u.id} style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:9,padding:"12px 14px",marginBottom:8}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
-                    <div style={{flex:1}}>
-                      <div style={{fontWeight:700,fontSize:13,color:"#0f172a"}}>{u.name}</div>
-                      <div style={{fontSize:12,color:"#94a3b8",marginTop:1}}>
-                        @{u.login} · {roleLabel(u.role)}
-                        {u.id === currentUser.id && <span style={{color:"#94a3b8",marginLeft:6}}>(вы)</span>}
-                      </div>
-                    </div>
-                    <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                      <button
-                        onClick={()=>{setEditingUser(editingUser?.id===u.id?null:{id:u.id,name:u.name,login:u.login,role:u.role||"user"});setEditingPass(null);}}
-                        style={{background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:8,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
-                        ✏ Изменить
-                      </button>
-                      <button
-                        onClick={()=>{setEditingPass(editingPass?.id===u.id?null:{id:u.id,val:""});setEditingUser(null);}}
-                        style={{background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:8,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
-                        🔑
-                      </button>
-                      {u.id !== currentUser.id && (
-                        <button onClick={()=>removeUser(u.id)}
-                          style={{background:"rgba(220,38,38,.1)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:8,padding:"4px 8px",fontSize:11,cursor:"pointer"}}>✕</button>
-                      )}
-                    </div>
-                  </div>
-                  {editingUser?.id === u.id && (
-                    <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:8}}>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                        <div>
-                          <div style={{fontSize:10,color:"#94a3b8",marginBottom:3}}>Имя</div>
-                          <input style={{width:"100%",background:"#f8fafc",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:8,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"}}
-                            value={editingUser.name} onChange={e=>setEditingUser(p=>({...p,name:e.target.value}))}/>
-                        </div>
-                        <div>
-                          <div style={{fontSize:10,color:"#94a3b8",marginBottom:3}}>Логин</div>
-                          <input style={{width:"100%",background:"#f8fafc",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:8,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"}}
-                            value={editingUser.login} onChange={e=>setEditingUser(p=>({...p,login:e.target.value}))}/>
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{fontSize:10,color:"#94a3b8",marginBottom:3}}>Роль</div>
-                        <select style={{width:"100%",background:"#f8fafc",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:8,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none",cursor:"pointer"}}
-                          value={editingUser.role||"user"} onChange={e=>setEditingUser(p=>({...p,role:e.target.value}))} disabled={u.id===currentUser.id}>
-                          <option value="user">👤 Замерщик</option>
-                          <option value="foreman">🔨 Прораб</option>
-                          <option value="manager">🧑‍💼 Руководитель</option>
-                          <option value="admin">👑 Администратор</option>
-                          <option value="viewer">👁 Наблюдатель</option>
-                        </select>
-                        {u.id===currentUser.id && <div style={{fontSize:10,color:"#94a3b8",marginTop:3}}>Нельзя менять свою роль</div>}
-                      </div>
-                      <button onClick={saveUser}
-                        style={{background:"#2563eb",color:"#f3f4f6",border:"none",borderRadius:8,padding:"8px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                        Сохранить изменения
-                      </button>
-                    </div>
-                  )}
-                  {editingPass?.id === u.id && (
-                    <div style={{marginTop:10,display:"flex",gap:8}}>
-                      <input
-                        style={{flex:1,background:"#f8fafc",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:8,padding:"7px 10px",fontFamily:"inherit",fontSize:12,outline:"none"}}
-                        placeholder="Новый пароль"
-                        value={editingPass.val}
-                        onChange={e=>setEditingPass(p=>({...p,val:e.target.value}))}
-                      />
-                      <button onClick={()=>savePass(u.id)}
-                        style={{background:"#2563eb",color:"#f3f4f6",border:"none",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                        Сохранить
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* Добавить */}
-            <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:9,padding:"14px 16px"}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",letterSpacing:.8,textTransform:"uppercase",marginBottom:10}}>+ Новый пользователь</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-                <input style={{background:"#ffffff",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none"}} placeholder="Имя" value={newName} onChange={e=>setNewName(e.target.value)}/>
-                <input style={{background:"#ffffff",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none"}} placeholder="Логин" value={newLogin} onChange={e=>setNewLogin(e.target.value)}/>
-                <input style={{background:"#ffffff",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none"}} placeholder="Пароль" value={newPass} onChange={e=>setNewPass(e.target.value)}/>
-                <select style={{background:"#ffffff",border:"1px solid #e2e8f0",color:"#94a3b8",borderRadius:7,padding:"8px 11px",fontFamily:"inherit",fontSize:12,outline:"none",cursor:"pointer"}} value={newRole} onChange={e=>setNewRole(e.target.value)}>
-                  <option value="user">👤 Замерщик</option>
-                  <option value="manager">🧑‍💼 Руководитель</option>
-                  <option value="admin">👑 Администратор</option>
-                  <option value="viewer">👁 Наблюдатель</option>
-                </select>
-              </div>
-              <button onClick={addUser} className="btn btn-g" style={{width:"100%",marginTop:4}}>
-                + Добавить
-              </button>
-            </div>
-
-            {msg && <div style={{marginTop:12,textAlign:"center",fontSize:12,color: msg.startsWith("✓") ? "#059669" : "#dc2626"}}>{msg}</div>}
-            {saving && <div style={{textAlign:"center",fontSize:11,color:"#94a3b8",marginTop:8}}>💾 Сохранение...</div>}
-          </>
-          </div>
-        ) : (
-          /* ═══ ВКЛАДКА ПРАЙС-ЛИСТ ═══ */
-          <div style={{display:"flex",flexDirection:"column",height:"calc(88vh - 160px)"}}>
-            {!localPrices ? <div style={{textAlign:"center",padding:30,color:"#94a3b8"}}>Загрузка...</div> : null}
-            {localPrices && <>
-              {/* Поиск — фиксированный */}
-              <input
-                style={{width:"100%",boxSizing:"border-box",background:"#ffffff",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:7,padding:"8px 12px",fontFamily:"inherit",fontSize:12,outline:"none",marginBottom:8}}
-                placeholder="🔍 Поиск по названию..."
-                value={priceSearch}
-                onChange={e=>setPriceSearch(e.target.value)}
-              />
-              {/* Список — скроллится */}
-              <div className="price-scroll" style={{flex:1,overflowY:"scroll",paddingRight:4,scrollbarWidth:"auto",scrollbarColor:"#d1d5db #f3f4f6"}}>
-                <style>{`
-                  .price-scroll::-webkit-scrollbar{width:10px}
-                  .price-scroll::-webkit-scrollbar-track{background:#e5e7eb;border-radius:5px}
-                  .price-scroll::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:5px;min-height:40px}
-                  .price-scroll::-webkit-scrollbar-thumb:hover{background:#9ca3af}
-                `}</style>
-                {(() => {
-                  const allWorks = getEffectiveCatalog();
-                  const q = priceSearch.toLowerCase();
-                  const filtered = allWorks.filter(w =>
-                    !q || w.name.toLowerCase().includes(q) || w.sub.toLowerCase().includes(q) || w.cat.toLowerCase().includes(q)
-                  );
-                  const groups = {};
-                  for (const w of filtered) {
-                    const key = w.cat + " / " + w.sub;
-                    if (!groups[key]) groups[key] = [];
-                    groups[key].push(w);
-                  }
-                  // Группируем по категории отдельно для заголовков кат.
-                  // Группируем с сохранением оригинальных ключей
-                  const catGroups = {}; // displayCat -> { _origCat, subs: { displaySub -> { _origSub, works[] } } }
-                  for (const w of filtered) {
-                    if (!catGroups[w.cat]) catGroups[w.cat] = { _origCat: w._origCat||w.cat, subs:{} };
-                    if (!catGroups[w.cat].subs[w.sub]) catGroups[w.cat].subs[w.sub] = { _origSub: w._origSub||w.sub, works:[] };
-                    catGroups[w.cat].subs[w.sub].works.push(w);
-                  }
-                  const btnS = {background:"transparent",border:"none",cursor:"pointer",padding:"2px 5px",fontSize:11,lineHeight:1};
-                  return Object.entries(catGroups).map(([cat, catData]) => {
-                    const origCat = catData._origCat;
-                    return (
-                    <div key={cat} style={{marginBottom:16}}>
-                      {/* Заголовок категории */}
-                      {editingCat?.key===origCat ? (
-                        <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:6}}>
-                          <input autoFocus value={editingCat.val}
-                            onChange={e=>setEditingCat(p=>({...p,val:e.target.value}))}
-                            onKeyDown={e=>{if(e.key==="Enter")renameCat(origCat,editingCat.val);if(e.key==="Escape")setEditingCat(null);}}
-                            style={{flex:1,background:"#f8fafc",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:5,padding:"3px 8px",fontFamily:"inherit",fontSize:11,fontWeight:700,outline:"none"}}/>
-                          <button onClick={()=>renameCat(origCat,editingCat.val)} style={{...btnS,color:"#059669"}}>✓</button>
-                          <button onClick={()=>setEditingCat(null)} style={{...btnS,color:"#94a3b8"}}>✕</button>
-                        </div>
-                      ) : (
-                        <div style={{display:"flex",alignItems:"center",gap:4,padding:"4px 0",borderBottom:"1px solid #e2e8f0",marginBottom:6}}>
-                          <span style={{fontSize:10,fontWeight:700,color:"#94a3b8",letterSpacing:.8,textTransform:"uppercase",flex:1}}>{cat}</span>
-                          <button onClick={()=>setEditingCat({key:origCat,val:cat})} title="Переименовать категорию" style={{...btnS,color:"#94a3b8"}}>✏️</button>
-                          <button onClick={()=>{ if(window.confirm(`Удалить всю категорию "${cat}"?`)) deleteCat(origCat); }} title="Удалить категорию" style={{...btnS,color:"#dc2626"}}>🗑</button>
-                        </div>
-                      )}
-                      {/* Подкатегории */}
-                      {Object.entries(catData.subs).map(([sub, subData]) => {
-                        const origSub = subData._origSub;
-                        return (
-                        <div key={sub} style={{marginBottom:10}}>
-                          {editingSub?.cat===origCat&&editingSub?.key===origSub ? (
-                            <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:4,paddingLeft:8}}>
-                              <input autoFocus value={editingSub.val}
-                                onChange={e=>setEditingSub(p=>({...p,val:e.target.value}))}
-                                onKeyDown={e=>{if(e.key==="Enter")renameSub(origCat,origSub,editingSub.val);if(e.key==="Escape")setEditingSub(null);}}
-                                style={{flex:1,background:"#f8fafc",border:"1px solid #e2e8f0",color:"#94a3b8",borderRadius:5,padding:"2px 7px",fontFamily:"inherit",fontSize:10,outline:"none"}}/>
-                              <button onClick={()=>renameSub(origCat,origSub,editingSub.val)} style={{...btnS,color:"#059669"}}>✓</button>
-                              <button onClick={()=>setEditingSub(null)} style={{...btnS,color:"#94a3b8"}}>✕</button>
-                            </div>
-                          ) : (
-                            <div style={{display:"flex",alignItems:"center",gap:3,paddingLeft:8,marginBottom:4}}>
-                              <span style={{fontSize:9,fontWeight:700,color:"#94a3b8",letterSpacing:.8,textTransform:"uppercase",flex:1}}>{sub}</span>
-                              <button onClick={()=>setEditingSub({cat:origCat,key:origSub,val:sub})} title="Переименовать подкатегорию" style={{...btnS,color:"#334155",fontSize:10}}>✏️</button>
-                              <button onClick={()=>{ if(window.confirm(`Удалить подкатегорию "${sub}"?`)) deleteSub(origCat,origSub); }} title="Удалить подкатегорию" style={{...btnS,color:"#dc2626",fontSize:10}}>🗑</button>
-                            </div>
-                          )}
-                          {subData.works.map(w => (
-                            <PriceWorkCard key={w.code} w={w}
-                              initTiers={localPrices?.[w.code]?.tiers || []}
-                              initFixed={localPrices?.[w.code]?.fixedPrice || ""}
-                              onRename={newName => renameWork(w.code, newName)}
-                              onDelete={()=>{
-                                if(w.code.startsWith("CUSTOM-")) deleteCustomWork(w.code);
-                                else {
-                                  const hc = [...new Set([...((localCatalog||{}).hiddenCodes||[]), w.code])];
-                                  saveCatalog({...(localCatalog||{}), hiddenCodes:hc});
-                                }
-                              }}
-                            />
-                          ))}
-                        </div>
-                        );
-                      })}
-                    </div>
-                    );
-                  });
-                })()}
-                {/* Форма добавления новой позиции */}
-                <div style={{marginTop:8,border:"1px dashed #eff6ff",borderRadius:8,padding:"10px 12px",marginBottom:8}}>
-                  {!showAddWork ? (
-                    <button onClick={()=>setShowAddWork(true)} className="btn btn-g" style={{width:"100%"}}>
-                      ＋ Добавить позицию в каталог
-                    </button>
-                  ) : (() => {
-                    const allW = getEffectiveCatalog();
-                    const cats = [...new Set(allW.map(w=>w.cat))];
-                    const subs = newWork.cat ? [...new Set(allW.filter(w=>w.cat===newWork.cat).map(w=>w.sub))] : [];
-                    const inpStyle = {background:"#f8fafc",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:8,padding:"6px 9px",fontFamily:"inherit",fontSize:11,outline:"none",width:"100%",boxSizing:"border-box"};
-                    const selStyle = {...inpStyle, cursor:"pointer"};
-                    return (
-                      <div>
-                        <div style={{fontSize:11,fontWeight:600,color:"#334155",marginBottom:10}}>Новая позиция</div>
-
-                        {/* Категория */}
-                        <div style={{marginBottom:6}}>
-                          <div style={{fontSize:10,color:"#94a3b8",marginBottom:3}}>Категория</div>
-                          <select value={newWork.cat} onChange={e=>setNewWork(p=>({...p,cat:e.target.value,sub:""}))} style={selStyle}>
-                            <option value="">— выбрать существующую —</option>
-                            {cats.map(c=><option key={c} value={c}>{c}</option>)}
-                            <option value="__new__">＋ Новая категория...</option>
-                          </select>
-                          {newWork.cat==="__new__" && (
-                            <input autoFocus placeholder="Введите название категории" value={newWork.catNew||""}
-                              onChange={e=>setNewWork(p=>({...p,catNew:e.target.value}))}
-                              style={{...inpStyle,marginTop:4}}/>
-                          )}
-                        </div>
-
-                        {/* Подкатегория */}
-                        <div style={{marginBottom:6}}>
-                          <div style={{fontSize:10,color:"#94a3b8",marginBottom:3}}>Подкатегория</div>
-                          <select value={newWork.sub} onChange={e=>setNewWork(p=>({...p,sub:e.target.value}))} style={selStyle}
-                            disabled={!newWork.cat||newWork.cat==="__new__"&&!newWork.catNew}>
-                            <option value="">— выбрать существующую —</option>
-                            {subs.map(s=><option key={s} value={s}>{s}</option>)}
-                            <option value="__new__">＋ Новая подкатегория...</option>
-                          </select>
-                          {newWork.sub==="__new__" && (
-                            <input autoFocus placeholder="Введите название подкатегории" value={newWork.subNew||""}
-                              onChange={e=>setNewWork(p=>({...p,subNew:e.target.value}))}
-                              style={{...inpStyle,marginTop:4}}/>
-                          )}
-                        </div>
-
-                        {/* Название и единица */}
-                        <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:6,marginBottom:10}}>
-                          <div>
-                            <div style={{fontSize:10,color:"#94a3b8",marginBottom:3}}>Название работы</div>
-                            <input placeholder="напр. Укладка паркета" value={newWork.name}
-                              onChange={e=>setNewWork(p=>({...p,name:e.target.value}))}
-                              style={inpStyle}/>
-                          </div>
-                          <div>
-                            <div style={{fontSize:10,color:"#94a3b8",marginBottom:3}}>Единица</div>
-                            <select value={newWork.unit} onChange={e=>setNewWork(p=>({...p,unit:e.target.value}))} style={{...selStyle,width:80}}>
-                              {["м²","м.п.","шт","усл.","кг","л"].map(u=><option key={u} value={u}>{u}</option>)}
-                            </select>
-                          </div>
-                        </div>
-
-                        <div style={{display:"flex",gap:6}}>
-                          <button onClick={addCustomWork}
-                            style={{flex:1,background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px",fontFamily:"inherit",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-                            ✓ Добавить
-                          </button>
-                          <button onClick={()=>{setShowAddWork(false);setNewWork({cat:"",sub:"",name:"",unit:"м²"});}}
-                            style={{background:"rgba(220,38,38,.1)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:8,padding:"7px 12px",fontFamily:"inherit",fontSize:12,cursor:"pointer"}}>
-                            Отмена
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
-              {/* Индикатор автосохранения */}
-              <div style={{paddingTop:10,borderTop:"1px solid #e2e8f0",marginTop:6}}>
-                {priceMsg && <div style={{textAlign:"center",fontSize:12,color:"#059669",fontWeight:700,marginBottom:6}}>{priceMsg}</div>}
-                {priceSaving && <div style={{textAlign:"center",fontSize:11,color:"#94a3b8"}}>💾 Сохранение...</div>}
-              </div>
-            </>}
-          </div>
-        )}
       </div>
-
+      {/* Фильтр по разделу */}
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
+        <button onClick={() => setFEntity("")} style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, border: "1px solid #e2e8f0", background: fEntity === "" ? "#0f172a" : "#f8fafc", color: fEntity === "" ? "#fff" : "#64748b", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>Все</button>
+        {sections.map(s => { const m = AUDIT_SECTION_META[s]; if (!m) return null; return (
+          <button key={s} onClick={() => setFEntity(s === fEntity ? "" : s)} style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, border: `1px solid ${m.color}40`, background: fEntity === s ? m.color : m.bg, color: fEntity === s ? "#fff" : m.color, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>{m.icon} {m.label}</button>
+        ); })}
+        <span style={{ fontSize: 11, color: "#94a3b8" }}>{filtered.length} событий</span>
+      </div>
+      {loading && <div style={{ color: "#94a3b8", textAlign: "center", padding: "30px 0" }}>Загрузка…</div>}
+      {!loading && filtered.length === 0 && <div style={{ color: "#94a3b8", textAlign: "center", padding: "30px 0" }}>Событий не найдено</div>}
+      {filtered.map(renderEntry)}
+      {filtered.length > 0 && <button onClick={() => downloadCSV("journal_" + (month === "__legacy__" ? "archive" : month) + ".csv", ["Дата", "Кто", "Раздел", "Действие", "Поле", "Было", "Стало", "Источник", "Объект/детали"], filtered.map(e => [new Date(e.ts).toLocaleString("ru-RU"), e.by, AUDIT_SECTION_META[e.entity]?.label || e.entity || "", e.action, e.field || "", _auditVal(e.old), _auditVal(e.new), AUDIT_SOURCE_META[e.source]?.label || e.source || "", e.label || e.detail || ""]))} style={{ alignSelf: "flex-start", background: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", marginTop: 4 }}>⬇ Экспорт (CSV)</button>}
     </div>
   );
 }
+
 
 // ─── КОМПОНЕНТ КП (используется в модале и при печати) ───────────────────────
 function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note }) {
@@ -1697,7 +1690,7 @@ function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note })
 
 
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
-function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, onBackupWorkspace=()=>{} }) {
+function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
   const [tab, setTab] = useState("users");
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1720,8 +1713,9 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
   const [editingCat, setEditingCat] = useState(null);
   const [editingSub, setEditingSub] = useState(null);
   const [catalogBackupsModal, setCatalogBackupsModal] = useState(null);
-  const [adminEditItem, setAdminEditItem] = useState(null); // {mode:"newClient"|"editClient"|"newCA"|"editCA", data:{}}
-  const [adminSubTab, setAdminSubTab] = useState("list"); // "list"|"clientEditor"|"caEditor"
+  const [adminEditItem, setAdminEditItem] = useState(null); // {mode:"newClient"|"editClient"|"newCA"|"editCA"|"newWorker"|"editWorker", data:{}}
+  const [adminSubTab, setAdminSubTab] = useState("list"); // "list"|"clientEditor"|"caEditor"|"workerEditor"
+  const [workerSearch, setWorkerSearch] = useState(""); // поиск в справочнике подрядчиков
 
   const openCatalogBackups = async () => {
     const bRaw = await storage.get(CATALOG_BACKUPS_KEY);
@@ -1731,7 +1725,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
   const restoreCatalogBackup = async (snap) => {
     if (!snap?.data) return;
     let cat; try { cat = JSON.parse(snap.data); } catch { window.alert("Бэкап повреждён"); return; }
-    if (!window.confirm(`Восстановить каталог на ${new Date(snap.ts).toLocaleString("ru-RU")}?\nТекущий каталог уйдёт в бэкап.`)) return;
+    if (!confirmDangerous(`Восстановить каталог на ${new Date(snap.ts).toLocaleString("ru-RU")}?\nТекущий каталог уйдёт в бэкап.`)) return;
     await saveCatalog(cat);
     setCatalogBackupsModal(null);
     window.alert("Каталог восстановлен ✓");
@@ -1784,7 +1778,8 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
   const addUser = async () => {
     if (!newLogin.trim() || !newPass.trim() || !newName.trim()) { setMsg("Заполните все поля"); return; }
     if (users.find(u => u.login.toLowerCase() === newLogin.trim().toLowerCase())) { setMsg("Логин уже занят"); return; }
-    const u = { id: genId(), login: newLogin.trim(), password: simpleHash(newPass.trim()), name: newName.trim(), role: newRole };
+    const weak = passwordTooWeak(newPass); if (weak) { setMsg(weak); return; }
+    const u = { id: genId(), login: newLogin.trim(), password: await hashPassword(newPass.trim()), name: newName.trim(), role: newRole };
     const updated = [...users, u];
     setUsers(updated); await saveUsers(updated); await onUsersChanged();
     writeAudit(currentUser,"создал пользователя","user",u.id,`${u.name} (${u.role})`);
@@ -1798,8 +1793,11 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
   };
   const savePass = async (id) => {
     if (!editingPass?.val?.trim()) return;
-    const updated = users.map(u => u.id === id ? {...u, password: simpleHash(editingPass.val.trim())} : u);
-    setUsers(updated); await saveUsers(updated);
+    const weak = passwordTooWeak(editingPass.val); if (weak) { setMsg(weak); return; }
+    // pwChangedAt — метка смены пароля: сессии, вошедшие до этого момента, разлогинятся при загрузке
+    const newHash = await hashPassword(editingPass.val.trim());
+    const updated = users.map(u => u.id === id ? {...u, password: newHash, pwChangedAt: Date.now()} : u);
+    setUsers(updated); await saveUsers(updated); await onUsersChanged();
     setEditingPass(null); setMsg("✓ Пароль изменён"); setTimeout(() => setMsg(""), 2500);
   };
   const saveUser = async () => {
@@ -1868,7 +1866,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
     const allWorks = getEffectiveCatalog();
     setLocalPrices(prev => { const lp = {...(prev||{})}; for (const w of allWorks) { if (!lp[w.code]) lp[w.code] = { tiers:(w.tiers||[]).map(t=>({...t})), fixedPrice: w.fixedPrice!=null?String(w.fixedPrice):"" }; } return lp; });
   };
-  const renameWork = async (code, newName) => { const cur = _catalogOverrides; await saveCatalog({ renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], ...cur, renames: { ...(cur.renames||{}), [code]: newName } }); };
+  const renameWork = async (code, newName) => { const cur = _catalogOverrides; await saveCatalog(withCatalogOverrides(cur, { renames: { ...(cur.renames||{}), [code]: newName } })); };
   const addCustomWork = async () => {
     const finalCat = newWork.cat === "__new__" ? (newWork.catNew||"").trim() : newWork.cat.trim();
     const finalSub = newWork.sub === "__new__" ? (newWork.subNew||"").trim() : newWork.sub.trim();
@@ -1885,14 +1883,14 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
   const renameCat = async (origKey, newCat) => {
     if (!newCat.trim()) return;
     const cur = _catalogOverrides; const cr = { ...(cur.catRenames||{}), [origKey]: newCat.trim() }; const currentName = (cur.catRenames||{})[origKey] || origKey;
-    await saveCatalog({ renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], ...cur, catRenames:cr, custom:(cur.custom||[]).map(w => w.cat===currentName ? {...w,cat:newCat.trim()} : w) });
+    await saveCatalog(withCatalogOverrides(cur, { catRenames:cr, custom:(cur.custom||[]).map(w => w.cat===currentName ? {...w,cat:newCat.trim()} : w) }));
     setEditingCat(null); Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
   const renameSub = async (origCatKey, origSubKey, newSub) => {
     if (!newSub.trim()) return;
     const cur = _catalogOverrides; const key = origCatKey+"|"+origSubKey; const sr = { ...(cur.subRenames||{}), [key]: newSub.trim() };
     const curCat = (cur.catRenames||{})[origCatKey] || origCatKey; const curSub = (cur.subRenames||{})[key] || origSubKey;
-    await saveCatalog({ renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], ...cur, subRenames:sr, custom:(cur.custom||[]).map(w => w.cat===curCat && w.sub===curSub ? {...w,sub:newSub.trim()} : w) });
+    await saveCatalog(withCatalogOverrides(cur, { subRenames:sr, custom:(cur.custom||[]).map(w => w.cat===curCat && w.sub===curSub ? {...w,sub:newSub.trim()} : w) }));
     setEditingSub(null); Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
   const deleteCat = async (origCatKey) => {
@@ -1922,7 +1920,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
   };
 
   return (
-    <div className="page">
+    <div className="page" style={{maxWidth:1320}}>
       <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"24px 28px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
         <div style={{position:"absolute",top:-30,right:-30,width:160,height:160,borderRadius:"50%",background:"rgba(59,130,246,.08)"}}/>
         <div style={{position:"relative",zIndex:1}}>
@@ -1933,7 +1931,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
 
       {/* Табы */}
       <div className="admin-tabs" style={{display:"flex",gap:3,marginBottom:24,background:"#f8fafc",borderRadius:10,padding:4,overflowX:"auto"}}>
-        {[["users","👥 Сотрудники"],["clients","👥 Клиенты"],["contragents","🏢 Реквизиты"],["prices","💰 Прайс-лист"],["backups","🗄 Бэкапы"],["audit","📋 Журнал"]].map(([t,label])=>(
+        {[["users","👥 Сотрудники"],["clients","👥 Клиенты"],["contragents","🏢 Реквизиты"],["workers","🔨 Подрядчики"],["prices","💰 Прайс-лист"],["backups","🗄 Бэкапы"],["audit","📋 Журнал"],["check","🔍 Проверка базы"]].map(([t,label])=>(
           <button key={t} onClick={()=>{ setTab(t); setAdminSubTab("list"); }} style={{
             flex:1,padding:"11px",borderRadius:8,border:"none",cursor:"pointer",
             fontFamily:"inherit",fontSize:12,fontWeight:700,whiteSpace:"nowrap",
@@ -1949,11 +1947,11 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
         </div>
       ) : tab === "users" ? (
         <div>
-          {/* Список сотрудников */}
-          <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
+          {/* Список сотрудников — карточки богатые (роль, онлайн, кнопки), поэтому шире: 2 колонки */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(480px,1fr))",gap:10,marginBottom:20,alignItems:"start"}}>
             {users.map(u => (
               <div key={u.id} style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"16px 18px"}}>
-                <div className="user-row" style={{display:"flex",alignItems:"center",gap:12}}>
+                <div className="user-row" style={{display:"flex",alignItems:"flex-start",gap:12}}>
                   {/* Аватар */}
                   <div style={{width:42,height:42,borderRadius:10,background:"#eff6ff",border:"1px solid #eff6ff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:18}}>
                     {u.role==="admin"?"👑":u.role==="viewer"?"👁":u.role==="manager"?"🧑‍💼":"👤"}
@@ -2006,14 +2004,17 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                     </button>
                   </div>
                 )}
-                {editingPass?.id === u.id && (
-                  <div style={{marginTop:14,paddingTop:14,borderTop:"1px solid #e2e8f0",display:"flex",gap:8}}>
-                    <input className="fi" placeholder="Новый пароль" value={editingPass.val} onChange={e=>setEditingPass(p=>({...p,val:e.target.value}))}/>
-                    <button onClick={()=>savePass(u.id)} style={{background:"#2563eb",color:"#f3f4f6",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                      Сохранить
-                    </button>
+                {editingPass?.id === u.id && (()=>{ const weak = editingPass.val ? passwordTooWeak(editingPass.val) : null; return (
+                  <div style={{marginTop:14,paddingTop:14,borderTop:"1px solid #e2e8f0"}}>
+                    <div style={{display:"flex",gap:8}}>
+                      <input className="fi" placeholder="Новый пароль" value={editingPass.val} onChange={e=>setEditingPass(p=>({...p,val:e.target.value}))}/>
+                      <button onClick={()=>savePass(u.id)} disabled={!!weak} style={{background:weak?"#cbd5e1":"#2563eb",color:"#f3f4f6",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:weak?"default":"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                        Сохранить
+                      </button>
+                    </div>
+                    {weak && <div style={{marginTop:6,fontSize:11,color:"#dc2626"}}>{weak}</div>}
                   </div>
-                )}
+                ); })()}
               </div>
             ))}
           </div>
@@ -2056,6 +2057,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
               )}
             </div>
             {clients.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#334155",fontSize:13}}>Клиентов пока нет</div>}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:10}}>
             {clients.map(c=>(
               <div key={c.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"14px 16px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -2074,13 +2076,14 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                         style={{background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
                     )}
                     {(currentUser.role==="admin"||(currentUser.role==="user"&&c.createdById===currentUser.id))&&(
-                      <button onClick={()=>{ if(window.confirm("Удалить клиента?")) saveClients(clientsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
+                      <button onClick={async ()=>{ if(await confirmTyped("Удалить клиента «"+(c.name||"без имени")+"»?\nЭто действие нельзя отменить через интерфейс.")){ saveClients(clientsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); logChange(currentUser,{entity:"client",entityId:c.id,label:c.name||"без имени",action:"удалил клиента",detail:c.phone||""}); } }}
                         style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                     )}
                   </div>
                 </div>
               </div>
             ))}
+            </div>
           </>)}
           {adminSubTab === "clientEditor" && adminEditItem && (<>
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -2129,6 +2132,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                   className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
               )}
             </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:10}}>
             {contragents.map(c=>(
               <div key={c.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"14px 16px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -2141,13 +2145,14 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                     <div style={{display:"flex",gap:5}}>
                       <button onClick={()=>{ setAdminEditItem({mode:"editCA",data:{...c}}); setAdminSubTab("caEditor"); }}
                         style={{background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
-                      {contragents.length>1&&<button onClick={()=>{ if(window.confirm("Удалить?")) saveContragents(contragentsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
+                      {contragents.length>1&&<button onClick={async ()=>{ if(await confirmTyped("Удалить реквизиты «"+(c.name||"без имени")+"»?\nЭто действие нельзя отменить через интерфейс.")) saveContragents(contragentsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
                         style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
                     </div>
                   )}
                 </div>
               </div>
             ))}
+            </div>
           </>)}
           {adminSubTab === "caEditor" && adminEditItem && (<>
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -2177,6 +2182,102 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
             }}>← Готово</button>
           </>)}
         </div>
+      ) : tab === "workers" ? (
+        /* СПРАВОЧНИК ПОДРЯДЧИКОВ (рабочих) */
+        (()=>{
+          // статистика по подрядчику: сколько договоров подряда и на какую сумму
+          const workerStats = (wid) => {
+            const cs = (contracts||[]).filter(c=>!c.deletedAt && (c.type==="podryad"||c.type==="podryad_annex") && c.workerId===wid);
+            const sum = cs.reduce((s,c)=>s+(c.works||[]).reduce((a,w)=>a+((Number(w.quantity)||0)*(Number(w.price)||0)),0),0);
+            return { count: cs.length, sum };
+          };
+          const emptyWorker = () => ({ id:Date.now().toString(), name:"", iin:"", doc:"", phone:"", email:"", address:"", spec:"" });
+          const wsearch = (workerSearch||"").trim().toLowerCase();
+          const shown = wsearch
+            ? workers.filter(w => [w.name,w.iin,w.phone,w.spec].filter(Boolean).some(v=>String(v).toLowerCase().includes(wsearch)))
+            : workers;
+          return (
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {adminSubTab === "list" && (<>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <div style={{fontWeight:700,color:"#94a3b8",fontSize:12}}>ПОДРЯДЧИКИ / РАБОЧИЕ ({workers.length})</div>
+              {currentUser.role==="admin" && (
+                <button onClick={()=>{ setAdminEditItem({mode:"newWorker",data:emptyWorker()}); setAdminSubTab("workerEditor"); }}
+                  className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
+              )}
+            </div>
+            {workers.length>3 && (
+              <input className="fi" placeholder="🔍 Поиск по ФИО, ИИН, телефону, специализации…" value={workerSearch} onChange={e=>setWorkerSearch(e.target.value)} />
+            )}
+            {workers.length===0 && (
+              <div style={{textAlign:"center",padding:"28px 0",color:"#94a3b8",background:"#f9fafb",borderRadius:10,border:"1px dashed #e5e7eb",fontSize:13}}>
+                Подрядчиков пока нет<br/>
+                <span style={{fontSize:11,color:"#cbd5e1"}}>Нажмите <b>+ Добавить</b> — или создайте нового прямо в редакторе договора подряда</span>
+              </div>
+            )}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(340px,1fr))",gap:10}}>
+            {shown.map(w=>{
+              const st = workerStats(w.id);
+              return (
+              <div key={w.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"14px 16px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <span style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>🔨 {w.name||"Без имени"}</span>
+                      {w.spec && <span style={{fontSize:10,fontWeight:700,color:"#059669",background:"#ecfdf5",borderRadius:4,padding:"1px 7px"}}>{w.spec}</span>}
+                    </div>
+                    <div style={{fontSize:12,color:"#94a3b8",marginTop:2}}>
+                      {[w.iin&&("ИИН "+w.iin), w.phone, w.email].filter(Boolean).join(" · ")||"— реквизиты не заполнены"}
+                    </div>
+                    {w.address && <div style={{fontSize:12,color:"#94a3b8",marginTop:1}}>📍 {w.address}</div>}
+                    <div style={{fontSize:11,color:"#64748b",marginTop:4}}>
+                      {st.count>0
+                        ? <>Договоров подряда: <b>{st.count}</b> · на сумму <b>{fmt(st.sum)} ₸</b></>
+                        : <span style={{color:"#cbd5e1"}}>Договоров подряда пока нет</span>}
+                    </div>
+                  </div>
+                  {currentUser.role==="admin" && (
+                    <div style={{display:"flex",gap:5,flexShrink:0}}>
+                      <button onClick={()=>{ setAdminEditItem({mode:"editWorker",data:{...w}}); setAdminSubTab("workerEditor"); }}
+                        style={{background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                      <button onClick={async ()=>{
+                          const s = workerStats(w.id);
+                          if(s.count>0){ window.alert("Нельзя удалить подрядчика «"+(w.name||"без имени")+"»: он привязан к "+s.count+" договор(ам) подряда. Сначала открепите его от договоров, чтобы ничего не потерялось."); return; }
+                          if(await confirmTyped("Удалить подрядчика «"+(w.name||"без имени")+"»?\nЭто действие нельзя отменить через интерфейс.")) saveWorkers(workersRef.current.filter(x=>x.id!==w.id),{removedIds:[w.id],allowEmpty:true});
+                        }}
+                        style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+              );
+            })}
+            </div>
+          </>)}
+          {adminSubTab === "workerEditor" && adminEditItem && (<>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <button onClick={()=>setAdminSubTab("list")} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:18}}>←</button>
+              <span style={{fontWeight:700,fontSize:15,color:"#0f172a"}}>{adminEditItem.mode==="newWorker"?"Новый подрядчик":"Редактировать подрядчика"}</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              {[["ФИО","name"],["ИИН","iin"],["№ документа","doc"],["Специализация","spec"],["Телефон","phone"],["Email","email"],["Адрес","address"]].map(([label,field])=>(
+                <div key={field} style={field==="address"?{gridColumn:"1/-1"}:undefined}>
+                  <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>{label}{field==="name"?" *":""}</div>
+                  <input className="fi" value={adminEditItem.data[field]||""} onChange={e=>setAdminEditItem(p=>({...p,data:{...p.data,[field]:e.target.value}}))} placeholder={label}/>
+                </div>
+              ))}
+            </div>
+            <button className="btn btn-g" onClick={()=>{
+              const d = {...adminEditItem.data, name:(adminEditItem.data.name||"").trim()};
+              if(!d.name){ window.alert("Укажите ФИО подрядчика"); return; }
+              const list = adminEditItem.mode==="newWorker" ? [...workers,d] : workers.map(x=>x.id===d.id?d:x);
+              saveWorkers(list);
+              setAdminSubTab("list");
+            }}>← Готово</button>
+          </>)}
+        </div>
+          );
+        })()
       ) : tab === "prices" ? (
         /* ПРАЙС-ЛИСТ */
         <div style={{paddingBottom:90}}>
@@ -2324,7 +2425,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
               <thead>
                 <tr style={{background:"#ffffff",position:"sticky",top:0,zIndex:5}}>
                   {["Подкатегория","Название работы","Ед.","Себестоимость ₸","Маржа %","Цена для клиента ₸","Цена от ₸","Валовая прибыль ₸",""].map((h,i)=>(
-                    <th key={i} style={{padding:"10px 12px",textAlign:i>=3&&i<=7?"right":"left",fontSize:10,fontWeight:700,color:h==="Цена от ₸"?"#b8904a":"#94a3b8",textTransform:"uppercase",letterSpacing:.5,borderBottom:"2px solid #e5e7eb",whiteSpace:"normal",overflowWrap:"anywhere",wordBreak:"break-word",lineHeight:1.2,verticalAlign:"bottom"}}>
+                    <th key={i} style={{padding:"10px 12px",textAlign:i>=3&&i<=7?"right":"left",fontSize:10,fontWeight:700,color:h==="Цена от ₸"?"#b8904a":"#94a3b8",textTransform:"uppercase",letterSpacing:.5,borderBottom:"2px solid #e5e7eb",whiteSpace:"normal",overflowWrap:"normal",wordBreak:"keep-all",lineHeight:1.2,verticalAlign:"bottom"}}>
                       {h}
                     </th>
                   ))}
@@ -2516,8 +2617,37 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
       {/* ── БЭКАПЫ ── */}
       {tab === "backups" && (
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          <div style={{fontWeight:700,color:"#334155",fontSize:14,marginBottom:4}}>Восстановление данных</div>
-          <div style={{fontSize:12,color:"#94a3b8",marginBottom:8}}>Снимки рабочего пространства создаются автоматически. Каждый снимок — это все объекты вместе с их сметами и договорами. Восстановление возвращает всё целиком на выбранный момент.</div>
+          {/* ── ФАЙЛ-БЭКАП: скачать всё в JSON / залить назад / сметы в Excel ── */}
+          <div style={{fontWeight:700,color:"#334155",fontSize:14,marginBottom:2}}>Бэкап в файл (перед мержем / на всякий случай)</div>
+          <div style={{fontSize:12,color:"#94a3b8",marginBottom:4}}>Скачивает ВСЕ рабочие данные (объекты, договоры, сметы, клиенты, финансы, производство, акты, реквизиты, подрядчики) одним JSON-файлом на ваш компьютер. Этим же файлом можно всё вернуть назад.</div>
+          <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"16px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <div style={{minWidth:180,flex:1}}>
+              <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>⬇️ Скачать полный бэкап (JSON)</div>
+              <div style={{fontSize:12,color:"#94a3b8",marginTop:2}}>Файл сохранится на компьютер. Храните его до и после мержа.</div>
+            </div>
+            <button onClick={onExportAll} style={{background:"#0f172a",color:"#fff",border:"none",borderRadius:8,padding:"9px 18px",fontSize:12.5,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",fontWeight:700}}>⬇️ Скачать JSON</button>
+          </div>
+          <div style={{background:"#fff",border:"1px solid #fde68a",borderRadius:10,padding:"16px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <div style={{minWidth:180,flex:1}}>
+              <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>⬆️ Восстановить из файла (JSON)</div>
+              <div style={{fontSize:12,color:"#b45309",marginTop:2}}>Заменит текущие данные данными из файла. Спросит подтверждение «ВОССТАНОВИТЬ». Перед заменой всё уходит в авто-бэкап.</div>
+            </div>
+            <label style={{background:"#fffbeb",color:"#b45309",border:"1px solid #fde68a",borderRadius:8,padding:"9px 18px",fontSize:12.5,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",fontWeight:700}}>
+              ⬆️ Выбрать файл…
+              <input type="file" accept="application/json,.json" style={{display:"none"}} onChange={e=>{ const f=e.target.files?.[0]; e.target.value=""; if(f) onImportAll(f); }} />
+            </label>
+          </div>
+          <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"16px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <div style={{minWidth:180,flex:1}}>
+              <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>📊 Сметы в Excel</div>
+              <div style={{fontSize:12,color:"#94a3b8",marginTop:2}}>Таблица всех смет: название, клиент, адрес, дата, статус, кол-во позиций, сумма. Откроется в Excel.</div>
+            </div>
+            <button onClick={onExportEstimatesXls} style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.25)",borderRadius:8,padding:"9px 18px",fontSize:12.5,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",fontWeight:700}}>📊 Выгрузить сметы</button>
+          </div>
+
+          {/* ── Внутренние авто-снимки Firebase ── */}
+          <div style={{fontWeight:700,color:"#334155",fontSize:14,marginTop:12,marginBottom:2}}>Авто-снимки в базе</div>
+          <div style={{fontSize:12,color:"#94a3b8",marginBottom:4}}>Снимки рабочего пространства создаются автоматически при изменениях. Восстановление возвращает всё целиком на выбранный момент.</div>
           <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"16px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
             <div>
               <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>📦 Объекты, сметы и договора</div>
@@ -2531,6 +2661,27 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
       )}
 
       {tab === "audit" && <AuditTab />}
+
+      {tab === "check" && (()=>{
+        const reds = checkIssues.filter(i=>i.sev==="red").length;
+        const yellows = checkIssues.length - reds;
+        const verdict = reds>0 ? { color:"#dc2626", bg:"#fef2f2", bd:"#fecaca", icon:"🔴", text:"Есть критичные ошибки — не рекомендуется мерж/релиз до исправления" }
+          : yellows>0 ? { color:"#92610f", bg:"#fffbeb", bd:"#fde68a", icon:"🟡", text:"Есть предупреждения — данные не сломаны, но стоит проверить" }
+          : { color:"#059669", bg:"#f0fdf4", bd:"#bbf7d0", icon:"🟢", text:"База чистая — можно релизить" };
+        return (
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            <div style={{fontSize:12.5,color:"#64748b",lineHeight:1.5}}>Проверка связей и целостности данных перед мержем в <b>main</b>, импортом или чисткой базы. Read-only — ничего не меняет. Клик по проблеме открывает нужную карточку.</div>
+            <div style={{background:verdict.bg,border:`1px solid ${verdict.bd}`,borderRadius:12,padding:"14px 18px",display:"flex",alignItems:"center",gap:12}}>
+              <span style={{fontSize:26}}>{verdict.icon}</span>
+              <div>
+                <div style={{fontSize:15,fontWeight:800,color:verdict.color}}>{reds>0?`${reds} критичных · ${yellows} предупреждений`:yellows>0?`${yellows} предупреждений`:"Проблем не найдено"}</div>
+                <div style={{fontSize:12.5,color:verdict.color,opacity:.9,marginTop:2}}>{verdict.text}</div>
+              </div>
+            </div>
+            <IssuePanel issues={checkIssues} onNav={onNavIssue} emptyText="✓ База чистая — связи и целостность в порядке" />
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -3409,6 +3560,10 @@ function PublicProgress({ token }) {
       const r = await storage.getResult(PROGRESS_NODE(token));
       if (r.status === "found" && r.value) {
         let data = null; try { data = JSON.parse(r.value); } catch {}
+        if (data && data.expiresAt && Date.now() > data.expiresAt) {
+          if (!isRefresh) setState("expired");
+          return;
+        }
         if (data && !data.revoked && Array.isArray(data.stages)) {
           setS(data); setState("ok"); ok = true;
           if (!isRefresh) { try { storage.set(PROGRESS_NODE(token), JSON.stringify({ ...data, viewedAt: Date.now(), viewCount: (data.viewCount || 0) + 1 })); } catch {} }
@@ -3449,8 +3604,8 @@ function PublicProgress({ token }) {
     setRmBusy(false);
   };
   const wrap = (children) => (
-    <div style={{ minHeight: "100vh", background: "#eef2f7", padding: "0 0 40px", boxSizing: "border-box", fontFamily: "'Golos Text','Segoe UI',sans-serif", color: "#0f172a" }}>
-      <div style={{ maxWidth: 560, margin: "0 auto" }}>{children}</div>
+    <div style={{ minHeight: "100vh", width: "100%", overflowX: "hidden", background: "linear-gradient(180deg,#f2f4f8 0%,#e8ebf0 100%)", padding: "0 0 32px", boxSizing: "border-box", fontFamily: "'Golos Text','Segoe UI',sans-serif", color: "#0f172a", WebkitFontSmoothing: "antialiased" }}>
+      <div style={{ maxWidth: 600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>{children}</div>
     </div>
   );
 
@@ -3462,6 +3617,13 @@ function PublicProgress({ token }) {
       <div style={{ fontSize: 13, color: "#64748b" }}>Возможно, доступ закрыт. Свяжитесь с менеджером: <a href={"https://wa.me/" + COMPANY_WA} style={{ color: "#059669" }}>WhatsApp</a></div>
     </div>
   );
+  if (state === "expired") return wrap(
+    <div style={{ textAlign: "center", padding: "70px 20px", margin: "20px 12px", background: "#fff", borderRadius: 16 }}>
+      <div style={{ fontSize: 40, marginBottom: 12 }}>⏳</div>
+      <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 6 }}>Срок действия ссылки истёк</div>
+      <div style={{ fontSize: 13, color: "#64748b" }}>Свяжитесь с менеджером, чтобы получить новую ссылку: <a href={"https://wa.me/" + COMPANY_WA} style={{ color: "#059669" }}>WhatsApp</a></div>
+    </div>
+  );
 
   // Процент считаем прямо из этапов снимка — чтобы всегда совпадал с производством
   // (по количеству готовых этапов), независимо от того, какая версия кода публиковала снимок.
@@ -3471,83 +3633,161 @@ function PublicProgress({ token }) {
   const pay = s.payment || {};
   const remarks = Array.isArray(s.clientRemarks) ? s.clientRemarks : [];
   const daysLeft = (s.planEndDate && !s.factEndDate) ? Math.ceil((new Date(s.planEndDate).getTime() - Date.now()) / 86400000) : null;
+  // Настройки видимости (старые снимки без vis → показываем всё, как раньше)
+  const vis = s.vis || {};
+  const showStages = vis.stages !== false, showPay = vis.payments !== false, showRemarks = vis.remarks !== false;
+  // Работы идут ПАРАЛЛЕЛЬНО и НЕ по порядку списка. Поэтому «сейчас в работе» — это ВСЕ этапы
+  // со статусом progress, а «задержки» — delayed. Никакой ложной последовательности «текущий→следующий».
+  const inWork = _stg.filter(st => (st.status || "todo") === "progress");
+  const delayedStages = _stg.filter(st => (st.status || "todo") === "delayed");
   // Группировка этапов по категории (черновые / чистовые / санузел …)
   const groups = []; const gmap = {};
   for (const st of (s.stages || [])) { const c = st.cat || "Работы"; if (!gmap[c]) { gmap[c] = { cat: c, items: [] }; groups.push(gmap[c]); } gmap[c].items.push(st); }
-  const card = { background: "#fff", borderRadius: 16, padding: "16px 18px", margin: "0 12px 14px" };
-  const h = { fontWeight: 800, fontSize: 15, marginBottom: 10 };
-  const docBtn = { display: "flex", alignItems: "center", gap: 10, width: "100%", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "11px 12px", cursor: "pointer", fontFamily: "inherit" };
+  // ── Премиальная палитра/стили публичной страницы ──
+  const BRASS = "#b8904a", INK = "#0f172a", MUT = "#64748b", FAINT = "#94a3b8", GREEN = "#059669", BLUE = "#2563eb";
+  const card = { background: "#fff", borderRadius: 20, padding: "18px 20px", margin: "0 14px 14px", boxShadow: "0 6px 22px -12px rgba(15,23,42,.16)", border: "1px solid rgba(15,23,42,.04)", boxSizing: "border-box" };
+  const h = { fontWeight: 800, fontSize: 15.5, marginBottom: 12, letterSpacing: "-.01em", color: INK };
+  const docBtn = { display: "flex", alignItems: "center", gap: 12, width: "100%", boxSizing: "border-box", background: "#f8fafc", border: "1px solid #eef1f5", borderRadius: 13, padding: "11px 12px", cursor: "pointer", fontFamily: "inherit", textAlign: "left", transition: "background .15s,border-color .15s" };
+  // Кольцо прогресса (SVG)
+  const _R = 42, _C = 2 * Math.PI * _R;
+  const Ring = () => (
+    <div style={{ position: "relative", width: 104, height: 104, flexShrink: 0 }}>
+      <svg width="104" height="104" viewBox="0 0 104 104">
+        <circle cx="52" cy="52" r={_R} fill="none" stroke="#eef1f5" strokeWidth="9" />
+        <circle cx="52" cy="52" r={_R} fill="none" stroke="url(#pg)" strokeWidth="9" strokeLinecap="round"
+          strokeDasharray={_C} strokeDashoffset={_C * (1 - pct / 100)} transform="rotate(-90 52 52)" style={{ transition: "stroke-dashoffset .6s ease" }} />
+        <defs><linearGradient id="pg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#34d399" /><stop offset="1" stopColor={GREEN} /></linearGradient></defs>
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ fontSize: 27, fontWeight: 900, color: INK, lineHeight: 1, letterSpacing: "-.02em" }}>{pct}<span style={{ fontSize: 14 }}>%</span></div>
+        <div style={{ fontSize: 10, color: FAINT, fontWeight: 600, marginTop: 2 }}>готово</div>
+      </div>
+    </div>
+  );
+  // Узел таймлайна этапа (готов / в работе / задержка / предстоит) — по статусу, без «порядка»
+  const stageNode = (status) => {
+    if (status === "done") return { bg: BRASS, brd: BRASS, mark: "✓", ring: "none" };
+    if (status === "progress") return { bg: BLUE, brd: BLUE, mark: "", ring: "0 0 0 4px rgba(37,99,235,.16)" };
+    if (status === "delayed") return { bg: "#dc2626", brd: "#dc2626", mark: "!", ring: "0 0 0 4px rgba(220,38,38,.14)" };
+    return { bg: "#fff", brd: "#cbd5e1", mark: "", ring: "none" };
+  };
+
+  // ── История для клиента: безопасная лента событий (только клиентские факты из снимка) ──
+  const _tsOf = (d) => { if (!d) return 0; const t = (typeof d === "number") ? d : new Date(d).getTime(); return isNaN(t) ? 0 : t; };
+  const history = [];
+  if (s.startDate) history.push({ ts: _tsOf(s.startDate), icon: "🚀", color: BLUE, text: "Работы начаты" });
+  if (showStages) for (const st of _stg) { if ((st.status || "todo") === "done" && st.factEnd) history.push({ ts: _tsOf(st.factEnd), icon: "✅", color: GREEN, text: `Этап «${st.name}» завершён` }); }
+  if (showPay) for (const p of (Array.isArray(s.payments) ? s.payments : [])) { const t = _tsOf(p.date); if (t) history.push({ ts: t, icon: "💰", color: BRASS, text: "Оплата принята", amount: p.amount }); }
+  if (showRemarks) for (const rm of remarks) { if (rm.done && rm.text) history.push({ ts: _tsOf(rm.ts), icon: "💬", color: GREEN, text: `Замечание выполнено: «${rm.text}»` }); }
+  if (s.factEndDate) history.push({ ts: _tsOf(s.factEndDate), icon: "🏁", color: GREEN, text: "Объект сдан" });
+  if (s.clientMessage && s.clientMessage.updatedAt) history.push({ ts: _tsOf(s.clientMessage.updatedAt), icon: "📣", color: BRASS, text: "Обновлено сообщение от компании" });
+  history.sort((a, b) => (b.ts || 0) - (a.ts || 0));
 
   return wrap(<>
-    {/* Шапка — тёмная, по ширине как карточки */}
-    <div style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)", color: "#fff", padding: "20px 20px 22px", margin: "12px 12px 14px", borderRadius: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-        <div style={{ width: 34, height: 34, borderRadius: 9, background: "#b8904a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 900, color: "#0c0e1a" }}>T</div>
-        <div style={{ fontSize: 17, fontWeight: 800, flex: 1, minWidth: 0 }}>TitovStroy <span style={{ color: "#94a3b8", fontWeight: 600 }}>· ремонт</span></div>
-        <button onClick={refresh} disabled={refreshing} title="Обновить данные"
-          style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.1)", border: "1px solid rgba(255,255,255,.18)", color: "#e2e8f0", borderRadius: 9, padding: "7px 11px", fontSize: 12.5, fontWeight: 700, cursor: refreshing ? "default" : "pointer", fontFamily: "inherit", flexShrink: 0 }}>
-          <span style={{ display: "inline-block", transition: "transform .6s ease", transform: refreshing ? "rotate(360deg)" : "none" }}>⟳</span>
-          {refreshing ? "Обновляю…" : "Обновить"}
+    {/* Шапка */}
+    <div style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e293b 62%,#2a3446 100%)", color: "#fff", padding: "22px 22px 24px", margin: "14px 14px 14px", borderRadius: 22, position: "relative", overflow: "hidden", boxShadow: "0 12px 32px -14px rgba(15,23,42,.55)" }}>
+      <div style={{ position: "absolute", top: -45, right: -35, width: 160, height: 160, borderRadius: "50%", background: "radial-gradient(circle, rgba(184,144,74,.24), transparent 70%)" }} />
+      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 11, marginBottom: 18 }}>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: BRASS, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 21, fontWeight: 900, color: "#0c0e1a", boxShadow: "0 4px 14px rgba(184,144,74,.45)" }}>T</div>
+        <div style={{ fontSize: 17, fontWeight: 800, flex: 1, minWidth: 0, letterSpacing: "-.01em" }}>TitovStroy <span style={{ color: FAINT, fontWeight: 600 }}>· ремонт</span></div>
+        <button onClick={refresh} disabled={refreshing} title="Обновить"
+          style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.1)", border: "1px solid rgba(255,255,255,.16)", color: "#e2e8f0", borderRadius: 10, padding: "7px 12px", fontSize: 12.5, fontWeight: 700, cursor: refreshing ? "default" : "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+          <span style={{ display: "inline-block", transition: "transform .6s ease", transform: refreshing ? "rotate(360deg)" : "none" }}>⟳</span>{refreshing ? "" : "Обновить"}
         </button>
       </div>
-      <div style={{ fontSize: 11.5, color: "#94a3b8", marginBottom: 3 }}>Ваш объект</div>
-      <div style={{ fontSize: 21, fontWeight: 900, lineHeight: 1.15 }}>{s.objectAddress || s.clientName || "Ремонт"}</div>
-      {s.managerName && <div style={{ fontSize: 12.5, color: "#cbd5e1", marginTop: 10 }}>Менеджер: <b style={{ color: "#fff" }}>{s.managerName}</b></div>}
+      <div style={{ position: "relative", fontSize: 10.5, color: FAINT, marginBottom: 5, textTransform: "uppercase", letterSpacing: ".1em", fontWeight: 700 }}>Ваш объект</div>
+      <div style={{ position: "relative", fontSize: 22, fontWeight: 900, lineHeight: 1.15, letterSpacing: "-.02em" }}>{s.objectAddress || s.clientName || "Ремонт"}</div>
+      {s.managerName && <div style={{ position: "relative", fontSize: 12.5, color: "#cbd5e1", marginTop: 13, display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.07)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 20, padding: "5px 12px" }}>Менеджер: <b style={{ color: "#fff" }}>{s.managerName}</b></div>}
     </div>
 
     {/* Сообщение от компании */}
     {s.clientMessage && s.clientMessage.text && (
-      <div style={{ background: "#fff", borderRadius: 16, padding: "14px 16px", margin: "0 12px 14px", borderLeft: "4px solid #b8904a" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
+      <div style={{ ...card, borderLeft: `4px solid ${BRASS}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <span style={{ fontSize: 15 }}>💬</span>
-          <span style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>Сообщение от компании</span>
-          {s.clientMessage.updatedAt && <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: "auto" }}>{new Date(s.clientMessage.updatedAt).toLocaleDateString("ru-RU")}</span>}
+          <span style={{ fontSize: 13, fontWeight: 800, color: INK }}>Сообщение от компании</span>
+          {s.clientMessage.updatedAt && <span style={{ fontSize: 11, color: FAINT, marginLeft: "auto" }}>{new Date(s.clientMessage.updatedAt).toLocaleDateString("ru-RU")}</span>}
         </div>
-        <div style={{ fontSize: 13.5, color: "#334155", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{s.clientMessage.text}</div>
+        <div style={{ fontSize: 14, color: "#334155", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{s.clientMessage.text}</div>
       </div>
     )}
 
-    {/* Прогресс */}
+    {/* Готовность — кольцо + факты */}
     <div style={card}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-        <span style={{ fontWeight: 800, fontSize: 15 }}>Готовность объекта</span>
-        <span style={{ fontWeight: 900, fontSize: 24, color: "#2563eb" }}>{pct}%</span>
-      </div>
-      <div style={{ height: 14, background: "#e2e8f0", borderRadius: 8, overflow: "hidden" }}>
-        <div style={{ width: pct + "%", height: "100%", background: "linear-gradient(90deg,#22c55e,#16a34a)", borderRadius: 8, transition: "width .4s" }} />
-      </div>
-      <div style={{ display: "flex", gap: "6px 16px", flexWrap: "wrap", marginTop: 12, fontSize: 12.5, color: "#64748b" }}>
-        {(_stg.length > 0) && <span>Этапов готово: <b style={{ color: "#334155" }}>{_doneN} из {_stg.length}</b></span>}
-        {s.startDate && <span>Старт: <b style={{ color: "#334155" }}>{dt(s.startDate)}</b></span>}
-        {s.planEndDate && <span>План сдачи: <b style={{ color: "#334155" }}>{dt(s.planEndDate)}</b></span>}
-        {s.factEndDate ? <span style={{ color: "#059669", fontWeight: 700 }}>✓ Сдан {dt(s.factEndDate)}</span>
-          : daysLeft != null && <span style={{ color: daysLeft < 0 ? "#dc2626" : "#334155" }}>{daysLeft < 0 ? `Просрочка ${-daysLeft} дн.` : `Осталось ~${daysLeft} дн.`}</span>}
+      <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+        <Ring />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 15.5, fontWeight: 800, color: INK, marginBottom: 9, letterSpacing: "-.01em" }}>Готовность объекта</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12.5, color: MUT }}>
+            {(_stg.length > 0) && <div>Этапов готово: <b style={{ color: INK }}>{_doneN} из {_stg.length}</b></div>}
+            {s.startDate && <div>Старт: <b style={{ color: INK }}>{dt(s.startDate)}</b></div>}
+            {s.planEndDate && <div>План сдачи: <b style={{ color: INK }}>{dt(s.planEndDate)}</b></div>}
+            {s.factEndDate ? <div style={{ color: GREEN, fontWeight: 700 }}>✓ Сдан {dt(s.factEndDate)}</div>
+              : daysLeft != null && <div style={{ color: daysLeft < 0 ? "#dc2626" : INK, fontWeight: daysLeft < 0 ? 700 : 400 }}>{daysLeft < 0 ? `Просрочка ${-daysLeft} дн.` : `Осталось ~${daysLeft} дн.`}</div>}
+          </div>
+        </div>
       </div>
     </div>
 
-    {/* Этапы — сгруппированы по категориям */}
+    {/* Сейчас в работе — ВСЕ параллельные этапы (progress) + задержки. Без ложного «далее». */}
+    {showStages && !s.factEndDate && (inWork.length > 0 || delayedStages.length > 0) && (
+      <div style={card}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+          <span style={{ fontSize: 15 }}>🔨</span>
+          <span style={{ fontSize: 15.5, fontWeight: 800, color: INK, letterSpacing: "-.01em" }}>Сейчас в работе</span>
+          <span style={{ fontSize: 11, color: FAINT, marginLeft: "auto" }}>работы идут параллельно</span>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+          {inWork.map((st, i) => (
+            <div key={"w" + i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 13px", background: "linear-gradient(135deg,#eff6ff,#f7faff)", border: "1px solid #dbeafe", borderRadius: 14, boxSizing: "border-box" }}>
+              <span style={{ width: 30, height: 30, borderRadius: 9, background: BLUE, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(37,99,235,.5)" }}>🔨</span>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: INK, lineHeight: 1.25, overflowWrap: "break-word" }}>{st.name}</div>
+                <div style={{ fontSize: 11.5, color: MUT, marginTop: 2 }}>{st.cat}{st.planEnd ? ` · до ${dt(st.planEnd)}` : ""}</div>
+              </div>
+            </div>
+          ))}
+          {delayedStages.map((st, i) => (
+            <div key={"d" + i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 13px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 14, boxSizing: "border-box" }}>
+              <span style={{ width: 30, height: 30, borderRadius: 9, background: "#dc2626", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 900, flexShrink: 0 }}>!</span>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: INK, lineHeight: 1.25, overflowWrap: "break-word" }}>{st.name}</div>
+                <div style={{ fontSize: 11.5, color: "#dc2626", fontWeight: 700, marginTop: 2 }}>Задержка{st.planEnd ? ` · срок был ${dt(st.planEnd)}` : ""}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+
+    {/* Ход работ — таймлайн */}
+    {showStages && (
     <div style={card}>
-      <div style={h}>Этапы работ</div>
-      {groups.length === 0 && <div style={{ color: "#94a3b8", fontSize: 13, padding: "8px 0" }}>Этапы появятся по мере старта работ.</div>}
+      <div style={h}>Ход работ</div>
+      {groups.length === 0 && <div style={{ color: FAINT, fontSize: 13, padding: "8px 0" }}>Этапы появятся по мере старта работ.</div>}
       {groups.map((g, gi) => {
         const dn = g.items.filter(x => (x.status || "todo") === "done").length;
         return (
-          <div key={gi} style={{ marginBottom: gi < groups.length - 1 ? 14 : 0 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-              <span style={{ fontSize: 12, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em" }}>{g.cat}</span>
-              <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>{dn}/{g.items.length}</span>
+          <div key={gi} style={{ marginBottom: gi < groups.length - 1 ? 18 : 0 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ fontSize: 11.5, fontWeight: 800, color: BRASS, textTransform: "uppercase", letterSpacing: ".05em" }}>{g.cat}</span>
+              <span style={{ fontSize: 11, color: FAINT, fontWeight: 700, background: "#f8fafc", borderRadius: 20, padding: "2px 9px" }}>{dn}/{g.items.length}</span>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+            <div style={{ position: "relative" }}>
+              <div style={{ position: "absolute", left: 10, top: 14, bottom: 14, width: 2, background: "#eef1f5" }} />
               {g.items.map((st, i) => {
-                const cfg = _PROG_ST[st.status] || _PROG_ST.todo;
+                const status = st.status || "todo";
+                const isCur = status === "progress";
+                const nd = stageNode(status);
+                const cfg = _PROG_ST[status] || _PROG_ST.todo;
                 return (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: cfg.bg, borderRadius: 10 }}>
-                    <span style={{ fontSize: 15, flexShrink: 0 }}>{cfg.i}</span>
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 13, padding: "7px 0", position: "relative" }}>
+                    <div style={{ width: 22, height: 22, borderRadius: "50%", background: nd.bg, border: `2px solid ${nd.brd}`, boxShadow: nd.ring, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#fff", fontWeight: 900, zIndex: 1 }}>{nd.mark}</div>
                     <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "#0f172a" }}>{st.name}</div>
+                      <div style={{ fontSize: 13.5, fontWeight: isCur ? 800 : 600, color: status === "done" ? "#475569" : INK }}>{st.name}</div>
                       <div style={{ fontSize: 11, color: cfg.c, fontWeight: 700, marginTop: 1 }}>{cfg.l}{st.planEnd ? ` · до ${dt(st.planEnd)}` : ""}</div>
                     </div>
-                    {Number(st.priceClient) > 0 && <div style={{ fontSize: 12.5, fontWeight: 800, color: "#334155", flexShrink: 0 }}>{fmt(st.priceClient)} ₸</div>}
+                    {Number(st.priceClient) > 0 && <div style={{ fontSize: 12.5, fontWeight: 800, color: MUT, flexShrink: 0 }}>{fmt(st.priceClient)} ₸</div>}
                   </div>
                 );
               })}
@@ -3556,39 +3796,51 @@ function PublicProgress({ token }) {
         );
       })}
     </div>
-
-    {/* Оплата */}
-    {(pay.budget > 0 || pay.paid > 0) && (
-      <div style={card}>
-        <div style={h}>Оплата по договору</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13.5 }}>
-          <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#64748b" }}>Сумма договора</span><b>{fmt(pay.budget)} ₸</b></div>
-          <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#64748b" }}>Оплачено</span><b style={{ color: "#059669" }}>{fmt(pay.paid)} ₸</b></div>
-          <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #f1f5f9", paddingTop: 8 }}><span style={{ color: "#64748b" }}>Остаток</span><b style={{ color: pay.remaining > 0 ? "#dc2626" : "#059669" }}>{fmt(pay.remaining)} ₸</b></div>
-        </div>
-      </div>
     )}
 
-    {/* Документы (договоры + акты) */}
-    {docs && ((docs.contracts || []).length > 0 || (docs.acts || []).length > 0) && (
+    {/* Оплата */}
+    {showPay && (pay.budget > 0 || pay.paid > 0) && (() => {
+      const fill = pay.budget > 0 ? Math.min(100, Math.round((pay.paid || 0) / pay.budget * 100)) : 0;
+      return (
+      <div style={card}>
+        <div style={h}>Оплата по договору</div>
+        {pay.budget > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 7 }}>
+              <span style={{ fontSize: 19, fontWeight: 900, color: GREEN, letterSpacing: "-.01em" }}>{fmt(pay.paid)} <span style={{ fontSize: 12, fontWeight: 600, color: FAINT }}>из {fmt(pay.budget)} ₸</span></span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: fill >= 100 ? GREEN : BLUE }}>{fill}%</span>
+            </div>
+            <div style={{ height: 9, background: "#eef1f5", borderRadius: 6, overflow: "hidden" }}>
+              <div style={{ width: fill + "%", height: "100%", background: `linear-gradient(90deg,#34d399,${GREEN})`, borderRadius: 6, transition: "width .5s" }} />
+            </div>
+          </div>
+        )}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 13.5, paddingTop: pay.budget > 0 ? 12 : 0, borderTop: pay.budget > 0 ? "1px solid #f1f5f9" : "none" }}>
+          <span style={{ color: MUT }}>Остаток к оплате</span><b style={{ color: pay.remaining > 0 ? "#dc2626" : GREEN, fontSize: 15.5 }}>{fmt(pay.remaining)} ₸</b>
+        </div>
+      </div>
+      );
+    })()}
+
+    {/* Документы (сметы + договоры + акты) */}
+    {vis.docs !== false && docs && ((docs.contracts || []).length > 0 || (docs.acts || []).length > 0 || (docs.estimates || []).length > 0) && (
       <div style={card}>
         <div style={h}>Документы</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {(docs.contracts || []).map((d, i) => (
-            <button key={"c" + i} onClick={() => openHtml(d.html)} style={docBtn}>
-              <span style={{ fontSize: 16, flexShrink: 0 }}>📄</span>
-              <span style={{ flex: 1, textAlign: "left", fontSize: 13, fontWeight: 600, color: "#0f172a", minWidth: 0 }}>{d.title}</span>
-              <span style={{ fontSize: 11, color: "#2563eb", fontWeight: 700, flexShrink: 0 }}>Открыть ↗</span>
-            </button>
-          ))}
-          {(docs.acts || []).map((d, i) => (
-            <button key={"a" + i} onClick={() => openHtml(d.html)} style={docBtn}>
-              <span style={{ fontSize: 16, flexShrink: 0 }}>🧾</span>
-              <span style={{ flex: 1, textAlign: "left", minWidth: 0 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", display: "block" }}>{d.title}</span>
-                {d.total > 0 && <span style={{ fontSize: 11, color: "#64748b" }}>{fmt(d.total)} ₸{d.date ? ` · ${new Date(d.date).toLocaleDateString("ru-RU")}` : ""}</span>}
+          {[
+            ...(docs.estimates || []).map(d => ({ ...d, ic: "📋" })),
+            ...(docs.contracts || []).map(d => ({ ...d, ic: "📄" })),
+            ...(docs.acts || []).map(d => ({ ...d, ic: "🧾" })),
+          ].map((d, i) => (
+            <button key={i} onClick={() => openHtml(d.html)} style={docBtn}
+              onMouseEnter={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#cbd5e1"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "#f8fafc"; e.currentTarget.style.borderColor = "#eef1f5"; }}>
+              <span style={{ width: 36, height: 36, borderRadius: 10, background: "#fff", border: "1px solid #eef1f5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 }}>{d.ic}</span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: INK, display: "block" }}>{d.title}</span>
+                {d.total > 0 && <span style={{ fontSize: 11, color: MUT }}>{fmt(d.total)} ₸{d.date ? ` · ${new Date(d.date).toLocaleDateString("ru-RU")}` : ""}</span>}
               </span>
-              <span style={{ fontSize: 11, color: "#2563eb", fontWeight: 700, flexShrink: 0 }}>Открыть ↗</span>
+              <span style={{ fontSize: 11.5, color: BLUE, fontWeight: 700, flexShrink: 0 }}>Открыть ↗</span>
             </button>
           ))}
         </div>
@@ -3596,34 +3848,55 @@ function PublicProgress({ token }) {
     )}
 
     {/* Замечания от клиента */}
+    {showRemarks && (
     <div style={card}>
       <div style={h}>Замечания и пожелания</div>
-      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>Напишите, если что-то нужно поправить или уточнить — замечание попадёт прорабу.</div>
-      <div style={{ display: "flex", gap: 6, marginBottom: remarks.length ? 12 : 0 }}>
-        <textarea value={rmText} onChange={e => setRmText(e.target.value)} placeholder="Например: в спальне переделать угол у окна…" rows={2}
-          style={{ flex: 1, border: "1px solid #cbd5e1", borderRadius: 10, padding: "9px 11px", fontSize: 13, fontFamily: "inherit", outline: "none", resize: "vertical" }} />
-      </div>
+      <div style={{ fontSize: 12.5, color: FAINT, marginBottom: 12, lineHeight: 1.45 }}>Напишите, если что-то нужно поправить или уточнить — замечание попадёт прорабу.</div>
+      <textarea value={rmText} onChange={e => setRmText(e.target.value)} placeholder="Например: в спальне переделать угол у окна…" rows={2}
+        style={{ width: "100%", boxSizing: "border-box", border: "1px solid #e2e8f0", borderRadius: 13, padding: "11px 13px", fontSize: 13.5, fontFamily: "inherit", outline: "none", resize: "vertical", marginBottom: 10 }} />
       <button onClick={submitRemark} disabled={!rmText.trim() || rmBusy}
-        style={{ width: "100%", background: (!rmText.trim() || rmBusy) ? "#cbd5e1" : "#2563eb", color: "#fff", border: "none", borderRadius: 10, padding: "11px", fontSize: 13.5, fontWeight: 700, cursor: (!rmText.trim() || rmBusy) ? "default" : "pointer", fontFamily: "inherit", marginBottom: remarks.length ? 14 : 0 }}>
+        style={{ width: "100%", boxSizing: "border-box", background: (!rmText.trim() || rmBusy) ? "#cbd5e1" : `linear-gradient(135deg,${BLUE},#1d4ed8)`, color: "#fff", border: "none", borderRadius: 13, padding: "12px", fontSize: 14, fontWeight: 800, cursor: (!rmText.trim() || rmBusy) ? "default" : "pointer", fontFamily: "inherit", boxShadow: (!rmText.trim() || rmBusy) ? "none" : "0 8px 20px -10px rgba(37,99,235,.6)" }}>
         {rmBusy ? "Отправляю…" : "Отправить замечание"}
       </button>
-      {rmSent && <div style={{ fontSize: 12.5, color: "#059669", fontWeight: 700, marginTop: 8 }}>✓ Замечание отправлено, спасибо!</div>}
+      {rmSent && <div style={{ fontSize: 12.5, color: GREEN, fontWeight: 700, marginTop: 10, textAlign: "center" }}>✓ Замечание отправлено, спасибо!</div>}
       {remarks.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
           {remarks.slice().reverse().map((rm, i) => (
-            <div key={rm.id || i} style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "9px 11px", background: rm.done ? "#ecfdf5" : "#f8fafc", borderRadius: 10, border: "1px solid " + (rm.done ? "#a7f3d0" : "#e2e8f0") }}>
-              <span style={{ fontSize: 14, flexShrink: 0, color: rm.done ? "#059669" : "#f59e0b" }}>{rm.done ? "✓" : "⏳"}</span>
+            <div key={rm.id || i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 12px", background: rm.done ? "#f0fdf4" : "#f8fafc", borderRadius: 12, border: "1px solid " + (rm.done ? "#bbf7d0" : "#eef1f5") }}>
+              <span style={{ fontSize: 14, flexShrink: 0, color: rm.done ? GREEN : "#f59e0b", marginTop: 1 }}>{rm.done ? "✓" : "⏳"}</span>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 13, color: "#0f172a" }}>{rm.text}</div>
-                <div style={{ fontSize: 10.5, color: rm.done ? "#059669" : "#f59e0b", fontWeight: 700, marginTop: 2 }}>{rm.done ? "Выполнено" : "В работе"}{rm.ts ? ` · ${new Date(rm.ts).toLocaleDateString("ru-RU")}` : ""}</div>
+                <div style={{ fontSize: 13, color: INK, lineHeight: 1.4 }}>{rm.text}</div>
+                <div style={{ fontSize: 10.5, color: rm.done ? GREEN : "#f59e0b", fontWeight: 700, marginTop: 3 }}>{rm.done ? "Выполнено" : "В работе"}{rm.ts ? ` · ${new Date(rm.ts).toLocaleDateString("ru-RU")}` : ""}</div>
               </div>
             </div>
           ))}
         </div>
       )}
     </div>
+    )}
 
-    <div style={{ textAlign: "center", fontSize: 11.5, color: "#94a3b8", marginTop: 18 }}>TitovStroy · ремонт и отделка{s.publishedAt ? ` · обновлено ${new Date(s.publishedAt).toLocaleDateString("ru-RU")}` : ""}</div>
+    {/* История — безопасная лента событий по объекту */}
+    {history.length > 0 && (
+      <div style={card}>
+        <div style={h}>История</div>
+        <div style={{ position: "relative" }}>
+          <div style={{ position: "absolute", left: 15, top: 14, bottom: 14, width: 2, background: "#eef1f5" }} />
+          {history.map((ev, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "8px 0", position: "relative" }}>
+              <div style={{ width: 32, height: 32, borderRadius: 9, background: "#fff", border: `1px solid ${ev.color}30`, boxShadow: `0 2px 8px -3px ${ev.color}55`, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, zIndex: 1 }}>{ev.icon}</div>
+              <div style={{ minWidth: 0, flex: 1, paddingTop: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: INK, lineHeight: 1.35, overflowWrap: "break-word" }}>
+                  {ev.text}{ev.amount ? <b style={{ color: BRASS }}> {fmt(ev.amount)} ₸</b> : null}
+                </div>
+                {ev.ts ? <div style={{ fontSize: 11.5, color: FAINT, fontWeight: 600, marginTop: 2 }}>{dt(ev.ts)}</div> : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+
+    <div style={{ textAlign: "center", fontSize: 11.5, color: FAINT, marginTop: 20, paddingBottom: 4 }}>TitovStroy · ремонт и отделка{s.publishedAt ? ` · обновлено ${new Date(s.publishedAt).toLocaleDateString("ru-RU")}` : ""}</div>
   </>);
 }
 
@@ -3645,6 +3918,15 @@ export default function App() {
     if (!currentUser?.id) return;
     try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: currentUser, savedAt: Date.now() })); } catch(e) {}
   }, [currentUser?.id]);
+  // Метка тестового окружения (dev-база) — чтобы не спутать превью с боевым сайтом
+  useEffect(() => {
+    if (!IS_DEV_ENV) return;
+    const b = document.createElement("div");
+    b.textContent = "🧪 ТЕСТ · dev-база";
+    b.style.cssText = "position:fixed;left:8px;bottom:8px;z-index:99999;background:#7c3aed;color:#fff;font:700 11px/1 'Golos Text',sans-serif;padding:6px 10px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.25);pointer-events:none;letter-spacing:.02em";
+    document.body.appendChild(b);
+    return () => { try { document.body.removeChild(b); } catch {} };
+  }, []);
   // Публичная страница КП по ссылке #/kp/<id> — открывается без входа
   const _kpId = (() => { const m = (typeof window !== "undefined" ? (window.location.hash || "") : "").match(/^#\/kp\/(.+)$/); return m ? decodeURIComponent(m[1]) : null; })();
   if (_kpId) return <PublicKP id={_kpId} />;
@@ -3761,6 +4043,8 @@ function MainApp({ currentUser, setCurrentUser }) {
 
   // Пользователи для выпадающего списка менеджеров
   const [allUsers, setAllUsers] = useState(DEFAULT_USERS);
+  const allUsersRef = useRef(DEFAULT_USERS);
+  useEffect(() => { allUsersRef.current = allUsers; }, [allUsers]);
 
   // Присутствие { [userId]: lastSeenTs } — пишет каждый, видит только админ
   const [presence, setPresence] = useState({});
@@ -3771,12 +4055,12 @@ function MainApp({ currentUser, setCurrentUser }) {
     const touch = async () => {
       if (stopped || document.visibilityState === "hidden") return;
       try {
-        const r = await storage.getResult(PRESENCE_KEY);
-        let map = {};
-        if (r.status === "found" && r.value) { try { map = JSON.parse(r.value) || {}; } catch {} }
-        map[currentUser.id] = Date.now();
-        await storage.set(PRESENCE_KEY, JSON.stringify(map));
-        if (!stopped) setPresence(map);
+        // Пишем ТОЛЬКО свой ключ presence-<id> — без чтения-изменения общего блока,
+        // иначе параллельные отметки затирают друг друга (человек, зашедший на минуту,
+        // мог вообще пропасть из «был в сети»). Свой ключ никто не перетрёт.
+        const now = Date.now();
+        await storage.set(PRESENCE_KEY + "-" + currentUser.id, String(now));
+        if (!stopped) setPresence(p => ({ ...p, [currentUser.id]: now }));
       } catch {}
     };
     touch();
@@ -3791,8 +4075,19 @@ function MainApp({ currentUser, setCurrentUser }) {
     let stopped = false;
     const pull = async () => {
       try {
-        const r = await storage.getResult(PRESENCE_KEY);
-        if (!stopped && r.status === "found" && r.value) { try { setPresence(JSON.parse(r.value) || {}); } catch {} }
+        const ids = (allUsersRef.current || []).map(u => u.id).filter(Boolean);
+        const map = {};
+        const results = await Promise.all(ids.map(id => storage.getResult(PRESENCE_KEY + "-" + id).catch(() => null)));
+        results.forEach((r, i) => { if (r && r.status === "found" && r.value) { const t = parseInt(r.value, 10); if (t) map[ids[i]] = t; } });
+        // Старый общий блок (обратная совместимость): берём максимум, чтобы историю «был в сети» не потерять
+        try {
+          const legacy = await storage.getResult(PRESENCE_KEY);
+          if (legacy.status === "found" && legacy.value) {
+            const m = JSON.parse(legacy.value) || {};
+            for (const [k, v] of Object.entries(m)) { const t = typeof v === "number" ? v : parseInt(v, 10); if (t && (!map[k] || t > map[k])) map[k] = t; }
+          }
+        } catch {}
+        if (!stopped) setPresence(map);
       } catch {}
     };
     pull();
@@ -3853,7 +4148,6 @@ function MainApp({ currentUser, setCurrentUser }) {
   const [showFinancial, setShowFinancial] = useState(true);
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const [search, setSearch] = useState("");
-  const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [estStatus, setEstStatus] = useState("new");
   const [estSentAt, setEstSentAt] = useState("");
   const [estComment, setEstComment] = useState("");
@@ -3874,12 +4168,7 @@ function MainApp({ currentUser, setCurrentUser }) {
   const contragentsRef = useRef([]);
   useEffect(() => { contragentsRef.current = contragents; }, [contragents]);
   const _contractsLoaded = useRef(false);
-  // Отдельно от _contractsLoaded: productions грузится в том же запросе, но может НЕ долететь
-  // (unavailable), пока остальное (contracts/objects/clients) долетело. Раньше это не
-  // отслеживалось — saveProductions блокировался общим _contractsLoaded, который в такой
-  // ситуации был true, хотя productionsRef.current мог остаться СТАРЫМ (не обновлённым в этой
-  // загрузке). Риск: авто-синк этапов мог бы сохранить неполный список поверх облака.
-  const _productionsLoaded = useRef(false);
+  const _productionsLoaded = useRef(false); // отдельно от _contractsLoaded: productions грузится в том же запросе, но может не долететь, пока остальное — долетит
   const [contractTab, setContractTab] = useState("list"); // list | editor | clients | contragents
   const [currentContract, setCurrentContract] = useState(null);
 
@@ -3945,8 +4234,7 @@ function MainApp({ currentUser, setCurrentUser }) {
   const [finProjCatFilter, setFinProjCatFilter] = useState("");
 
   // ── Связь фин-проектов с объектами (по номеру договора) ──
-  // нормализация номера договора для сопоставления: убираем пробелы, № и # — чтобы «№0919#153» и «0919#153» считались одним
-  const normCN = (s) => String(s||"").trim().toLowerCase().replace(/[\s№#]/g,"");
+  // normCN — модульная функция (см. верх файла), чтобы «№0919#153» и «0919#153» считались одним
   // map: нормализованный № договора → { object, contract, planTotal, planCost, planMargin, planMarginPct }
   const contractLinkMap = useMemo(() => {
     const m = {};
@@ -3967,9 +4255,7 @@ function MainApp({ currentUser, setCurrentUser }) {
       const obj = c.objectId ? objects.find(o=>o.id===c.objectId) : null;
       const conTotal = (c.works||[]).reduce((s,w)=>s+((Number(w.quantity)||0)*(Number(w.price)||0)),0);
       const agg = obj ? estAgg[obj.id] : null;
-      // ПЛАН = ВСЕ сметы объекта (основная + доп.) — доп. сметы сразу попадают в план;
-      // если смет нет, берём сумму работ договора. Раньше приоритет был у договора, из-за
-      // чего доп. сметы «не шли в финансы» (план не менялся при добавлении доп. сметы).
+      // ПЛАН = ВСЕ сметы объекта (основная + доп.) — доп. сметы сразу в плане; если смет нет — сумма работ договора
       const planTotal = (agg && agg.total>0) ? agg.total : conTotal;
       const planCost = agg ? agg.cost : 0;
       const planMargin = planTotal>0 ? planTotal - planCost : 0;
@@ -3981,9 +4267,18 @@ function MainApp({ currentUser, setCurrentUser }) {
   const linkForContractNo = (cn) => contractLinkMap[normCN(cn)] || null;
   // открыть объект из финансов
   const openObjectFromFinance = (obj) => { if(!obj) return; setCurrentObject({...obj}); setObjectTab("workspace"); setScreen("objects"); };
-  // Бюджет проекта = сумма работ основного договора + всех его доп. соглашений (annex).
-  // Раньше бюджет считался ТОЛЬКО по основному договору и не пересчитывался при правках —
-  // из-за этого проект показывал устаревшую сумму (напр. договор урезали, а бюджет остался).
+  // построить черновик фин-проекта из объекта+договора
+  // Основной клиентский договор проекта: доп. соглашения (annex) относятся к нему.
+  // Подряд (podryad/podryad_annex) — это себестоимость, в проект Финансов не идёт.
+  const mainContractOf = (c) => {
+    if (!c) return null;
+    if (c.type === "annex" && c.mainNumber) {
+      return contractsRef.current.find(x => !x.deletedAt && x.number && normCN(x.number) === normCN(c.mainNumber)
+        && x.type !== "podryad" && x.type !== "podryad_annex") || c;
+    }
+    return c;
+  };
+  // Бюджет проекта = сумма основного договора + всех его доп. соглашений (доп. работы увеличивают бюджет).
   const _worksSum = (works) => (works || []).reduce((s, w) => s + ((Number(w.quantity) || 0) * (Number(w.price) || 0)), 0);
   const finBudgetOfContract = (main) => {
     if (!main) return 0;
@@ -3993,31 +4288,32 @@ function MainApp({ currentUser, setCurrentUser }) {
       .reduce((s, x) => s + _worksSum(x.works), 0) : 0;
     return own + annex;
   };
-  // построить черновик фин-проекта из объекта+договора
   const finProjDraftFromObject = (obj, contract) => {
+    const main = mainContractOf(contract);
     return {
-      id:"", contractNo: contract?.number||"",
+      id:"", contractNo: main?.number||"",
       client: obj?.clientType==="юр" ? "Юр лицо" : "Физ лицо",
       category: obj?.objType || "Вторичка",
       description: [obj?.clientName, obj?.address, obj?.clientPhone].filter(Boolean).join(" | "),
-      budget: finBudgetOfContract(contract)||0,
+      budget: finBudgetOfContract(main)||0,
       status:"активен", rawStatus:"в работе",
-      createdAt: contract?.date || new Date().toISOString().slice(0,10),
+      createdAt: main?.date || new Date().toISOString().slice(0,10),
       closedAt:"", b24:"нет",
-      contractSigned: contract ? "да" : "нет",
+      contractSigned: main ? "да" : "нет",
       avr:"нет", comment:"", objectId: obj?.id||"",
     };
   };
-  // завести проект в финансах из объекта (или открыть существующий).
-  // Если проект уже есть — СРАЗУ пересчитываем его бюджет по актуальному договору (+доп.)
-  // и сохраняем, чтобы правки договора/доп. соглашений отразились без ручного «Сохранить».
+  // завести проект в финансах из объекта (или открыть существующий). Доп. соглашение
+  // не плодит новый проект — обновляет бюджет проекта основного договора СРАЗУ
+  // (сохраняет), чтобы доп. работы отразились без ручного «Сохранить».
   const startFinProjFromObject = async (obj, contract) => {
-    const existing = contract ? finProjectsRef.current.find(p=>normCN(p.contractNo)===normCN(contract.number)) : null;
+    const main = mainContractOf(contract);
+    const existing = main ? finProjectsRef.current.find(p=>normCN(p.contractNo)===normCN(main.number)) : null;
     setScreen("finance"); setFinanceTab("projects");
     if (existing) {
-      const nb = finBudgetOfContract(contract);
+      const nb = finBudgetOfContract(main);
       const upd = { ...existing, budget: nb };
-      if (nb > 0 && Math.round(Number(existing.budget)||0) !== Math.round(nb)) { try { await saveFinanceProjects(finProjectsRef.current.map(p=>p.id===existing.id?upd:p)); } catch(e) {} }
+      if (Number(existing.budget) !== nb) { try { await saveFinanceProjects(finProjectsRef.current.map(p=>p.id===existing.id?upd:p)); } catch(e) {} }
       setFinProjModal(upd);
     } else {
       setFinProjModal(finProjDraftFromObject(obj, contract));
@@ -4025,9 +4321,13 @@ function MainApp({ currentUser, setCurrentUser }) {
   };
 
   const [objectTab, setObjectTab] = useState("list"); // list | workspace
+  const [objWsTab, setObjWsTab] = useState("info"); // вкладка внутри карточки объекта: info | estimates | documents
   const [objInfoCollapsed, setObjInfoCollapsed] = useState(false); // свёрнут ли блок инфо клиента/объекта
   const [currentObject, setCurrentObject] = useState(null);
+  // При открытии другого объекта возвращаемся на вкладку «Информация»
+  useEffect(()=>{ setObjWsTab("info"); }, [currentObject?.id]);
   const [objectFilterStatus, setObjectFilterStatus] = useState("approval");
+  const [statusConflictsOpen, setStatusConflictsOpen] = useState(false); // раскрыта ли панель «Проверка статусов»
   const [objectFilterType, setObjectFilterType] = useState("");
   const [objectFilterManager, setObjectFilterManager] = useState("");
   const [objectDateSort, setObjectDateSort] = useState("new"); // new = сначала новые, old = сначала старые
@@ -4080,7 +4380,7 @@ function MainApp({ currentUser, setCurrentUser }) {
     return [...objects]
       .filter(o=>!o.deletedAt) // скрываем мягко-удалённые из основного списка
       .filter(o=>{
-        if(objectFilterStatus && (o.status||"new")!==objectFilterStatus) return false;
+        // фильтр по статусу применяется в рендере через unifiedStatusOf (единый статус)
         if(objectFilterType && (o.objType||"Вторичка")!==objectFilterType) return false;
         if(objectFilterManager && (o.manager||"")!==objectFilterManager) return false;
         if(objectDateFrom && (o.createdAt||0) < new Date(objectDateFrom).getTime()) return false;
@@ -4093,6 +4393,47 @@ function MainApp({ currentUser, setCurrentUser }) {
 
   // Только «живые» (не удалённые) объекты — используется в дашборде, аналитике и всех расчётах
   const liveObjects = useMemo(() => objects.filter(o=>!o.deletedAt), [objects]);
+
+  // ── «Что горит» / «Проверка базы»: детектор проблем (read-only, чистая функция из utils) ──
+  const _allIssues = useMemo(() => computeIssues({ objects, productions, finProjects, financeTx, contracts, estimates, clients: contractClients }), [objects, productions, finProjects, financeTx, contracts, estimates, contractClients]);
+  // «Скрыть до завтра» — по устройству (localStorage), без записи в общую базу. { [issueId]: untilTs }.
+  const ISSUE_DISMISS_KEY = "titovstroy-issue-dismissed";
+  const [issueDismissed, setIssueDismissed] = useState(() => {
+    try { const raw = JSON.parse(localStorage.getItem(ISSUE_DISMISS_KEY) || "{}"); const now = Date.now(); const kept = {}; for (const k in raw) if (raw[k] > now) kept[k] = raw[k]; return kept; } catch { return {}; }
+  });
+  const dismissIssueTomorrow = useCallback((id) => {
+    const tomorrow = (() => { const d = new Date(); d.setHours(0,0,0,0); return d.getTime() + 24*60*60*1000; })();
+    setIssueDismissed(prev => { const next = { ...prev, [id]: tomorrow }; try { localStorage.setItem(ISSUE_DISMISS_KEY, JSON.stringify(next)); } catch {} return next; });
+  }, []);
+  // Открыть проблему: перейти в нужную карточку объекта / раздел
+  const openIssue = useCallback((nav) => {
+    if (!nav) return;
+    if (nav.object) {
+      const o = objectsRef.current.find(x => x.id === nav.object);
+      if (o) { setCurrentObject({ ...o }); setObjectTab("workspace"); if (nav.tab) setObjWsTab(nav.tab); setScreen("objects"); return; }
+      setScreen("objects"); return;
+    }
+    if (nav.screen) {
+      setScreen(nav.screen);
+      if (nav.screen === "finance" && nav.tab) setFinanceTab(nav.tab);
+    }
+  }, []);
+  const _issueActive = (i) => !(issueDismissed[i.id] > Date.now()); // не скрыта «до завтра»
+  // Операционные проблемы для дашборда admin/manager (минус скрытые «до завтра»)
+  const _todayIssues = useMemo(() => _allIssues.filter(i => i.scope === "today" && _issueActive(i)), [_allIssues, issueDismissed]);
+  // Целостность данных — для «Проверка базы» в Админке (скрывать нельзя)
+  const _checkIssues = useMemo(() => _allIssues.filter(i => i.scope === "check"), [_allIssues]);
+  // «Мои задачи» прораба: операционные проблемы по ЕГО объектам (ответственный/менеджер/создатель).
+  // Финансовую группу исключаем: прораб финансы не видит, и финпроекты ему не загружаются
+  // (loadFinance только для admin/manager) — иначе «подписан без финпроекта» давал бы ложные
+  // срабатывания на каждом объекте. Прорабу — производство и замечания клиента.
+  const _myIssues = useMemo(() => {
+    const mine = new Set(objects.filter(o => {
+      const p = productions.find(x => x.objectId === o.id);
+      return o.createdById === currentUser.id || o.manager === currentUser.name || (p && p.responsible === currentUser.name);
+    }).map(o => o.id));
+    return _allIssues.filter(i => i.scope === "today" && i.group !== "Финансы" && i.nav && mine.has(i.nav.object) && _issueActive(i));
+  }, [_allIssues, objects, productions, currentUser, issueDismissed]);
 
   // Объекты «в работе» для раздела «Производство»: только те, по которым заведён
   // проект в Финансах (связь по objectId, либо по номеру договора).
@@ -4163,6 +4504,21 @@ function MainApp({ currentUser, setCurrentUser }) {
     return entries;
   }, [finProjects, financeTx, matchFpToObject]);
 
+  // ЕДИНЫЙ статус объекта для списка: производственный статус (В работе/Приостановлен/
+  // Выполнен/Расторгнут) перевешивает статус сделки; иначе — статус объекта как есть.
+  // Ничего не записывает — только вычисляет для отображения.
+  // Статус ОБЪЕКТА — главный (объект первичен, финансы/производство вторичны).
+  // Показываем ровно то, что задано в карточке объекта, ничем не перебивая.
+  const unifiedStatusOf = useCallback((o) => o.status || "new", []);
+  // Что «подсказывает» производство/финансы — используется только как рекомендация
+  // в панели проверки статусов (не влияет на отображение автоматически).
+  const suggestedStatusOf = useCallback((o) => {
+    const pr = productions.find(p=>p.objectId===o.id);
+    const pe = prodEntries.find(e=>e.objectId===o.id);
+    const ps = pr?.prodStatus || pe?.prodStatusDefault || "";
+    return PROD_TO_DEAL[ps] || null;
+  }, [productions, prodEntries]);
+
   // Мемоизированный фильтрованный/сортированный список смет
   const filteredEstimates = useMemo(() => {
     const q = debouncedListSearch.toLowerCase().trim();
@@ -4208,6 +4564,8 @@ function MainApp({ currentUser, setCurrentUser }) {
     if ((exists.status || "new") !== (updated.status || "new")) {
       const lbl = (STATUSES.find(s => s.key === (updated.status || "new")) || {}).label || updated.status;
       push(`статус → «${lbl}»`);
+      const oldLbl = (STATUSES.find(s => s.key === (exists.status || "new")) || {}).label || exists.status || "—";
+      logChange(currentUser, { entity: "estimate", entityId: updated.id || "", objectId: updated.objectId || "", label: `Смета${updated.dsNumber ? ` (ДС №${updated.dsNumber})` : ""}`, field: "статус", action: "изменил смету", old: oldLbl, new: lbl });
     }
     const last = hist[hist.length - 1];
     const recentEdit = last && last.by === by && last.action === "редактировал" && (now - last.ts) < 10 * 60 * 1000;
@@ -4261,7 +4619,7 @@ function MainApp({ currentUser, setCurrentUser }) {
   // ── Загрузка списка смет из shared storage ──
   const loadContracts = useCallback(async () => {
     let ok = true;
-    let pdOk = true; // отдельный успех именно для productions (см. _productionsLoaded ниже)
+    let prodOk = true;
     try {
       const [cr, cl, ca, ob, pd, rp, wk, py] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY), storage.getResult(OBJECTS_KEY), storage.getResult(PRODUCTIONS_KEY), storage.getResult(REPORTS_KEY), storage.getResult(WORKERS_KEY), storage.getResult(PODRYADS_KEY)]);
       // Договоры
@@ -4272,12 +4630,13 @@ function MainApp({ currentUser, setCurrentUser }) {
       if (ob.status === "found" && ob.value) { try { const p = JSON.parse(ob.value); if (Array.isArray(p)) { setObjects(p); objectsRef.current = p; } } catch {} }
       else if (ob.status === "empty") { setObjects([]); objectsRef.current = []; }
       else { ok = false; }
-      // Производственные карточки. pdOk отслеживаем ОТДЕЛЬНО от общего ok: раньше сбой
-      // именно этого запроса (unavailable) никак не помечался — общий ok/_contractsLoaded
-      // мог остаться true, хотя productionsRef.current не обновился в этой загрузке.
+      // Производственные карточки — статус загрузки отслеживаем ОТДЕЛЬНО (_productionsLoaded):
+      // если этот конкретный запрос не долетел, а остальные (договоры/объекты) — долетели,
+      // ok выше всё равно останется true, и без отдельного флага сохранение production
+      // считалось бы разрешённым при незагруженных данных (риск затереть карточки).
       if (pd.status === "found" && pd.value) { try { const p = JSON.parse(pd.value); if (Array.isArray(p)) { setProductions(p); productionsRef.current = p; } } catch {} }
       else if (pd.status === "empty") { setProductions([]); productionsRef.current = []; }
-      else { pdOk = false; }
+      else { prodOk = false; }
       // Отчёты (АВР)
       if (rp.status === "found" && rp.value) { try { const p = JSON.parse(rp.value); if (Array.isArray(p)) { setReports(p); reportsRef.current = p; } } catch {} }
       else if (rp.status === "empty") { setReports([]); reportsRef.current = []; }
@@ -4294,9 +4653,9 @@ function MainApp({ currentUser, setCurrentUser }) {
       // Контрагенты
       if (ca.status === "found" && ca.value) { try { const p = JSON.parse(ca.value); if (Array.isArray(p)) { setContragents(p); contragentsRef.current = p; } } catch {} }
       // контрагенты: если пусто/недоступно — оставляем дефолтный, не трогаем
-    } catch(e) { console.error(e); ok = false; pdOk = false; }
+    } catch(e) { console.error(e); ok = false; prodOk = false; }
     _contractsLoaded.current = ok;
-    _productionsLoaded.current = ok && pdOk;
+    _productionsLoaded.current = ok && prodOk;
   }, []);
 
   const saveContracts = async (list, opts = {}) => {
@@ -4322,8 +4681,8 @@ function MainApp({ currentUser, setCurrentUser }) {
   };
   const saveProductions = async (list, opts = {}) => {
     // identityKey: "objectId" — у production записей нет id, мердж по нему давал бы пустой
-    // результат и молча блокировал сохранение. loadedRef — свой собственный
-    // _productionsLoaded (не общий _contractsLoaded), см. объяснение у объявления рефа.
+    // результат и молча блокировал сохранение (см. историю бага с этапами). loadedRef —
+    // свой собственный _productionsLoaded, а не общий _contractsLoaded.
     return await saveListProtected(PRODUCTIONS_KEY, PRODUCTIONS_BACKUPS_KEY, list, (fl)=>{ productionsRef.current = fl; setProductions(fl); }, { loadedRef: _productionsLoaded, identityKey: "objectId", ...opts });
   };
   const saveReports = async (list, opts = {}) => {
@@ -4688,10 +5047,12 @@ ${reqBlock}`;
     const list = exists ? cur.map(p => p.objectId === record.objectId ? record : p) : [...cur, record];
     await saveProductions(list, { replace: true });
   }, []);
-  // Удалить производственную карточку по objectId (replace:true — карточки ключуются по objectId, без id)
+  // Удалить производственную карточку по objectId. removedIds ОБЯЗАТЕЛЕН: при честном мердже
+  // по identityKey запись, которой просто нет в переданном списке (но она есть на сервере),
+  // сохраняется — удаление нужно указывать явно, иначе карточка не удалится.
   const onDeleteProduction = useCallback(async (objectId) => {
     const list = productionsRef.current.filter(p => p.objectId !== objectId);
-    await saveProductions(list, { replace: true, allowEmpty: true });
+    await saveProductions(list, { replace: true, allowEmpty: true, removedIds: [objectId] });
   }, []);
 
   // ── ДОСТУП КЛИЕНТА К ПРОГРЕССУ (публичная ссылка #/progress/<токен>) ──
@@ -4721,23 +5082,71 @@ ${reqBlock}`;
     const clientMessage = (cm && typeof cm === "object" && String(cm.text || "").trim())
       ? { text: String(cm.text).trim(), updatedAt: cm.updatedAt || null }
       : (typeof cm === "string" && cm.trim() ? { text: cm.trim(), updatedAt: null } : null);
+    // Настройки видимости для клиента (по умолчанию всё включено). Скрытые разделы НЕ
+    // просто прячутся в интерфейсе — их данные вообще не кладём в снимок, чтобы не утекли
+    // даже при прямом чтении ноды.
+    const cv = obj.clientVis || {};
+    const showPay = cv.payments !== false, showStages = cv.stages !== false, showRemarks = cv.remarks !== false, showDocs = cv.docs !== false;
+    // Индивидуальные ОПЛАТЫ клиента (только доходные операции по договорам объекта) — для «Истории».
+    // Только когда оплаты разрешены к показу. Себестоимость/расходы/подрядчики сюда НЕ попадают —
+    // берём исключительно income-транзакции, привязанные к номерам договоров этого объекта.
+    let payments = [];
+    if (showPay) {
+      try {
+        const objCNs = new Set((contractsRef.current || []).filter(c => c.objectId === objectId).map(c => normCN(c.number || c.contractNo || "")).filter(Boolean));
+        if (objCNs.size) payments = (financeTxRef.current || [])
+          .filter(t => t && !t.deletedAt && t.type === "income" && t.contractNo && objCNs.has(normCN(t.contractNo)))
+          .map(t => ({ date: t.date || t.createdAt || null, amount: Math.round(Number(t.amount) || 0) }))
+          .filter(p => p.amount > 0);
+      } catch {}
+    }
     return {
       v: 2, objectAddress: obj.address || "", clientName: obj.clientName || "", managerName: obj.manager || "",
       startDate: prod.startDate || "", planEndDate: prod.planEndDate || "", factEndDate: prod.factEndDate || "",
       progressPct, doneStages: doneCnt, totalStages: stages.length,
-      stages: stages.map(st => ({ name: st.manualName || st.name || "Этап", cat: st.cat || "Работы", status: st.status || "todo", planEnd: st.planEnd || "", priceClient: Number(st.priceClient) || 0 })),
-      payment: { budget, paid, remaining: Math.max(0, budget - paid) },
-      handover, clientRemarks, clientMessage,
+      // vis — что показывать клиенту (публичная страница читает эти флаги)
+      vis: { payments: showPay, docs: showDocs, stages: showStages, remarks: showRemarks },
+      stages: showStages ? stages.map(st => ({ name: st.manualName || st.name || "Этап", cat: st.cat || "Работы", status: st.status || "todo", planEnd: st.planEnd || "", factEnd: st.factEnd || "", priceClient: Number(st.priceClient) || 0 })) : [],
+      payment: showPay ? { budget, paid, remaining: Math.max(0, budget - paid) } : null,
+      payments: showPay ? payments : [],
+      handover, clientRemarks: showRemarks ? clientRemarks : [], clientMessage,
+      // Срок жизни ссылки — жёстко зафиксирован в объекте при включении доступа (не продлевается
+      // здесь автоматически: buildProgressSnapshot вызывается и фоновой минутной republish'ей).
+      expiresAt: obj.progressExpiresAt || null,
       publishedAt: Date.now(), viewCount: prev.viewCount || 0, viewedAt: prev.viewedAt || null,
     };
   }, []);
   const publishProgress = useCallback(async (objectId) => {
     const obj = objectsRef.current.find(o => o.id === objectId);
     if (!obj || !obj.progressShared || !obj.progressToken) return;
+    const showRemarks = (obj.clientVis || {}).remarks !== false;
+    // Замечания СКРЫТЫ клиенту → сначала заберём уже присланные замечания в производство,
+    // чтобы они не потерялись, ПЕРЕД тем как вычистить их из публичной ноды.
+    if (!showRemarks) { try { await syncRemarksRef.current?.(objectId); } catch {} }
     let prev = {};
     try { const r = await storage.getResult(PROGRESS_NODE(obj.progressToken)); if (r.status === "found" && r.value) prev = JSON.parse(r.value); } catch {}
     const snap = buildProgressSnapshot(objectId, prev);
-    if (snap) { try { await storage.set(PROGRESS_NODE(obj.progressToken), JSON.stringify(snap)); } catch (e) { console.warn("publishProgress err", e); } }
+    if (!snap) return;
+    if (showRemarks) {
+      // Клиент мог отправить замечание прямо в эту ноду, пока мы считали снимок (submitRemark
+      // тоже пишет всю ноду целиком) — без этой подстраховки republish затёр бы его. Перед
+      // записью перечитываем ноду ещё раз и добираем замечания, которых не было в prev.
+      try {
+        const r2 = await storage.getResult(PROGRESS_NODE(obj.progressToken));
+        if (r2.status === "found" && r2.value) {
+          const fresh = JSON.parse(r2.value);
+          const freshRemarks = Array.isArray(fresh.clientRemarks) ? fresh.clientRemarks : [];
+          const known = new Set((snap.clientRemarks || []).map(rm => rm.id));
+          const missing = freshRemarks.filter(rm => rm.id && !known.has(rm.id)).map(rm => ({ id: rm.id, text: rm.text, ts: rm.ts, done: !!rm.done }));
+          if (missing.length) snap.clientRemarks = [...snap.clientRemarks, ...missing];
+        }
+      } catch {}
+    } else {
+      // Раздел «Замечания» скрыт — в публичной ноде замечаний быть НЕ должно даже в сыром JSON.
+      // (buildProgressSnapshot уже ставит [], но подстраховываемся явно — чтобы re-read их не вернул.)
+      snap.clientRemarks = [];
+    }
+    try { await storage.set(PROGRESS_NODE(obj.progressToken), JSON.stringify(snap)); } catch (e) { console.warn("publishProgress err", e); }
   }, [buildProgressSnapshot]);
   const publishProgressRef = useRef(); publishProgressRef.current = publishProgress;
   const _publishDocsRef = useRef(null); // назначается ниже (после генераторов договоров/актов)
@@ -4759,10 +5168,28 @@ ${reqBlock}`;
     await onSaveProduction({ ...base, defects: [...add, ...defects], updatedAt: Date.now() });
   }, [genId, onSaveProduction]);
   const syncRemarksRef = useRef(); syncRemarksRef.current = syncClientRemarks;
+  // Доступ реально ещё активен (включён и срок 60 дней не истёк). Раньше срок проверялся
+  // только на клиентской странице (косметически) — сама нода в базе продолжала жить и
+  // обновляться фоновой republish'ей вечно, то есть по прямому запросу к базе с истёкшим
+  // токеном данные оставались доступны. Теперь фоновые публикации тоже проверяют срок.
+  const _progActive = (o) => !!(o.progressShared && o.progressToken && (!o.progressExpiresAt || Date.now() <= o.progressExpiresAt));
+  // Отозвать доступ (ручной revoke или истёкший срок) — гасим обе ноды, не только PROGRESS_NODE,
+  // иначе документы клиента (DOCS_NODE) остаются читаемы по старому токену бессрочно.
+  const _revokeProgressAccess = useCallback(async (token) => {
+    try { await storage.set(PROGRESS_NODE(token), JSON.stringify({ revoked: true })); } catch {}
+    try { await storage.set(DOCS_NODE(token), JSON.stringify({ revoked: true })); } catch {}
+  }, []);
   // Опрос замечаний клиента раз в минуту (клиент пишет прямо в ноду — производственных событий нет)
   useEffect(() => {
     const tick = () => {
       objectsRef.current.filter(o => o.progressShared && o.progressToken).forEach(async o => {
+        // Срок истёк — гасим доступ насовсем вместо очередной republish'и (иначе «истёк» был
+        // бы виден только в интерфейсе, а сама нода продолжала бы обновляться в базе).
+        if (o.progressExpiresAt && Date.now() > o.progressExpiresAt) {
+          try { await saveObjects([...objectsRef.current.filter(x => x.id !== o.id), { ...o, progressShared: false, updatedAt: Date.now() }]); } catch {}
+          try { await _revokeProgressAccess(o.progressToken); } catch {}
+          return;
+        }
         try { await syncRemarksRef.current?.(o.id); } catch {}
         try { await publishProgressRef.current?.(o.id); } catch {}
         try { await _publishDocsRef.current?.(o.id); } catch {}
@@ -4770,7 +5197,7 @@ ${reqBlock}`;
     };
     const iv = setInterval(tick, 60000);
     return () => clearInterval(iv);
-  }, []);
+  }, [saveObjects, _revokeProgressAccess]);
   // Включить/выключить доступ клиента; возвращает ссылку (или null при выключении)
   const toggleClientShare = useCallback(async (objectId) => {
     const obj = objectsRef.current.find(o => o.id === objectId);
@@ -4779,29 +5206,52 @@ ${reqBlock}`;
     if (obj.progressShared && obj.progressToken) {
       const token = obj.progressToken;
       await saveObjects([...objectsRef.current.filter(o => o.id !== objectId), { ...obj, progressShared: false, updatedAt: Date.now() }]);
-      try { await storage.set(PROGRESS_NODE(token), JSON.stringify({ revoked: true })); } catch {}
+      await _revokeProgressAccess(token);
+      logChange(currentUser, { entity: "publish", entityId: objectId, objectId, label: _objLabel(obj), action: "закрыл доступ клиенту" });
       return null;
     }
     const token = obj.progressToken || (genId() + Math.random().toString(36).slice(2, 10));
-    await saveObjects([...objectsRef.current.filter(o => o.id !== objectId), { ...obj, progressShared: true, progressToken: token, updatedAt: Date.now() }]);
+    // Срок жизни ссылки — жёстко 60 дней с момента включения доступа (не продлевается
+    // автоматической фоновой republish'ю). Повторное включение задаёт свежий срок.
+    const progressExpiresAt = Date.now() + 60 * 24 * 60 * 60 * 1000;
+    await saveObjects([...objectsRef.current.filter(o => o.id !== objectId), { ...obj, progressShared: true, progressToken: token, progressExpiresAt, updatedAt: Date.now() }]);
     const snap = buildProgressSnapshot(objectId, {});
     if (snap) { try { await storage.set(PROGRESS_NODE(token), JSON.stringify(snap)); } catch {} }
     try { await _publishDocsRef.current?.(objectId); } catch {}
+    logChange(currentUser, { entity: "publish", entityId: objectId, objectId, label: _objLabel(obj), action: "открыл доступ клиенту" });
     return linkOf(token);
-  }, [saveObjects, buildProgressSnapshot]);
+  }, [saveObjects, buildProgressSnapshot, _revokeProgressAccess]);
+  // Настройки видимости кабинета: что показывать клиенту (платежи/документы/этапы/замечания).
+  // По умолчанию всё включено. Сразу пере-публикуем снимок и документы, чтобы клиент увидел.
+  const setClientVis = useCallback(async (objectId, patch) => {
+    const obj = objectsRef.current.find(o => o.id === objectId);
+    if (!obj) return;
+    const clientVis = { ...(obj.clientVis || {}), ...patch };
+    await saveObjects([...objectsRef.current.filter(o => o.id !== objectId), { ...obj, clientVis, updatedAt: Date.now() }]);
+    setCurrentObject(p => (p && p.id === objectId) ? { ...p, clientVis } : p);
+    try { await publishProgressRef.current?.(objectId); } catch {}
+    try { await _publishDocsRef.current?.(objectId); } catch {}
+    // журнал: каждый переключённый раздел видимости
+    const VIS_LBL = { payments: "оплата", docs: "документы", stages: "этапы работ", remarks: "замечания" };
+    for (const f of Object.keys(patch || {})) {
+      const before = (obj.clientVis || {})[f] !== false, after = patch[f] !== false;
+      if (before === after) continue;
+      logChange(currentUser, { entity: "publish", entityId: objectId, objectId, label: _objLabel(obj), field: "видимость: " + (VIS_LBL[f] || f), action: "изменил доступ", old: before ? "показано" : "скрыто", new: after ? "показано" : "скрыто" });
+    }
+  }, [saveObjects, currentUser]);
   // Публикация документов клиента (договоры/акты) при их изменении — для открытых объектов
   const _docsPubTimer = useRef(null);
   useEffect(() => {
-    const shared = objectsRef.current.filter(o => o.progressShared && o.progressToken);
+    const shared = objectsRef.current.filter(_progActive);
     if (!shared.length) return;
     if (_docsPubTimer.current) clearTimeout(_docsPubTimer.current);
     _docsPubTimer.current = setTimeout(() => { shared.forEach(o => { try { _publishDocsRef.current?.(o.id); } catch {} }); }, 1500);
     return () => { if (_docsPubTimer.current) clearTimeout(_docsPubTimer.current); };
-  }, [contracts, reports]);
+  }, [contracts, reports, estimates]);
   // Живое авто-обновление: при любом изменении производства/оплат пере-публикуем снимки всех открытых объектов
   const _progPubTimer = useRef(null);
   useEffect(() => {
-    const shared = objectsRef.current.filter(o => o.progressShared && o.progressToken);
+    const shared = objectsRef.current.filter(_progActive);
     if (!shared.length) return;
     if (_progPubTimer.current) clearTimeout(_progPubTimer.current);
     _progPubTimer.current = setTimeout(() => { shared.forEach(async o => { try { await syncRemarksRef.current?.(o.id); } catch {} publishProgressRef.current?.(o.id); }); }, 1200);
@@ -4847,14 +5297,9 @@ ${reqBlock}`;
   // удалил смету/позицию → сметные этапы сами исчезают. Статус/сроки/ответственный
   // существующих этапов сохраняются. НЕ трогаем: ручные этапы (в т.ч. с введённой
   // вручную ценой, если имени нет в каталоге) и импортные карточки без объекта (fp:).
-  // РАНЬШЕ в этой ветке этапы подтягивались из сметы ТОЛЬКО ОДИН РАЗ при первом открытии
-  // объекта (когда карточки производства ещё не существовало) — если карточка уже была
-  // создана (например, объект успел побывать «в работе» с пустыми этапами), новые/изменённые
-  // позиции сметы в неё больше не попадали. Отсюда «в производстве нет этапов и сроков», хотя
-  // смета заполнена. Теперь синк идёт постоянно, а не разово.
   const _stageSyncTimer = useRef(null);
   useEffect(() => {
-    if (!_estimatesLoaded.current || !_contractsLoaded.current || !_productionsLoaded.current) return;
+    if (!_estimatesLoaded.current || !_contractsLoaded.current) return;
     if (_stageSyncTimer.current) clearTimeout(_stageSyncTimer.current);
     _stageSyncTimer.current = setTimeout(() => {
       const prods = productionsRef.current;
@@ -4897,7 +5342,7 @@ ${reqBlock}`;
       // ВАЖНО: replace:true — карточки производства без id (ключ objectId), а мердж по id
       // в обычном режиме даёт пусто → блок «пусто поверх» молча отменял сохранение (этапы не удалялись).
       if (anyChanged) saveProductions(updated, { replace: true });
-    }, 900);
+    }, 1200);
     return () => { if (_stageSyncTimer.current) clearTimeout(_stageSyncTimer.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [estimates]);
@@ -4907,7 +5352,7 @@ ${reqBlock}`;
   const migrateFinanceToProd = useCallback(async () => {
     const total = finProjectsRef.current.filter(p => (p.rawStatus||p.status) !== "отменен").length;
     if (!window.confirm(`Перенести ${total} проектов из Финансов в Производство? Текущие записи производства будут заменены.`)) return;
-    const finStatMap = { "новый":"new","активен":"active","в работе":"active","приостановлен":"паused","выполнен":"done","отменен":"cancel" };
+    const finStatMap = { "новый":"new","активен":"active","в работе":"active","приостановлен":"paused","выполнен":"done","отменен":"cancel" };
     const stagesFromEst = (objId) => buildStagesFromEstimate(objId).map(s => ({
       id: genId(), cat: s.cat||"Прочее", name: s.name||"", unit: s.unit||"", qty: s.qty||0,
       planStart:"", planEnd:"", factStart:"", factEnd:"",
@@ -4958,7 +5403,9 @@ ${reqBlock}`;
       newProds.push(prod);
     }
     if (extraObjs.length > 0) await saveObjects([...objectsRef.current, ...extraObjs], { replace: true });
-    await saveProductions(newProds, { replace: true });
+    // Пользователь явно подтвердил в диалоге выше «текущие записи будут заменены» — hardReplace,
+    // не безопасный мердж (иначе старые production-карточки, которых нет в newProds, останутся).
+    await saveProductions(newProds, { replace: true, hardReplace: true, allowEmpty: true });
     alert(`Перенесено ${newProds.length} объектов.${extraObjs.length ? ` Создано ${extraObjs.length} новых объектов.`:""}`);
   }, [contractLinkMap, genId, buildStagesFromEstimate]);
 
@@ -5010,10 +5457,10 @@ ${reqBlock}`;
     return await saveListProtected(FINANCE_PROJECTS_KEY, FINANCE_PROJECTS_BACKUPS_KEY, list, (fl)=>{ finProjectsRef.current = fl; setFinProjects(fl); }, { loadedRef: _financeLoaded, ...opts });
   };
 
-  // АВТО-ПЕРЕСЧЁТ БЮДЖЕТА ПРОЕКТОВ: при любом изменении договоров (правка позиций,
-  // удаление, доп. соглашение) бюджет связанного проекта пересчитывается сам:
-  // бюджет = основной договор + все его доп. соглашения. Проекты без договора в сервисе
-  // (импорт из Google-таблиц) и проекты без совпадающего договора — НЕ трогаются. Debounce.
+  // БЫСТРОЕ ОБНОВЛЕНИЕ бюджета проектов: при любом изменении договоров (добавили/
+  // изменили/удалили доп. соглашение) бюджет связанного проекта пересчитывается сам:
+  // бюджет = основной договор + все его доп. соглашения. Проекты без договора в
+  // сервисе (импорт из Google-таблиц) не трогаются. Debounce, чтобы не спамить сейвы.
   const _budgetSyncTimer = useRef(null);
   useEffect(() => {
     if (!_financeLoaded.current || !_contractsLoaded.current) return;
@@ -5158,8 +5605,14 @@ ${reqBlock}`;
         setCurrentUser(prev=>{
           if(!prev) return prev;
           const fresh=uList.find(x=>x.id===prev.id);
+          // Пароль сменили после входа этой сессии → принудительный выход при загрузке/обновлении
+          if(fresh && fresh.pwChangedAt && fresh.pwChangedAt > (prev.authAt||0)){
+            try{ localStorage.removeItem(SESSION_KEY); }catch(e){}
+            return null;
+          }
           if(!fresh || (fresh.role===prev.role && fresh.name===prev.name)) return prev;
-          const updated={...prev,...fresh};
+          const {password:_pw, ...freshSafe}=fresh; // пароль в сессии не храним
+          const updated={...prev,...freshSafe};
           try{ localStorage.setItem(SESSION_KEY,JSON.stringify({user:updated,savedAt:Date.now()})); }catch(e){}
           return updated;
         });
@@ -5189,8 +5642,10 @@ ${reqBlock}`;
   }, []);
 
   useEffect(() => { loadEstimates(); loadContracts(); }, []);
-  // Финансы грузим для админа и руководителя
-  useEffect(() => { if (currentUser?.role === "admin" || currentUser?.role === "manager") loadFinance(); }, [currentUser?.role, loadFinance]);
+  // Финансы грузим для админа, руководителя и прораба (прораб видит финансы ВНУТРИ объекта:
+  // вкладка Финансы + карточки. Сам раздел «Финансы» ему всё равно закрыт через effScreen).
+  // Замерщику финансы НЕ грузим — он видит себестоимость/маржу только в смете при заполнении.
+  useEffect(() => { const r = currentUser?.role; if (r === "admin" || r === "manager" || r === "foreman") loadFinance(); }, [currentUser?.role, loadFinance]);
 
   // ── САМОИСЦЕЛЕНИЕ СИНХРОНИЗАЦИИ ──
   const [resyncing, setResyncing] = useState(false);
@@ -5202,7 +5657,7 @@ ${reqBlock}`;
     try {
       await storage.flushDirty();
       await Promise.all([loadEstimates(), loadContracts()]);
-      if (currentUser?.role === "admin" || currentUser?.role === "manager") await loadFinance();
+      if (["admin","manager","foreman"].includes(currentUser?.role)) await loadFinance();
       const left = storage.dirtyKeys().length;
       setDirtyCount(left);
       if (left === 0) setCloudError(false); // всё дожали — баннер «облако недоступно» больше не актуален
@@ -5433,7 +5888,7 @@ ${reqBlock}`;
     if (!Array.isArray(list)) { window.alert("Бэкап повреждён"); return; }
     // Отфильтровываем мусор (null/undefined/без id), чтобы не записать битые записи
     list = list.filter(e => e && typeof e==="object" && e.id);
-    if (!window.confirm(`Восстановить архив на момент ${new Date(snap.ts).toLocaleString("ru-RU")}?\nСметы: ${list.length}. Текущая версия уйдёт в бэкап и её можно вернуть обратно.`)) return;
+    if (!confirmDangerous(`Восстановить архив на момент ${new Date(snap.ts).toLocaleString("ru-RU")}?\nСметы: ${list.length}. Текущая версия уйдёт в бэкап и её можно вернуть обратно.`)) return;
     _allowEmptySave.current = true; // восстановление может заменить на меньший набор
     estimatesRef.current = list;
     setEstimates(list);
@@ -5471,7 +5926,11 @@ ${reqBlock}`;
         let arr = []; try { if (raw?.value) arr = JSON.parse(raw.value); } catch {}
         if (!Array.isArray(arr)) arr = [];
         const prev = arr[0];
-        const sig = `${snap.counts.o}|${snap.counts.e}|${snap.counts.c}|${snap.counts.f}`;
+        // Сигнатура по counts ловит добавление/удаление записей, но НЕ ловит правку поля
+        // без изменения количества (напр. поменяли цену/статус) — добавляем max updatedAt,
+        // чтобы такие правки тоже создавали новый снимок.
+        const maxTs = Math.max(0, ...[...objectsRef.current, ...estimatesRef.current, ...contractsRef.current, ...financeTxRef.current].map(x => x?.updatedAt || x?.createdAt || 0));
+        const sig = `${snap.counts.o}|${snap.counts.e}|${snap.counts.c}|${snap.counts.f}|${maxTs}`;
         if (prev && prev._sig === sig) return;
         snap._sig = sig;
         arr = [snap, ...arr].slice(0, 30);
@@ -5487,6 +5946,109 @@ ${reqBlock}`;
       let arr = []; try { if (raw?.value) arr = JSON.parse(raw.value); } catch {}
       setWsBackupsModal(Array.isArray(arr) ? arr : []);
     } catch { setWsBackupsModal([]); }
+  };
+
+  // ── ПОЛНЫЙ БЭКАП В ФАЙЛ: выгрузка всех рабочих данных в один JSON и загрузка обратно ──
+  // Работаем НАПРЯМУЮ с ключами хранилища (не с тем, что подгружено в интерфейс), чтобы
+  // бэкап всегда был полным, а восстановление — предсказуемым.
+  const _backupSections = [
+    { k: "objects",         label: "Объекты",           key: OBJECTS_KEY,          bkey: OBJECTS_BACKUPS_KEY },
+    { k: "contracts",       label: "Договоры",          key: CONTRACTS_KEY,        bkey: CONTRACTS_BACKUPS_KEY },
+    { k: "estimates",       label: "Сметы",             key: STORAGE_KEY,          bkey: BACKUPS_KEY },
+    { k: "clients",         label: "Клиенты",           key: CLIENTS_KEY,          bkey: CLIENTS_BACKUPS_KEY },
+    { k: "contragents",     label: "Реквизиты",         key: CONTRAGENTS_KEY,      bkey: CONTRAGENTS_BACKUPS_KEY },
+    { k: "workers",         label: "Подрядчики",        key: WORKERS_KEY,          bkey: WORKERS_BACKUPS_KEY },
+    { k: "productions",     label: "Производство",      key: PRODUCTIONS_KEY,      bkey: PRODUCTIONS_BACKUPS_KEY },
+    { k: "financeTx",       label: "Финансы: операции", key: FINANCE_TX_KEY,       bkey: FINANCE_TX_BACKUPS_KEY },
+    { k: "financeProjects", label: "Финансы: проекты",  key: FINANCE_PROJECTS_KEY, bkey: FINANCE_PROJECTS_BACKUPS_KEY },
+    { k: "reports",         label: "Акты",              key: REPORTS_KEY,          bkey: REPORTS_BACKUPS_KEY },
+  ];
+  const _readArr = async (key) => { try { const r = await storage.getResult(key); if (r.status === "found" && r.value) { const p = JSON.parse(r.value); if (Array.isArray(p)) return p; } } catch {} return []; };
+  // Выгрузка: читаем каждый ключ из базы (авторитетно) и отдаём .json файлом
+  const exportAllJSON = async () => {
+    const data = {};
+    for (const s of _backupSections) data[s.k] = await _readArr(s.key);
+    try { const m = await storage.get(FINANCE_META_KEY); data.financeMeta = m?.value ? JSON.parse(m.value) : null; } catch { data.financeMeta = null; }
+    try { const c = await storage.get(CATALOG_KEY); data.catalog = c?.value ? JSON.parse(c.value) : null; } catch { data.catalog = null; }
+    const snapshot = {
+      _type: "titovstroy-backup", _version: 1,
+      _exportedAt: new Date().toISOString(),
+      _env: IS_DEV_ENV ? "dev" : "prod",
+      _counts: Object.fromEntries(_backupSections.map(s => [s.k, (data[s.k] || []).length])),
+      data,
+    };
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `titovstroy-backup-${IS_DEV_ENV ? "dev" : "prod"}-${stamp}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  };
+  // Загрузка: читаем .json, показываем сводку, требуем ввести «ВОССТАНОВИТЬ»,
+  // перед заменой КАЖДЫЙ раздел уходит в свой авто-бэкап, затем ключ перезаписывается.
+  const importAllJSON = async (file) => {
+    if (!file) return;
+    let snap;
+    try { snap = JSON.parse(await file.text()); } catch { window.alert("Файл не читается как JSON."); return; }
+    if (!snap || snap._type !== "titovstroy-backup" || !snap.data) { window.alert("Это не файл бэкапа TitovStroy."); return; }
+    // База должна быть доступна — иначе восстановление могло бы записаться только локально
+    const probe = await storage.getResult(OBJECTS_KEY);
+    if (probe.status === "unavailable") { window.alert("База сейчас недоступна — восстановление отменено. Проверьте интернет и повторите."); return; }
+    const d = snap.data;
+    const lines = _backupSections.map(s => `• ${s.label}: ${Array.isArray(d[s.k]) ? d[s.k].length : "—"}`).join("\n");
+    const envWarn = IS_DEV_ENV ? "" : "\n\n⚠️ ЭТО БОЕВАЯ БАЗА. Текущие данные будут ЗАМЕНЕНЫ данными из файла.\nПеред заменой каждый раздел уходит в свой авто-бэкап (откат возможен).";
+    const ok = await confirmTyped(`Восстановить ВСЁ из файла бэкапа?\nОт: ${snap._exportedAt || "?"} · база «${snap._env || "?"}»\n\n${lines}${envWarn}`, "ВОССТАНОВИТЬ");
+    if (!ok) return;
+    let done = 0, fail = 0;
+    for (const s of _backupSections) {
+      const list = Array.isArray(d[s.k]) ? d[s.k] : null;
+      if (!list) continue; // нет раздела в файле — не трогаем текущий
+      try {
+        // 1) пред-бэкап текущего значения раздела
+        const cur = await storage.get(s.key);
+        if (cur?.value) {
+          let backups = []; try { const b = await storage.get(s.bkey); if (b?.value) backups = JSON.parse(b.value); } catch {}
+          if (!Array.isArray(backups)) backups = [];
+          let cnt = 0; try { const p = JSON.parse(cur.value); cnt = Array.isArray(p) ? p.length : 0; } catch {}
+          if (!backups[0] || backups[0].data !== cur.value) backups.unshift({ ts: Date.now(), by: currentUser?.name || "", count: cnt, data: cur.value });
+          await storage.set(s.bkey, JSON.stringify(backups.slice(0, 20)));
+        }
+        // 2) перезапись раздела данными из файла
+        await storage.set(s.key, JSON.stringify(list));
+        done++;
+      } catch (e) { console.warn("restore fail", s.k, e); fail++; }
+    }
+    if (d.financeMeta) { try { await storage.set(FINANCE_META_KEY, JSON.stringify(d.financeMeta)); } catch {} }
+    if (d.catalog) { try { await storage.set(CATALOG_KEY, JSON.stringify(d.catalog)); } catch {} }
+    window.alert(`Восстановление завершено: ${done} разделов${fail ? `, ошибок: ${fail}` : ""}.\nСтраница сейчас перезагрузится, чтобы показать восстановленные данные.`);
+    setTimeout(() => window.location.reload(), 1000);
+  };
+  // Выгрузка всех смет отдельной таблицей для Excel (CSV, открывается в Excel напрямую)
+  const exportEstimatesXls = async () => {
+    const ests = await _readArr(STORAGE_KEY);
+    const objs = await _readArr(OBJECTS_KEY);
+    const objById = {}; for (const o of objs) objById[o.id] = o;
+    const stLbl = (k) => (STATUSES.find(s => s.key === (k || "new")) || {}).label || k || "";
+    const rows = ests.map(e => {
+      const obj = e.objectId ? objById[e.objectId] : null;
+      const nPos = Object.values(e.rows || {}).filter(r => Number(r?.qty) > 0).length;
+      return [
+        e.proj?.name || "Без названия",
+        e.proj?.phone || "",
+        obj?.address || e.proj?.address || "",
+        e.proj?.type || "",
+        e.proj?.area ? Number(e.proj.area) : "",
+        e.createdAt ? new Date(e.createdAt).toLocaleDateString("ru-RU") : "",
+        e.dsNumber ? `ДС №${e.dsNumber}` : "основная",
+        stLbl(e.status),
+        nPos,
+        Math.round(Number(e.total) || 0),
+      ];
+    });
+    downloadCSV(`сметы-${new Date().toISOString().slice(0, 10)}.csv`,
+      ["Название", "Телефон", "Адрес объекта", "Тип", "Площадь м²", "Дата", "Вид", "Статус", "Позиций", "Сумма клиенту ₸"],
+      rows);
   };
 
   // Точечно вытащить ТОЛЬКО пропавшие сметы из снимка рабочего пространства,
@@ -5509,7 +6071,7 @@ ${reqBlock}`;
     const e = Array.isArray(snap.estimates) ? snap.estimates : [];
     const c = Array.isArray(snap.contracts) ? snap.contracts : [];
     const f = Array.isArray(snap.financeTx) ? snap.financeTx : [];
-    if (!window.confirm(`Восстановить рабочее пространство на ${new Date(snap.ts).toLocaleString("ru-RU")}?\n\nОбъектов: ${o.length}\nСмет: ${e.length}\nДоговоров: ${c.length}\nФин. операций: ${f.length}\n\nТекущее состояние уйдёт в бэкап.`)) return;
+    if (!confirmDangerous(`Восстановить рабочее пространство на ${new Date(snap.ts).toLocaleString("ru-RU")}?\n\nОбъектов: ${o.length}\nСмет: ${e.length}\nДоговоров: ${c.length}\nФин. операций: ${f.length}\n\nТекущее состояние уйдёт в бэкап.`)) return;
     _allowEmptySave.current = true;
     objectsRef.current = o; setObjects(o);
     estimatesRef.current = e; setEstimates(e);
@@ -5533,7 +6095,7 @@ ${reqBlock}`;
       : Array.isArray(payload?.estimates) ? payload.estimates : null;
     if (!incoming || incoming.length === 0) { window.alert("В JSON нет смет для импорта."); return; }
     const customWorks = Array.isArray(payload?.customWorks) ? payload.customWorks : [];
-    if (!window.confirm(`Импортировать ${incoming.length} смет(ы)?${customWorks.length?`\nБудет добавлено пользовательских позиций в каталог: ${customWorks.length}.`:""}\nТекущий архив уйдёт в бэкап — откат доступен.`)) return;
+    if (!confirmDangerous(`Импортировать ${incoming.length} смет(ы)?${customWorks.length?`\nБудет добавлено пользовательских позиций в каталог: ${customWorks.length}.`:""}\nТекущий архив уйдёт в бэкап — откат доступен.`)) return;
     setImportBusy(true);
     try {
       // 1) Добавляем пользовательские позиции в каталог (без дублей по коду)
@@ -5542,7 +6104,7 @@ ${reqBlock}`;
         const existing = cur.custom || [];
         const codes = new Set(existing.map(w=>w.code));
         const merged = [...existing, ...customWorks.filter(w => !codes.has(w.code))];
-        const nextCat = { renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], ...cur, custom: merged };
+        const nextCat = withCatalogOverrides(cur, { custom: merged });
         await storage.set(CATALOG_KEY, JSON.stringify(nextCat));
         setCatalogOverrides(nextCat);            // обновляем _catalogOverrides (для getEffectiveCatalog/getPrice)
         setCatalogVersion(v => v + 1);           // пересобираем Gdyn, чтобы суммы посчитались
@@ -6045,7 +6607,6 @@ ${reqBlock}`;
     _allowEmptySave.current = true;
     await saveEstimates(newList, { removedIds: [id] });
     setTimeout(() => { _allowEmptySave.current = false; }, 1000);
-    setDeleteConfirm(null);
   };
 
 
@@ -6600,9 +7161,59 @@ ${reqBlock}`;
     if (t === "annex" || t === "podryad_annex") return `${t === "podryad_annex" ? "Приложение подряда" : "Приложение"} №${c.appendix || 2}` + (c.mainNumber ? ` к №${c.mainNumber}` : "");
     return `${T[t] || "Договор"} ${c.number ? "№" + c.number : "(без номера)"}`;
   };
+  // Смета для клиента: ТОЛЬКО клиентские цены (без себестоимости и маржи)
+  const estimateToClientHtml = (est, obj, title) => {
+    try {
+      const catalog = getEffectiveCatalog();
+      const mm = 1 + (Number(est.markup) || 0) / 100;
+      const rows = Object.entries(est.rows || {}).filter(([, r]) => Number(r?.qty) > 0).map(([key, r]) => {
+        const w = catalog.find(x => x.code === key) || catalog.find(x => x.name === key);
+        if (!w) return null;
+        const qty = Number(r.qty || 0);
+        const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
+        const raw = (r.manualPrice !== undefined && r.manualPrice !== "") ? Number(r.manualPrice) : getPrice(w, qty, r.complexity || "std", cpxPct);
+        const price = Math.round((Number(raw) || 0) * mm);
+        return { cat: w.cat || "Прочее", name: (r.manualName !== undefined ? r.manualName : w.name), unit: (r.manualUnit !== undefined ? r.manualUnit : (w.unit || "м²")), qty, price, sum: Math.round(price * qty) };
+      }).filter(Boolean);
+      if (!rows.length) return null;
+      const subtotal = rows.reduce((s, r) => s + r.sum, 0);
+      const disc = Number(est.discount) || 0;
+      const total = Math.round(est.total || subtotal * (1 - disc / 100));
+      const esc = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const F = n => (Math.round(Number(n) || 0)).toLocaleString("ru-RU");
+      const cats = []; const cmap = {};
+      rows.forEach(r => { if (!cmap[r.cat]) { cmap[r.cat] = { cat: r.cat, items: [] }; cats.push(cmap[r.cat]); } cmap[r.cat].items.push(r); });
+      let body = "";
+      cats.forEach(g => {
+        body += `<tr class="cat"><td colspan="5">${esc(g.cat)}</td></tr>`;
+        g.items.forEach(r => { body += `<tr><td>${esc(r.name)}</td><td class="r">${F(r.qty)}</td><td>${esc(r.unit)}</td><td class="r">${F(r.price)}</td><td class="r">${F(r.sum)}</td></tr>`; });
+      });
+      const d = new Date(est.updatedAt || est.createdAt || Date.now());
+      return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title || "Смета")}</title><style>
+body{font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;margin:24px auto;max-width:820px;padding:0 14px}
+h1{font-size:20px;margin:0 0 4px} .sub{color:#64748b;font-size:13px;margin-bottom:16px}
+table{width:100%;border-collapse:collapse;font-size:13px} th,td{border:1px solid #e2e8f0;padding:6px 8px;text-align:left}
+th{background:#f8fafc;font-size:11px;text-transform:uppercase;color:#64748b} .r{text-align:right;white-space:nowrap}
+tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:uppercase;font-size:11.5px}
+.tot{margin-top:14px;text-align:right;font-size:15px} .tot b{font-size:18px}
+@media print{body{margin:0}}
+</style></head><body>
+<h1>${esc(title || "Смета")}</h1>
+<div class="sub">${esc([obj?.clientName, obj?.address].filter(Boolean).join(" · "))} · ${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}</div>
+<table><thead><tr><th>Наименование работ</th><th class="r">Кол-во</th><th>Ед.</th><th class="r">Цена, ₸</th><th class="r">Сумма, ₸</th></tr></thead><tbody>${body}</tbody></table>
+<div class="tot">${disc > 0 ? `Сумма: ${F(subtotal)} ₸ · скидка ${disc}%<br/>` : ""}Итого: <b>${F(total)} ₸</b></div>
+</body></html>`;
+    } catch (e) { console.warn("estimateToClientHtml err", e); return null; }
+  };
   const publishDocs = async (objectId) => {
     const obj = objectsRef.current.find(o => o.id === objectId);
     if (!obj || !obj.progressShared || !obj.progressToken) return;
+    // Документы отключены в настройках видимости — пишем пустую ноду, чтобы клиент не видел
+    // старые документы после выключения тумблера.
+    if (obj.clientVis && obj.clientVis.docs === false) {
+      try { await storage.set(DOCS_NODE(obj.progressToken), JSON.stringify({ contracts: [], estimates: [], acts: [], publishedAt: Date.now() })); } catch {}
+      return;
+    }
     // Только клиентские документы объекта (как в карточке объекта): договор с клиентом
     // по этому объекту + его доп. приложения. Договоры ПОДРЯДА (компания↔рабочий) и прочие
     // внутренние документы клиенту НЕ показываем.
@@ -6619,7 +7230,21 @@ ${reqBlock}`;
       try { html = buildAvrHtml({ ...r, lines: (r.lines || []).map(l => ({ ...l, included: true, doneQty: l.doneQty })) }); } catch (e) {}
       return { title: `Акт №${r.actNo || "б/н"}`, date: r.actDate || r.createdAt || null, total: Number(r.total) || 0, html };
     }).filter(x => x.html);
-    try { await storage.set(DOCS_NODE(obj.progressToken), JSON.stringify({ contracts, acts: actsOut, publishedAt: Date.now() })); } catch (e) { console.warn("publishDocs err", e); }
+    // Все сметы объекта (основная + доп.) — клиентские цены, без себестоимости
+    const objEsts = estimatesRef.current.filter(e => e.objectId === objectId);
+    const isMainEst = e => !e.parentId || e.parentId === e.id;
+    const orderedEsts = [
+      ...objEsts.filter(isMainEst).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)),
+      ...objEsts.filter(e => !isMainEst(e)).sort((a, b) => (a.dsNumber || 0) - (b.dsNumber || 0)),
+    ];
+    const mainsCount = orderedEsts.filter(isMainEst).length;
+    let mi = 0;
+    const estimatesOut = orderedEsts.map(e => {
+      const main = isMainEst(e); if (main) mi++;
+      const title = main ? `Смета${mainsCount > 1 ? ` ${mi}` : ""}` : `Доп. смета`;
+      return { title, total: Math.round(e.total) || 0, date: e.updatedAt || e.createdAt || null, html: estimateToClientHtml(e, obj, title) };
+    }).filter(x => x.html);
+    try { await storage.set(DOCS_NODE(obj.progressToken), JSON.stringify({ contracts, estimates: estimatesOut, acts: actsOut, publishedAt: Date.now() })); } catch (e) { console.warn("publishDocs err", e); }
   };
   _publishDocsRef.current = publishDocs;
 
@@ -6714,17 +7339,20 @@ ${reqBlock}`;
       : (docLabel+" №"+num+" "+clientName+(dateStr?" от "+dateStr:"")+".docx").replace(/[<>:"/\\|?*]/g,"_");
 
     try {
-    if (!window.docx) {
-      await new Promise((res, rej) => {
-        const s = document.createElement("script");
-        s.src = "https://unpkg.com/docx@7.8.2/build/index.js";
-        s.onload = () => { if(window.docx) res(); else rej(new Error("docx not in window")); };
-        s.onerror = () => rej(new Error("Failed to load docx.js"));
-        document.head.appendChild(s);
-      });
+    // Раньше библиотека docx грузилась скриптом с unpkg.com в момент клика — если CDN
+    // недоступен (нет интернета, блокировка сетью), генерация DOCX ломалась целиком. Теперь
+    // docx — обычная npm-зависимость проекта, Vite выносит её в отдельный чанк и грузит
+    // с того же домена, что и остальное приложение (тот же CDN, что и всё остальное, не
+    // сторонний unpkg.com) — динамический import(), а не script-инъекция.
+    let D;
+    try {
+      const mod = await import("docx");
+      D = mod.Document ? mod : (mod.default && mod.default.Document ? mod.default : mod);
+    } catch (loadErr) {
+      alert("Не удалось загрузить сервис генерации DOCX.\n\nПроверьте интернет-соединение и попробуйте ещё раз. Если проблема повторяется — воспользуйтесь кнопками 📄 PDF или 📋 GDoc вместо DOCX.");
+      return;
     }
-    const D = window.docx;
-    if (!D || !D.Document) { alert("Ошибка загрузки библиотеки DOCX. Проверьте интернет."); return; }
+    if (!D || !D.Document) { alert("Не удалось загрузить сервис генерации DOCX.\n\nПроверьте интернет-соединение и попробуйте ещё раз. Если проблема повторяется — воспользуйтесь кнопками 📄 PDF или 📋 GDoc вместо DOCX."); return; }
     const TNR = "Times New Roman";
     const mmT = mm => Math.round(mm * 56.692);
     const hp = pt => pt * 2;
@@ -7180,7 +7808,7 @@ ${reqBlock}`;
       const s = document.createElement("script");
       s.src = "https://accounts.google.com/gsi/client";
       s.onload = () => res();
-      s.onerror = () => rej(new Error("Не удалось загрузить Google API"));
+      s.onerror = () => rej(new Error("Не удалось загрузить сервис Google (accounts.google.com недоступен). Проверьте интернет-соединение и попробуйте ещё раз, либо воспользуйтесь кнопкой 📄 PDF."));
       document.head.appendChild(s);
     });
 
@@ -7379,12 +8007,12 @@ ${reqBlock}`;
     const r = currentUser.role;
     const isAdmin = r === "admin", isMgr = r === "manager", isForeman = r === "foreman", isUser = r === "user", isViewer = r === "viewer";
     return [
-      ...(isAdmin||isMgr||isUser ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
+      ...(isAdmin||isMgr||isUser||isForeman ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
       { id:"objects", icon:"📦", label:"Объекты" },
-      ...(isAdmin||isMgr||isForeman ? [{ id:"production", icon:"🏗", label:"Производство" }] : []),
+      ...(isAdmin||isMgr||isForeman ? [{ id:"calendar", icon:"📅", label:"Календарь" }] : []),
       ...(!isViewer&&!isForeman ? [{ id:"contracts", icon:"📄", label:"Прочие документы", short:"Документы" }] : []),
       ...(isAdmin||isMgr ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
-      ...(isAdmin||isMgr ? [{ id:"finance", icon:"💰", label:"Финансы" }] : []),
+      ...(isAdmin||isMgr||isUser ? [{ id:"finance", icon:"💰", label:"Финансы" }] : []),
       ...(isAdmin ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
     ];
   }, [currentUser.role]);
@@ -7394,10 +8022,13 @@ ${reqBlock}`;
   const _isAdmin = _r === "admin", _isMgr = _r === "manager", _isForeman = _r === "foreman", _isUser = _r === "user", _isViewer = _r === "viewer";
   // Эффективный экран с учётом ограничений роли
   const effScreen = (() => {
-    if (_isViewer && (screen==="dashboard"||screen==="analytics"||screen==="admin"||screen==="deals"||screen==="finance"||screen==="production")) return "objects";
-    if (_isForeman && (screen==="analytics"||screen==="finance"||screen==="contracts"||screen==="dashboard"||screen==="admin")) return "production";
-    if (_isUser && (screen==="analytics"||screen==="finance"||screen==="production"||screen==="admin")) return "objects";
-    if (!_isAdmin && !_isMgr && screen==="finance") return "objects";
+    // «Производство» объединено с «Объекты» — отдельного экрана больше нет, все ведёт в Объекты
+    if (screen==="production") return "objects";
+    if (_isViewer && (screen==="dashboard"||screen==="analytics"||screen==="admin"||screen==="deals"||screen==="finance"||screen==="calendar")) return "objects";
+    if (_isForeman && (screen==="analytics"||screen==="finance"||screen==="contracts"||screen==="admin")) return "objects";
+    if (_isUser && (screen==="analytics"||screen==="admin"||screen==="calendar")) return "objects";
+    // Замерщик доходит до экрана «Финансы», но внутри видит пометку «доступ закрыт» (см. рендер раздела finance)
+    if (!_isAdmin && !_isMgr && !_isUser && screen==="finance") return "objects";
     if (!_isAdmin && screen==="admin") return "objects";
     return screen;
   })();
@@ -7651,7 +8282,31 @@ ${reqBlock}`;
       {/* ═══════════════════════════════════════════════════════════════════
           ЭКРАН 0: ДАШБОРД
       ═══════════════════════════════════════════════════════════════════ */}
-      {effScreen === "dashboard" && (()=>{
+      {/* ── ГЛАВНАЯ ПРОРАБА: «Мои задачи» (без финансовых KPI — прораб финансы не видит) ── */}
+      {/* ── КАЛЕНДАРЬ ПРОИЗВОДСТВА (admin/manager/foreman) ── */}
+      {effScreen === "calendar" && (
+        <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40}}>
+          <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"22px 26px",marginBottom:20,boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
+            <div style={{fontSize:21,fontWeight:900,color:"#fff",marginBottom:3}}>📅 Календарь производства</div>
+            <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>Загрузка объектов, этапов и прорабов во времени · пересечения и просрочки</div>
+          </div>
+          <ProductionCalendar objects={liveObjects} productions={productions} onOpenObject={(id)=>openIssue({ object:id, tab:"stages" })} />
+        </div>
+      )}
+
+      {/* Главная «Мои задачи» — прораб И замерщик (без финансов: замерщик видит финансы
+          только в смете, прораб — внутри объекта, но не на дашборде). */}
+      {effScreen === "dashboard" && (_isForeman||_isUser) && (
+        <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40}}>
+          <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"24px 28px",marginBottom:24,boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
+            <div style={{fontSize:20,fontWeight:900,color:"#fff",marginBottom:4}}>Мои задачи</div>
+            <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>{new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"})} · <span style={{color:"#bfdbfe",fontWeight:600}}>{currentUser.name}</span></div>
+          </div>
+          <div style={{fontSize:16,fontWeight:900,color:"#0f172a",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>🔥 Что требует внимания по моим объектам</div>
+          <IssuePanel issues={_myIssues} onNav={openIssue} onDismiss={dismissIssueTomorrow} emptyText="✓ По вашим объектам всё в порядке" />
+        </div>
+      )}
+      {effScreen === "dashboard" && !(_isForeman||_isUser) && (()=>{
         const thisMonth = new Date().getMonth();
         const thisYear = new Date().getFullYear();
         const _inMonth = ts => { const d=new Date(ts||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; };
@@ -7692,16 +8347,17 @@ ${reqBlock}`;
           const incMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&_inMonth(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
           return {count:active.length,totalInc,totalDebt,totalBudget,margin,incMonth};
         })() : null;
-        // ── Production KPIs (из единого источника prodEntries: одна запись на финпроект) ──
+        // ── Production KPIs (Объекты = Производство: считаем из единого object.status) ──
+        // Источник истины — статус объекта. Сроки (planEndDate/factEndDate) и дефекты берём
+        // из производственной карточки объекта (productions по objectId), но состояние — по статусу.
         const _prodKpi = (_isAdmin||_isMgr) ? (() => {
           const _ds = d => { const x=new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
           const today = _ds(new Date());
-          const prodByKey = {}; for(const p of (productions||[])) prodByKey[p.objectId]=p;
-          const statusOf = e => (prodByKey[e.key]?.prodStatus) || e.prodStatusDefault;
-          const inWork = prodEntries.filter(e=>statusOf(e)==="active").length;
-          const overdue = prodEntries.filter(e=>{const p=prodByKey[e.key]; return statusOf(e)==="active"&&p?.planEndDate&&_ds(p.planEndDate)<today&&!p?.factEndDate;}).length;
-          const doneMonth = prodEntries.filter(e=>{ if(statusOf(e)!=="done") return false; const p=prodByKey[e.key]; const dt=p?.factEndDate||e.closedAt; return dt&&_inMonth(new Date(dt).getTime()); }).length;
-          const defects = prodEntries.reduce((s,e)=>s+((prodByKey[e.key]?.defects||[]).filter(d=>!d.done).length),0);
+          const prodByObj = {}; for(const p of (productions||[])) prodByObj[p.objectId]=p;
+          const inWork = liveObjects.filter(o=>o.status==="work").length;
+          const overdue = liveObjects.filter(o=>{ if(o.status!=="work") return false; const p=prodByObj[o.id]; return p?.planEndDate&&_ds(p.planEndDate)<today&&!p?.factEndDate; }).length;
+          const doneMonth = liveObjects.filter(o=>{ if(o.status!=="done") return false; const p=prodByObj[o.id]; const dt=p?.factEndDate?new Date(p.factEndDate).getTime():(o.updatedAt||0); return dt&&_inMonth(dt); }).length;
+          const defects = liveObjects.reduce((s,o)=>s+((prodByObj[o.id]?.defects||[]).filter(d=>!d.done).length),0);
           return {inWork,overdue,doneMonth,defects};
         })() : null;
         return (
@@ -7751,6 +8407,14 @@ ${reqBlock}`;
               ))}
             </div>
           </div>
+
+          {/* ── ЧТО ГОРИТ СЕГОДНЯ (admin/manager) ── */}
+          {(_isAdmin||_isMgr) && (
+            <div style={{marginBottom:24}}>
+              <div style={{fontSize:16,fontWeight:900,color:"#0f172a",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>🔥 Что горит сегодня</div>
+              <IssuePanel issues={_todayIssues} onNav={openIssue} onDismiss={dismissIssueTomorrow} emptyText="✓ Всё под контролем — срочных задач нет" />
+            </div>
+          )}
 
           {/* KPI карточки */}
           <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14,marginBottom:24}}>
@@ -7810,13 +8474,13 @@ ${reqBlock}`;
               <div style={{fontSize:12,fontWeight:700,color:"#64748b",marginBottom:10,textTransform:"uppercase",letterSpacing:".05em"}}>🏗 Производство</div>
               <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14}}>
                 {[
-                  {label:"В работе", value:_prodKpi.inWork, sub:"активных производств", icon:"🔨", accent:"#2563eb"},
+                  {label:"В работе", value:_prodKpi.inWork, sub:"объектов в статусе «В работе»", icon:"🔨", accent:"#2563eb"},
                   {label:"Просрочено", value:_prodKpi.overdue, sub:"плановый срок истёк", icon:"🚨", accent:_prodKpi.overdue>0?"#dc2626":"#059669"},
-                  {label:"Сдано за "+monthName, value:_prodKpi.doneMonth, sub:"фактически завершено", icon:"✅", accent:"#059669"},
+                  {label:"Сдано за "+monthName, value:_prodKpi.doneMonth, sub:"объектов завершено", icon:"✅", accent:"#059669"},
                   {label:"Открытых замечаний", value:_prodKpi.defects, sub:"незакрытые дефекты", icon:"⚠️", accent:_prodKpi.defects>0?"#d97706":"#059669"},
                 ].map((s,i)=>(
                   <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden",cursor:"pointer"}}
-                    onClick={()=>setScreen("production")}
+                    onClick={()=>setScreen("objects")}
                     onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
                     onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)";}}>
                     <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:s.accent,opacity:.85}}/>
@@ -8169,7 +8833,7 @@ ${reqBlock}`;
                               </button>
                             )}
                             {(currentUser.role==="admin" || (currentUser.role==="user" && est.createdBy===currentUser.name)) && (
-                              <button onClick={()=>setDeleteConfirm(est.id)}
+                              <button onClick={async ()=>{ if(await confirmTyped("Удалить смету?\nЭто действие нельзя отменить.")) deleteEstimate(est.id); }}
                                 style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
                                 🗑
                               </button>
@@ -8208,22 +8872,6 @@ ${reqBlock}`;
         </div>
       )}
 
-      {/* Подтверждение удаления */}
-      {deleteConfirm && (
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20}}
-          onClick={() => setDeleteConfirm(null)}>
-          <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"24px 28px",maxWidth:340,width:"100%",textAlign:"center"}}
-            onClick={e=>e.stopPropagation()}>
-            <div style={{fontSize:32,marginBottom:12}}>🗑️</div>
-            <div style={{fontWeight:700,fontSize:15,marginBottom:8}}>Удалить смету?</div>
-            <div style={{fontSize:12,color:"#94a3b8",marginBottom:20}}>Это действие нельзя отменить</div>
-            <div style={{display:"flex",gap:10,justifyContent:"center"}}>
-              <button className="btn btn-o" style={{padding:"9px 20px"}} onClick={() => setDeleteConfirm(null)}>Отмена</button>
-              <button className="btn btn-red" style={{padding:"9px 20px"}} onClick={() => deleteEstimate(deleteConfirm)}>Удалить</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ═══════════════════════════════════════════════════════════════════
           ЭКРАН 2: РЕДАКТОР СМЕТЫ
@@ -9002,6 +9650,10 @@ ${reqBlock}`;
                   try {
                     // сохраняем отметки клиента (просмотры/принятие) при переотправке
                     let prev = {}; try { const pr = await storage.getResult("titovstroy-kp-"+currentId); if (pr.status==="found" && pr.value) prev = JSON.parse(pr.value); } catch {}
+                    // Клиент мог принять КП (или открыть его) прямо в это окно, пока мы готовили
+                    // снимок — перечитываем ноду ещё раз перед записью, иначе republish затрёт
+                    // acceptedAt/viewCount более свежими, чем то, что мы прочитали в prev.
+                    try { const pr2 = await storage.getResult("titovstroy-kp-"+currentId); if (pr2.status==="found" && pr2.value) { const fresh = JSON.parse(pr2.value); if ((fresh.viewCount||0) > (prev.viewCount||0) || fresh.acceptedAt) prev = fresh; } } catch {}
                     const snap = { proj, kpItems, fromItems:kpFromItems, discount, discAmt, final, note, publishedAt:Date.now(), viewedAt:prev.viewedAt, viewCount:prev.viewCount, acceptedAt:prev.acceptedAt };
                     const res = await storage.set("titovstroy-kp-"+currentId, JSON.stringify(snap));
                     const link = window.location.origin + window.location.pathname + "#/kp/" + currentId;
@@ -9192,14 +9844,15 @@ ${reqBlock}`;
               const incMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&_inM(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
               const expMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="expense"&&_inM(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
               const today = _ds(new Date());
-              // Производство — из единого источника prodEntries (одна запись на финпроект)
+              // Производство — Объекты = Производство: считаем из единого object.status
+              // (сроки/дефекты — из производственной карточки объекта, состояние — по статусу)
               const _pbk = {}; for(const p of (productions||[])) _pbk[p.objectId]=p;
-              const _stOf = e => (_pbk[e.key]?.prodStatus) || e.prodStatusDefault;
-              const prodActive = prodEntries.filter(e=>_stOf(e)==="active").length;
-              const prodOverdue = prodEntries.filter(e=>{const p=_pbk[e.key]; return _stOf(e)==="active"&&p?.planEndDate&&_ds(p.planEndDate)<today&&!p?.factEndDate;}).length;
-              const prodDoneMonth = prodEntries.filter(e=>{ if(_stOf(e)!=="done") return false; const p=_pbk[e.key]; const dt=p?.factEndDate||e.closedAt; return dt&&_inM(new Date(dt).getTime()); }).length;
-              const prodDefects = prodEntries.reduce((s,e)=>s+((_pbk[e.key]?.defects||[]).filter(d=>!d.done).length),0);
-              if(activeFp.length===0 && prodEntries.length===0) return null;
+              const prodActive = liveObjects.filter(o=>o.status==="work").length;
+              const prodOverdue = liveObjects.filter(o=>{ if(o.status!=="work") return false; const p=_pbk[o.id]; return p?.planEndDate&&_ds(p.planEndDate)<today&&!p?.factEndDate; }).length;
+              const prodDoneMonth = liveObjects.filter(o=>{ if(o.status!=="done") return false; const p=_pbk[o.id]; const dt=p?.factEndDate?new Date(p.factEndDate).getTime():(o.updatedAt||0); return dt&&_inM(dt); }).length;
+              const prodDefects = liveObjects.reduce((s,o)=>s+((_pbk[o.id]?.defects||[]).filter(d=>!d.done).length),0);
+              const prodAnyCount = liveObjects.filter(o=>o.status==="work"||o.status==="paused"||o.status==="done").length;
+              if(activeFp.length===0 && prodAnyCount===0) return null;
               const finCards = [
                 ["Сумма контрактов", fmt(Math.round(totalBudget))+" ₸", activeFp.length+" активных проектов", "#2563eb"],
                 ["Получено", fmt(Math.round(totalInc))+" ₸", recvPct+"% от контрактов", "#059669"],
@@ -9209,9 +9862,9 @@ ${reqBlock}`;
                 ["Денежный поток за месяц", fmt(Math.round(incMonth-expMonth))+" ₸", "приход "+fmt(Math.round(incMonth))+" − расход "+fmt(Math.round(expMonth)), incMonth-expMonth>=0?"#059669":"#dc2626"],
               ];
               const prodCards = [
-                ["В работе", prodActive, "активных производств", "#2563eb"],
+                ["В работе", prodActive, "объектов в статусе «В работе»", "#2563eb"],
                 ["Просрочено", prodOverdue, "срок истёк", prodOverdue>0?"#dc2626":"#059669"],
-                ["Сдано за месяц", prodDoneMonth, "фактически завершено", "#059669"],
+                ["Сдано за месяц", prodDoneMonth, "объектов завершено", "#059669"],
                 ["Открытых замечаний", prodDefects, "незакрытые дефекты", prodDefects>0?"#d97706":"#059669"],
               ];
               const Card = ([l,v,s,c],i)=>(
@@ -9229,9 +9882,9 @@ ${reqBlock}`;
                   </div>
                   {activeFp.length>0 && <>
                     <div style={{fontSize:10,color:"#059669",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>💰 Финансы по проектам</div>
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:prodEntries.length>0?16:0}}>{finCards.map(Card)}</div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:prodAnyCount>0?16:0}}>{finCards.map(Card)}</div>
                   </>}
-                  {prodEntries.length>0 && <>
+                  {prodAnyCount>0 && <>
                     <div style={{fontSize:10,color:"#d97706",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>🏗 Производство</div>
                     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>{prodCards.map(Card)}</div>
                   </>}
@@ -9437,7 +10090,14 @@ ${reqBlock}`;
       })()}
 
       {/* ── ЭКРАН: ФИНАНСЫ (независимый учёт ДДС + P&L) ── */}
-      {effScreen === "finance" && (()=>{
+      {effScreen === "finance" && _isUser && (
+        <div style={{maxWidth:520,margin:"48px auto",textAlign:"center",background:"#fff",border:"1px solid #e2e8f0",borderRadius:16,padding:"40px 28px",boxShadow:"0 1px 3px rgba(15,23,42,.07)"}}>
+          <div style={{fontSize:44,marginBottom:14}}>🔒</div>
+          <div style={{fontWeight:800,fontSize:18,color:"#0f172a",marginBottom:8}}>Доступ закрыт</div>
+          <div style={{fontSize:13,color:"#64748b",lineHeight:1.5}}>Раздел «Финансы» доступен только руководству.<br/>Если нужен доступ — обратитесь к администратору.</div>
+        </div>
+      )}
+      {effScreen === "finance" && !_isUser && (()=>{
         const fM = n => new Intl.NumberFormat("ru-RU").format(Math.round(n||0));
         const now = new Date();
         const periodStart = (()=>{
@@ -9538,8 +10198,8 @@ ${reqBlock}`;
                   {navHistory.length > 0 && <button onClick={goBack} style={{background:"none",border:"1px solid rgba(255,255,255,.4)",borderRadius:6,padding:"4px 12px",cursor:"pointer",fontSize:14,color:"#fff",alignSelf:"center"}}>← Назад</button>}
                   {(()=>{
                     const projIncH={};
-                    for(const t of financeTx){ if(t.included===false)continue; const cn=(t.contractNo||"").trim(); if(!cn)continue; if(t.type==="income") projIncH[cn]=(projIncH[cn]||0)+(Number(t.amount)||0); }
-                    const debtH = finProjects.filter(p=>(p.rawStatus||p.status)!=="отменен").reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projIncH[p.contractNo]||0)),0);
+                    for(const t of financeTx){ if(t.deletedAt||t.included===false)continue; const cn=normCN(t.contractNo); if(!cn)continue; if(t.type==="income") projIncH[cn]=(projIncH[cn]||0)+(Number(t.amount)||0); }
+                    const debtH = finProjects.filter(p=>(p.rawStatus||p.status)!=="отменен").reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projIncH[normCN(p.contractNo)]||0)),0);
                     return <>
                       <div style={{textAlign:"right"}}>
                         <div style={{fontSize:11,color:"rgba(255,255,255,.6)"}}>Дебиторка (по проектам)</div>
@@ -10195,13 +10855,13 @@ ${reqBlock}`;
               const n = v => Number(v)||0;
               // приход по проектам (для дебиторки)
               const projInc={};
-              for(const t of financeTx){ if(t.included===false)continue; const cn=(t.contractNo||"").trim(); if(!cn)continue; if(t.type==="income") projInc[cn]=(projInc[cn]||0)+(Number(t.amount)||0); }
+              for(const t of financeTx){ if(t.deletedAt||t.included===false)continue; const cn=normCN(t.contractNo); if(!cn)continue; if(t.type==="income") projInc[cn]=(projInc[cn]||0)+(Number(t.amount)||0); }
               // ── Денежные средства по типам счетов ──
               const byType = { cash:0, bank:0, card:0, ewallet:0 };
               accounts.forEach(a=>{ const tp=a.accType||"bank"; byType[tp]=(byType[tp]||0)+(balances[a.name]||0); });
               const cash = byType.cash+byType.bank+byType.card+byType.ewallet;
               // Дебиторка (денежная — клиенты должны оплатить деньгами по проектам)
-              const receivablesMoney = finProjects.filter(p=>(p.rawStatus||p.status)!=="отменен").reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projInc[p.contractNo]||0)),0);
+              const receivablesMoney = finProjects.filter(p=>(p.rawStatus||p.status)!=="отменен").reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projInc[normCN(p.contractNo)]||0)),0);
               // Авансы клиентов (обязательство)
               const advances = financeTx.filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&t.isAdvance).reduce((s,t)=>s+(Number(t.amount)||0),0);
 
@@ -10420,12 +11080,12 @@ ${reqBlock}`;
             {financeTab==="projects" && (()=>{
               const projStats = {};
               for (const t of financeTx) {
-                if (t.included===false) continue;
-                const cn = (t.contractNo||"").trim();
+                if (t.deletedAt || t.included===false) continue;
+                const cn = normCN(t.contractNo);
                 if (!cn) continue;
                 if (!projStats[cn]) projStats[cn] = { income:0, expense:0 };
-                if (t.type==="income") projStats[cn].income += t.amount||0;
-                else if (t.type==="expense") projStats[cn].expense += t.amount||0;
+                if (t.type==="income") projStats[cn].income += Number(t.amount)||0;
+                else if (t.type==="expense") projStats[cn].expense += Number(t.amount)||0;
               }
               const sorted = [...finProjects].sort((a,b)=>(a.createdAt||"").localeCompare(b.createdAt||""));
               const allStatuses = [...new Set(sorted.map(p=>p.rawStatus||p.status).filter(Boolean))];
@@ -10445,9 +11105,9 @@ ${reqBlock}`;
               const tdSL = {...tdS,textAlign:"left"};
               // totals
               const totBudget = filtered.reduce((s,p)=>s+(Number(p.budget)||0),0);
-              const totIncome = filtered.reduce((s,p)=>s+(projStats[p.contractNo]?.income||0),0);
-              const totExpense = filtered.reduce((s,p)=>s+(projStats[p.contractNo]?.expense||0),0);
-              const totDebt = filtered.reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projStats[p.contractNo]?.income||0)),0);
+              const totIncome = filtered.reduce((s,p)=>s+(projStats[normCN(p.contractNo)]?.income||0),0);
+              const totExpense = filtered.reduce((s,p)=>s+(projStats[normCN(p.contractNo)]?.expense||0),0);
+              const totDebt = filtered.reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projStats[normCN(p.contractNo)]?.income||0)),0);
               const totMargin = totIncome>0 ? Math.round((totIncome-totExpense)/totIncome*100) : 0;
               return (
                 <div>
@@ -10495,7 +11155,7 @@ ${reqBlock}`;
                   {/* Карточки проектов */}
                   <div className="fin-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>
                     {filtered.map(p=>{
-                      const st = projStats[p.contractNo]||{income:0,expense:0};
+                      const st = projStats[normCN(p.contractNo)]||{income:0,expense:0};
                       const income = st.income;
                       const expense = st.expense;
                       const debt = Math.max(0,(Number(p.budget)||0)-income);
@@ -10591,7 +11251,7 @@ ${reqBlock}`;
                       setFinProjModal(null);
                     };
                     const delp = async () => {
-                      if (!mp.id) return; if (!confirm("Удалить проект?")) return;
+                      if (!mp.id) return; if (!await confirmTyped("Удалить проект?\nЭто действие нельзя отменить через интерфейс.")) return;
                       // removedIds обязательно — иначе merge при сохранении вернёт удалённый проект из облака
                       await saveFinanceProjects(finProjectsRef.current.filter(x=>x.id!==mp.id), {removedIds:[mp.id], allowEmpty:true});
                       setFinProjModal(null);
@@ -10604,7 +11264,7 @@ ${reqBlock}`;
                             <button onClick={()=>setFinProjModal(null)} style={{background:"none",border:"none",fontSize:20,color:"#94a3b8",cursor:"pointer"}}>✕</button>
                           </div>
                           {/* показываем расчётные цифры если проект существует */}
-                          {mp.id && (()=>{ const st=projStats[mp.contractNo]||{income:0,expense:0}; const debt=Math.max(0,(Number(mp.budget)||0)-st.income); const mrg=st.income>0?Math.round((st.income-st.expense)/st.income*100):null;
+                          {mp.id && (()=>{ const st=projStats[normCN(mp.contractNo)]||{income:0,expense:0}; const debt=Math.max(0,(Number(mp.budget)||0)-st.income); const mrg=st.income>0?Math.round((st.income-st.expense)/st.income*100):null;
                             const link=linkForContractNo(mp.contractNo); const plan=link?.planTotal||0; const pCost=link?.planCost||0; const pMrgPct=link?.planMarginPct;
                             const Cell=({l,v,c})=><div><div style={{fontSize:10,color:"#94a3b8"}}>{l}</div><div style={{fontWeight:800,color:c}}>{v}</div></div>;
                             return <>
@@ -10729,7 +11389,7 @@ ${reqBlock}`;
                           <span style={{fontSize:11,color:"#94a3b8"}}>остаток на начало</span>
                           <input className="fi" type="number" style={{width:110}} value={a.opening} onChange={e=>{const acc=[...meta.accounts];acc[i]={...a,opening:Number(e.target.value)||0};upd({...meta,accounts:acc});}}/>
                         </div>
-                        <button onClick={()=>{if(confirm("Удалить счёт «"+a.name+"»?")){upd({...meta,accounts:meta.accounts.filter(x=>x.id!==a.id)});}}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:16}}>✕</button>
+                        <button onClick={async ()=>{if(await confirmTyped("Удалить счёт «"+a.name+"»?\nОперации, у которых указан этот счёт, останутся в истории, но счёт из справочника пропадёт — баланс по ним перестанет считаться.")){upd({...meta,accounts:meta.accounts.filter(x=>x.id!==a.id)});}}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:16}}>✕</button>
                       </div>
                     ))}
                   </div>
@@ -10757,7 +11417,7 @@ ${reqBlock}`;
                           <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6}}>
                             <input className="fi" style={{flex:1,fontWeight:700}} value={c.cat} onChange={e=>{const arr=[...meta[key]];arr[ci]={...c,cat:e.target.value};upd({...meta,[key]:arr});}}/>
                             <button onClick={()=>{const arr=[...meta[key]];arr[ci]={...c,subs:[...(c.subs||[]),"Новая подкатегория"]};upd({...meta,[key]:arr});}} style={{background:"#f1f5f9",border:"none",borderRadius:7,padding:"6px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit",color:"#475569",whiteSpace:"nowrap"}}>+ подкат.</button>
-                            <button onClick={()=>{if(confirm("Удалить категорию «"+c.cat+"»?")){const arr=meta[key].filter((_,x)=>x!==ci);upd({...meta,[key]:arr});}}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:15}}>✕</button>
+                            <button onClick={async ()=>{if(await confirmTyped("Удалить категорию «"+c.cat+"»?\nОперации с этой категорией останутся в истории, но категория из справочника пропадёт.")){const arr=meta[key].filter((_,x)=>x!==ci);upd({...meta,[key]:arr});}}} style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:15}}>✕</button>
                           </div>
                           <div style={{paddingLeft:14,display:"flex",flexDirection:"column",gap:5}}>
                             {(c.subs||[]).map((s,si)=>(
@@ -10775,13 +11435,15 @@ ${reqBlock}`;
                   {/* Импорт / экспорт */}
                   <div className="card" style={{padding:"18px 20px"}}>
                     <div style={{fontSize:14,fontWeight:800,color:"#0f172a",marginBottom:6}}>📥 Импорт / экспорт данных</div>
-                    <div style={{fontSize:12,color:"#94a3b8",marginBottom:14}}>Импорт перезапишет операции, проекты и справочник. Файл JSON со структурой {`{meta, transactions, projects}`}.</div>
+                    <div style={{fontSize:12,color:"#94a3b8",marginBottom:14}}>Импорт добавит операции и проекты из файла к текущим (без замены существующих). Файл JSON со структурой {`{meta, transactions, projects}`}.</div>
                     <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
                       <label style={{background:"#2563eb",color:"#fff",borderRadius:9,padding:"9px 16px",fontSize:13,fontWeight:700,cursor:finImportBusy?"wait":"pointer",fontFamily:"inherit",opacity:finImportBusy?.6:1}}>
                         {finImportBusy?"Импорт...":"📂 Импортировать JSON"}
                         <input type="file" accept=".json,application/json" style={{display:"none"}} disabled={finImportBusy}
                           onChange={async e=>{
-                            const file=e.target.files?.[0]; if(!file) return; setFinImportBusy(true);
+                            const file=e.target.files?.[0]; if(!file) return;
+                            if (!confirmDangerous(`Импортировать файл «${file.name}»?\nОперации, справочник категорий и проекты из файла добавятся к текущим (не заменят целиком).`)) { e.target.value=""; return; }
+                            setFinImportBusy(true);
                             try {
                               const txt=await file.text(); const data=JSON.parse(txt);
                               if(data.meta && data.meta.accounts) await saveFinanceMeta(data.meta);
@@ -10833,7 +11495,7 @@ ${reqBlock}`;
                         </div>
                         <button onClick={async()=>{await saveFinanceTx([{...t,deletedAt:undefined,updatedAt:Date.now()}],{replace:false}); }}
                           style={{background:"#f0fdf4",color:"#059669",border:"1px solid #bbf7d0",borderRadius:7,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↩</button>
-                        <button onClick={async()=>{if(confirm("Удалить безвозвратно?")) await saveFinanceTx([],{replace:false,removedIds:[t.id],allowEmpty:true}); }}
+                        <button onClick={async()=>{if(await confirmTyped("Удалить операцию безвозвратно?")) await saveFinanceTx([],{replace:false,removedIds:[t.id],allowEmpty:true}); }}
                           style={{background:"rgba(220,38,38,.1)",color:"#dc2626",border:"1px solid rgba(220,38,38,.2)",borderRadius:7,padding:"5px 10px",fontSize:12,cursor:"pointer"}}>✕</button>
                       </div>
                     );
@@ -10860,10 +11522,16 @@ ${reqBlock}`;
                   isAdvance:m.type==="income"?!!m.isAdvance:false,
                   included:m.included!==false, opuMonth:m.opuMonth, createdAt:m.createdAt||ts, updatedAt:Date.now() };
                 const isNew = !m.id;
+                const _oldTx = m.id ? financeTxRef.current.find(x=>x.id===m.id) : null;
                 setFinTxModal(null);
                 // merge (replace:false) — не перезатираем облако: операции с других устройств не теряются
                 saveFinanceTx([tx],{replace:false});
-                writeAudit(currentUser, isNew?"создал операцию":"изменил операцию", "finance_tx", tx.id, `${tx.type} ${Math.round(tx.amount)} ₸ ${tx.category||""}`);
+                // журнал: привязываем к объекту по номеру договора, если получается
+                const _oid = (tx.contractNo && (contractsRef.current.find(c=>normCN(c.number||"")===normCN(tx.contractNo)||normCN(c.contractNo||"")===normCN(tx.contractNo))||{}).objectId) || "";
+                const _tl = _finTypeLbl[tx.type] || tx.type;
+                const _lbl = `${_tl}${tx.category?` · ${tx.category}`:""}${tx.contractNo?` · дог. ${tx.contractNo}`:""}`;
+                if (isNew) logChange(currentUser, { entity:"finance_tx", entityId:tx.id, objectId:_oid, label:_lbl, action:"создал операцию", new:_tng(tx.amount) });
+                else logChange(currentUser, { entity:"finance_tx", entityId:tx.id, objectId:_oid, label:_lbl, field:"сумма", action:"изменил операцию", old:_tng(_oldTx?.amount), new:_tng(tx.amount) });
               };
               const del = ()=>{
                 if(!m.id) return; if(!confirm("Переместить операцию в корзину?")) return;
@@ -10871,7 +11539,9 @@ ${reqBlock}`;
                 const deleted={...ex,deletedAt:Date.now(),updatedAt:Date.now()};
                 setFinTxModal(null);
                 saveFinanceTx([deleted],{replace:false});
-                writeAudit(currentUser,"удалил операцию","finance_tx",m.id,`${m.type} ${Math.round(Number(m.amount)||0)} ₸`);
+                const _doid = (ex.contractNo && (contractsRef.current.find(c=>normCN(c.number||"")===normCN(ex.contractNo)||normCN(c.contractNo||"")===normCN(ex.contractNo))||{}).objectId) || "";
+                const _dtl = _finTypeLbl[ex.type] || ex.type;
+                logChange(currentUser, { entity:"finance_tx", entityId:m.id, objectId:_doid, label:`${_dtl}${ex.category?` · ${ex.category}`:""}`, action:"удалил операцию", old:_tng(ex.amount) });
               };
               return (
                 <div onClick={()=>{setFinCatOpen(false);setFinTxModal(null);}} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.55)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
@@ -11142,35 +11812,59 @@ ${reqBlock}`;
         };
 
         const saveObjField = async (obj, patch) => {
+          // При подписании договора (статус «Заключён») СНАЧАЛА заводим зависимости —
+          // проект в Финансах и карточку Производства, и только при их успехе меняем
+          // статус объекта. Раньше статус сохранялся первым шагом, а зависимости —
+          // отдельно: при сбое сети объект тихо оставался «подписан» без финпроекта и
+          // без производства. Теперь либо всё получилось, либо статус вообще не меняется.
+          if (patch.status === "signed") {
+            // Существование проекта проверяем по СВЕЖИМ данным с сервера, а не по локальному
+            // кэшу (finProjectsRef.current): Финансы грузятся в память только у admin/manager,
+            // у замерщика/прораба кэш всегда пуст — иначе автосоздание либо тихо не срабатывало
+            // (saveFinanceProjects блокировался бы флагом "не загружено"), либо на стухшем
+            // кэше можно было бы наплодить дублей проекта.
+            try {
+              const fpRaw = await storage.getResult(FINANCE_PROJECTS_KEY);
+              let projList;
+              if (fpRaw.status === "found" && fpRaw.value) { try { const p = JSON.parse(fpRaw.value); projList = Array.isArray(p) ? p : []; } catch { projList = finProjectsRef.current || []; } }
+              else if (fpRaw.status === "empty") { projList = []; }
+              else { projList = finProjectsRef.current || []; } // база недоступна — fallback на локальный кэш (может тоже быть пуст)
+              const exists = projList.some(p => p.objectId === obj.id
+                || (p.contractNo && contractsRef.current.some(c => c.objectId === obj.id && normCN(c.number) === normCN(p.contractNo))));
+              if (!exists) {
+                const contract = contractsRef.current.find(c => c.objectId === obj.id) || null;
+                const estTotal = estimates.filter(e => e.objectId === obj.id).reduce((s, e) => s + (Number(e.total) || 0), 0);
+                const draft = finProjDraftFromObject(obj, contract);
+                const proj = { ...draft, id: genId(), budget: draft.budget || estTotal || 0, status: "новый", rawStatus: "новый" };
+                // saveListProtected при блокировке (loadedRef/база недоступна/"пусто поверх")
+                // молча возвращает undefined БЕЗ throw — try/catch сам по себе это не ловит,
+                // нужно явно проверить результат, иначе статус менялся бы, даже если проект
+                // на самом деле не создан.
+                const fpRes = await saveFinanceProjects([...projList, proj], { loadedRef: null });
+                if (!fpRes) throw new Error("saveFinanceProjects заблокирован");
+              }
+              const hasProd = productionsRef.current.some(p => p.objectId === obj.id);
+              if (!hasProd) {
+                const prod = emptyProduction(obj.id, genId);
+                prod.prodStatus = "new";
+                const prodRes = await saveProductions([...productionsRef.current, prod], { replace: true });
+                if (!prodRes) throw new Error("saveProductions заблокирован");
+              }
+            } catch (e) {
+              console.warn("auto-create finProject/production err", e);
+              alert("Не удалось перевести в статус «Договор подписан»: не получилось создать проект в Финансах и карточку Производства (нет связи с базой). Статус НЕ изменён — попробуйте ещё раз.");
+              return;
+            }
+          }
           const updated = {...obj, ...patch, updatedAt: Date.now()};
           const list = objectsRef.current.map(x=>x.id===obj.id?updated:x);
           await saveObjects(list);
           setCurrentObject(updated);
-          // При подписании договора (статус «Заключён») автоматически заводим
-          // проект в Финансах — объект становится «в работе» и появляется в Производстве.
-          if (patch.status === "signed") {
-            const cur = finProjectsRef.current;
-            const exists = cur.some(p => p.objectId === obj.id
-              || (p.contractNo && contractsRef.current.some(c => c.objectId === obj.id && normCN(c.number) === normCN(p.contractNo))));
-            if (!exists) {
-              const contract = contractsRef.current.find(c => c.objectId === obj.id) || null;
-              const estTotal = estimates.filter(e => e.objectId === obj.id).reduce((s, e) => s + (Number(e.total) || 0), 0);
-              const draft = finProjDraftFromObject(updated, contract);
-              const proj = { ...draft, id: genId(), budget: draft.budget || estTotal || 0, status: "новый", rawStatus: "новый" };
-              await saveFinanceProjects([...cur, proj]);
-            }
-            // Авто-создать карточку производства со статусом «новый»
-            const hasProd = productionsRef.current.some(p => p.objectId === obj.id);
-            if (!hasProd) {
-              const prod = emptyProduction(obj.id, genId);
-              prod.prodStatus = "new";
-              await saveProductions([...productionsRef.current, prod], { replace: true });
-            }
-          }
+          logObjChange(currentUser, obj, patch);
         };
 
         return (
-        <div className="page" style={{maxWidth:960,minHeight:"100vh"}}>
+        <div style={{padding:"20px 16px 90px",minHeight:"100vh"}}>
           {/* Шапка */}
           <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"22px 26px",marginBottom:20,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
             <div style={{position:"absolute",top:-30,right:-30,width:160,height:160,borderRadius:"50%",background:"rgba(59,130,246,.08)"}}/>
@@ -11214,10 +11908,10 @@ ${reqBlock}`;
                 <button onClick={()=>downloadCSV(
                   "objects_"+new Date().toISOString().slice(0,10)+".csv",
                   ["Статус","Клиент","Телефон","Адрес","Тип","Площадь","Менеджер","Дата создания","Смет (шт)","Сумма смет","Договоров"],
-                  filteredObjects.map(o=>{
+                  filteredObjects.filter(o=>!objectFilterStatus||unifiedStatusOf(o)===objectFilterStatus).map(o=>{
                     const ests=estimates.filter(e=>e.objectId===o.id);
-                    const cons=contracts.filter(c=>c.objectId===o.id);
-                    const st=DEAL_STATUSES.find(s=>s.key===(o.status||"new"))||DEAL_STATUSES[0];
+                    const cons=contracts.filter(c=>c.objectId===o.id && !c.deletedAt && c.type!=="podryad" && c.type!=="podryad_annex");
+                    const st=DEAL_STATUSES.find(s=>s.key===unifiedStatusOf(o))||DEAL_STATUSES[0];
                     return [st.label,o.clientName||"",o.clientPhone||"",o.address||"",o.objType||"",o.area||"",o.manager||"",o.createdAt?new Date(o.createdAt).toLocaleDateString("ru-RU"):"",ests.length,Math.round(ests.reduce((s,e)=>s+(e.total||0),0)),cons.length];
                   })
                 )} title="Экспорт в Excel" style={{background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:8,padding:"8px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>⬇ Excel</button>
@@ -11231,9 +11925,9 @@ ${reqBlock}`;
               {/* Фильтр по статусу */}
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 <button onClick={()=>setObjectFilterStatus("")}
-                  style={{background:!objectFilterStatus?"#2563eb":"rgba(0,0,0,.03)",color:!objectFilterStatus?"#fff":"#94a3b8",border:`1px solid ${!objectFilterStatus?"#2563eb":"#e2e8f0"}`,borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Все ({objects.length})</button>
+                  style={{background:!objectFilterStatus?"#2563eb":"rgba(0,0,0,.03)",color:!objectFilterStatus?"#fff":"#94a3b8",border:`1px solid ${!objectFilterStatus?"#2563eb":"#e2e8f0"}`,borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Все ({objects.filter(o=>!o.deletedAt).length})</button>
                 {DEAL_STATUSES.map(s=>{
-                  const cnt = objects.filter(o=>(o.status||"new")===s.key).length;
+                  const cnt = objects.filter(o=>!o.deletedAt && unifiedStatusOf(o)===s.key).length;
                   if(!cnt && objectFilterStatus!==s.key) return null;
                   return (
                     <button key={s.key} onClick={()=>setObjectFilterStatus(v=>v===s.key?"":s.key)}
@@ -11274,44 +11968,165 @@ ${reqBlock}`;
                 </div>
               )}
 
-              {filteredObjects.map(obj=>{
-                const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"new"))||DEAL_STATUSES[0];
+              {/* Плитки объектов — как в «Производстве». Статус единый: производство перевешивает сделку. */}
+              {(()=>{
+              const usRows = filteredObjects.filter(o=>!objectFilterStatus||unifiedStatusOf(o)===objectFilterStatus);
+              // Проекты из Финансов без объекта — тоже показываем (клик = создать объект, с подтверждением)
+              const orphanFps = prodEntries.filter(e=>!e.objectId).filter(e=>{
+                const pr = productions.find(p=>p.objectId===e.key);
+                const us = PROD_TO_DEAL[pr?.prodStatus||e.prodStatusDefault]||"new";
+                if(objectFilterStatus && us!==objectFilterStatus) return false;
+                if(objectFilterType||objectFilterManager) return false; // тип/сотрудник у финпроекта не заданы
+                const q=(objectSearch||"").toLowerCase().trim();
+                if(q && ![e.name,e.address,e.contractNo].some(v=>v&&String(v).toLowerCase().includes(q))) return false;
+                return true;
+              });
+              return (<>
+              <div style={{fontSize:12,color:"#94a3b8"}}>Объектов: {usRows.length}{orphanFps.length>0?` · проектов из Финансов без объекта: ${orphanFps.length}`:""}</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>
+              {usRows.map(obj=>{
+                const st = DEAL_STATUSES.find(s=>s.key===unifiedStatusOf(obj))||DEAL_STATUSES[0];
                 const objEsts = estimates.filter(e=>e.objectId===obj.id);
-                const objCons = contracts.filter(c=>c.objectId===obj.id);
+                const objCons = contracts.filter(c=>c.objectId===obj.id && !c.deletedAt);
+                const objConsClient = objCons.filter(c=>c.type!=="podryad"&&c.type!=="podryad_annex"); // без договоров подряда
                 // сумма объекта = все сметы (основная + доп. сметы)
                 const total = objEsts.reduce((s,e)=>s+(e.total||0),0);
+                // Финансы/производство, если объект уже в работе (те же данные, что в «Производстве»);
+                // для лида — тот же блок, но бюджет = сумма смет (карточки везде одинаковые)
+                const pe = prodEntries.find(e=>e.objectId===obj.id);
+                const pr = productions.find(p=>p.objectId===obj.id);
+                const fin = pe || { budget: total, income: 0, expense: 0, debt: total, margin: null, _est: true };
+                const sts = pr?.stages||[];
+                const doneSt = sts.filter(s=>s.status==="done").length;
+                const prog = sts.length?Math.round(doneSt/sts.length*100):0;
+                const fill = fin.budget>0?Math.min(100,Math.round(fin.income/fin.budget*100)):0;
+                const mCol = fin.margin==null?"#94a3b8":fin.margin>=30?"#059669":fin.margin>=0?"#f59e0b":"#dc2626";
                 return (
-                  <div key={obj.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"14px 18px",cursor:"pointer",transition:"all .15s"}}
-                    onClick={()=>{ setCurrentObject({...obj}); setObjectTab("workspace"); }}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-                      <div style={{minWidth:0,flex:1}}>
-                        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                          <span style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>{obj.clientName||<span style={{color:"#94a3b8",fontStyle:"italic",fontWeight:400}}>Без клиента</span>}</span>
-                          {obj.clientPhone&&<span style={{fontSize:12,color:"#64748b",fontWeight:500}}>📞 {obj.clientPhone}</span>}
-                          <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:4,padding:"1px 7px",whiteSpace:"nowrap"}}>{st.label}</span>
+                  <div key={obj.id} onClick={()=>{ setCurrentObject({...obj}); setObjectTab("workspace"); }}
+                    style={{background:"#fff",border:"1px solid #eef2f7",borderRadius:16,cursor:"pointer",boxShadow:"0 1px 3px rgba(15,23,42,.07)",transition:"box-shadow .15s,transform .15s",overflow:"hidden",display:"flex",flexDirection:"column"}}
+                    onMouseEnter={e=>{e.currentTarget.style.boxShadow="0 8px 24px rgba(0,0,0,.08)";e.currentTarget.style.transform="translateY(-2px)";}}
+                    onMouseLeave={e=>{e.currentTarget.style.boxShadow="none";e.currentTarget.style.transform="none";}}>
+                    {/* Цветная полоса по статусу */}
+                    <div style={{height:4,background:`linear-gradient(90deg,${st.color},${st.color}99)`,flexShrink:0}}/>
+                    <div style={{padding:"14px 16px",flex:1,display:"flex",flexDirection:"column"}}>
+                      {/* Шапка карточки */}
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:14,fontWeight:800,color:"#0f172a",lineHeight:1.3,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{obj.clientName||<span style={{color:"#94a3b8",fontStyle:"italic",fontWeight:400}}>Без клиента</span>}</div>
+                          {obj.clientPhone&&<div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>📞 {obj.clientPhone}</div>}
+                          {obj.address&&<div style={{fontSize:11.5,color:"#64748b",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>📍 {obj.address}{obj.area?` · ${obj.area} м²`:""}</div>}
                         </div>
-                        <div style={{fontSize:12,color:"#94a3b8",marginTop:3}}>
-                          {obj.objType||"Вторичка"}{obj.address?` · 📍 ${obj.address}`:""}
-                          {obj.area?` · ${obj.area} м²`:""}
-                        </div>
-                        <div style={{fontSize:11,color:"#94a3b8",marginTop:3,display:"flex",gap:10,flexWrap:"wrap"}}>
-                          {obj.createdAt&&<span>📅 {fmtDate(obj.createdAt)}</span>}
-                          <span>📋 {objEsts.length} смет</span>
-                          <span>📄 {objCons.length} договоров</span>
-                          {obj.manager&&<span>👤 {obj.manager}</span>}
+                        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
+                          <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap"}}>{st.label}</span>
+                          {(currentUser.role==="admin"||(currentUser.role==="user"&&obj.createdById===currentUser.id)) && (
+                            <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить объект в корзину?")){ saveObjects(objectsRef.current.map(x=>x.id===obj.id?{...x,deletedAt:Date.now()}:x)); logChange(currentUser,{entity:"object",entityId:obj.id,objectId:obj.id,label:_objLabel(obj),action:"удалил объект"}); }}}
+                              title="В корзину (можно восстановить)" style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.15)",borderRadius:6,padding:"2px 7px",fontSize:11,cursor:"pointer",fontFamily:"inherit",marginTop:2}}>🗑</button>
+                          )}
                         </div>
                       </div>
-                      <div style={{textAlign:"right",flexShrink:0}}>
-                        {total>0&&<div style={{fontWeight:800,fontSize:16,color:"#0f172a"}}>{fmt(total)} ₸</div>}
-                        {(currentUser.role==="admin"||(currentUser.role==="user"&&obj.createdById===currentUser.id)) && (
-                          <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить объект в корзину?")){ saveObjects(objectsRef.current.map(x=>x.id===obj.id?{...x,deletedAt:Date.now()}:x)); writeAudit(currentUser,"удалил объект","object",obj.id,obj.clientName||obj.address||obj.objType||""); }}}
-                            title="В корзину (можно восстановить)" style={{marginTop:6,background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
-                        )}
+                      {/* Финансовый блок — единый вид для всех карточек (как в «Производстве»).
+                          У лида бюджет = сумма смет (помечено «смета»), оплаты ещё нет.
+                          Видно только admin/manager — у остальных ролей нет доступа к финансам вообще. */}
+                      {(_isAdmin||_isMgr||_isForeman) && <div style={{marginBottom:10}}>
+                        {fin.budget>0 ? <>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
+                            <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{fmt(fin.income)} <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>из {fmt(fin.budget)} ₸{fin._est?" · смета":""}</span></span>
+                            <span style={{fontSize:12,fontWeight:800,color:fill>=100?"#059669":"#2563eb"}}>{fill}%</span>
+                          </div>
+                          <div style={{height:6,background:"#f1f5f9",borderRadius:4,overflow:"hidden"}}>
+                            <div style={{width:fill+"%",height:"100%",background:fill>=100?"linear-gradient(90deg,#059669,#34d399)":"linear-gradient(90deg,#2563eb,#60a5fa)",borderRadius:4,transition:"width .3s"}}/>
+                          </div>
+                        </> : <div><span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{fin.income>0?fmt(fin.income)+" ₸":"—"}</span><span style={{fontSize:10,color:"#94a3b8",marginLeft:7}}>{fin._est?"нет сметы":"бюджет не указан"}</span></div>}
+                        <div style={{borderTop:"1px solid #f1f5f9",marginTop:10}}>
+                          {[["Долг",fin.debt>0?fmt(fin.debt)+" ₸":"—",fin.debt>0?"#dc2626":"#94a3b8"],
+                            ["Расходы",fin.expense>0?fmt(fin.expense)+" ₸":"—",fin.expense>0?"#dc2626":"#94a3b8"]
+                          ].map(([l,v,c])=>(
+                            <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9"}}>
+                              <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>{l}</span>
+                              <span style={{fontSize:13,fontWeight:700,color:c}}>{v}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:fin.margin==null?"#f8fafc":fin.margin>=30?"#f0fdf4":fin.margin>=0?"#fffbeb":"#fef2f2",borderRadius:10,padding:"8px 12px",marginTop:8}}>
+                          <span style={{fontSize:11,fontWeight:700,color:"#475569"}}>Маржа</span>
+                          <span style={{display:"flex",alignItems:"center",gap:7}}>
+                            <span style={{fontSize:14,fontWeight:800,color:mCol}}>{fin.income>0?fmt(fin.income-fin.expense)+" ₸":"—"}</span>
+                            {fin.margin!=null&&<span style={{fontSize:10,fontWeight:800,color:"#fff",background:mCol,borderRadius:6,padding:"2px 7px"}}>{fin.margin}%</span>}
+                          </span>
+                        </div>
+                      </div>}
+                      {/* Футер (договоры — только клиентские, без подряда) */}
+                      <div style={{marginTop:"auto",display:"flex",flexWrap:"wrap",gap:"4px 10px",fontSize:11,color:"#64748b",borderTop:"1px solid #f1f5f9",paddingTop:10}}>
+                        <span>📋 {objEsts.length} смет</span>
+                        <span>📄 {objConsClient.length} дог.</span>
+                        {sts.length>0&&<span>🔨 {doneSt}/{sts.length} эт. · {prog}%</span>}
+                        {obj.manager&&<span>👤 {obj.manager}</span>}
+                        {obj.createdAt&&<span>📅 {fmtDate(obj.createdAt)}</span>}
                       </div>
                     </div>
                   </div>
                 );
               })}
+              {/* Проекты из Финансов, у которых ещё нет объекта: клик = создать объект (с подтверждением) */}
+              {orphanFps.map(e=>{
+                const pr = productions.find(p=>p.objectId===e.key);
+                const usKey = PROD_TO_DEAL[pr?.prodStatus||e.prodStatusDefault]||"new";
+                const st = DEAL_STATUSES.find(s=>s.key===usKey)||DEAL_STATUSES[0];
+                const fill = e.budget>0?Math.min(100,Math.round(e.income/e.budget*100)):0;
+                const mCol = e.margin==null?"#94a3b8":e.margin>=30?"#059669":e.margin>=0?"#f59e0b":"#dc2626";
+                return (
+                  <div key={e.key} onClick={()=>{
+                      if(!window.confirm(`«${e.name}» — проект из Финансов, объекта у него ещё нет.\nСоздать объект со статусом «${st.label}»?`)) return;
+                      const newObj = { id: Date.now().toString(), clientName: e.name||"Проект", clientPhone:"", address: e.address||"", objType:"Вторичка", status: usKey, manager: currentUser.name, createdAt: Date.now(), createdById: currentUser.id, updatedAt: Date.now(), _fromFinProject: e.fpId };
+                      saveObjects([...objectsRef.current, newObj]);
+                      writeAudit(currentUser,"создал объект из финпроекта","object",newObj.id,newObj.clientName);
+                      setCurrentObject(newObj); setObjectTab("workspace");
+                    }}
+                    style={{background:"#fff",border:"1px dashed #cbd5e1",borderRadius:16,cursor:"pointer",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+                    <div style={{height:4,background:`linear-gradient(90deg,${st.color},${st.color}99)`,flexShrink:0}}/>
+                    <div style={{padding:"14px 16px",flex:1,display:"flex",flexDirection:"column"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:14,fontWeight:800,color:"#0f172a",lineHeight:1.3}}>{e.name}</div>
+                          {e.contractNo&&<div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>№{String(e.contractNo).replace(/^№+/,"")}</div>}
+                          {e.address&&<div style={{fontSize:11.5,color:"#64748b",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>📍 {e.address}</div>}
+                        </div>
+                        <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap",flexShrink:0}}>{st.label}</span>
+                      </div>
+                      {(_isAdmin||_isMgr||_isForeman) && <div style={{marginBottom:10}}>
+                        {e.budget>0 ? <>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
+                            <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{fmt(e.income)} <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>из {fmt(e.budget)} ₸</span></span>
+                            <span style={{fontSize:12,fontWeight:800,color:fill>=100?"#059669":"#2563eb"}}>{fill}%</span>
+                          </div>
+                          <div style={{height:6,background:"#f1f5f9",borderRadius:4,overflow:"hidden"}}><div style={{width:fill+"%",height:"100%",background:fill>=100?"linear-gradient(90deg,#059669,#34d399)":"linear-gradient(90deg,#2563eb,#60a5fa)",borderRadius:4}}/></div>
+                        </> : <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{e.income>0?fmt(e.income)+" ₸":"—"}</span>}
+                        <div style={{borderTop:"1px solid #f1f5f9",marginTop:10}}>
+                          {[["Долг",e.debt>0?fmt(e.debt)+" ₸":"—",e.debt>0?"#dc2626":"#94a3b8"],["Расходы",e.expense>0?fmt(e.expense)+" ₸":"—",e.expense>0?"#dc2626":"#94a3b8"]].map(([l,v,c])=>(
+                            <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9"}}>
+                              <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:c}}>{v}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:e.margin==null?"#f8fafc":e.margin>=30?"#f0fdf4":e.margin>=0?"#fffbeb":"#fef2f2",borderRadius:10,padding:"8px 12px",marginTop:8}}>
+                          <span style={{fontSize:11,fontWeight:700,color:"#475569"}}>Маржа</span>
+                          <span style={{display:"flex",alignItems:"center",gap:7}}>
+                            <span style={{fontSize:14,fontWeight:800,color:mCol}}>{e.income>0?fmt(e.income-e.expense)+" ₸":"—"}</span>
+                            {e.margin!=null&&<span style={{fontSize:10,fontWeight:800,color:"#fff",background:mCol,borderRadius:6,padding:"2px 7px"}}>{e.margin}%</span>}
+                          </span>
+                        </div>
+                      </div>}
+                      <div style={{marginTop:"auto",display:"flex",flexWrap:"wrap",gap:"4px 10px",fontSize:11,color:"#64748b",borderTop:"1px solid #f1f5f9",paddingTop:10}}>
+                        <span>💼 проект из Финансов</span>
+                        <span style={{color:"#2563eb",fontWeight:700}}>+ создать объект</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              </div>
+              </>);
+              })()}
             </div>
           )}
 
@@ -11338,7 +12153,7 @@ ${reqBlock}`;
                       <div style={{display:"flex",gap:8}}>
                         <button onClick={()=>saveObjects(objectsRef.current.map(x=>x.id===obj.id?{...x,deletedAt:undefined}:x))}
                           style={{background:"#f0fdf4",color:"#059669",border:"1px solid #bbf7d0",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↩ Восстановить</button>
-                        {currentUser.role==="admin" && <button onClick={()=>{if(confirm("Удалить безвозвратно?")) saveObjects(objectsRef.current.filter(x=>x.id!==obj.id),{removedIds:[obj.id],allowEmpty:true});}}
+                        {currentUser.role==="admin" && <button onClick={async ()=>{if(await confirmTyped("Удалить объект безвозвратно?")) saveObjects(objectsRef.current.filter(x=>x.id!==obj.id),{removedIds:[obj.id],allowEmpty:true});}}
                           style={{background:"rgba(220,38,38,.1)",color:"#dc2626",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"7px 12px",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>✕ Удалить</button>}
                       </div>
                     </div>
@@ -11352,7 +12167,7 @@ ${reqBlock}`;
             const obj = currentObject;
             const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"new"))||DEAL_STATUSES[0];
             const _allEsts = estimates.filter(e=>e.objectId===obj.id);
-            const _allCons = contracts.filter(c=>c.objectId===obj.id);
+            const _allCons = contracts.filter(c=>c.objectId===obj.id && !c.deletedAt);
             // Дерево смет: основная смета → под ней доп. сметы (ДС). parentId===id (битая ссылка) трактуем как основную.
             const _estIsMain = (e) => !e.parentId || e.parentId===e.id;
             const _estMains = _allEsts.filter(_estIsMain).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
@@ -11364,13 +12179,15 @@ ${reqBlock}`;
             // осиротевшие ДС (родитель удалён) — показываем в конце
             _allEsts.filter(e=>!_estIsMain(e) && !_estMains.some(m=>m.id===e.parentId)).forEach(ch=>objEsts.push(ch));
             // Дерево договоров: основной договор → под ним доп. соглашения (приложения)
-            const _conMains = _allCons.filter(c=>(c.type||"repair_fiz")!=="annex").sort((a,b)=>(b.id||0)-(a.id||0));
+            // Приложения (в т.ч. к договорам подряда) идут детьми под своим договором
+            const _conIsChild = c => c.type==="annex" || c.type==="podryad_annex";
+            const _conMains = _allCons.filter(c=>!_conIsChild(c)).sort((a,b)=>(b.id||0)-(a.id||0));
             const objCons = [];
             _conMains.forEach(m=>{
               objCons.push(m);
-              _allCons.filter(c=>c.type==="annex" && c.mainNumber && c.mainNumber===m.number).sort((a,b)=>(a.appendix||0)-(b.appendix||0)).forEach(ch=>objCons.push(ch));
+              _allCons.filter(c=>_conIsChild(c) && c.mainNumber && normCN(c.mainNumber)===normCN(m.number)).sort((a,b)=>(a.appendix||0)-(b.appendix||0)).forEach(ch=>objCons.push(ch));
             });
-            _allCons.filter(c=>c.type==="annex" && !(c.mainNumber && _conMains.some(m=>m.number===c.mainNumber))).forEach(ch=>objCons.push(ch));
+            _allCons.filter(c=>_conIsChild(c) && !(c.mainNumber && _conMains.some(m=>normCN(m.number)===normCN(c.mainNumber)))).forEach(ch=>objCons.push(ch));
             const canEdit = currentUser.role==="admin"||(currentUser.role==="user"&&obj.createdById===currentUser.id);
             // Текст печатаем локально (отзывчиво), сохраняем на blur. Синхронизируем скрытую запись клиента.
             const setObjLocal = (patch) => setCurrentObject(p=>({...p,...patch}));
@@ -11393,10 +12210,8 @@ ${reqBlock}`;
               return upd;
             });
 
-            return (
-              <div>
-                {/* Карточка объекта — компактная */}
-                <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
+            const clientCardNode = (
+                <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10,boxSizing:"border-box"}}>
                   {/* Статус */}
                   <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                     {DEAL_STATUSES.map(s=>(
@@ -11509,9 +12324,32 @@ ${reqBlock}`;
                   </div>
                   )}
                 </div>
+            );
 
-                {/* Сметы объекта */}
-                <div style={{marginTop:24}}>
+            return (
+              <div>
+                {/* Вкладки карточки объекта: Информация · Сметы · Документы · производство */}
+                <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap",borderBottom:"1px solid #e2e8f0"}}>
+                  {[
+                    ["info","ℹ️ Информация"],
+                    ["documents",`📄 Документы (${objEsts.length+objCons.length+reports.filter(r=>r.objectId===obj.id).length})`],
+                    ["launch","🚀 Запуск"],
+                    ["stages","🔨 Этапы"],
+                    ["finance","💰 Финансы"],
+                    ["journal","📖 Журнал"],
+                    ["defects","⚠️ Замечания"],
+                    ["handover","🏁 Сдача"],
+                    ...(_isAdmin ? [["changes","🧾 Изменения"]] : []),
+                  ].map(([k,l])=>(
+                    <button key={k} onClick={()=>setObjWsTab(k)}
+                      style={{background:objWsTab===k?"#fff":"transparent",border:"1px solid",borderColor:objWsTab===k?"#e2e8f0":"transparent",borderBottom:objWsTab===k?"1px solid #fff":"1px solid transparent",marginBottom:-1,borderRadius:"10px 10px 0 0",padding:"9px 14px",fontSize:13,fontWeight:objWsTab===k?700:500,color:objWsTab===k?"#0f172a":"#64748b",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+
+                {objWsTab==="documents" && (
+                <div style={{marginTop:0}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                     <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>📋 Сметы ({objEsts.length})</div>
                     {currentUser.role!=="viewer" && (
@@ -11553,8 +12391,8 @@ ${reqBlock}`;
                                   <button title="Сформировать акт выполненных работ (Р-1) по этой смете" onClick={()=>openAvrBuilder(obj,est)}
                                     style={{background:"rgba(124,58,237,.08)",color:"#7c3aed",border:"1px solid rgba(124,58,237,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>📋 Акт</button>
                                 )}
-                                {currentUser.role!=="viewer" && !isChild && (
-                                  <button title="Договор подряда с рабочим (работы из этой сметы, суммы редактируются)" onClick={()=>{
+                                {currentUser.role!=="viewer" && !_isUser && !isChild && (
+                                  <button title="Договор подряда с подрядчиком (работы из этой сметы, суммы редактируются). Подрядчика и «новый договор / приложение» выбираешь в редакторе." onClick={()=>{
                                     const ws = estimateToWorks(est);
                                     const podCount = contractsRef.current.filter(c=>c.type==="podryad").length;
                                     setObjectReturnId(obj.id);
@@ -11572,7 +12410,7 @@ ${reqBlock}`;
                                     style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(100,100,200,.15)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>⧉</button>
                                 )}
                                 {(currentUser.role==="admin"||(currentUser.role==="user"&&est.createdBy===currentUser.name)) && (
-                                  <button title="Удалить смету" onClick={()=>{ if(window.confirm("Удалить смету?")) deleteEstimate(est.id); }}
+                                  <button title="Удалить смету" onClick={async ()=>{ if(await confirmTyped("Удалить смету?\nЭто действие нельзя отменить.")) deleteEstimate(est.id); }}
                                     style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                                 )}
                               </div>
@@ -11583,8 +12421,10 @@ ${reqBlock}`;
                     })}
                   </div>
                 </div>
+                )}
 
-                {/* Договоры объекта */}
+                {objWsTab==="documents" && (<>
+                {/* Договоры объекта (включая договоры подряда, созданные в рамках объекта) */}
                 <div style={{marginTop:24}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                     <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>📄 Договоры ({objCons.length})</div>
@@ -11596,41 +12436,70 @@ ${reqBlock}`;
                     </div>
                   )}
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                    {objCons.map(c=>{
+                    {(()=>{
+                      // Приложения идут СРАЗУ под своим договором. Подряд — только под договором подряда,
+                      // ремонт/дизайн — только под своим (приложение подряда НЕ попадает под договор ремонта).
+                      const _normNum = s => String(s||"").trim().toLowerCase().replace(/[\s№#]/g,"");
+                      const _isChildC = c => c.type==="annex"||c.type==="design_add"||c.type==="podryad_annex";
+                      const _isPodC = c => c.type==="podryad"||c.type==="podryad_annex";
+                      const _rootsC = objCons.filter(c=>!_isChildC(c));
+                      const _findParent = ch => {
+                        const fam = _rootsC.filter(p=>_isPodC(p)===_isPodC(ch)); // та же «семья» (подряд/не подряд)
+                        if(ch.mainNumber){ const m=fam.find(p=>_normNum(p.number)===_normNum(ch.mainNumber)); if(m) return m; }
+                        return fam.length===1 ? fam[0] : null; // если родитель один — привязываем к нему
+                      };
+                      const _kids = {}; const _claimed = new Set();
+                      objCons.forEach(c=>{ if(_isChildC(c)){ const p=_findParent(c); if(p){ (_kids[p.id]||(_kids[p.id]=[])).push(c); _claimed.add(c.id); } } });
+                      Object.values(_kids).forEach(a=>a.sort((x,y)=>(x.appendix||0)-(y.appendix||0)));
+                      const _ordered = [];
+                      _rootsC.forEach(p=>{ _ordered.push(p); (_kids[p.id]||[]).forEach(ch=>_ordered.push(ch)); });
+                      objCons.forEach(c=>{ if(_isChildC(c) && !_claimed.has(c.id)) _ordered.push(c); }); // сироты — в конец
+                      return _ordered.map(c=>{
                       const cl2 = contractClients.find(x=>x.id===c.clientId);
                       const ca2 = contragents.find(x=>x.id===c.contragentId);
                       const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
                       const stC = CONTRACT_STATUSES.find(x=>x.key===(c.contractStatus||"draft"))||CONTRACT_STATUSES[0];
-                      const TLABEL = {repair_fiz:"Договор",annex:"Доп. соглашение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронь"};
-                      const isAnnex = c.type==="annex";
-                      const conTitle = isAnnex ? `Доп. соглашение №${c.appendix||2}`+(c.mainNumber?` к договору №${c.mainNumber}`:"") : `${TLABEL[c.type||"repair_fiz"]||"Договор"} №${c.number||"б/н"}`;
+                      const TLABEL = {repair_fiz:"Договор ремонта",annex:"Доп. соглашение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронь",podryad:"👷 Договор подряда"};
+                      const isAnnex = c.type==="annex" || c.type==="podryad_annex";
+                      const conTitle = isAnnex
+                        ? `${c.type==="podryad_annex"?"Приложение":"Доп. соглашение"} №${c.appendix||2}`+(c.mainNumber?` к договору №${c.mainNumber}`:"")
+                        : `${TLABEL[c.type||"repair_fiz"]||"Договор"} №${c.number||"б/н"}`;
+                      const _isPod = c.type==="podryad"||c.type==="podryad_annex";
+                      const _workerName = _isPod ? ((workers.find(w=>w.id===c.workerId)?.name)||c.worker?.name||"") : "";
+                      // Замерщику подряд виден, но открывать нельзя (себестоимость)
+                      const _podLocked = _isUser && _isPod;
                       return (
-                        <div key={c.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 16px",cursor:"pointer",transition:"all .12s",marginLeft:isAnnex?16:0,borderLeft:isAnnex?"3px solid #ede9fe":"1px solid #e5e7eb"}}
-                          onClick={()=>{ setCurrentContract({...c}); setObjectReturnId(obj.id); setContractTab("editor"); setScreen("contracts"); }}>
+                        <div key={c.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 16px",cursor:_podLocked?"default":"pointer",transition:"all .12s",marginLeft:isAnnex?16:0,borderLeft:isAnnex?"3px solid #ede9fe":"1px solid #e5e7eb",opacity:_podLocked?.75:1}}
+                          onClick={_podLocked?undefined:()=>{ setCurrentContract({...c}); setObjectReturnId(obj.id); setContractTab("editor"); setScreen("contracts"); }}>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                                {isAnnex && <span style={{fontSize:10,fontWeight:700,color:"#7c3aed",background:"rgba(124,58,237,.08)",borderRadius:3,padding:"1px 6px"}}>Доп. согл.</span>}
+                                {isAnnex && <span style={{fontSize:10,fontWeight:700,color:"#7c3aed",background:"rgba(124,58,237,.08)",borderRadius:3,padding:"1px 6px"}}>{c.type==="podryad_annex"?"Прил. подряда":"Доп. согл."}</span>}
                                 <span style={{fontWeight:600,fontSize:13,color:"#0f172a"}}>{conTitle}</span>
+                                {_podLocked && <span title="Доступ закрыт" style={{fontSize:11}}>🔒</span>}
                                 <span style={{fontSize:10,fontWeight:700,color:stC.color,background:stC.bg,borderRadius:4,padding:"1px 6px"}}>{stC.label}</span>
                               </div>
                               <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>
-                                {cl2?.name||c.estClient||"Клиент не выбран"} · {new Date(c.date||Date.now()).toLocaleDateString("ru-RU")} · {(c.works||[]).length} позиций
+                                {_isPod ? (_workerName ? `🔨 ${_workerName}` : "Подрядчик не выбран") : (cl2?.name||c.estClient||"Клиент не выбран")} · {new Date(c.date||Date.now()).toLocaleDateString("ru-RU")} · {(c.works||[]).length} позиций
                               </div>
                             </div>
                             <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
                               <div style={{fontWeight:800,fontSize:15,color:"#0f172a"}}>{fmt(total)} ₸</div>
                               <div style={{display:"flex",gap:4}} onClick={e=>e.stopPropagation()}>
-                                <button onClick={()=>generateContractPdf(c,cl2,ca2)}
-                                  style={{background:"#e2e8f0",color:"#334155",border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>
-                                <button onClick={()=>generateContractGDoc(c,cl2,ca2)}
-                                  style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>
-                                {currentUser.role==="admin" && (()=>{ const exists=finProjectsRef.current.find(p=>normCN(p.contractNo)===normCN(c.number));
-                                  return <button onClick={()=>startFinProjFromObject(obj,c)} title={exists?"Открыть проект в финансах":"Завести проект в финансах"}
-                                    style={{background:exists?"#f0fdf4":"rgba(5,150,105,.1)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 {exists?"В финансах ✓":"В финансы"}</button>;
+                                {!_podLocked && <button onClick={()=>generateContractPdf(c,cl2,ca2)}
+                                  style={{background:"#e2e8f0",color:"#334155",border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>}
+                                {!_podLocked && <button onClick={()=>generateContractGDoc(c,cl2,ca2)}
+                                  style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>}
+                                {currentUser.role==="admin" && c.type!=="podryad" && c.type!=="podryad_annex" && (()=>{
+                                  const main = mainContractOf(c);
+                                  const exists = finProjectsRef.current.find(p=>normCN(p.contractNo)===normCN(main?.number));
+                                  const isAnx = c.type==="annex";
+                                  return <button onClick={()=>startFinProjFromObject(obj,c)}
+                                    title={isAnx ? (exists?"Обновить проект основного договора (учесть доп. соглашение)":"Завести проект по основному договору (с учётом доп. соглашения)") : (exists?"Открыть проект в финансах":"Завести проект в финансах")}
+                                    style={{background:exists?"#f0fdf4":"rgba(5,150,105,.1)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 {isAnx ? (exists?"В проект ✓":"В проект") : (exists?"В финансах ✓":"В финансы")}</button>;
                                 })()}
                                 {(currentUser.role==="admin"||(currentUser.role==="user"&&c.createdBy===currentUser.name)) && (
-                                  <button onClick={()=>{ if(window.confirm("Удалить договор?")) saveContracts(contractsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
+                                  <button onClick={async ()=>{ if(await confirmTyped("Удалить договор?\nЭто действие нельзя отменить через интерфейс.")) saveContracts(contractsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
                                     style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                                 )}
                               </div>
@@ -11638,7 +12507,8 @@ ${reqBlock}`;
                           </div>
                         </div>
                       );
-                    })}
+                    });
+                    })()}
                   </div>
                 </div>
 
@@ -11692,7 +12562,7 @@ ${reqBlock}`;
                                       style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
                                   )}
                                   {(currentUser.role==="admin"||(currentUser.role==="user"&&r.createdBy===currentUser.name)) && (
-                                    <button title="Удалить акт" onClick={()=>{ if(window.confirm("Удалить акт?")) saveReports(reportsRef.current.filter(x=>x.id!==r.id),{removedIds:[r.id],allowEmpty:true}); }}
+                                    <button title="Удалить акт" onClick={async ()=>{ if(await confirmTyped("Удалить акт?\nЭто действие нельзя отменить через интерфейс.")) saveReports(reportsRef.current.filter(x=>x.id!==r.id),{removedIds:[r.id],allowEmpty:true}); }}
                                       style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                                   )}
                                 </div>
@@ -11704,6 +12574,53 @@ ${reqBlock}`;
                     </div>
                   );
                 })()}
+                </>)}
+
+                {/* Вкладка «Финансы» объекта: видят admin/manager/foreman (руководство + прораб —
+                    финансы ВНУТРИ объекта). Замерщик (user) и viewer — пометка «доступ закрыт».
+                    Замерщик видит себестоимость/маржу только в смете при заполнении, больше нигде. */}
+                {objWsTab==="finance" && !(_isAdmin||_isMgr||_isForeman) && (
+                  <div style={{maxWidth:480,margin:"32px auto",textAlign:"center",background:"#f9fafb",border:"1px dashed #e5e7eb",borderRadius:12,padding:"32px 24px"}}>
+                    <div style={{fontSize:38,marginBottom:12}}>🔒</div>
+                    <div style={{fontWeight:800,fontSize:16,color:"#0f172a",marginBottom:6}}>Доступ закрыт</div>
+                    <div style={{fontSize:13,color:"#64748b",lineHeight:1.5}}>Финансы по объекту доступны руководству и прорабу.</div>
+                  </div>
+                )}
+                {/* Журнал изменений по объекту (только админ) */}
+                {objWsTab==="changes" && _isAdmin && (
+                  <div style={{marginTop:8}}>
+                    <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Кто и когда менял статус, сумму, оплаты, сроки, прораба и доступ клиента по этому объекту.</div>
+                    <AuditTab objectId={obj.id} />
+                  </div>
+                )}
+                {/* Производственные вкладки (и производственная часть «Информации») — встроенный модуль Производства */}
+                {["info","launch","stages","finance","journal","defects","handover"].includes(objWsTab) && !(objWsTab==="finance" && !(_isAdmin||_isMgr||_isForeman)) && (
+                  <div style={{marginTop: objWsTab==="info" ? 14 : 0}}>
+                  <ProductionModule
+                    embedObjectId={obj.id}
+                    embedTab={objWsTab}
+                    clientInfoCard={clientCardNode}
+                    objects={objects}
+                    entries={prodEntries}
+                    allObjects={objects}
+                    unlinkedProjects={unlinkedFinProjects}
+                    estimates={estimates}
+                    contracts={contracts}
+                    productions={productions}
+                    onSaveProduction={onSaveProduction}
+                    onDeleteProduction={onDeleteProduction}
+                    onToggleClientShare={toggleClientShare}
+                    onSetClientVis={setClientVis}
+                    buildStagesFromEstimate={buildStagesFromEstimate}
+                    finProjects={finProjects}
+                    financeTx={financeTx}
+                    fmt={fmt}
+                    genId={genId}
+                    currentUser={currentUser}
+                    onAudit={(ev)=>logChange(currentUser, ev)}
+                  />
+                  </div>
+                )}
               </div>
             );
           })()}
@@ -11823,14 +12740,16 @@ ${reqBlock}`;
                     const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
                     const isPod = c.type==="podryad" || c.type==="podryad_annex";
                     const workerName = isPod ? workerNameOf(c) : "";
+                    // Замерщику подряд виден, но открывать нельзя (себестоимость)
+                    const _podLocked = _isUser && isPod;
                     return (
                       <div key={c.id}>
                         {isChild && <div style={{display:"flex",alignItems:"center",gap:6,marginLeft:26,marginBottom:2,marginTop:4}}>
                           <div style={{width:2,height:14,background:"#e2e8f0",borderRadius:2,flexShrink:0}}/>
                           <span style={{fontSize:10,color:"#7c3aed",fontWeight:700,background:"rgba(124,58,237,.08)",borderRadius:3,padding:"1px 6px"}}>Приложение №{c.appendix||2}</span>
                         </div>}
-                        <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:8,padding:"14px 18px",cursor:"pointer",transition:"all .15s",marginLeft:isChild?26:0,borderLeft:isChild?"3px solid #ede9fe":(isPod?"3px solid #10b981":"1px solid #e5e7eb")}}
-                          onClick={()=>{ setCurrentContract({...c}); setContractTab("editor"); }}>
+                        <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:8,padding:"14px 18px",cursor:_podLocked?"default":"pointer",transition:"all .15s",marginLeft:isChild?26:0,borderLeft:isChild?"3px solid #ede9fe":(isPod?"3px solid #10b981":"1px solid #e5e7eb"),opacity:_podLocked?.75:1}}
+                          onClick={_podLocked?undefined:()=>{ setCurrentContract({...c}); setContractTab("editor"); }}>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
@@ -11843,6 +12762,7 @@ ${reqBlock}`;
                                 <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>
                                   {contractTitle(c)}{isPod && workerName ? ` — ${workerName}` : ""}
                                 </div>
+                                {_podLocked && <span title="Доступ закрыт" style={{fontSize:12,flexShrink:0}}>🔒</span>}
                                 {(()=>{ const s=CONTRACT_STATUSES.find(x=>x.key===(c.contractStatus||"draft"))||CONTRACT_STATUSES[0]; return <span style={{fontSize:10,fontWeight:700,color:s.color,background:s.bg,borderRadius:4,padding:"1px 7px",flexShrink:0,whiteSpace:"nowrap"}}>{s.label}</span>; })()}
                                 {!isChild && kidsCount>0 && <span style={{fontSize:10,fontWeight:700,color:"#7c3aed",background:"rgba(124,58,237,.08)",borderRadius:4,padding:"1px 7px",flexShrink:0,whiteSpace:"nowrap"}}>приложений: {kidsCount}</span>}
                               </div>
@@ -11859,22 +12779,22 @@ ${reqBlock}`;
                             <div style={{textAlign:"right",flexShrink:0}}>
                               <div style={{fontWeight:800,fontSize:16,color:"#0f172a"}}>{fmt(total)} ₸</div>
                               <div style={{display:"flex",gap:5,marginTop:6}}>
-                                {c.type==="podryad" && !isChild && currentUser.role!=="viewer" && (
+                                {c.type==="podryad" && !isChild && currentUser.role!=="viewer" && !_isUser && (
                                   <button title="Создать доп. приложение к этому договору подряда" onClick={e=>{e.stopPropagation(); createPodryadAnnex(c);}}
                                     style={{background:"#ecfdf5",color:"#059669",border:"1px solid rgba(5,150,105,.25)",borderRadius:5,padding:"3px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ Приложение</button>
                                 )}
-                                <button onClick={e=>{e.stopPropagation();
+                                {!_podLocked && <button onClick={e=>{e.stopPropagation();
                                   const cl = contractClients.find(x=>x.id===c.clientId);
                                   const ca2 = contragents.find(x=>x.id===c.contragentId);
                                   generateContractPdf(c, cl, ca2);
-                                }} style={{background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>
-                                <button onClick={e=>{e.stopPropagation();
+                                }} style={{background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>}
+                                {!_podLocked && <button onClick={e=>{e.stopPropagation();
                                   const cl = contractClients.find(x=>x.id===c.clientId);
                                   const ca2 = contragents.find(x=>x.id===c.contragentId);
                                   generateContractGDoc(c, cl, ca2);
-                                }} style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>
+                                }} style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>}
                                 {(currentUser.role==="admin" || (currentUser.role==="user" && c.createdBy===currentUser.name)) && (
-                                  <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить в корзину?")){ saveContracts(contractsRef.current.map(x=>x.id===c.id?{...x,deletedAt:Date.now()}:x)); writeAudit(currentUser,"удалил договор","contract",c.id,c.contractNo||c.objectName||""); }}}
+                                  <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить в корзину?")){ saveContracts(contractsRef.current.map(x=>x.id===c.id?{...x,deletedAt:Date.now()}:x)); logChange(currentUser,{entity:"contract",entityId:c.id,objectId:c.objectId||"",label:c.contractNo||c.objectName||"Договор",action:"удалил договор"}); }}}
                                     style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                                 )}
                               </div>
@@ -11935,7 +12855,7 @@ ${reqBlock}`;
                           <span style={{fontWeight:700,fontSize:14,color:"#64748b"}}>{fmt(total)} ₸</span>
                           <button onClick={()=>saveContracts(contractsRef.current.map(x=>x.id===c.id?{...x,deletedAt:undefined}:x))}
                             style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:5,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>↩ Восстановить</button>
-                          {currentUser.role==="admin" && <button onClick={()=>{ if(window.confirm("Удалить навсегда?")) saveContracts(contractsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
+                          {currentUser.role==="admin" && <button onClick={async ()=>{ if(await confirmTyped("Удалить договор навсегда?")) saveContracts(contractsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
                             style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✕ Удалить</button>}
                         </div>
                       </div>
@@ -11965,10 +12885,10 @@ ${reqBlock}`;
                   setContractTab("list");
                 }}
                 onSave={async ()=>{
-                  const isNewContract = !contracts.find(x=>x.id===currentContract.id);
+                  const _oldC = contracts.find(x=>x.id===currentContract.id) || null;
                   const list = contracts.filter(x=>x.id!==currentContract.id);
                   await saveContracts([...list, currentContract]);
-                  writeAudit(currentUser, isNewContract?"создал договор":"изменил договор", "contract", currentContract.id, currentContract.contractNo||currentContract.number||currentContract.objectName||"");
+                  logContractSave(currentUser, _oldC, currentContract);
                   if (objectReturnId) {
                     const obj = objectsRef.current.find(x=>x.id===objectReturnId);
                     setObjectReturnId(null);
@@ -12029,10 +12949,12 @@ ${reqBlock}`;
             if(!u) return;
             const list=JSON.parse(u.value);
             setAllUsers(list);
-            // обновляем currentUser если его роль/имя изменились
+            // синхронизируем текущего пользователя и ПРОДЛЕВАЕМ метку входа (authAt),
+            // чтобы тот, кто меняет пароли (в т.ч. свой), не разлогинил сам себя
             const me=list.find(x=>x.id===currentUser.id);
-            if(me && (me.role!==currentUser.role || me.name!==currentUser.name)){
-              const updated={...currentUser,...me};
+            if(me){
+              const {password:_pw, ...meSafe}=me; // пароль в сессии не храним
+              const updated={...currentUser,...meSafe, authAt: Date.now()};
               setCurrentUser(updated);
               try{ localStorage.setItem(SESSION_KEY,JSON.stringify({user:updated,savedAt:Date.now()})); }catch(e){}
             }
@@ -12043,37 +12965,23 @@ ${reqBlock}`;
           contragents={contragents}
           saveContragents={saveContragents}
           contragentsRef={contragentsRef}
+          workers={workers}
+          saveWorkers={saveWorkers}
+          workersRef={workersRef}
+          contracts={contracts}
+          fmt={fmt}
           onBackupWorkspace={openWorkspaceBackups}
+          onExportAll={exportAllJSON}
+          onImportAll={importAllJSON}
+          onExportEstimatesXls={exportEstimatesXls}
+          checkIssues={_checkIssues}
+          onNavIssue={openIssue}
         />
       )}
 
-      {/* ── ЭКРАН: ПРОИЗВОДСТВО ── */}
-      {effScreen === "production" && (
-        <div style={{padding:"20px 16px 90px"}}>
-          {/* Производство обновляется автоматически: показываются объекты с подписанным договором /
-              финпроектом / карточкой. Ручной массовый импорт убран — он заменял все карточки и плодил дубли. */}
-          <ProductionModule
-            objects={productionObjects}
-            entries={prodEntries}
-            allObjects={objects}
-            unlinkedProjects={unlinkedFinProjects}
-            estimates={estimates}
-            contracts={contracts}
-            productions={productions}
-            onSaveProduction={onSaveProduction}
-            onDeleteProduction={onDeleteProduction}
-            onToggleClientShare={toggleClientShare}
-            buildStagesFromEstimate={buildStagesFromEstimate}
-            finProjects={finProjects}
-            financeTx={financeTx}
-            fmt={fmt}
-            genId={genId}
-            currentUser={currentUser}
-          />
-        </div>
-      )}
-
       </div>
+
+      <DangerConfirmModal/>
 
       {/* Модал подтверждения выхода */}
       {/* ── Построитель АВР (форма Р-1) ── */}

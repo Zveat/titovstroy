@@ -1,5 +1,6 @@
-import { useState, useMemo, useEffect, Fragment } from "react";
+import { useState, useMemo, useEffect, useRef, Fragment } from "react";
 import { STAGE_STATUSES, emptyProduction } from "./constants.js";
+import { normCN } from "../utils.js";
 
 // ─────────────────────────────────────────────────────────────────────────
 // ПРОИЗВОДСТВО — управление и контроль объектов в работе.
@@ -18,22 +19,12 @@ import { STAGE_STATUSES, emptyProduction } from "./constants.js";
 
 const stByKey = (k) => STAGE_STATUSES.find(s => s.key === k) || STAGE_STATUSES[0];
 
-// Статусы производственных объектов (жизненный цикл)
-const PROD_STATUSES = [
-  { key: "new",     label: "Новый",          color: "#7c3aed", bg: "rgba(124,58,237,.1)"  },
-  { key: "active",  label: "В работе",       color: "#2563eb", bg: "#eff6ff"               },
-  { key: "paused",  label: "Приостановлен",  color: "#f59e0b", bg: "rgba(245,158,11,.1)"  },
-  { key: "done",    label: "Выполнен",       color: "#059669", bg: "rgba(5,150,105,.1)"   },
-  { key: "cancel",  label: "Отменён",        color: "#94a3b8", bg: "#f3f4f6"               },
-];
-const psByKey = (k) => PROD_STATUSES.find(s => s.key === k) || PROD_STATUSES[1];
-
 // Превратить строки сметы в строки-работы (наименования). cat = блок-заголовок.
 const estToStages = (fromEst, genId) => fromEst.map(s => ({
   id: genId(), cat: s.cat || "Прочее", name: s.name || "", unit: s.unit || "", qty: s.qty || 0,
   planStart: "", planEnd: "", factStart: "", factEnd: "",
   status: "todo", responsible: "", note: "", paid: false,
-  priceClient: s.priceClient || 0, costPlan: s.costPlan || 0,
+  priceClient: s.priceClient || 0, costPlan: s.costPlan || 0, fromEst: true,
 }));
 
 // Группировка строк по Заголовку (категории) с сохранением порядка
@@ -43,31 +34,24 @@ const groupByCat = (rows) => {
   return order.map(c => [c, g[c]]);
 };
 
-// Имя/адрес из проекта Финансов (description = "Клиент | Адрес | Телефон")
-const projTitle = (p) => {
-  const d = (p.description || "").split("|").map(s => s.trim());
-  return d[0] || ("№" + (p.contractNo || "")) || "Проект";
-};
-const projAddress = (p) => {
-  const d = (p.description || "").split("|").map(s => s.trim());
-  return d[1] || "";
-};
-
-const _normCN = (s) => String(s||"").trim().toLowerCase().replace(/\s+/g,"");
+// Нормализация номера договора — ЕДИНАЯ с App.jsx (normCN из utils.js): убираем не только
+// пробелы, но и № и #. Раньше здесь была своя усечённая версия (только пробелы) — из-за неё
+// «№1012» и «1012» считались разными, и операции/проект могли не сойтись в финвкладке объекта,
+// хотя в разделе Финансы (где normCN) — сходились. Теперь один источник истины.
 
 export default function ProductionModule({
   objects, entries = [], allObjects, unlinkedProjects, estimates, contracts, productions,
-  onSaveProduction, onDeleteProduction, onToggleClientShare, buildStagesFromEstimate,
+  onSaveProduction, onDeleteProduction, onToggleClientShare, onSetClientVis, buildStagesFromEstimate,
   finProjects, financeTx,
-  fmt, genId, currentUser,
+  fmt, genId, currentUser, onAudit,
+  embedObjectId, embedTab, clientInfoCard, // встроенный режим: карточка одного объекта внутри раздела «Объекты»
 }) {
   // карта запись производства по ключу записи (objectId реального объекта или "fp:<id>")
   const entryByKey = useMemo(() => { const m = {}; for (const e of entries) m[e.key] = e; return m; }, [entries]);
-  const [openId, setOpenId] = useState(null);
-  const [tab, setTab] = useState("info");
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState(""); // «Все» — иначе новые карточки (статус «new») прячутся под «В работе»
-  const [addOpen, setAddOpen] = useState(false);
+  // Модуль используется только во встроенном режиме — карточкой объекта в «Объектах»
+  // (единственный вызов, всегда с embedObjectId). Отдельного списка/своей карточки-с-
+  // вкладками больше нет — это раньше был неиспользуемый параллельный экран.
+  const activeId = embedObjectId;
 
   const prodByObj = useMemo(() => {
     const m = {};
@@ -75,17 +59,11 @@ export default function ProductionModule({
     return m;
   }, [productions]);
 
-  const launchProgress = (p) => {
-    if (!p || !p.checklistLaunch?.length) return 0;
-    const done = p.checklistLaunch.filter(x => x.done).length;
-    return Math.round(done / p.checklistLaunch.length * 100);
-  };
-
   // Объект может быть реальным (из objects) либо "виртуальным" — из карточки производства,
   // созданной по проекту Финансов (objectId начинается с "fp:").
-  const openObj = openId ? (
-    (allObjects || objects).find(o => o.id === openId) ||
-    (() => { const e = entryByKey[openId]; if (e) return { id: openId, clientName: e.name || "Проект", address: e.address || "", clientPhone: "" }; const pr = prodByObj[openId]; return pr ? { id: openId, clientName: pr.title || "Проект", address: pr.address || "", clientPhone: "" } : null; })()
+  const openObj = activeId ? (
+    (allObjects || objects).find(o => o.id === activeId) ||
+    (() => { const e = entryByKey[activeId]; if (e) return { id: activeId, clientName: e.name || "Проект", address: e.address || "", clientPhone: "" }; const pr = prodByObj[activeId]; return pr ? { id: activeId, clientName: pr.title || "Проект", address: pr.address || "", clientPhone: "" } : null; })()
   ) : null;
   const openProd = openObj ? (prodByObj[openObj.id] || emptyProduction(openObj.id, genId)) : null;
 
@@ -99,7 +77,7 @@ export default function ProductionModule({
     const record = { ...base, stages: fromEst.length ? estToStages(fromEst, genId) : [], updatedAt: Date.now() };
     onSaveProduction(record);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openId]);
+  }, [activeId]);
 
   const patchProd = (patch) => onSaveProduction({ ...openProd, ...patch, updatedAt: Date.now() });
 
@@ -110,7 +88,7 @@ export default function ProductionModule({
     if (fp) return fp;
     const objContracts = (contracts||[]).filter(c => c.objectId === openObj.id);
     for (const c of objContracts) {
-      fp = finProjects.find(p => _normCN(p.contractNo) === _normCN(c.number));
+      fp = finProjects.find(p => normCN(p.contractNo) === normCN(c.number));
       if (fp) return fp;
     }
     if (openObj.clientName && openObj.clientName.length > 2) {
@@ -124,8 +102,8 @@ export default function ProductionModule({
 
   const finSummary = useMemo(() => {
     if (!finProj) return null;
-    const cn = _normCN(finProj.contractNo);
-    const txList = (financeTx||[]).filter(t => !t.deletedAt && t.included !== false && _normCN(t.contractNo) === cn);
+    const cn = normCN(finProj.contractNo);
+    const txList = (financeTx||[]).filter(t => !t.deletedAt && t.included !== false && normCN(t.contractNo) === cn);
     const income = txList.filter(t => t.type === "income").reduce((s,t) => s+(Number(t.amount)||0), 0);
     const expense = txList.filter(t => t.type === "expense").reduce((s,t) => s+(Number(t.amount)||0), 0);
     const budget = Number(finProj.budget) || 0;
@@ -134,284 +112,26 @@ export default function ProductionModule({
     return { budget, income, expense, debt, margin, contractNo: finProj.contractNo, status: finProj.rawStatus || finProj.status };
   }, [finProj, financeTx]);
 
-  const contractByObj = useMemo(() => {
-    const m = {};
-    for (const c of (contracts || [])) {
-      if (c.objectId && !c.deletedAt && !m[c.objectId]) m[c.objectId] = c.number;
-    }
-    return m;
-  }, [contracts]);
-
-  // Финансовая сводка для каждой записи производства — берётся напрямую из prodEntries (источник = финпроект)
-  const finSummaryMap = useMemo(() => {
-    const map = {};
-    for (const e of entries) map[e.key] = { budget: e.budget, income: e.income, expense: e.expense, debt: e.debt, margin: e.margin, contractNo: e.contractNo };
-    return map;
-  }, [entries]);
-
-  // ─── СПИСОК ОБЪЕКТОВ ───
-  if (!openObj) {
-    const q = search.toLowerCase().trim();
-    const num = v => Number(v) || 0;
-    const today = _dayStart(new Date());
-    const nowD = new Date();
-    // Список = ВСЕ финпроекты (одна запись на проект). Источник — entries из App.
-    const baseEntries = entries.map(e => ({ id: e.key, name: e.name || "Без названия", address: e.address || "—", updatedAt: prodByObj[e.key]?.updatedAt || 0 }));
-    // Метрики объекта для светофора и сводки (тянутся из этапов/смет/производства)
-    const metricsOf = (id) => {
-      const p = prodByObj[id];
-      const sts = p?.stages || [];
-      const pc = sts.reduce((s, x) => s + num(x.priceClient), 0);
-      const cp = sts.reduce((s, x) => s + num(x.costPlan), 0);
-      const cf = sts.reduce((s, x) => s + num(x.costFact), 0);
-      const mPlan = pc ? Math.round((pc - cp) / pc * 100) : null;
-      const mFact = (pc && cf) ? Math.round((pc - cf) / pc * 100) : null;
-      const doneStages = sts.filter(s => s.status === "done").length;
-      const prog = sts.length ? Math.round(doneStages / sts.length * 100) : launchProgress(p);
-      const defectsOpen = (p?.defects || []).filter(d => !d.done).length;
-      // статус производства: сохранённый → иначе по статусу финпроекта (новый/в работе/выполнен/отменён)
-      const e = entryByKey[id];
-      const prodStatus = p?.prodStatus || e?.prodStatusDefault || "new";
-      const finished = prodStatus === "done" || !!p?.factEndDate;
-      let daysLeft = null, overdue = false;
-      if (!finished && p?.planEndDate) { daysLeft = Math.round((_dayStart(p.planEndDate) - today) / 864e5); if (daysLeft < 0) overdue = true; }
-      const overdueStages = sts.some(s => s.status !== "done" && s.planEnd && _dayStart(s.planEnd) < today);
-      let sev, color, label;
-      if (prodStatus === "cancel") { sev = 0; color = "#94a3b8"; label = "Отменён"; }
-      else if (finished) { sev = 0; color = "#94a3b8"; label = "Сдан ✓"; }
-      else if (overdue || overdueStages) { sev = 3; color = "#dc2626"; label = "Просрочка"; }
-      else if ((daysLeft != null && daysLeft <= 5) || defectsOpen > 0) { sev = 2; color = "#d97706"; label = "Внимание"; }
-      else { sev = 1; color = "#059669"; label = "В норме"; }
-      const fdRaw = p?.factEndDate || e?.closedAt;
-      const fd = (finished && fdRaw) ? new Date(fdRaw) : null;
-      const finishedThisMonth = !!(fd && fd.getMonth() === nowD.getMonth() && fd.getFullYear() === nowD.getFullYear());
-      return { pc, cp, cf, mPlan, mFact, prog, defectsOpen, finished, daysLeft, sev, color, label, responsible: p?.responsible || "", stagesCount: sts.length, doneStages, finishedThisMonth, prodStatus };
-    };
-    const rows = baseEntries
-      .filter(o => !statusFilter || (prodByObj[o.id]?.prodStatus || entryByKey[o.id]?.prodStatusDefault || "new") === statusFilter)
-      .filter(o => !q || [o.name, o.address].some(v => v && v.toLowerCase().includes(q)))
-      .map(o => ({ ...o, m: metricsOf(o.id) }))
-      .sort((a, b) => (b.m.sev - a.m.sev) || ((a.m.daysLeft == null ? 999 : a.m.daysLeft) - (b.m.daysLeft == null ? 999 : b.m.daysLeft)) || (b.updatedAt - a.updatedAt));
-    const sum = rows.reduce((a, r) => { a.pc += r.m.pc; a.cp += r.m.cp; a.cf += r.m.cf; a.defects += r.m.defectsOpen; if (r.m.prodStatus === "done") { a.done++; if (r.m.finishedThisMonth) a.doneMonth++; } else if (r.m.prodStatus === "active") a.inWork++; if (r.m.sev === 3) a.overdue++; return a; }, { pc: 0, cp: 0, cf: 0, defects: 0, done: 0, doneMonth: 0, inWork: 0, overdue: 0 });
-    const compMPlan = sum.pc ? Math.round((sum.pc - sum.cp) / sum.pc * 100) : null;
-    const compMFact = (sum.pc && sum.cf) ? Math.round((sum.pc - sum.cf) / sum.pc * 100) : null;
-    const sumCard = (label, value, sub, color) => (
-      <div key={label} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px" }}>
-        <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 4, textTransform: "uppercase", letterSpacing: ".03em", fontWeight: 700 }}>{label}</div>
-        <div style={{ fontSize: 19, fontWeight: 800, color: color || "#0f172a", lineHeight: 1.1, overflowWrap: "anywhere" }}>{value}</div>
-        {sub && <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 2 }}>{sub}</div>}
-      </div>
-    );
-    return (
-      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 4px" }}>
-        {/* Заголовок + кнопка */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-          <h2 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a", margin: 0 }}>🏗 Производство</h2>
-          <button onClick={() => setAddOpen(v => !v)} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 10, padding: "9px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>+ Добавить объект</button>
-        </div>
-        {/* Поиск */}
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск по клиенту, адресу…"
-          style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 10, padding: "9px 14px", fontSize: 14, fontFamily: "inherit", outline: "none", boxSizing: "border-box", marginBottom: 10 }} />
-        {/* Фильтр по статусу */}
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-          <button onClick={() => setStatusFilter("")} style={{ border: "1px solid", borderColor: !statusFilter ? "#0f172a" : "#e2e8f0", background: !statusFilter ? "#0f172a" : "#fff", color: !statusFilter ? "#fff" : "#64748b", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Все</button>
-          {PROD_STATUSES.map(s => (
-            <button key={s.key} onClick={() => setStatusFilter(f => f === s.key ? "" : s.key)}
-              style={{ border: `1px solid ${statusFilter === s.key ? s.color : "#e2e8f0"}`, background: statusFilter === s.key ? s.bg : "#fff", color: statusFilter === s.key ? s.color : "#64748b", borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-              {s.label}
-            </button>
-          ))}
-        </div>
-        {addOpen && (() => {
-          const prodIds = new Set((productions || []).map(p => p.objectId));
-          const objCands = (allObjects || []).filter(o => !o.deletedAt && !prodIds.has(o.id));
-          const projCands = (unlinkedProjects || []).filter(p => !prodIds.has("fp:" + p.id));
-          const total = objCands.length + projCands.length;
-          return (
-            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, marginBottom: 14 }}>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Добавить в производство вручную ({total} доступно):</div>
-              <select defaultValue="" onChange={e => {
-                const v = e.target.value; if (!v) return;
-                if (v.startsWith("fp:")) {
-                  const p = projCands.find(x => "fp:" + x.id === v);
-                  if (p) { onSaveProduction({ ...emptyProduction(v, genId), title: projTitle(p), address: projAddress(p), finProjectId: p.id, budget: Number(p.budget) || 0 }); }
-                } else {
-                  const o = objCands.find(x => x.id === v);
-                  if (o) onSaveProduction(emptyProduction(o.id, genId));
-                }
-                setAddOpen(false);
-              }}
-                style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "9px 12px", fontSize: 14, fontFamily: "inherit", cursor: "pointer" }}>
-                <option value="">— Выбрать —</option>
-                {projCands.length > 0 && (
-                  <optgroup label="Проекты из Финансов">
-                    {projCands.map(p => <option key={"fp:" + p.id} value={"fp:" + p.id}>{projTitle(p)}{projAddress(p) ? " · " + projAddress(p) : ""}{p.contractNo ? " (№" + p.contractNo + ")" : ""}</option>)}
-                  </optgroup>
-                )}
-                {objCands.length > 0 && (
-                  <optgroup label="Объекты / лиды">
-                    {objCands.map(o => <option key={o.id} value={o.id}>{o.clientName || "Без имени"}{o.address ? " · " + o.address : ""}</option>)}
-                  </optgroup>
-                )}
-              </select>
-              {total === 0 && <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Всё уже в производстве.</div>}
-            </div>
-          );
-        })()}
-        {/* ── Сводка собственника ── */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(135px,1fr))", gap: 10, marginBottom: 16 }}>
-          {sumCard("В работе", sum.inWork)}
-          {sumCard("Сдано за месяц", sum.doneMonth)}
-          {sumCard("Маржа компании", compMPlan != null ? `${compMPlan}%` : "—", compMFact != null ? `факт ${compMFact}%` : "план", "#059669")}
-          {sumCard("Просрочено", sum.overdue, "объектов", sum.overdue ? "#dc2626" : "#059669")}
-          {sumCard("Замечаний", sum.defects, "открыто", sum.defects ? "#d97706" : "#059669")}
-        </div>
-        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>Объектов: {rows.length} · сверху — что горит 🔴</div>
-        {rows.length === 0 && <div style={{ textAlign: "center", color: "#94a3b8", padding: "50px 0", fontSize: 14 }}>Нет объектов в производстве.</div>}
-        {/* ── Светофор ── */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 14 }}>
-          {rows.map(o => {
-            const m = o.m;
-            const ps = psByKey(m.prodStatus);
-            const cn = contractByObj[o.id];
-            const fs = finSummaryMap[o.id];
-            const budgetFill = fs?.budget > 0 ? Math.min(100, Math.round(fs.income / fs.budget * 100)) : 0;
-            const mCol = fs?.margin == null ? "#94a3b8" : fs.margin >= 30 ? "#059669" : fs.margin >= 0 ? "#f59e0b" : "#dc2626";
-            const mBg  = fs?.margin == null ? "#f8fafc" : fs.margin >= 30 ? "#f0fdf4" : fs.margin >= 0 ? "#fffbeb" : "#fef2f2";
-            return (
-              <div key={o.id} onClick={() => { setOpenId(o.id); setTab("info"); }}
-                style={{ background: "#fff", border: "1px solid #eef2f7", borderRadius: 16, cursor: "pointer", boxShadow: "0 1px 3px rgba(15,23,42,.07)", transition: "box-shadow .15s,transform .15s", overflow: "hidden", display: "flex", flexDirection: "column" }}
-                onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 8px 24px rgba(0,0,0,.08)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
-                onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}>
-                {/* Цветная полоса */}
-                <div style={{ height: 4, background: `linear-gradient(90deg,${m.color},${m.color}99)`, flexShrink: 0 }} />
-                <div style={{ padding: "14px 16px", flex: 1, display: "flex", flexDirection: "column" }}>
-                  {/* Шапка */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 800, color: "#0f172a", lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{o.name}</div>
-                      {(fs?.contractNo || cn) && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{String(fs?.contractNo || cn || "").replace(/^№+/, "№")}</div>}
-                      {o.address && o.address !== "—" && <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.address}</div>}
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: ps.color, background: ps.bg, borderRadius: 20, padding: "3px 9px", whiteSpace: "nowrap" }}>{ps.label}</span>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: m.color, background: m.color + "18", borderRadius: 6, padding: "2px 7px", whiteSpace: "nowrap" }}>{m.label}{m.daysLeft != null && !m.finished ? (m.daysLeft < 0 ? ` ${-m.daysLeft}д` : ` ${m.daysLeft}д`) : ""}</span>
-                      {currentUser?.role === "admin" && onDeleteProduction && (
-                        <button title="Удалить производственную карточку" onClick={e => { e.stopPropagation(); if (window.confirm(`Удалить производственную карточку «${o.name}»? (объект и смета не удаляются)`)) onDeleteProduction(o.id); }}
-                          style={{ background: "rgba(220,38,38,.08)", color: "#dc2626", border: "1px solid rgba(220,38,38,.15)", borderRadius: 6, padding: "2px 7px", fontSize: 11, cursor: "pointer", fontFamily: "inherit", marginTop: 2 }}>🗑</button>
-                      )}
-                    </div>
-                  </div>
-                  {/* Финансы (если есть данные из Finance) */}
-                  {fs ? <>
-                    <div style={{ marginBottom: 12 }}>
-                      {fs.budget > 0 ? <>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 5 }}>
-                          <span style={{ fontSize: 16, fontWeight: 800, color: "#059669" }}>{fmt(fs.income)} <span style={{ fontSize: 11, fontWeight: 600, color: "#94a3b8" }}>из {fmt(fs.budget)} ₸</span></span>
-                          <span style={{ fontSize: 12, fontWeight: 800, color: budgetFill >= 100 ? "#059669" : "#2563eb" }}>{budgetFill}%</span>
-                        </div>
-                        <div style={{ height: 6, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}>
-                          <div style={{ width: budgetFill + "%", height: "100%", background: budgetFill >= 100 ? "linear-gradient(90deg,#059669,#34d399)" : "linear-gradient(90deg,#2563eb,#60a5fa)", borderRadius: 4, transition: "width .3s" }} />
-                        </div>
-                      </> : <div>
-                        <span style={{ fontSize: 16, fontWeight: 800, color: "#059669" }}>{fs.income > 0 ? fmt(fs.income) + " ₸" : "—"}</span>
-                        <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: 7 }}>бюджет не указан</span>
-                      </div>}
-                    </div>
-                    <div style={{ borderTop: "1px solid #f1f5f9" }}>
-                      {[["Долг", fs.debt > 0 ? fmt(fs.debt) + " ₸" : "—", fs.debt > 0 ? "#dc2626" : "#94a3b8"],
-                        ["Расходы", fs.expense > 0 ? fmt(fs.expense) + " ₸" : "—", fs.expense > 0 ? "#dc2626" : "#94a3b8"]
-                      ].map(([l, v, c]) => (
-                        <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #f1f5f9" }}>
-                          <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>{l}</span>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: c }}>{v}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{ marginTop: "auto", paddingTop: 10 }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: mBg, borderRadius: 10, padding: "8px 12px", marginBottom: 8 }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: "#475569" }}>Маржа</span>
-                        <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                          <span style={{ fontSize: 14, fontWeight: 800, color: mCol }}>{fs.income > 0 ? fmt(fs.income - fs.expense) + " ₸" : "—"}</span>
-                          {fs.margin != null && <span style={{ fontSize: 10, fontWeight: 800, color: "#fff", background: mCol, borderRadius: 6, padding: "2px 7px" }}>{fs.margin}%</span>}
-                        </span>
-                      </div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 10px", fontSize: 11, color: "#64748b" }}>
-                        {m.stagesCount > 0 && <span>🔨 {m.doneStages}/{m.stagesCount} эт. · {m.prog}%</span>}
-                        {m.defectsOpen > 0 && <span style={{ color: "#d97706" }}>⚠ {m.defectsOpen}</span>}
-                        {m.responsible && <span>👷 {m.responsible}</span>}
-                      </div>
-                    </div>
-                  </> : <>
-                    {/* Нет финансовых данных — показываем прогресс по этапам */}
-                    <div style={{ marginBottom: 10 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5, fontSize: 11, color: "#64748b" }}>
-                        <span>Выполнено</span><span style={{ fontWeight: 700 }}>{m.prog}%</span>
-                      </div>
-                      <div style={{ height: 6, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}>
-                        <div style={{ width: `${m.prog}%`, height: "100%", background: m.prog === 100 ? "#059669" : "#2563eb", borderRadius: 4, transition: "width .3s" }} />
-                      </div>
-                    </div>
-                    <div style={{ marginTop: "auto", display: "flex", flexWrap: "wrap", gap: "4px 12px", fontSize: 11, color: "#64748b", borderTop: "1px solid #f1f5f9", paddingTop: 10 }}>
-                      {m.stagesCount > 0 && <span>🔨 {m.doneStages}/{m.stagesCount} эт.</span>}
-                      {m.mPlan != null && <span>📊 {m.mFact != null ? `${m.mFact}% факт` : `${m.mPlan}% план`}</span>}
-                      {m.defectsOpen > 0 && <span style={{ color: "#d97706" }}>⚠ {m.defectsOpen}</span>}
-                      {m.responsible && <span>👷 {m.responsible}</span>}
-                    </div>
-                  </>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
-
-  // ─── КАРТОЧКА ОБЪЕКТА ───
-  const TABS = [
-    { key: "info", label: "Информация", icon: "ℹ️" },
-    { key: "launch", label: "Запуск", icon: "🚀" },
-    { key: "stages", label: "Этапы и сроки", icon: "🔨" },
-    { key: "finance", label: "Финансы", icon: "💰" },
-    { key: "journal", label: "Журнал", icon: "📖" },
-    { key: "defects", label: "Замечания", icon: "⚠️" },
-    { key: "handover", label: "Сдача", icon: "🏁" },
-  ];
-
+  // Единственный вызов этого компонента (App.jsx) всегда встроенный (embedObjectId задан) —
+  // отдельного списка объектов и своей карточки-с-вкладками больше нет. Раньше здесь был
+  // недостижимый параллельный экран (~260 строк): свой список производства, добавление
+  // объекта вручную, финансовая сводка по каждой карточке — БЕЗ проверки роли (в отличие
+  // от вкладки «Финансы» в карточке объекта). Кода не было видно ни разу, потому что сюда
+  // никто не попадал, но при случайном повторном использовании компонента без embedObjectId
+  // он бы показал бюджет/долг/маржу кому угодно. Убран целиком вместе с мёртвым списком.
+  if (!openObj || !openProd) return <div style={{ color: "#94a3b8", fontSize: 13, padding: "16px 4px" }}>Нет данных производства.</div>;
+  const _objLbl = openObj.clientName || openObj.address || "Объект";
+  // try/catch: журнал не должен мешать сохранению производственных данных
+  const audit = (ev) => { try { if (onAudit) onAudit({ objectId: openObj.id, label: _objLbl, source: "manual", ...ev }); } catch (e) { console.warn("audit failed", e); } };
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 4px" }}>
-      {/* Тёмная шапка объекта с кнопкой «назад» — всегда над вкладками */}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, background: "linear-gradient(135deg,#0f172a,#1e293b)", borderRadius: 16, padding: "16px 20px", marginBottom: 16, color: "#fff" }}>
-        <button onClick={() => setOpenId(null)} title="Назад"
-          style={{ background: "rgba(255,255,255,.1)", border: "1px solid rgba(255,255,255,.18)", borderRadius: 9, width: 34, height: 34, fontSize: 20, cursor: "pointer", color: "#e2e8f0", padding: 0, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>←</button>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 21, fontWeight: 900, marginBottom: 6, lineHeight: 1.15 }}>{openObj.clientName || "Объект"}</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "5px 16px", fontSize: 13, color: "rgba(255,255,255,.82)" }}>
-            {openObj.address && <span>📍 {openObj.address}</span>}
-            {openObj.clientPhone && <span>📞 {openObj.clientPhone}</span>}
-            {openObj.objType && <span>🏠 {openObj.objType}</span>}
-            {openObj.area && <span>📐 {openObj.area} м²</span>}
-          </div>
-        </div>
-      </div>
-
-      <div style={{ display: "flex", gap: 4, marginBottom: 18, flexWrap: "wrap", borderBottom: "1px solid #e2e8f0" }}>
-        {TABS.map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            style={{ background: tab === t.key ? "#fff" : "transparent", border: "1px solid", borderColor: tab === t.key ? "#e2e8f0" : "transparent", borderBottom: tab === t.key ? "1px solid #fff" : "1px solid transparent", marginBottom: -1, borderRadius: "10px 10px 0 0", padding: "9px 16px", fontSize: 13, fontWeight: tab === t.key ? 700 : 500, color: tab === t.key ? "#0f172a" : "#64748b", cursor: "pointer", fontFamily: "inherit" }}>
-            {t.icon} {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "info" && <InfoTab prod={openProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={patchProd} onToggleClientShare={onToggleClientShare} currentUser={currentUser} />}
-      {tab === "launch" && <ChecklistTab kind="checklistLaunch" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист запуска объекта" />}
-      {tab === "handover" && <ChecklistTab kind="checklistHandover" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист сдачи объекта" />}
-      {tab === "stages" && <StagesTab prod={openProd} patch={patchProd} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} />}
-      {tab === "finance" && <FinanceTab prod={openProd} patch={patchProd} fmt={fmt} finSummary={finSummary} />}
-      {tab === "journal" && <JournalTab prod={openProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
-      {tab === "defects" && <DefectsTab prod={openProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
+    <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+      {embedTab === "info" && <InfoTab prod={openProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={patchProd} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} clientInfoCard={clientInfoCard} audit={audit} />}
+      {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист запуска объекта" />}
+      {embedTab === "handover" && <ChecklistTab kind="checklistHandover" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист сдачи объекта" />}
+      {embedTab === "stages" && <StagesTab prod={openProd} patch={patchProd} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} audit={audit} />}
+      {embedTab === "finance" && <FinanceTab prod={openProd} patch={patchProd} fmt={fmt} finSummary={finSummary} />}
+      {embedTab === "journal" && <JournalTab prod={openProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
+      {embedTab === "defects" && <DefectsTab prod={openProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
     </div>
   );
 }
@@ -420,9 +140,10 @@ export default function ProductionModule({
 const _dayStart = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); };
 // Телефон → формат для wa.me (КЗ: 8XXXXXXXXXX → 7XXXXXXXXXX)
 const _waPhone = (p) => { let d = (p || "").replace(/\D/g, ""); if (d.length === 11 && d[0] === "8") d = "7" + d.slice(1); else if (d.length === 10) d = "7" + d; return d; };
-function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientShare, currentUser }) {
+function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientShare, onSetClientVis, currentUser, clientInfoCard, audit }) {
   const objEstimates = estimates.filter(e => e.objectId === obj.id);
-  const objContracts = contracts.filter(c => c.objectId === obj.id && !c.deletedAt);
+  // Только клиентские договоры: подряд (с рабочим) — это себестоимость, в метрику «Договоры» не входит
+  const objContracts = contracts.filter(c => c.objectId === obj.id && !c.deletedAt && c.type !== "podryad" && c.type !== "podryad_annex");
   const totalEst = objEstimates.reduce((s, e) => s + (Number(e.total) || 0), 0);
   const totalCon = objContracts.reduce((s, c) => s + (c.works || []).reduce((ss, w) => ss + (Number(w.quantity) || 0) * (Number(w.price) || 0), 0), 0);
   const stages = prod.stages || [];
@@ -455,15 +176,21 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientSh
     if (lt >= 0 && lt <= 3) alerts.push("Плановая сдача " + (lt === 0 ? "сегодня" : ("через " + lt + " дн")));
   }
   const cBtn = { display: "inline-flex", alignItems: "center", gap: 6, textDecoration: "none", border: "none", borderRadius: 9, padding: "10px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" };
-  const fld = (label, key, type = "text") => (
+  const _fldFocus = useRef("");
+  const _fmtFld = (type, v) => type === "date" ? (v ? new Date(v).toLocaleDateString("ru-RU") : "—") : (v || "—");
+  // auditLabel задаётся только для значимых полей (прораб/сроки) — тогда на blur пишем «было→стало»
+  const fld = (label, key, type = "text", auditLabel = null) => (
     <div>
       <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>{label}</div>
-      <input type={type} value={prod[key] || ""} onChange={e => patch({ [key]: e.target.value })}
+      <input type={type} value={prod[key] || ""}
+        onFocus={e => { _fldFocus.current = e.target.value; }}
+        onChange={e => patch({ [key]: e.target.value })}
+        onBlur={e => { if (auditLabel && audit && e.target.value !== _fldFocus.current) audit({ entity: "object", field: auditLabel, action: "изменил", old: _fmtFld(type, _fldFocus.current), new: _fmtFld(type, e.target.value) }); }}
         style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
     </div>
   );
   const Metric = ({ label, value, sub, color = "#0f172a" }) => (
-    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "13px 15px" }}>
+    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "13px 15px", minHeight: 86, boxSizing: "border-box", display: "flex", flexDirection: "column", justifyContent: "center" }}>
       <div style={{ fontSize: 10.5, color: "#94a3b8", marginBottom: 5, textTransform: "uppercase", letterSpacing: ".03em", fontWeight: 700 }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 800, color, lineHeight: 1.1, overflowWrap: "anywhere" }}>{value}</div>
       {sub && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>{sub}</div>}
@@ -494,25 +221,18 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientSh
           <div style={{ height: 8, background: "#f1f5f9", borderRadius: 5, overflow: "hidden" }}><div style={{ width: stageProg + "%", height: "100%", background: "#059669", borderRadius: 5, transition: "width .3s" }} /></div>
         </div>
       )}
+      {/* Клиент и объект — статус уже выбирается тут, поэтому в «Производственной информации» ниже статус-кнопки не дублируются */}
+      {clientInfoCard}
       {/* Производственные поля */}
-      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>Производственная информация</div>
-          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-            {PROD_STATUSES.map(s => {
-              const active = (prod.prodStatus || "active") === s.key;
-              return <button key={s.key} onClick={() => patch({ prodStatus: s.key })}
-                style={{ border: `1px solid ${active ? s.color : "#e2e8f0"}`, background: active ? s.bg : "#fff", color: active ? s.color : "#94a3b8", borderRadius: 20, padding: "4px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", transition: "all .1s" }}>{s.label}</button>;
-            })}
-          </div>
-        </div>
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 14 }}>Производственная информация</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          {fld("Ответственный прораб / менеджер", "responsible")}
+          {fld("Ответственный прораб / менеджер", "responsible", "text", "прораб")}
           {fld("Доступ (ключ, код, пропуск)", "access")}
           {fld("Дата продажи (подписание договора)", "saleDate", "date")}
-          {fld("Дата начала работ", "startDate", "date")}
-          {fld("Плановая дата окончания", "planEndDate", "date")}
-          {fld("Фактическая дата окончания", "factEndDate", "date")}
+          {fld("Дата начала работ", "startDate", "date", "старт работ")}
+          {fld("Плановая дата окончания", "planEndDate", "date", "план сдачи")}
+          {fld("Фактическая дата окончания", "factEndDate", "date", "факт сдачи")}
         </div>
         <div style={{ marginTop: 12 }}>
           <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Примечания / особенности</div>
@@ -539,25 +259,29 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientSh
       </div>
 
       {/* Клиент: доступ к прогрессу + сообщение */}
-      <ClientAccessBlock obj={obj} prod={prod} patch={patch} onToggleClientShare={onToggleClientShare} currentUser={currentUser} />
+      <ClientAccessBlock obj={obj} prod={prod} patch={patch} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} />
     </div>
   );
 }
 
 // ─── Блок «Клиент»: доступ к прогрессу + сообщение (внизу вкладки «Информация») ───
-function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, currentUser }) {
+function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, onSetClientVis, currentUser }) {
   const [shareLink, setShareLink] = useState(null); // ссылка для клиента после включения доступа
   const [shareBusy, setShareBusy] = useState(false);
   if (currentUser?.role === "viewer") return null;
   const shared = !!(obj.progressShared && obj.progressToken);
   const realUrl = shared ? (window.location.origin + window.location.pathname + "#/progress/" + obj.progressToken) : null;
   const url = realUrl || shareLink;
+  const cv = obj.clientVis || {};
+  const visRows = [["stages","Этапы работ"],["payments","Оплата по договору"],["docs","Документы"],["remarks","Замечания клиента"]];
   return (
     <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 11 }}>
       {onToggleClientShare && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>👁 Доступ клиента к прогрессу{shared && <span style={{ fontSize: 11, color: "#059669", fontWeight: 700 }}> · открыт</span>}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>👁 Доступ клиента к прогрессу{shared && <span style={{ fontSize: 11, color: "#059669", fontWeight: 700 }}> · открыт</span>}
+              {shared && obj.progressExpiresAt && <span style={{ fontSize: 10.5, color: "#94a3b8", fontWeight: 500 }}> (до {new Date(obj.progressExpiresAt).toLocaleDateString("ru-RU")})</span>}
+            </div>
             <button disabled={shareBusy} onClick={async () => { setShareBusy(true); const link = await onToggleClientShare(obj.id); setShareLink(link); setShareBusy(false); }}
               style={{ background: shared ? "rgba(220,38,38,.08)" : "#ecfdf5", color: shared ? "#dc2626" : "#059669", border: "1px solid " + (shared ? "rgba(220,38,38,.2)" : "rgba(5,150,105,.25)"), borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: shareBusy ? "default" : "pointer", opacity: shareBusy ? .6 : 1, fontFamily: "inherit", whiteSpace: "nowrap" }}>
               {shared ? "Закрыть доступ" : "Открыть доступ клиенту"}
@@ -570,7 +294,21 @@ function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, currentUser 
               <a href={"https://wa.me/?text=" + encodeURIComponent("Прогресс вашего ремонта: " + url)} target="_blank" rel="noopener" style={{ background: "#25D366", color: "#fff", textDecoration: "none", padding: "7px 11px", borderRadius: 6, fontSize: 12, fontWeight: 700 }}>WhatsApp</a>
             </div>
           )}
-          <div style={{ fontSize: 10.5, color: "#94a3b8" }}>Клиент видит прогресс, этапы, сроки и оплату. Себестоимость, маржа и подрядчики скрыты.</div>
+          <div style={{ fontSize: 10.5, color: "#94a3b8" }}>Клиент видит только то, что отмечено ниже. Себестоимость, маржа и подрядчики скрыты всегда.</div>
+          {/* Настройки видимости — что показывать клиенту (по умолчанию всё включено) */}
+          {onSetClientVis && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
+              {visRows.map(([key, label]) => {
+                const on = cv[key] !== false;
+                return (
+                  <button key={key} onClick={() => onSetClientVis(obj.id, { [key]: !on })}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, background: on ? "#ecfdf5" : "#f1f5f9", color: on ? "#059669" : "#94a3b8", border: "1px solid " + (on ? "rgba(5,150,105,.25)" : "#e2e8f0"), borderRadius: 20, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                    <span>{on ? "☑" : "☐"}</span>{label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
       {onToggleClientShare && <div style={{ borderTop: "1px solid #f1f5f9" }} />}
@@ -687,16 +425,23 @@ function ClientMessageCard({ prod, patch, embedded = false }) {
 }
 
 // ─── ВКЛАДКА: ЭТАПЫ И СРОКИ ───
-function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) {
+function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, audit }) {
   const stages = prod.stages || [];
   const [newName, setNewName] = useState("");
   const [newCat, setNewCat] = useState("");
   const upd = (id, p) => patch({ stages: stages.map(s => s.id === id ? { ...s, ...p } : s) });
+  // Журнал изменений этапа (прораб/срок) — пишем на blur, только если значение реально изменилось
+  const _stFocus = useRef("");
+  const _fmtDate = (v) => v ? new Date(v).toLocaleDateString("ru-RU") : "—";
+  const auditStage = (stage, field, oldV, newV) => { if (audit && oldV !== newV) audit({ entity: "stage", field, action: "изменил", old: oldV || "—", new: newV || "—", detail: `этап: ${stage.name || "без названия"}` }); };
   const addManual = () => {
     if (!newName.trim()) return;
     patch({ stages: [...stages, { id: genId(), cat: newCat.trim() || "Прочее", name: newName.trim(), unit: "", qty: 0, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: 0, costPlan: 0 }] });
     setNewName("");
   };
+  // Этапы синхронизируются со сметами АВТОМАТИЧЕСКИ (эффект в App.jsx по [estimates]):
+  // позиции из смет сами добавляются/обновляются/удаляются (флаг fromEst), ручные этапы не трогаются.
+  // Поэтому ручной кнопки «Обновить из смет» больше нет.
   const inWorkDays = (s) => s.factStart ? Math.max(0, Math.round((_dayStart(s.factEnd || new Date()) - _dayStart(s.factStart)) / 864e5)) + 1 : null;
   const dInp = { border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 7px", fontSize: 12, fontFamily: "inherit", outline: "none", color: "#0f172a", width: "100%", boxSizing: "border-box" };
 
@@ -721,7 +466,11 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 12 }}>Этапы и сроки ({stages.length})</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Этапы и сроки ({stages.length})</div>
+          <span title="Позиции из смет объекта появляются, обновляются и удаляются в этапах автоматически. Ручные этапы не трогаются."
+            style={{ fontSize: 11, color: "#94a3b8", display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>🔄 Синхронизируется со сметами автоматически</span>
+        </div>
         {stages.length === 0 ? (
           <div style={{ textAlign: "center", color: "#94a3b8", padding: "20px 0", fontSize: 13 }}>Добавьте работу вручную ниже.</div>
         ) : (
@@ -745,6 +494,8 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) 
                             {STAGE_STATUSES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
                           </select>
                           <input value={s.responsible || ""} onChange={e => upd(s.id, { responsible: e.target.value })} placeholder="Ответств."
+                            onFocus={e => { _stFocus.current = e.target.value; }}
+                            onBlur={e => auditStage(s, "прораб этапа", _stFocus.current, e.target.value)}
                             style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 8px", fontSize: 12, fontFamily: "inherit", outline: "none", width: 100 }} />
                           {iw != null && <span style={{ fontSize: 11, color: "#2563eb", fontWeight: 700 }}>🔨 {iw} дн</span>}
                         </div>
@@ -755,7 +506,9 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) 
                           </div>
                           <div>
                             <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 2 }}>Конец план</div>
-                            <input type="date" value={s.planEnd || ""} onChange={e => upd(s.id, { planEnd: e.target.value })} style={dInp} />
+                            <input type="date" value={s.planEnd || ""} onChange={e => upd(s.id, { planEnd: e.target.value })}
+                              onFocus={e => { _stFocus.current = e.target.value; }}
+                              onBlur={e => auditStage(s, "срок этапа (план)", _fmtDate(_stFocus.current), _fmtDate(e.target.value))} style={dInp} />
                           </div>
                           <div>
                             <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 2 }}>Старт факт</div>
@@ -769,6 +522,8 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId }) 
                         <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="+ примечание"
                           style={{ marginTop: 6, width: "100%", border: "none", borderBottom: "1px dashed #e2e8f0", fontSize: 11, color: "#64748b", fontFamily: "inherit", outline: "none", padding: "1px 0", background: "transparent" }} />
                       </div>
+                      <button onClick={() => { if (window.confirm(`Удалить этап «${s.name || "без названия"}»?\n\nВажно: если эта работа ещё есть в смете объекта — этап вернётся при следующей синхронизации. Чтобы убрать навсегда, удалите работу из сметы.`)) patch({ stages: stages.filter(x => x.id !== s.id) }); }}
+                        title="Удалить этап" style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "0 2px", flexShrink: 0, alignSelf: "flex-start" }}>×</button>
                     </div>
                   );
                 })}
@@ -1056,8 +811,9 @@ function FinanceTab({ prod, patch, fmt, finSummary }) {
   const mCol = (p) => p >= 30 ? "#059669" : p >= 0 ? "#d97706" : "#dc2626";
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* Данные из Финансов (бюджет, оплаты, расходы) */}
-      {finSummary && (
+      {/* Сводка: если есть финпроект — по факту (бюджет/оплаты/расходы),
+          иначе — по плану из сметы/этапов (объект ещё не в производстве/финансах). */}
+      {finSummary ? (
         <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>💰 Финансовый проект{finSummary.contractNo ? ` ${String(finSummary.contractNo).replace(/^№+/, "№")}` : ""}</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8 }}>
@@ -1067,6 +823,24 @@ function FinanceTab({ prod, patch, fmt, finSummary }) {
               ["Долг", finSummary.debt > 0 ? fmt(finSummary.debt) + " ₸" : "—", finSummary.debt > 0 ? "#dc2626" : "#94a3b8", finSummary.debt > 0 ? "#fef2f2" : "#f8fafc"],
               ["Расходы", finSummary.expense > 0 ? fmt(finSummary.expense) + " ₸" : "—", "#dc2626", "#fef2f2"],
               ["Маржа", finSummary.margin != null ? (fmt(finSummary.income - finSummary.expense) + " ₸ / " + finSummary.margin + "%") : "—", finSummary.margin != null ? mCol(finSummary.margin) : "#94a3b8", "#f0fdf4"],
+            ].map(([l, v, c, bg]) => (
+              <div key={l} style={{ background: bg, borderRadius: 10, padding: "10px 12px", border: `1px solid ${c}22` }}>
+                <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".03em", marginBottom: 3 }}>{l}</div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: c }}>{v}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>📐 План по смете</div>
+          <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 10 }}>Проект в Финансах ещё не заведён (оплаты/расходы появятся, когда объект пойдёт в работу).</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8 }}>
+            {[
+              ["Выручка (план)", tot.priceClient > 0 ? fmt(tot.priceClient) + " ₸" : "—", "#2563eb", "#eff6ff"],
+              ["Себестоимость (план)", tot.costPlan > 0 ? fmt(tot.costPlan) + " ₸" : "—", "#dc2626", "#fef2f2"],
+              ["Маржа (план)", tot.priceClient > 0 ? (fmt(mPlanSumTot) + " ₸ / " + mPlanTot + "%") : "—", tot.priceClient > 0 ? mCol(mPlanTot) : "#94a3b8", "#f0fdf4"],
+              ...(tot.costFact > 0 ? [["Маржа (факт)", fmt(mFactSumTot) + " ₸ / " + mFactTot + "%", mCol(mFactTot || 0), "#f0fdf4"]] : []),
             ].map(([l, v, c, bg]) => (
               <div key={l} style={{ background: bg, borderRadius: 10, padding: "10px 12px", border: `1px solid ${c}22` }}>
                 <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".03em", marginBottom: 3 }}>{l}</div>
