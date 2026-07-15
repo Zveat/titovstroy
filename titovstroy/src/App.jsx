@@ -3874,6 +3874,12 @@ function MainApp({ currentUser, setCurrentUser }) {
   const contragentsRef = useRef([]);
   useEffect(() => { contragentsRef.current = contragents; }, [contragents]);
   const _contractsLoaded = useRef(false);
+  // Отдельно от _contractsLoaded: productions грузится в том же запросе, но может НЕ долететь
+  // (unavailable), пока остальное (contracts/objects/clients) долетело. Раньше это не
+  // отслеживалось — saveProductions блокировался общим _contractsLoaded, который в такой
+  // ситуации был true, хотя productionsRef.current мог остаться СТАРЫМ (не обновлённым в этой
+  // загрузке). Риск: авто-синк этапов мог бы сохранить неполный список поверх облака.
+  const _productionsLoaded = useRef(false);
   const [contractTab, setContractTab] = useState("list"); // list | editor | clients | contragents
   const [currentContract, setCurrentContract] = useState(null);
 
@@ -4255,6 +4261,7 @@ function MainApp({ currentUser, setCurrentUser }) {
   // ── Загрузка списка смет из shared storage ──
   const loadContracts = useCallback(async () => {
     let ok = true;
+    let pdOk = true; // отдельный успех именно для productions (см. _productionsLoaded ниже)
     try {
       const [cr, cl, ca, ob, pd, rp, wk, py] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY), storage.getResult(OBJECTS_KEY), storage.getResult(PRODUCTIONS_KEY), storage.getResult(REPORTS_KEY), storage.getResult(WORKERS_KEY), storage.getResult(PODRYADS_KEY)]);
       // Договоры
@@ -4265,9 +4272,12 @@ function MainApp({ currentUser, setCurrentUser }) {
       if (ob.status === "found" && ob.value) { try { const p = JSON.parse(ob.value); if (Array.isArray(p)) { setObjects(p); objectsRef.current = p; } } catch {} }
       else if (ob.status === "empty") { setObjects([]); objectsRef.current = []; }
       else { ok = false; }
-      // Производственные карточки
+      // Производственные карточки. pdOk отслеживаем ОТДЕЛЬНО от общего ok: раньше сбой
+      // именно этого запроса (unavailable) никак не помечался — общий ok/_contractsLoaded
+      // мог остаться true, хотя productionsRef.current не обновился в этой загрузке.
       if (pd.status === "found" && pd.value) { try { const p = JSON.parse(pd.value); if (Array.isArray(p)) { setProductions(p); productionsRef.current = p; } } catch {} }
       else if (pd.status === "empty") { setProductions([]); productionsRef.current = []; }
+      else { pdOk = false; }
       // Отчёты (АВР)
       if (rp.status === "found" && rp.value) { try { const p = JSON.parse(rp.value); if (Array.isArray(p)) { setReports(p); reportsRef.current = p; } } catch {} }
       else if (rp.status === "empty") { setReports([]); reportsRef.current = []; }
@@ -4284,8 +4294,9 @@ function MainApp({ currentUser, setCurrentUser }) {
       // Контрагенты
       if (ca.status === "found" && ca.value) { try { const p = JSON.parse(ca.value); if (Array.isArray(p)) { setContragents(p); contragentsRef.current = p; } } catch {} }
       // контрагенты: если пусто/недоступно — оставляем дефолтный, не трогаем
-    } catch(e) { console.error(e); ok = false; }
+    } catch(e) { console.error(e); ok = false; pdOk = false; }
     _contractsLoaded.current = ok;
+    _productionsLoaded.current = ok && pdOk;
   }, []);
 
   const saveContracts = async (list, opts = {}) => {
@@ -4310,7 +4321,10 @@ function MainApp({ currentUser, setCurrentUser }) {
     return r;
   };
   const saveProductions = async (list, opts = {}) => {
-    return await saveListProtected(PRODUCTIONS_KEY, PRODUCTIONS_BACKUPS_KEY, list, (fl)=>{ productionsRef.current = fl; setProductions(fl); }, { loadedRef: _contractsLoaded, ...opts });
+    // identityKey: "objectId" — у production записей нет id, мердж по нему давал бы пустой
+    // результат и молча блокировал сохранение. loadedRef — свой собственный
+    // _productionsLoaded (не общий _contractsLoaded), см. объяснение у объявления рефа.
+    return await saveListProtected(PRODUCTIONS_KEY, PRODUCTIONS_BACKUPS_KEY, list, (fl)=>{ productionsRef.current = fl; setProductions(fl); }, { loadedRef: _productionsLoaded, identityKey: "objectId", ...opts });
   };
   const saveReports = async (list, opts = {}) => {
     return await saveListProtected(REPORTS_KEY, REPORTS_BACKUPS_KEY, list, (fl)=>{ reportsRef.current = fl; setReports(fl); }, { loadedRef: _contractsLoaded, ...opts });
@@ -4840,7 +4854,7 @@ ${reqBlock}`;
   // смета заполнена. Теперь синк идёт постоянно, а не разово.
   const _stageSyncTimer = useRef(null);
   useEffect(() => {
-    if (!_estimatesLoaded.current || !_contractsLoaded.current) return;
+    if (!_estimatesLoaded.current || !_contractsLoaded.current || !_productionsLoaded.current) return;
     if (_stageSyncTimer.current) clearTimeout(_stageSyncTimer.current);
     _stageSyncTimer.current = setTimeout(() => {
       const prods = productionsRef.current;
@@ -5304,7 +5318,9 @@ ${reqBlock}`;
   // Та же логика, что у смет: слияние по id, бэкап, защита от затирания, баннер при сбое облака.
   const saveListProtected = useCallback(async (key, backupKey, list, applyState, opts = {}) => {
     if (!Array.isArray(list)) { console.error("saveListProtected: не массив", key); return; }
-    const { replace = false, removedIds = [], allowEmpty = false, loadedRef = null } = opts;
+    // identityKey — по какому полю мерджить (по умолчанию "id"; у production записей его нет,
+    // там ключ — "objectId", иначе слияние молча даёт пустой список и сохранение блокируется).
+    const { replace = false, removedIds = [], allowEmpty = false, loadedRef = null, identityKey = "id", hardReplace = false } = opts;
     if (loadedRef && !loadedRef.current) { console.warn("saveListProtected заблокирован: не загружено", key); return; }
 
     let stored = [], prevValue = null, prevStatus = "empty";
@@ -5321,29 +5337,33 @@ ${reqBlock}`;
     } catch(e) { console.warn("guard check err", e); }
 
     let finalList;
-    if (replace) {
-      // БЕЗОПАСНАЯ ЗАМЕНА для коллекций с id (договоры, клиенты, объекты, отчёты…):
-      // список перекрывает свои id, но записи из облака, которых нет в списке, НЕ
-      // теряются (кроме removedIds). Коллекции без id (производство ключуется по
-      // objectId) сохраняем как раньше — голым списком.
-      const idKeyed = list.every(e => e && e.id) && stored.every(e => e && e.id);
-      if (idKeyed) {
+    if (hardReplace) {
+      // ЖЁСТКАЯ ЗАМЕНА без мерджа — только для намеренных операций (напр. ручная миграция
+      // с явным предупреждением админу «текущие записи будут заменены»). Не использовать
+      // по умолчанию: обходит защиту от потери записей, которых нет в переданном списке.
+      finalList = list;
+    } else if (replace) {
+      // БЕЗОПАСНАЯ ЗАМЕНА по identityKey (обычно id, для production — objectId):
+      // список перекрывает свои ключи, но записи из облака, которых нет в списке, НЕ
+      // теряются (кроме removedIds).
+      const keyed = list.every(e => e && e[identityKey]) && stored.every(e => e && e[identityKey]);
+      if (keyed) {
         const rm = new Set(removedIds);
         const map = new Map();
-        for (const e of stored) if (e && e.id && !rm.has(e.id)) map.set(e.id, e);
-        for (const e of list) { if (!e || !e.id || rm.has(e.id)) continue; map.set(e.id, e); }
+        for (const e of stored) if (e && e[identityKey] && !rm.has(e[identityKey])) map.set(e[identityKey], e);
+        for (const e of list) { if (!e || !e[identityKey] || rm.has(e[identityKey])) continue; map.set(e[identityKey], e); }
         finalList = [...map.values()];
       } else {
         finalList = list;
       }
     } else {
       const map = new Map();
-      for (const e of stored) if (e && e.id) map.set(e.id, e);
+      for (const e of stored) if (e && e[identityKey]) map.set(e[identityKey], e);
       for (const e of list) {
-        if (!e || !e.id) continue;
-        const ex = map.get(e.id);
-        if (!ex) map.set(e.id, e);
-        else map.set(e.id, _ts(e.updatedAt) >= _ts(ex.updatedAt) ? e : ex);
+        if (!e || !e[identityKey]) continue;
+        const ex = map.get(e[identityKey]);
+        if (!ex) map.set(e[identityKey], e);
+        else map.set(e[identityKey], _ts(e.updatedAt) >= _ts(ex.updatedAt) ? e : ex);
       }
       for (const id of removedIds) map.delete(id);
       finalList = [...map.values()];
