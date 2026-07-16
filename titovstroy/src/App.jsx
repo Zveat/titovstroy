@@ -4,7 +4,7 @@ import { getDatabase, ref, get, set, runTransaction } from "firebase/database";
 import ProductionModule from "./production/ProductionModule.jsx";
 import { emptyProduction } from "./production/constants.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable } from "./utils.js";
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
 function useDebounce(value, ms) {
@@ -703,6 +703,8 @@ const SESSION_KEY        = "titovstroy-session";
 const PRESENCE_KEY       = "titovstroy-presence"; // { [userId]: lastSeenTs } — кто когда был онлайн
 const PRESENCE_ONLINE_MS = 2 * 60 * 1000; // «в сети», если активность была <2 мин назад
 const PRICES_KEY         = "titovstroy-prices";  // переопределённые цены {code: {fixedPrice?, tiers?}}
+const PRICES_BACKUPS_KEY = "titovstroy-prices-backups"; // ОТДЕЛЬНО от каталога: цены — объект другого формата
+const PUBLIC_NODES_BACKUPS_KEY = "titovstroy-public-nodes-backups"; // пред-бэкап публичных нод (КП/кабинеты) перед restore
 const CATALOG_BACKUPS_KEY= "titovstroy-catalog-backups"; // снимки каталога (последние 10)
 const CONTRACTS_BACKUPS_KEY = "titovstroy-contracts-backups";
 const CLIENTS_BACKUPS_KEY   = "titovstroy-clients-backups";
@@ -1124,9 +1126,92 @@ const storage = {
     // Ничего не нашли: различаем «точно пусто» и «недоступно»
     return { value: null, status: fbResponded ? "empty" : "unavailable" };
   },
+  // Чтение ТОЛЬКО из облака (Firebase). НИКОГДА не берёт localStorage/_mem — в отличие от
+  // getResult, который ради оффлайна отдаёт локальную (возможно устаревшую/грязную) копию со
+  // статусом "found". Нужно для ПОЛНОГО БЭКАПА: файл можно назвать полным, только если каждый
+  // раздел реально прочитан из базы. Возвращает { status:'found'|'empty'|'unavailable', value, source:'firebase' }.
+  async getCloudResult(key) {
+    // SDK не сконфигурирован — только чистый REST
+    if (!_fbDb) {
+      const rr = await _fbRestGet(key);
+      if (rr.ok) return { status: rr.value === null ? "empty" : "found", value: rr.value, source: "firebase" };
+      return { status: "unavailable", value: null, source: "firebase" };
+    }
+    try {
+      await _fbAuthReady;
+      let snap = await _race(get(ref(_fbDb, _fbKey(key))), 8000);
+      if (snap === _TIMEOUT) { await new Promise(r => setTimeout(r, 500)); snap = await _race(get(ref(_fbDb, _fbKey(key))), 8000); }
+      if (snap !== _TIMEOUT) {
+        if (snap && snap.exists()) { const v = snap.val(); return { status: "found", value: typeof v === "string" ? v : JSON.stringify(v), source: "firebase" }; }
+        return { status: "empty", value: null, source: "firebase" };
+      }
+      // SDK не ответил (WebSocket мог быть заблокирован) — пробуем REST тем же ключом
+      const rr = await _fbRestGet(key);
+      if (rr.ok) return { status: rr.value === null ? "empty" : "found", value: rr.value, source: "firebase" };
+      return { status: "unavailable", value: null, source: "firebase" };
+    } catch (e) {
+      const rr = await _fbRestGet(key);
+      if (rr.ok) return { status: rr.value === null ? "empty" : "found", value: rr.value, source: "firebase" };
+      return { status: "unavailable", value: null, source: "firebase" };
+    }
+  },
   async get(key) {
     const r = await this.getResult(key);
     return r.status === "found" ? { value: r.value } : null;
+  },
+  // Запись ТОЛЬКО в облако (SDK, затем REST). НЕ пишет в localStorage/_mem и НЕ ставит dirty,
+  // когда облако не ответило — иначе неудачная запись при ВОССТАНОВЛЕНИИ осела бы «грязной»
+  // локальной копией, и автосинк позже неожиданно затолкал бы её в облако, хотя restore был
+  // объявлен частичным. При успехе — синхронизируем локальное зеркало (и снимаем dirty).
+  async setCloudOnly(key, value) {
+    let fbOk = false, fbError = null;
+    if (_fbDb) {
+      try {
+        await _fbAuthReady;
+        let res = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000);
+        if (res === _TIMEOUT) { await new Promise(r => setTimeout(r, 800)); res = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000); }
+        if (res !== _TIMEOUT) fbOk = true; else fbError = "timeout";
+      } catch(e) { fbError = e?.message || String(e); }
+      if (!fbOk) { try { if (await _fbRestSet(key, value)) { fbOk = true; fbError = null; } } catch {} }
+    } else {
+      try { if (await _fbRestSet(key, value)) fbOk = true; else fbError = "no cloud"; } catch(e) { fbError = e?.message || String(e); }
+    }
+    if (fbOk) {
+      try { localStorage.setItem(key, value); localStorage.setItem(key + _TS_SUFFIX, Date.now().toString()); localStorage.removeItem(key + _DIRTY_SUFFIX); } catch(e) {}
+      _mem[key] = value;
+    }
+    return { fbOk, fbError };
+  },
+  // АТОМАРНОЕ чтение-слияние-запись СПИСКА через Firebase runTransaction. mutator получает
+  // текущий массив (распарсенный), возвращает новый массив ИЛИ undefined для отмены. Хранилище
+  // держит значения JSON-СТРОКАМИ, поэтому парсим внутри транзакции; битое/не-массив → отмена.
+  // ТОЛЬКО SDK: если транзакция не прошла (нет SDK/таймаут/не закоммичена) — возвращаем
+  // committed:false, БЕЗ отката на обычный set (иначе теряется атомарность). Нужно для аудита:
+  // параллельная запись между чтением и сохранением не должна затираться восстановлением.
+  async mutateTransaction(key, mutator) {
+    if (!_fbDb) return { committed: false, reason: "no-sdk" };
+    try {
+      await _fbAuthReady;
+      const res = await _race(runTransaction(ref(_fbDb, _fbKey(key)), (cur) => {
+        let list;
+        if (cur == null) list = [];
+        else if (typeof cur === "string") { try { list = JSON.parse(cur); } catch { return; } } // битый JSON → отмена
+        else if (Array.isArray(cur)) list = cur;
+        else return; // неожиданная форма → отмена
+        if (!Array.isArray(list)) return;
+        const next = mutator(list);
+        if (next === undefined || !Array.isArray(next)) return; // отмена
+        return JSON.stringify(next);
+      }), 15000);
+      if (res === _TIMEOUT) return { committed: false, reason: "timeout" };
+      if (res && res.committed) {
+        const v = res.snapshot ? res.snapshot.val() : null;
+        const val = typeof v === "string" ? v : (v == null ? null : JSON.stringify(v));
+        if (val != null) { try { localStorage.setItem(key, val); localStorage.setItem(key + _TS_SUFFIX, Date.now().toString()); localStorage.removeItem(key + _DIRTY_SUFFIX); } catch(e) {} _mem[key] = val; }
+        return { committed: true, value: val };
+      }
+      return { committed: false, reason: "aborted" };
+    } catch(e) { return { committed: false, reason: e?.message || String(e) }; }
   },
   async set(key, value) {
     // Сначала localStorage — всегда надёжно и мгновенно
@@ -6060,38 +6145,94 @@ ${reqBlock}`;
     { k: "reports",         label: "Акты",              key: REPORTS_KEY,          bkey: REPORTS_BACKUPS_KEY },
     { k: "users",           label: "Пользователи",      key: USERS_KEY,            bkey: USERS_BACKUPS_KEY },
   ];
-  // { list, ok } — ok=false значит база не ответила (не путать с «раздел реально пуст»),
-  // иначе exportAllJSON мог бы молча выгрузить бэкап с пустыми разделами при сбое сети,
-  // не предупредив, что это НЕ полный бэкап (а бэкап — последняя страховка перед мержем/восстановлением).
+  // { list, ok } — читаем ТОЛЬКО из облака (getCloudResult, без localStorage-резерва). ok=false =
+  // база не ответила ИЛИ значение есть, но это не валидный JSON-массив (битые данные — это ошибка,
+  // а не «пустой раздел»). Раньше здесь был getResult — он ради оффлайна возвращал локальную
+  // (возможно устаревшую/грязную) копию со статусом "found", и файл всё равно помечался полным,
+  // хотя из Firebase ничего не прочитано. Полный бэкап — последняя страховка, врать про полноту нельзя.
   const _readArr = async (key) => {
-    try {
-      const r = await storage.getResult(key);
-      if (r.status === "found" && r.value) { const p = JSON.parse(r.value); if (Array.isArray(p)) return { list: p, ok: true }; }
-      if (r.status === "empty") return { list: [], ok: true };
-      return { list: [], ok: false };
-    } catch { return { list: [], ok: false }; }
+    try { return classifyCloudArr(await storage.getCloudResult(key)); }
+    catch { return { list: [], ok: false }; }
   };
-  // Выгрузка: читаем каждый ключ из базы (авторитетно) и отдаём .json файлом
+  // Чтение НЕ-массива (объект: настройки/каталог/цены) из облака.
+  const _readObj = async (key) => {
+    try { return classifyCloudObj(await storage.getCloudResult(key)); }
+    catch { return { value: null, ok: false }; }
+  };
+  // Параллельная обработка с ограничением одновременных запросов (чтобы сотни публичных нод
+  // не ушли в облако одним залпом и не словили таймауты/троттлинг). Сохраняет порядок.
+  const _mapLimit = async (items, limit, fn) => {
+    const out = new Array(items.length);
+    let i = 0;
+    const worker = async () => { while (i < items.length) { const idx = i++; out[idx] = await fn(items[idx], idx); } };
+    await Promise.all(Array.from({ length: Math.min(limit, items.length || 0) }, worker));
+    return out;
+  };
+  // Выгрузка: читаем каждый ключ НАПРЯМУЮ ИЗ FIREBASE (getCloudResult) и отдаём .json файлом.
+  // Файл считается ПОЛНЫМ (verifiedFromFirebase:true) только если ВСЕ разделы прочитаны из базы.
   const exportAllJSON = async () => {
     const data = {}; const failed = [];
+    // Машиночитаемый статус каждого раздела: "verified" (прочитан из Firebase) / "unavailable"
+    // (база не ответила/битые данные). Импорт опирается на него, а не на русские подписи.
+    const sectionStatus = {};
+    const mark = (k, ok, label) => { sectionStatus[k] = ok ? "verified" : "unavailable"; if (!ok && label) failed.push(label); };
     for (const s of _backupSections) {
       const r = await _readArr(s.key);
       data[s.k] = r.list;
-      if (!r.ok) failed.push(s.label);
+      mark(s.k, r.ok, s.label);
     }
-    let metaOk = true, catalogOk = true;
-    try { const m = await storage.getResult(FINANCE_META_KEY); data.financeMeta = m.status === "found" && m.value ? JSON.parse(m.value) : null; if (m.status === "unavailable") metaOk = false; } catch { data.financeMeta = null; metaOk = false; }
-    try { const c = await storage.getResult(CATALOG_KEY); data.catalog = c.status === "found" && c.value ? JSON.parse(c.value) : null; if (c.status === "unavailable") catalogOk = false; } catch { data.catalog = null; catalogOk = false; }
-    if (!metaOk) failed.push("Финансы: настройки");
-    if (!catalogOk) failed.push("Каталог цен");
+    // Настройки финансов, каталог, ПЕРЕОПРЕДЕЛЕНИЯ ЦЕН (раньше в бэкап не входили)
+    const meta = await _readObj(FINANCE_META_KEY); data.financeMeta = meta.value; mark("financeMeta", meta.ok, "Финансы: настройки");
+    const cat = await _readObj(CATALOG_KEY); data.catalog = cat.value; mark("catalog", cat.ok, "Каталог");
+    const prices = await _readObj(PRICES_KEY); data.prices = prices.value; mark("prices", prices.ok, "Цены (переопределения)");
+    // Журнал аудита: индекс месяцев + каждый помесячный ключ + легаси-журнал (раньше не входил)
+    let auditOk = true;
+    const auditIdx = await _readArr(AUDIT_INDEX_KEY);
+    if (!auditIdx.ok) { auditOk = false; failed.push("Журнал: индекс"); }
+    const auditMonths = {};
+    for (const ym of (Array.isArray(auditIdx.list) ? auditIdx.list : [])) {
+      const mo = await _readArr(AUDIT_MONTH_KEY(ym));
+      auditMonths[ym] = mo.list;
+      if (!mo.ok) { auditOk = false; failed.push("Журнал: " + ym); }
+    }
+    const auditLegacy = await _readArr(AUDIT_KEY);
+    if (!auditLegacy.ok) { auditOk = false; failed.push("Журнал: архив"); }
+    data.audit = { index: auditIdx.list, months: auditMonths, legacy: auditLegacy.list };
+    sectionStatus.audit = auditOk ? "verified" : "unavailable";
+
+    // ПУБЛИЧНЫЕ НОДЫ (раньше в бэкап не входили — после восстановления ломались ссылки клиентов):
+    // опубликованные КП (ключ по id сметы), кабинеты прогресса и документы кабинета (по progressToken).
+    // Читаем параллельно; храним валидный JSON-объект (битый → ошибка раздела). empty → просто пропуск.
+    let pubOk = true;
+    const publicNodes = { kp: {}, progress: {}, docs: {} };
+    const readNode = async (key) => { try { return classifyCloudObj(await storage.getCloudResult(key)); } catch { return { value: null, ok: false }; } };
+    const estIds = (data.estimates || []).filter(e => e?.id).map(e => e.id);
+    const kpRes = await _mapLimit(estIds, 8, id => readNode(KP_NODE(id)).then(r => ({ id, r })));
+    for (const { id, r } of kpRes) {
+      if (!r.ok) { pubOk = false; failed.push("КП сметы " + id); continue; }
+      if (r.value) publicNodes.kp[id] = r.value;
+    }
+    const tokens = [...new Set((data.objects || []).filter(o => o?.progressToken).map(o => o.progressToken))];
+    const progRes = await _mapLimit(tokens, 8, t => Promise.all([readNode(PROGRESS_NODE(t)), readNode(DOCS_NODE(t))]).then(([pr, dr]) => ({ t, pr, dr })));
+    for (const { t, pr, dr } of progRes) {
+      if (!pr.ok) { pubOk = false; failed.push("Кабинет " + t); } else if (pr.value) publicNodes.progress[t] = pr.value;
+      if (!dr.ok) { pubOk = false; failed.push("Документы кабинета " + t); } else if (dr.value) publicNodes.docs[t] = dr.value;
+    }
+    data.publicNodes = publicNodes;
+    sectionStatus.publicNodes = pubOk ? "verified" : "unavailable";
+
     if (failed.length) {
-      const proceed = window.confirm(`⚠️ База не ответила при чтении: ${failed.join(", ")}.\nЭти разделы попадут в файл ПУСТЫМИ — это НЕ полный бэкап.\n\nРекомендуется отменить, проверить связь и повторить.\nВсё равно скачать неполный файл?`);
+      const proceed = window.confirm(`⚠️ База (Firebase) не ответила при чтении: ${failed.join(", ")}.\nЭти разделы попадут в файл ПУСТЫМИ — это НЕ полный бэкап.\n\n⛔ ВАЖНО: такой файл НЕЛЬЗЯ будет использовать для «Восстановить всё» — иначе он затрёт эти разделы пустыми. Годится только для ручного разбора.\n\nРекомендуется отменить, проверить связь и повторить.\nВсё равно скачать неполный файл?`);
       if (!proceed) return;
     }
     const snapshot = {
-      _type: "titovstroy-backup", _version: 1,
+      _type: "titovstroy-backup", _version: 2,
       _exportedAt: new Date().toISOString(),
       _env: IS_DEV_ENV ? "dev" : "prod",
+      verifiedFromFirebase: failed.length === 0,
+      databaseProject: firebaseConfig.projectId || "",
+      databaseUrl: firebaseConfig.databaseURL || "",
+      _sectionStatus: sectionStatus,
       _incomplete: failed.length ? failed : undefined,
       _counts: Object.fromEntries(_backupSections.map(s => [s.k, (data[s.k] || []).length])),
       data,
@@ -6104,6 +6245,39 @@ ${reqBlock}`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   };
+  // Безопасное восстановление журнала аудита: ОБЪЕДИНЕНИЕ (не замена). Записи из бэкапа,
+  // которых нет в текущем журнале (по сигнатуре), добавляются; существующие не трогаются;
+  // ничего не удаляется. Пишем через setCloudOnly. Возвращает { merged, skipped }.
+  const _restoreAuditMerge = async (audit) => {
+    let merged = 0, skipped = false;
+    // Каждый месяц — АТОМАРНО через runTransaction: чтение-слияние-запись за одну операцию,
+    // так параллельная новая запись аудита между чтением и записью НЕ теряется. Битое/недоступное
+    // текущее значение → транзакция отменяется (committed:false) → помечаем аудит пропущенным.
+    const mergeInto = async (key, backupEntries) => {
+      if (!Array.isArray(backupEntries) || !backupEntries.length) return;
+      let added = 0;
+      const res = await storage.mutateTransaction(key, (cur) => {
+        const r = mergeAuditEntries(cur, backupEntries);
+        added = r.added;
+        return r.merged;
+      });
+      if (!res.committed) { skipped = true; return; }
+      merged += added;
+    };
+    const months = audit.months || {};
+    for (const ym of Object.keys(months)) await mergeInto(AUDIT_MONTH_KEY(ym), months[ym]);
+    await mergeInto(AUDIT_KEY, audit.legacy);
+    // индекс месяцев — тоже атомарно (объединение множеств строк "YYYY-MM"), без потери текущих
+    const fromBackup = Array.isArray(audit.index) ? audit.index : Object.keys(months);
+    if (fromBackup.length) {
+      const idxRes = await storage.mutateTransaction(AUDIT_INDEX_KEY, (cur) => {
+        const union = [...new Set([...cur, ...fromBackup])].sort().reverse();
+        return union;
+      });
+      if (!idxRes.committed) skipped = true;
+    }
+    return { merged, skipped };
+  };
   // Загрузка: читаем .json, показываем сводку, требуем ввести «ВОССТАНОВИТЬ»,
   // перед заменой КАЖДЫЙ раздел уходит в свой авто-бэкап, затем ключ перезаписывается.
   const importAllJSON = async (file) => {
@@ -6111,42 +6285,157 @@ ${reqBlock}`;
     let snap;
     try { snap = JSON.parse(await file.text()); } catch { window.alert("Файл не читается как JSON."); return; }
     if (!snap || snap._type !== "titovstroy-backup" || !snap.data) { window.alert("Это не файл бэкапа TitovStroy."); return; }
-    // База должна быть доступна — иначе восстановление могло бы записаться только локально
-    const probe = await storage.getResult(OBJECTS_KEY);
-    if (probe.status === "unavailable") { window.alert("База сейчас недоступна — восстановление отменено. Проверьте интернет и повторите."); return; }
+    // ПРОВЕРКА СТРУКТУРЫ ДО ЛЮБОЙ ЗАПИСИ: валидный JSON может иметь неверную форму (массив
+    // вместо цен, строка вместо каталога, кривые публичные ноды/журнал). При любой ошибке —
+    // полная отмена, ни одна запись в Firebase не идёт.
+    const _arraySpecs = _backupSections.map(s => ({ key: s.k, idKey: s.k === "productions" ? "objectId" : "id" }));
+    const schema = validateBackupSchema(snap, _arraySpecs);
+    if (!schema.ok) { window.alert("❌ Файл бэкапа повреждён или имеет неверную структуру — восстановление отменено.\n\nПричина: " + schema.error); return; }
+    // ЗАПРЕТ МАССОВОГО ВОССТАНОВЛЕНИЯ НЕПОЛНОГО ФАЙЛА: если какой-то раздел не прочитался из
+    // Firebase при выгрузке, он лежит в файле ПУСТЫМ — «Восстановить всё» затёр бы им рабочий
+    // раздел (например, все объекты → []). Такой файл к массовому restore не допускаем.
+    const restorable = isBackupRestorable(snap);
+    if (!restorable.ok) { window.alert(`⛔ Массовое восстановление из НЕПОЛНОГО бэкапа запрещено — иначе пустые разделы затрут рабочие данные.\n\nПричина: ${restorable.reason}\n\nСделайте новый полный бэкап при стабильной связи. Неполный файл можно разобрать вручную, но кнопкой «Восстановить всё» его использовать нельзя.`); return; }
+    // ЗАЩИТА ОТ ЧУЖОЙ БАЗЫ: файл дев-базы нельзя случайно накатить на боевую (и наоборот).
+    // Сверяем И projectId, И hostname databaseURL (один проект может держать несколько RTDB).
+    const curProject = firebaseConfig.projectId || "";
+    if (snap.databaseProject && snap.databaseProject !== curProject) {
+      window.alert(`❌ Восстановление отменено: файл сделан из ДРУГОГО проекта Firebase.\n\nВ файле: ${snap.databaseProject}\nТекущий: ${curProject}\n\nНельзя восстанавливать бэкап одной базы в другую (например, тестовую в боевую).`);
+      return;
+    }
+    const _host = (u) => { try { return new URL(u).host; } catch { return u || ""; } };
+    if (snap.databaseUrl && _host(snap.databaseUrl) !== _host(firebaseConfig.databaseURL || "")) {
+      window.alert(`❌ Восстановление отменено: файл сделан из ДРУГОЙ базы Realtime Database.\n\nВ файле: ${_host(snap.databaseUrl)}\nТекущая: ${_host(firebaseConfig.databaseURL || "")}\n\nОдин проект Firebase может держать несколько баз — накатывать чужую нельзя.`);
+      return;
+    }
+    // Доступность проверяем ТОЛЬКО по облаку (getCloudResult): getResult мог бы отдать локальную
+    // копию и «разрешить» восстановление, которое на деле ушло бы только в localStorage.
+    const probe = await storage.getCloudResult(OBJECTS_KEY);
+    if (probe.status === "unavailable") { window.alert("База (Firebase) сейчас недоступна — восстановление отменено. Проверьте интернет и повторите."); return; }
+    // НЕСИНХРОНИЗИРОВАННЫЕ ЛОКАЛЬНЫЕ ПРАВКИ: восстановление через setCloudOnly перезапишет
+    // локальную копию и снимет dirty-флаг → незасинканные правки этого устройства пропадут
+    // БЕЗ попадания даже в пред-бэкап. Поэтому сначала дожимаем их в облако; если не удалось —
+    // ПОЛНОСТЬЮ запрещаем восстановление, пока правки не синхронизированы.
+    let _dirty = storage.dirtyKeys();
+    if (_dirty.length) {
+      try { await storage.flushDirty(); } catch {}
+      _dirty = storage.dirtyKeys();
+      if (_dirty.length) {
+        window.alert(`❌ Восстановление отменено: на этом устройстве есть несохранённые в облако изменения (${_dirty.length}).\n\nСначала синхронизируйте их с облаком (кнопка «🔄 Повторить синхронизацию» / дождитесь связи) — иначе восстановление их безвозвратно сотрёт.`);
+        return;
+      }
+    }
+    const projWarn = !snap.databaseProject ? "\n\n⚠️ В файле НЕ указан проект Firebase (старый формат) — проверьте, что это бэкап ИМЕННО этой базы, иначе можно затереть данные чужими." : "";
     const d = snap.data;
     const lines = _backupSections.map(s => `• ${s.label}: ${Array.isArray(d[s.k]) ? d[s.k].length : "—"}`).join("\n");
-    const envWarn = IS_DEV_ENV ? "" : "\n\n⚠️ ЭТО БОЕВАЯ БАЗА. Текущие данные будут ЗАМЕНЕНЫ данными из файла.\nПеред заменой каждый раздел уходит в свой авто-бэкап (откат возможен).";
-    const incompleteWarn = snap._incomplete?.length ? `\n\n⚠️ Этот файл сам был выгружен НЕПОЛНЫМ (база не отвечала при выгрузке): ${snap._incomplete.join(", ")}.` : "";
-    const ok = await confirmTyped(`Восстановить ВСЁ из файла бэкапа?\nОт: ${snap._exportedAt || "?"} · база «${snap._env || "?"}»\n\n${lines}${incompleteWarn}${envWarn}`, "ВОССТАНОВИТЬ");
+    const envWarn = IS_DEV_ENV ? "" : "\n\n⚠️ ЭТО БОЕВАЯ БАЗА. Текущие данные будут ЗАМЕНЕНЫ данными из файла.\nПеред заменой каждый раздел уходит в свой облачный авто-бэкап (откат возможен).";
+    // Старые файлы (v1) без verifiedFromFirebase — предупреждаем, что полнота не подтверждена
+    const notVerified = snap.verifiedFromFirebase === false || (snap._version || 1) < 2;
+    const incompleteWarn = snap._incomplete?.length
+      ? `\n\n⚠️ Файл выгружен НЕПОЛНЫМ (база не отвечала при выгрузке): ${snap._incomplete.join(", ")}.`
+      : (notVerified ? "\n\n⚠️ У этого файла НЕ подтверждено чтение из Firebase (старый формат) — возможно, часть данных бралась из локальной копии." : "");
+    const ok = await confirmTyped(`Восстановить ВСЁ из файла бэкапа?\nОт: ${snap._exportedAt || "?"} · база «${snap._env || "?"}»${snap.databaseProject ? " · проект " + snap.databaseProject : ""}\n\n${lines}${incompleteWarn}${projWarn}${envWarn}`, "ВОССТАНОВИТЬ");
     if (!ok) return;
-    let done = 0, fail = 0; const localOnly = [];
+    // Повторная проверка несинхронизированных правок ПРЯМО ПЕРЕД первой записью: пока показывался
+    // диалог подтверждения, пользователь мог что-то отредактировать. Если появились новые dirty —
+    // отменяем (защита в глубину: setCloudOnly затёр бы их без пред-бэкапа).
+    if (storage.dirtyKeys().length) {
+      try { await storage.flushDirty(); } catch {}
+      if (storage.dirtyKeys().length) { window.alert("❌ Отменено: за время подтверждения появились несохранённые изменения. Синхронизируйте их и повторите."); return; }
+    }
+    let done = 0, pubDone = 0, fail = 0; const cloudFailed = [], skipped = [];
+    // Восстановление одного ключа: пред-бэкап ТЕКУЩЕГО значения в облако с проверкой fbOk;
+    // если текущее значение или список пред-бэкапов недоступны/битые — раздел НЕ трогаем
+    // (иначе рискуем затереть без возможности отката, см. preBackupDecision). Пишем через
+    // setCloudOnly — при сбое облака НЕ остаётся «грязной» локальной копии, которую автосинк
+    // потом молча затолкал бы (restore должен быть подтверждён облаком или честно «не удалось»).
+    const restoreKey = async (key, bkey, value, label) => {
+      try {
+        const cur = await storage.getCloudResult(key);
+        const bk = (cur.status === "found" && cur.value) ? await storage.getCloudResult(bkey) : { status: "empty" };
+        const decision = preBackupDecision(cur, bk);
+        if (decision.action === "skip") { skipped.push(label); return; }
+        if (cur.status === "found" && cur.value) {
+          const backups = decision.backups;
+          let cnt = 0; try { const p = JSON.parse(cur.value); cnt = Array.isArray(p) ? p.length : 0; } catch {}
+          if (!backups[0] || backups[0].data !== cur.value) backups.unshift({ ts: Date.now(), by: currentUser?.name || "", count: cnt, data: cur.value });
+          const bRes = await storage.setCloudOnly(bkey, JSON.stringify(backups.slice(0, 20)));
+          if (!bRes.fbOk) { skipped.push(label); return; } // облачный пред-бэкап не создан — раздел не трогаем
+        }
+        const setRes = await storage.setCloudOnly(key, JSON.stringify(value));
+        if (!setRes.fbOk) { cloudFailed.push(label); return; } // в облако не записалось — раздел НЕ восстановлен
+        done++;
+      } catch (e) { console.warn("restore fail", key, e); fail++; }
+    };
     for (const s of _backupSections) {
       const list = Array.isArray(d[s.k]) ? d[s.k] : null;
       if (!list) continue; // нет раздела в файле — не трогаем текущий
-      try {
-        // 1) пред-бэкап текущего значения раздела
-        const cur = await storage.get(s.key);
-        if (cur?.value) {
-          let backups = []; try { const b = await storage.get(s.bkey); if (b?.value) backups = JSON.parse(b.value); } catch {}
-          if (!Array.isArray(backups)) backups = [];
-          let cnt = 0; try { const p = JSON.parse(cur.value); cnt = Array.isArray(p) ? p.length : 0; } catch {}
-          if (!backups[0] || backups[0].data !== cur.value) backups.unshift({ ts: Date.now(), by: currentUser?.name || "", count: cnt, data: cur.value });
-          await storage.set(s.bkey, JSON.stringify(backups.slice(0, 20)));
-        }
-        // 2) перезапись раздела данными из файла — проверяем fbOk: storage.set при неудаче
-        // облака молча пишет только в localStorage (флаг __dirty), а до этого фикса код
-        // засчитывал раздел успешным в любом случае — интерфейс мог сообщить об успехе,
-        // хотя данные ушли только на это устройство и не видны остальным/после очистки кэша.
-        const setRes = await storage.set(s.key, JSON.stringify(list));
-        if (setRes && setRes.fbOk === false) localOnly.push(s.label);
-        done++;
-      } catch (e) { console.warn("restore fail", s.k, e); fail++; }
+      await restoreKey(s.key, s.bkey, list, s.label);
     }
-    if (d.financeMeta) { const r = await storage.set(FINANCE_META_KEY, JSON.stringify(d.financeMeta)); if (r?.fbOk === false) localOnly.push("Финансы: настройки"); }
-    if (d.catalog) { const r = await storage.set(CATALOG_KEY, JSON.stringify(d.catalog)); if (r?.fbOk === false) localOnly.push("Каталог цен"); }
-    const localOnlyWarn = localOnly.length ? `\n\n⚠️ В облако НЕ записались (только на этом устройстве, другие их не увидят): ${localOnly.join(", ")}.\nПроверьте связь и запустите восстановление ещё раз для этих разделов.` : "";
-    window.alert(`Восстановление завершено: ${done} разделов${fail ? `, ошибок: ${fail}` : ""}.${localOnlyWarn}\nСтраница сейчас перезагрузится, чтобы показать восстановленные данные.`);
+    // hasOwnProperty, а не истинность: подтверждённое пустое значение тоже нужно восстановить,
+    // иначе старые настройки/цены останутся, хотя в бэкапе их уже не было. Пустой объектный
+    // раздел восстанавливаем как {} (не null) — загрузчики каталога/цен/настроек ждут объект.
+    const has = (k) => Object.prototype.hasOwnProperty.call(d, k);
+    const objVal = (v) => (v == null ? {} : v);
+    if (has("financeMeta")) await restoreKey(FINANCE_META_KEY, FINANCE_META_BACKUPS_KEY, objVal(d.financeMeta), "Финансы: настройки");
+    if (has("catalog")) await restoreKey(CATALOG_KEY, CATALOG_BACKUPS_KEY, objVal(d.catalog), "Каталог");
+    if (has("prices")) await restoreKey(PRICES_KEY, PRICES_BACKUPS_KEY, objVal(d.prices), "Цены (переопределения)");
+    // ПУБЛИЧНЫЕ НОДЫ (КП/кабинеты/документы) — с пред-бэкапом: перед перезаписью снимаем текущие
+    // значения в PUBLIC_NODES_BACKUPS_KEY (один облачный снимок, откат возможен). Если снять/
+    // подтвердить снимок не удалось — публичные ноды НЕ трогаем (иначе теряем принятие КП,
+    // замечания клиента, документы без возможности вернуть). Пишем через setCloudOnly.
+    if (d.publicNodes) {
+      const pn = d.publicNodes;
+      const targets = [
+        ...Object.entries(pn.kp || {}).map(([id, val]) => ({ key: KP_NODE(id), val, label: "КП сметы " + id })),
+        ...Object.entries(pn.progress || {}).map(([t, val]) => ({ key: PROGRESS_NODE(t), val, label: "Кабинет " + t })),
+        ...Object.entries(pn.docs || {}).map(([t, val]) => ({ key: DOCS_NODE(t), val, label: "Документы кабинета " + t })),
+      ];
+      if (targets.length) {
+        // снимок текущих значений (ограниченный параллелизм)
+        let readFail = false;
+        const curVals = await _mapLimit(targets, 8, async (t) => { const r = await storage.getCloudResult(t.key); if (r.status === "unavailable") readFail = true; return { key: t.key, value: (r.status === "found" ? r.value : null) }; });
+        if (readFail) {
+          skipped.push("Публичные ноды (КП/кабинеты)");
+        } else {
+          // пред-бэкап истории (сам ключ истории тоже должен быть читаем/не битым)
+          const histCur = await storage.getCloudResult(PUBLIC_NODES_BACKUPS_KEY);
+          const histDec = preBackupDecision({ status: "found", value: "[]" }, histCur);
+          if (histDec.action === "skip") {
+            skipped.push("Публичные ноды (КП/кабинеты)");
+          } else {
+            const snapNodes = {}; for (const c of curVals) if (c.value != null) snapNodes[c.key] = c.value;
+            const hist = [{ ts: Date.now(), by: currentUser?.name || "", nodes: snapNodes }, ...histDec.backups].slice(0, 10);
+            const bRes = await storage.setCloudOnly(PUBLIC_NODES_BACKUPS_KEY, JSON.stringify(hist));
+            if (!bRes.fbOk) {
+              skipped.push("Публичные ноды (КП/кабинеты)");
+            } else {
+              await _mapLimit(targets, 8, async (t) => {
+                try { const r = await storage.setCloudOnly(t.key, JSON.stringify(t.val)); if (!r.fbOk) cloudFailed.push(t.label); else pubDone++; }
+                catch (e) { console.warn("restore public fail", t.key, e); fail++; }
+              });
+            }
+          }
+        }
+      }
+    }
+    // Журнал аудита (audit): безопасное ОБЪЕДИНЕНИЕ (не замена) — записи из бэкапа, которых нет
+    // в текущем журнале, добавляются; существующие не трогаются. Так восстановление не затрёт
+    // записи, добавленные после снятия бэкапа. Дедуп по сигнатуре записи.
+    let auditMerged = 0;
+    if (d.audit) {
+      const auditRes = await _restoreAuditMerge(d.audit);
+      auditMerged = auditRes.merged; if (auditRes.skipped) skipped.push("Журнал изменений");
+    }
+    // setCloudOnly при сбое НИЧЕГО не сохраняет (даже локально) — поэтому «не записались»
+    // означает «нужно повторить», а не «лежит только на этом устройстве».
+    const cloudFailedWarn = cloudFailed.length ? `\n\n⚠️ НЕ записаны в облако (сбой связи, повторите восстановление): ${cloudFailed.join(", ")}.` : "";
+    const skippedWarn = skipped.length ? `\n\n⛔ ПРОПУЩЕНЫ (текущие данные НЕ тронуты — не удалось безопасно сделать пред-бэкап): ${skipped.join(", ")}.` : "";
+    const failWarn = fail ? `\n\n❌ Ошибок при записи: ${fail}.` : "";
+    const auditMsg = auditMerged ? `\nЖурнал изменений: +${auditMerged} записей.` : "";
+    const pubMsg = pubDone ? `\nПубличных нод (КП/кабинеты): ${pubDone}.` : "";
+    const okMsg = (cloudFailed.length || skipped.length || fail) ? "Восстановление завершено ЧАСТИЧНО" : "Восстановление завершено УСПЕШНО";
+    window.alert(`${okMsg}: восстановлено разделов — ${done}.${pubMsg}${auditMsg}${failWarn}${skippedWarn}${cloudFailedWarn}\nСтраница сейчас перезагрузится.`);
     setTimeout(() => window.location.reload(), 1000);
   };
   // Выгрузка всех смет отдельной таблицей для Excel (CSV, открывается в Excel напрямую)
