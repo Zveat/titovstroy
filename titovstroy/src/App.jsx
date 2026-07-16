@@ -339,20 +339,23 @@ try {
       else { signInAnonymously(_fbAuth).then(resolve).catch(resolve); }
     });
   });
-  // ── Firebase App Check (опционально) ──
-  // Подтверждает Firebase, что запросы идут из настоящего приложения, а не curl'ом по
-  // найденному URL базы. Включается ТОЛЬКО если задана VITE_RECAPTCHA_SITE_KEY — без неё
-  // код просто не трогает App Check, поведение прежнее, ничего не сломается.
-  // Как включить (один раз, в консоли):
-  //  1. https://www.google.com/recaptcha/admin → создать ключ типа reCAPTCHA v3,
-  //     домены — боевой домен и *.vercel.app (для превью).
-  //  2. Firebase Console → Project Settings → App Check → своё веб-приложение → Register →
-  //     provider reCAPTCHA v3 → вставить тот же site key.
-  //  3. В Vercel → Settings → Environment Variables добавить VITE_RECAPTCHA_SITE_KEY
-  //     (тот же site key) для Production и Preview → Redeploy.
-  //  4. В Firebase Console → App Check → Enforce для Realtime Database, когда убедитесь,
-  //     что приложение с новым App Check работает (metrics покажут verified-запросы).
-  if (_env.VITE_RECAPTCHA_SITE_KEY) {
+  // ── Firebase App Check (по умолчанию ВЫКЛЮЧЕН) ──
+  // Подтверждает Firebase, что запросы идут из настоящего приложения. ВАЖНО: раньше App Check
+  // инициализировался при одном лишь наличии VITE_RECAPTCHA_SITE_KEY. На проде ключ задан, но
+  // домен titovstroy.kz не зарегистрирован в reCAPTCHA/консоли App Check → токен-обмен отдаёт
+  // 403, а reCAPTCHA на повторных отказах уходит в блок на 24 часа. Enforce на Realtime Database
+  // при этом ВЫКЛЮЧЕН (проверено), т.е. защиты сейчас ноль, а вред (403-шум + троттлинг) есть.
+  // Поэтому теперь нужен ЯВНЫЙ флаг VITE_APPCHECK_ON="1" ВДОБАВОК к ключу — просто «забытый»
+  // ключ в env больше не может молча ломать прод. Локалхост не трогаем (нет ключа/флага → нет init).
+  //
+  // Как ПРАВИЛЬНО включить (только после настройки, иначе снова 403):
+  //  1. https://www.google.com/recaptcha/admin → ключ reCAPTCHA v3, в «Домены» добавить
+  //     titovstroy.kz, www.titovstroy.kz и *.vercel.app (превью).
+  //  2. Firebase Console → App Check → своё веб-приложение → Register → reCAPTCHA v3 → тот же site key.
+  //  3. Vercel → Environment Variables: VITE_RECAPTCHA_SITE_KEY (site key) + VITE_APPCHECK_ON=1 → Redeploy.
+  //  4. Убедиться по метрикам App Check, что идут verified-запросы (403 нет), и ТОЛЬКО ПОТОМ включать
+  //     Enforce для Realtime Database. Иначе Enforce без валидных токенов положит всю базу.
+  if (_env.VITE_RECAPTCHA_SITE_KEY && _env.VITE_APPCHECK_ON === "1") {
     import("firebase/app-check").then(({ initializeAppCheck, ReCaptchaV3Provider }) => {
       try { initializeAppCheck(_fbApp, { provider: new ReCaptchaV3Provider(_env.VITE_RECAPTCHA_SITE_KEY), isTokenAutoRefreshEnabled: true }); }
       catch(e) { console.warn("App Check init failed", e); }
@@ -4187,6 +4190,14 @@ function MainApp({ currentUser, setCurrentUser }) {
   useEffect(() => { contragentsRef.current = contragents; }, [contragents]);
   const _contractsLoaded = useRef(false);
   const _productionsLoaded = useRef(false); // отдельно от _contractsLoaded: productions грузится в том же запросе, но может не долететь, пока остальное — долетит
+  // Флаги загрузки — это refs (не вызывают ре-рендер). Авто-синки (этапы←сметы, бюджет←договоры)
+  // зависят по массивам [estimates]/[contracts], поэтому если данные, от которых зависит ГАРД
+  // (productions/finance/contracts), долетают ПОЗЖЕ, чем в последний раз менялся массив-зависимость,
+  // эффект больше не перезапускается и синк не срабатывает (гонка первичной загрузки). loadedTick
+  // инкрементится в конце каждой загрузки и добавлен в зависимости синков — они честно
+  // перезапускаются, когда всё догрузилось.
+  const [loadedTick, setLoadedTick] = useState(0);
+  const _bumpLoaded = useCallback(() => setLoadedTick(t => t + 1), []);
   const [contractTab, setContractTab] = useState("list"); // list | editor | clients | contragents
   const [currentContract, setCurrentContract] = useState(null);
 
@@ -4683,7 +4694,8 @@ function MainApp({ currentUser, setCurrentUser }) {
     } catch(e) { console.error(e); ok = false; prodOk = false; }
     _contractsLoaded.current = ok;
     _productionsLoaded.current = ok && prodOk;
-  }, []);
+    _bumpLoaded();
+  }, [_bumpLoaded]);
 
   const saveContracts = async (list, opts = {}) => {
     const r = await saveListProtected(CONTRACTS_KEY, CONTRACTS_BACKUPS_KEY, list, (fl)=>{ contractsRef.current = fl; setContracts(fl); }, { loadedRef: _contractsLoaded, ...opts });
@@ -5400,8 +5412,9 @@ ${reqBlock}`;
       if (anyChanged) saveProductions(updated, { replace: true });
     }, 1200);
     return () => { if (_stageSyncTimer.current) clearTimeout(_stageSyncTimer.current); };
+    // loadedTick — чтобы синк перезапустился, когда productions/сметы догрузились ПОЗЖЕ estimates.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estimates]);
+  }, [estimates, loadedTick]);
 
   // Миграция: перенести все проекты из Финансов в Производство (один раз)
   // Определён ПОСЛЕ buildStagesFromEstimate чтобы избежать temporal dead zone
@@ -5489,7 +5502,8 @@ ${reqBlock}`;
       } } catch {} }
       _financeLoaded.current = ok;
     } catch(e) { console.error(e); }
-  }, []);
+    _bumpLoaded();
+  }, [_bumpLoaded]);
   const saveFinanceTx = async (list, opts = {}) => {
     return await saveListProtected(FINANCE_TX_KEY, FINANCE_TX_BACKUPS_KEY, list, (fl)=>{ financeTxRef.current = fl; setFinanceTx(fl); }, { loadedRef: _financeLoaded, ...opts });
   };
@@ -5541,8 +5555,9 @@ ${reqBlock}`;
       if (changed) saveFinanceProjects(updated);
     }, 800);
     return () => { if (_budgetSyncTimer.current) clearTimeout(_budgetSyncTimer.current); };
+    // loadedTick — чтобы синк перезапустился, когда финансы/договоры догрузились ПОЗЖЕ contracts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contracts]);
+  }, [contracts, loadedTick]);
 
   // Бэкапы списков (договоры/клиенты/контрагенты)
   const openListBackups = async (kind) => {
@@ -5698,7 +5713,8 @@ ${reqBlock}`;
     // теперь, когда запись разрешена, сохраняем результат санитизации (если что-то чинили)
     if (ok && _needResaveClean.current) { const c = _needResaveClean.current; _needResaveClean.current = null; saveEstimates(c, { replace: true }); }
     setLoadingList(false);
-  }, []);
+    _bumpLoaded();
+  }, [_bumpLoaded]);
 
   useEffect(() => { loadEstimates(); loadContracts(); }, []);
   // Финансы грузим для админа, руководителя и прораба (прораб видит финансы ВНУТРИ объекта:
@@ -5830,7 +5846,15 @@ ${reqBlock}`;
 
   // ── УНИВЕРСАЛЬНОЕ защищённое сохранение списка (договоры, клиенты, контрагенты) ──
   // Та же логика, что у смет: слияние по id, бэкап, защита от затирания, баннер при сбое облака.
-  const saveListProtected = useCallback(async (key, backupKey, list, applyState, opts = {}) => {
+  //
+  // ЕДИНАЯ ОЧЕРЕДЬ ЗАПИСИ ПО КЛЮЧУ. Внутри — чтение(getResult)→слияние→бэкап→запись(set). Это
+  // НЕ атомарно: два параллельных сохранения одного ключа прочитали бы одно и то же `stored`,
+  // слили на устаревших данных, и второй set затёр бы правку первого. Особенно опасно для
+  // производства, куда пишут сразу несколько источников (карточка объекта, авто-синк этапов←сметы,
+  // зеркалирование статуса в saveObjField, удаление карточки). Теперь вызовы одного ключа идут
+  // строго последовательно (цепочка промисов на ключ), разные ключи — по-прежнему параллельно.
+  const _saveQueues = useRef(new Map()); // key -> хвостовой промис очереди
+  const _saveListProtectedRaw = useCallback(async (key, backupKey, list, applyState, opts = {}) => {
     if (!Array.isArray(list)) { console.error("saveListProtected: не массив", key); return; }
     // identityKey — по какому полю мерджить (по умолчанию "id"; у production записей его нет,
     // там ключ — "objectId", иначе слияние молча даёт пустой список и сохранение блокируется).
@@ -5907,6 +5931,17 @@ ${reqBlock}`;
     } catch(e) { console.error(e); setCloudError(true); }
     return finalList;
   }, [currentUser]);
+
+  // Обёртка-очередь: каждый вызов встаёт в хвост очереди СВОЕГО ключа и запускается только
+  // после завершения предыдущего вызова того же ключа. Возвращаемый промис резолвится тем же,
+  // чем и сырой сейв (finalList/undefined) — вызовы, которые await'ят результат, работают как раньше.
+  const saveListProtected = useCallback((key, backupKey, list, applyState, opts = {}) => {
+    const prev = _saveQueues.current.get(key) || Promise.resolve();
+    const run = () => _saveListProtectedRaw(key, backupKey, list, applyState, opts);
+    const next = prev.then(run, run); // запускаем независимо от исхода предыдущего в очереди
+    _saveQueues.current.set(key, next.then(() => {}, () => {})); // хвост никогда не «падает», чтобы цепочка не рвалась
+    return next;
+  }, [_saveListProtectedRaw]);
 
   // Сколько позиций (с qty>0) в наборе rows
   const countFilled = (rws) => Object.values(rws||{}).filter(r => Number(r?.qty) > 0).length;
@@ -5997,7 +6032,8 @@ ${reqBlock}`;
       } catch (e) { console.warn("ws snapshot err", e); }
     }, 8000);
     return () => { if (_wsSnapTimer.current) clearTimeout(_wsSnapTimer.current); };
-  }, [objects, estimates, contracts, financeTx]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [objects, estimates, contracts, financeTx, loadedTick]);
 
   const openWorkspaceBackups = async () => {
     try {
