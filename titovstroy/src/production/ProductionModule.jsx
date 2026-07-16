@@ -79,7 +79,60 @@ export default function ProductionModule({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId]);
 
-  const patchProd = (patch) => onSaveProduction({ ...openProd, ...patch, updatedAt: Date.now() });
+  // Локальный буфер карточки: patch() применяется к нему МГНОВЕННО (инстант UI, без ожидания
+  // сети), а реальное сохранение (onSaveProduction — полный цикл чтение+бэкап+запись в App.jsx)
+  // уходит с debounce и СТРОГО последовательно (не параллельно) — иначе при быстром вводе текста
+  // каждый символ гонял бы сеть, а параллельные записи могли завершиться в обратном порядке и
+  // затереть более новый ввод более старым.
+  const [localProd, setLocalProd] = useState(openProd);
+  const localProdRef = useRef(openProd);
+  const openKeyRef = useRef(openObj?.id);
+  const pendingRef = useRef(false);
+  const savingRef = useRef(false);
+  const dirtyAfterSaveRef = useRef(false);
+  const saveTimerRef = useRef(null);
+
+  const flushProdSave = () => {
+    if (savingRef.current) { dirtyAfterSaveRef.current = true; return; }
+    savingRef.current = true;
+    const toSave = localProdRef.current;
+    Promise.resolve(onSaveProduction(toSave)).finally(() => {
+      savingRef.current = false;
+      if (dirtyAfterSaveRef.current) { dirtyAfterSaveRef.current = false; flushProdSave(); }
+      else { pendingRef.current = false; }
+    });
+  };
+
+  useEffect(() => {
+    const key = openObj?.id;
+    const objChanged = key !== openKeyRef.current;
+    if (objChanged) {
+      openKeyRef.current = key;
+      // Несохранённые правки ПРЕДЫДУЩЕГО объекта не бросаем — досылаем сразу, а не отменяем
+      // таймер молча (иначе быстрое переключение объектов теряло бы последний ввод).
+      if (pendingRef.current) {
+        if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+        flushProdSave();
+      }
+      pendingRef.current = false;
+    }
+    // Подхватываем обновление из props (сервер/другое устройство), только если сейчас нет
+    // несохранённых локальных правок — иначе не затираем то, что пользователь только что ввёл.
+    if (objChanged || !pendingRef.current) {
+      localProdRef.current = openProd;
+      setLocalProd(openProd);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openProd, openObj?.id]);
+
+  const patchProd = (patch) => {
+    const next = { ...localProdRef.current, ...patch, updatedAt: Date.now() };
+    localProdRef.current = next;
+    setLocalProd(next);
+    pendingRef.current = true;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(flushProdSave, 600);
+  };
 
   // Данные из Финансов для текущего объекта — ДОЛЖНЫ быть до if(!openObj), иначе нарушение Rules of Hooks
   const finProj = useMemo(() => {
@@ -125,13 +178,13 @@ export default function ProductionModule({
   const audit = (ev) => { try { if (onAudit) onAudit({ objectId: openObj.id, label: _objLbl, source: "manual", ...ev }); } catch (e) { console.warn("audit failed", e); } };
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-      {embedTab === "info" && <InfoTab prod={openProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={patchProd} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} clientInfoCard={clientInfoCard} audit={audit} />}
-      {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист запуска объекта" />}
-      {embedTab === "handover" && <ChecklistTab kind="checklistHandover" prod={openProd} patch={patchProd} genId={genId} title="Чек-лист сдачи объекта" />}
-      {embedTab === "stages" && <StagesTab prod={openProd} patch={patchProd} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} audit={audit} />}
-      {embedTab === "finance" && <FinanceTab prod={openProd} patch={patchProd} fmt={fmt} finSummary={finSummary} />}
-      {embedTab === "journal" && <JournalTab prod={openProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
-      {embedTab === "defects" && <DefectsTab prod={openProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
+      {embedTab === "info" && <InfoTab prod={localProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={patchProd} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} clientInfoCard={clientInfoCard} audit={audit} />}
+      {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={localProd} patch={patchProd} genId={genId} title="Чек-лист запуска объекта" />}
+      {embedTab === "handover" && <ChecklistTab kind="checklistHandover" prod={localProd} patch={patchProd} genId={genId} title="Чек-лист сдачи объекта" />}
+      {embedTab === "stages" && <StagesTab prod={localProd} patch={patchProd} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} audit={audit} />}
+      {embedTab === "finance" && <FinanceTab prod={localProd} patch={patchProd} fmt={fmt} finSummary={finSummary} />}
+      {embedTab === "journal" && <JournalTab prod={localProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
+      {embedTab === "defects" && <DefectsTab prod={localProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
     </div>
   );
 }
