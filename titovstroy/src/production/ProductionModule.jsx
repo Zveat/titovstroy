@@ -102,6 +102,27 @@ export default function ProductionModule({
       else { pendingRef.current = false; }
     });
   };
+  // flushProdSave — новая функция на каждый рендер; держим ссылку на актуальную, чтобы
+  // размонтирование/закрытие страницы дёргали свежую версию, а не «замороженную» в замыкании.
+  const flushRef = useRef(flushProdSave);
+  flushRef.current = flushProdSave;
+
+  // ФЛЕШ ПРИ РАЗМОНТИРОВАНИИ (ушли из карточки объекта в список/на другой экран) и ПРИ
+  // СКРЫТИИ/ЗАКРЫТИИ СТРАНИЦЫ. Без этого несохранённая правка, набранная в последние
+  // ~600 мс перед уходом/закрытием, терялась (дебаунс не успевал сработать).
+  useEffect(() => {
+    const flushIfDirty = () => { if (pendingRef.current) { if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; } flushRef.current(); } };
+    const onHide = () => { if (document.visibilityState === "hidden") flushIfDirty(); };
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("beforeunload", flushIfDirty);
+    window.addEventListener("pagehide", flushIfDirty);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("beforeunload", flushIfDirty);
+      window.removeEventListener("pagehide", flushIfDirty);
+      flushIfDirty(); // размонтирование карточки — досылаем несохранённое
+    };
+  }, []);
 
   useEffect(() => {
     const key = openObj?.id;
