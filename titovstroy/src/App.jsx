@@ -695,6 +695,7 @@ const DEALS_BACKUPS_KEY  = "titovstroy-deals-backups";
 const STORAGE_KEY        = "titovstroy-estimates";
 const BACKUPS_KEY        = "titovstroy-estimates-backups"; // снимки архива для восстановления
 const USERS_KEY          = "titovstroy-users";
+const USERS_BACKUPS_KEY  = "titovstroy-users-backups";
 const SESSION_KEY        = "titovstroy-session";
 const PRESENCE_KEY       = "titovstroy-presence"; // { [userId]: lastSeenTs } — кто когда был онлайн
 const PRESENCE_ONLINE_MS = 2 * 60 * 1000; // «в сети», если активность была <2 мин назад
@@ -1238,7 +1239,19 @@ function LoginScreen({ onLogin }) {
     let users, loadedFromStorage = false;
     const res = await storage.getResult(USERS_KEY);
     if (res.status === "found") {
-      try { users = JSON.parse(res.value); loadedFromStorage = true; } catch(e) { users = DEFAULT_USERS; }
+      // Повреждённый JSON (не распарсился/не массив) — это НЕ «базы нет», список
+      // пользователей реально существует и в нём чужие пароли. Раньше это тихо падало
+      // на DEFAULT_USERS — вход по вшитым в бандл admin/titov2024 прошёл бы, даже если
+      // реальные пароли давно другие. Теперь — честная блокировка входа, не бэкдор.
+      try {
+        const parsed = JSON.parse(res.value);
+        if (!Array.isArray(parsed)) throw new Error("users is not an array");
+        users = parsed; loadedFromStorage = true;
+      } catch(e) {
+        setError("Список пользователей повреждён — вход заблокирован для безопасности. Обратитесь к администратору.");
+        setLoading(false);
+        return;
+      }
     } else if (res.status === "empty") {
       users = DEFAULT_USERS;
     } else {
@@ -5341,14 +5354,12 @@ ${reqBlock}`;
   // вручную ценой, если имени нет в каталоге) и импортные карточки без объекта (fp:).
   const _stageSyncTimer = useRef(null);
   useEffect(() => {
-    if (!_estimatesLoaded.current || !_contractsLoaded.current) return;
+    if (!_estimatesLoaded.current || !_contractsLoaded.current || !_productionsLoaded.current) return;
     if (_stageSyncTimer.current) clearTimeout(_stageSyncTimer.current);
     _stageSyncTimer.current = setTimeout(() => {
       const prods = productionsRef.current;
       if (!prods.length) return;
       const keyOf = s => ((s.cat || "") + "|" + (s.name || "")).toLowerCase().trim();
-      // имена из каталога — по ним отличаем сметные этапы от ручных (у легаси-этапов нет флага fromEst)
-      const catKeys = new Set(getEffectiveCatalog().map(w => ((w.cat || "") + "|" + (w.name || "")).toLowerCase().trim()));
       let anyChanged = false;
       const updated = prods.map(p => {
         if (!p.objectId || String(p.objectId).startsWith("fp:")) return p;
@@ -5359,10 +5370,13 @@ ${reqBlock}`;
         const builtKeys = new Set(built.map(keyOf));
         const cur = p.stages || [];
         let changed = false;
-        // удаляем сметные этапы, которых больше нет в сметах. Сметный = флаг fromEst,
-        // либо имя из каталога, либо есть плановая сумма (ручные этапы «+ добавить» всегда с нулём —
-        // их не трогаем). Это ловит и старые этапы без флага fromEst (напр. каталог изменился/скрыт).
-        const kept = cur.filter(s => builtKeys.has(keyOf(s)) || !(s.fromEst || catKeys.has(keyOf(s)) || Number(s.priceClient) > 0 || Number(s.costPlan) > 0 || Number(s.qty) > 0));
+        // Удаляем автоматически ТОЛЬКО явно сметные этапы (fromEst===true), которых больше нет
+        // в сметах. Раньше сюда же попадали любые этапы с именем из каталога ИЛИ ненулевой
+        // ценой/кол-вом — это могло стереть РУЧНОЙ этап, который прораб добавил сам и просто
+        // вписал цену/кол-во (или случайно назвал так же, как позиция в каталоге). Легаси-этапы
+        // без флага (созданы до его введения) теперь не трогаем автоматически — они «усыновляются»
+        // (получают fromEst:true) при первом же совпадении с текущей сметой чуть ниже.
+        const kept = cur.filter(s => builtKeys.has(keyOf(s)) || s.fromEst !== true);
         if (kept.length !== cur.length) changed = true;
         const used = new Set();
         const next = kept.map(s => {
@@ -5517,8 +5531,11 @@ ${reqBlock}`;
           && c.type !== "podryad" && c.type !== "podryad_annex" && c.type !== "annex" && c.type !== "design_add"
           && normCN(c.number) === normCN(fp.contractNo));
         if (!main) return fp;
+        // nb>=0 (не nb>0): удаление ВСЕХ позиций из договора/приложений — законный бюджет 0,
+        // а не признак «данные ещё не загрузились» (это уже отсечено гардом выше по _contractsLoaded).
+        // Раньше nb>0 не давал бюджету обнулиться, если из договора убрали все работы.
         const nb = finBudgetOfContract(main);
-        if (nb > 0 && Math.round(Number(fp.budget) || 0) !== Math.round(nb)) { changed = true; return { ...fp, budget: nb }; }
+        if (nb >= 0 && Math.round(Number(fp.budget) || 0) !== Math.round(nb)) { changed = true; return { ...fp, budget: nb }; }
         return fp;
       });
       if (changed) saveFinanceProjects(updated);
@@ -6000,22 +6017,46 @@ ${reqBlock}`;
     { k: "clients",         label: "Клиенты",           key: CLIENTS_KEY,          bkey: CLIENTS_BACKUPS_KEY },
     { k: "contragents",     label: "Реквизиты",         key: CONTRAGENTS_KEY,      bkey: CONTRAGENTS_BACKUPS_KEY },
     { k: "workers",         label: "Подрядчики",        key: WORKERS_KEY,          bkey: WORKERS_BACKUPS_KEY },
+    { k: "podryads",        label: "Договоры подряда",  key: PODRYADS_KEY,         bkey: PODRYADS_BACKUPS_KEY },
     { k: "productions",     label: "Производство",      key: PRODUCTIONS_KEY,      bkey: PRODUCTIONS_BACKUPS_KEY },
     { k: "financeTx",       label: "Финансы: операции", key: FINANCE_TX_KEY,       bkey: FINANCE_TX_BACKUPS_KEY },
     { k: "financeProjects", label: "Финансы: проекты",  key: FINANCE_PROJECTS_KEY, bkey: FINANCE_PROJECTS_BACKUPS_KEY },
     { k: "reports",         label: "Акты",              key: REPORTS_KEY,          bkey: REPORTS_BACKUPS_KEY },
+    { k: "users",           label: "Пользователи",      key: USERS_KEY,            bkey: USERS_BACKUPS_KEY },
   ];
-  const _readArr = async (key) => { try { const r = await storage.getResult(key); if (r.status === "found" && r.value) { const p = JSON.parse(r.value); if (Array.isArray(p)) return p; } } catch {} return []; };
+  // { list, ok } — ok=false значит база не ответила (не путать с «раздел реально пуст»),
+  // иначе exportAllJSON мог бы молча выгрузить бэкап с пустыми разделами при сбое сети,
+  // не предупредив, что это НЕ полный бэкап (а бэкап — последняя страховка перед мержем/восстановлением).
+  const _readArr = async (key) => {
+    try {
+      const r = await storage.getResult(key);
+      if (r.status === "found" && r.value) { const p = JSON.parse(r.value); if (Array.isArray(p)) return { list: p, ok: true }; }
+      if (r.status === "empty") return { list: [], ok: true };
+      return { list: [], ok: false };
+    } catch { return { list: [], ok: false }; }
+  };
   // Выгрузка: читаем каждый ключ из базы (авторитетно) и отдаём .json файлом
   const exportAllJSON = async () => {
-    const data = {};
-    for (const s of _backupSections) data[s.k] = await _readArr(s.key);
-    try { const m = await storage.get(FINANCE_META_KEY); data.financeMeta = m?.value ? JSON.parse(m.value) : null; } catch { data.financeMeta = null; }
-    try { const c = await storage.get(CATALOG_KEY); data.catalog = c?.value ? JSON.parse(c.value) : null; } catch { data.catalog = null; }
+    const data = {}; const failed = [];
+    for (const s of _backupSections) {
+      const r = await _readArr(s.key);
+      data[s.k] = r.list;
+      if (!r.ok) failed.push(s.label);
+    }
+    let metaOk = true, catalogOk = true;
+    try { const m = await storage.getResult(FINANCE_META_KEY); data.financeMeta = m.status === "found" && m.value ? JSON.parse(m.value) : null; if (m.status === "unavailable") metaOk = false; } catch { data.financeMeta = null; metaOk = false; }
+    try { const c = await storage.getResult(CATALOG_KEY); data.catalog = c.status === "found" && c.value ? JSON.parse(c.value) : null; if (c.status === "unavailable") catalogOk = false; } catch { data.catalog = null; catalogOk = false; }
+    if (!metaOk) failed.push("Финансы: настройки");
+    if (!catalogOk) failed.push("Каталог цен");
+    if (failed.length) {
+      const proceed = window.confirm(`⚠️ База не ответила при чтении: ${failed.join(", ")}.\nЭти разделы попадут в файл ПУСТЫМИ — это НЕ полный бэкап.\n\nРекомендуется отменить, проверить связь и повторить.\nВсё равно скачать неполный файл?`);
+      if (!proceed) return;
+    }
     const snapshot = {
       _type: "titovstroy-backup", _version: 1,
       _exportedAt: new Date().toISOString(),
       _env: IS_DEV_ENV ? "dev" : "prod",
+      _incomplete: failed.length ? failed : undefined,
       _counts: Object.fromEntries(_backupSections.map(s => [s.k, (data[s.k] || []).length])),
       data,
     };
@@ -6023,7 +6064,7 @@ ${reqBlock}`;
     const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = `titovstroy-backup-${IS_DEV_ENV ? "dev" : "prod"}-${stamp}.json`;
+    a.href = url; a.download = `titovstroy-backup-${IS_DEV_ENV ? "dev" : "prod"}-${stamp}${failed.length ? "-НЕПОЛНЫЙ" : ""}.json`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   };
@@ -6040,9 +6081,10 @@ ${reqBlock}`;
     const d = snap.data;
     const lines = _backupSections.map(s => `• ${s.label}: ${Array.isArray(d[s.k]) ? d[s.k].length : "—"}`).join("\n");
     const envWarn = IS_DEV_ENV ? "" : "\n\n⚠️ ЭТО БОЕВАЯ БАЗА. Текущие данные будут ЗАМЕНЕНЫ данными из файла.\nПеред заменой каждый раздел уходит в свой авто-бэкап (откат возможен).";
-    const ok = await confirmTyped(`Восстановить ВСЁ из файла бэкапа?\nОт: ${snap._exportedAt || "?"} · база «${snap._env || "?"}»\n\n${lines}${envWarn}`, "ВОССТАНОВИТЬ");
+    const incompleteWarn = snap._incomplete?.length ? `\n\n⚠️ Этот файл сам был выгружен НЕПОЛНЫМ (база не отвечала при выгрузке): ${snap._incomplete.join(", ")}.` : "";
+    const ok = await confirmTyped(`Восстановить ВСЁ из файла бэкапа?\nОт: ${snap._exportedAt || "?"} · база «${snap._env || "?"}»\n\n${lines}${incompleteWarn}${envWarn}`, "ВОССТАНОВИТЬ");
     if (!ok) return;
-    let done = 0, fail = 0;
+    let done = 0, fail = 0; const localOnly = [];
     for (const s of _backupSections) {
       const list = Array.isArray(d[s.k]) ? d[s.k] : null;
       if (!list) continue; // нет раздела в файле — не трогаем текущий
@@ -6056,20 +6098,29 @@ ${reqBlock}`;
           if (!backups[0] || backups[0].data !== cur.value) backups.unshift({ ts: Date.now(), by: currentUser?.name || "", count: cnt, data: cur.value });
           await storage.set(s.bkey, JSON.stringify(backups.slice(0, 20)));
         }
-        // 2) перезапись раздела данными из файла
-        await storage.set(s.key, JSON.stringify(list));
+        // 2) перезапись раздела данными из файла — проверяем fbOk: storage.set при неудаче
+        // облака молча пишет только в localStorage (флаг __dirty), а до этого фикса код
+        // засчитывал раздел успешным в любом случае — интерфейс мог сообщить об успехе,
+        // хотя данные ушли только на это устройство и не видны остальным/после очистки кэша.
+        const setRes = await storage.set(s.key, JSON.stringify(list));
+        if (setRes && setRes.fbOk === false) localOnly.push(s.label);
         done++;
       } catch (e) { console.warn("restore fail", s.k, e); fail++; }
     }
-    if (d.financeMeta) { try { await storage.set(FINANCE_META_KEY, JSON.stringify(d.financeMeta)); } catch {} }
-    if (d.catalog) { try { await storage.set(CATALOG_KEY, JSON.stringify(d.catalog)); } catch {} }
-    window.alert(`Восстановление завершено: ${done} разделов${fail ? `, ошибок: ${fail}` : ""}.\nСтраница сейчас перезагрузится, чтобы показать восстановленные данные.`);
+    if (d.financeMeta) { const r = await storage.set(FINANCE_META_KEY, JSON.stringify(d.financeMeta)); if (r?.fbOk === false) localOnly.push("Финансы: настройки"); }
+    if (d.catalog) { const r = await storage.set(CATALOG_KEY, JSON.stringify(d.catalog)); if (r?.fbOk === false) localOnly.push("Каталог цен"); }
+    const localOnlyWarn = localOnly.length ? `\n\n⚠️ В облако НЕ записались (только на этом устройстве, другие их не увидят): ${localOnly.join(", ")}.\nПроверьте связь и запустите восстановление ещё раз для этих разделов.` : "";
+    window.alert(`Восстановление завершено: ${done} разделов${fail ? `, ошибок: ${fail}` : ""}.${localOnlyWarn}\nСтраница сейчас перезагрузится, чтобы показать восстановленные данные.`);
     setTimeout(() => window.location.reload(), 1000);
   };
   // Выгрузка всех смет отдельной таблицей для Excel (CSV, открывается в Excel напрямую)
   const exportEstimatesXls = async () => {
-    const ests = await _readArr(STORAGE_KEY);
-    const objs = await _readArr(OBJECTS_KEY);
+    const estsR = await _readArr(STORAGE_KEY);
+    const objsR = await _readArr(OBJECTS_KEY);
+    if (!estsR.ok || !objsR.ok) {
+      if (!window.confirm("⚠️ База не ответила — список смет может оказаться пустым или неполным.\nВсё равно скачать?")) return;
+    }
+    const ests = estsR.list, objs = objsR.list;
     const objById = {}; for (const o of objs) objById[o.id] = o;
     const stLbl = (k) => (STATUSES.find(s => s.key === (k || "new")) || {}).label || k || "";
     const rows = ests.map(e => {
