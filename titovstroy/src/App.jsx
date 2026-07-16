@@ -8397,16 +8397,16 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           const incMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&_inMonth(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
           return {count:active.length,totalInc,totalDebt,totalBudget,margin,incMonth};
         })() : null;
-        // ── Production KPIs (Объекты = Производство: считаем из единого object.status) ──
-        // Источник истины — статус объекта. Сроки (planEndDate/factEndDate) и дефекты берём
-        // из производственной карточки объекта (productions по objectId), но состояние — по статусу.
+        // ── Production KPIs ── Состояние берём через unifiedStatusOf (production перевешивает
+        // сырой object.status, как и везде в списках/карточках) — иначе на объектах, где реальный
+        // статус исторически хранится в производстве, эти счётчики занижены/неверны.
         const _prodKpi = (_isAdmin||_isMgr) ? (() => {
           const _ds = d => { const x=new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
           const today = _ds(new Date());
           const prodByObj = {}; for(const p of (productions||[])) prodByObj[p.objectId]=p;
-          const inWork = liveObjects.filter(o=>o.status==="work").length;
-          const overdue = liveObjects.filter(o=>{ if(o.status!=="work") return false; const p=prodByObj[o.id]; return p?.planEndDate&&_ds(p.planEndDate)<today&&!p?.factEndDate; }).length;
-          const doneMonth = liveObjects.filter(o=>{ if(o.status!=="done") return false; const p=prodByObj[o.id]; const dt=p?.factEndDate?new Date(p.factEndDate).getTime():(o.updatedAt||0); return dt&&_inMonth(dt); }).length;
+          const inWork = liveObjects.filter(o=>unifiedStatusOf(o)==="work").length;
+          const overdue = liveObjects.filter(o=>{ if(unifiedStatusOf(o)!=="work") return false; const p=prodByObj[o.id]; return p?.planEndDate&&_ds(p.planEndDate)<today&&!p?.factEndDate; }).length;
+          const doneMonth = liveObjects.filter(o=>{ if(unifiedStatusOf(o)!=="done") return false; const p=prodByObj[o.id]; const dt=p?.factEndDate?new Date(p.factEndDate).getTime():(o.updatedAt||0); return dt&&_inMonth(dt); }).length;
           const defects = liveObjects.reduce((s,o)=>s+((prodByObj[o.id]?.defects||[]).filter(d=>!d.done).length),0);
           return {inWork,overdue,doneMonth,defects};
         })() : null;
@@ -8446,7 +8446,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             {/* Мини-метрики в баннере */}
             <div style={{display:"flex",gap:24,marginTop:20,flexWrap:"wrap"}}>
               {[
-                {label:"Активных объектов",  val:liveObjects.filter(o=>o.status!=="archive"&&o.status!=="refuse").length},
+                {label:"Активных объектов",  val:liveObjects.filter(o=>{ const us=unifiedStatusOf(o); return us!=="archive"&&us!=="refuse"; }).length},
                 {label:"В согласовании", val:approvalObjs.length},
                 {label:"Договоров",       val:signedObjs.length},
               ].map((m,i)=>(
@@ -8474,7 +8474,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               {label:"Прибыль за "+monthName, value:fmt(Math.round(profitMonth))+" ₸", sub:"по подписанным", icon:"📈", accent:profitMonth>0?"#059669":"#ef4444"},
               {label:"Маржа за "+monthName, value:marginMonth+"%", sub:"рентабельность", icon:"🎯", accent:marginMonth>=35?"#059669":marginMonth>=20?"#d97706":"#ef4444"},
               {label:"Пайплайн (согласование)", value:fmt(Math.round(pipelineSum))+" ₸", sub:approvalObjs.length+" объектов", icon:"🔄", accent:"#d97706"},
-              {label:"Договоров подписано", value:signedObjs.length, sub:"из "+liveObjects.filter(o=>o.status!=="archive"&&o.status!=="refuse").length+" активных", icon:"✅", accent:"#059669"},
+              {label:"Договоров подписано", value:signedObjs.length, sub:"из "+liveObjects.filter(o=>{ const us=unifiedStatusOf(o); return us!=="archive"&&us!=="refuse"; }).length+" активных", icon:"✅", accent:"#059669"},
             ].map((s,i)=>(
               <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden"}}
                 onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
@@ -9894,14 +9894,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               const incMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&_inM(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
               const expMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="expense"&&_inM(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
               const today = _ds(new Date());
-              // Производство — Объекты = Производство: считаем из единого object.status
-              // (сроки/дефекты — из производственной карточки объекта, состояние — по статусу)
+              // Производство — состояние через unifiedStatusOf (production перевешивает сырой
+              // object.status, как и везде), иначе счётчики занижены на объектах-исключениях.
               const _pbk = {}; for(const p of (productions||[])) _pbk[p.objectId]=p;
-              const prodActive = liveObjects.filter(o=>o.status==="work").length;
-              const prodOverdue = liveObjects.filter(o=>{ if(o.status!=="work") return false; const p=_pbk[o.id]; return p?.planEndDate&&_ds(p.planEndDate)<today&&!p?.factEndDate; }).length;
-              const prodDoneMonth = liveObjects.filter(o=>{ if(o.status!=="done") return false; const p=_pbk[o.id]; const dt=p?.factEndDate?new Date(p.factEndDate).getTime():(o.updatedAt||0); return dt&&_inM(dt); }).length;
+              const prodActive = liveObjects.filter(o=>unifiedStatusOf(o)==="work").length;
+              const prodOverdue = liveObjects.filter(o=>{ if(unifiedStatusOf(o)!=="work") return false; const p=_pbk[o.id]; return p?.planEndDate&&_ds(p.planEndDate)<today&&!p?.factEndDate; }).length;
+              const prodDoneMonth = liveObjects.filter(o=>{ if(unifiedStatusOf(o)!=="done") return false; const p=_pbk[o.id]; const dt=p?.factEndDate?new Date(p.factEndDate).getTime():(o.updatedAt||0); return dt&&_inM(dt); }).length;
               const prodDefects = liveObjects.reduce((s,o)=>s+((_pbk[o.id]?.defects||[]).filter(d=>!d.done).length),0);
-              const prodAnyCount = liveObjects.filter(o=>o.status==="work"||o.status==="paused"||o.status==="done").length;
+              const prodAnyCount = liveObjects.filter(o=>{ const us=unifiedStatusOf(o); return us==="work"||us==="paused"||us==="done"; }).length;
               if(activeFp.length===0 && prodAnyCount===0) return null;
               const finCards = [
                 ["Сумма контрактов", fmt(Math.round(totalBudget))+" ₸", activeFp.length+" активных проектов", "#2563eb"],
@@ -12238,7 +12238,6 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 
           {objectTab==="workspace" && currentObject && (()=>{
             const obj = currentObject;
-            const st = DEAL_STATUSES.find(s=>s.key===(obj.status||"new"))||DEAL_STATUSES[0];
             const _allEsts = estimates.filter(e=>e.objectId===obj.id);
             const _allCons = contracts.filter(c=>c.objectId===obj.id && !c.deletedAt);
             // Дерево смет: основная смета → под ней доп. сметы (ДС). parentId===id (битая ссылка) трактуем как основную.
@@ -12285,14 +12284,17 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 
             const clientCardNode = (
                 <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10,boxSizing:"border-box"}}>
-                  {/* Статус */}
+                  {/* Статус — подсветка по unifiedStatusOf (тому же, что видно в списках/финпроектах),
+                      а не по сырому obj.status: иначе на старых объектах, где производство хранит
+                      другой реальный статус, кнопка подсвечивала одно, а везде снаружи было видно
+                      другое — визуально «два разных статуса у одного объекта». */}
                   <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                    {DEAL_STATUSES.map(s=>(
+                    {(()=>{ const curStatus = unifiedStatusOf(obj); return DEAL_STATUSES.map(s=>(
                       <button key={s.key} disabled={!canEdit} onClick={()=>saveObjField(obj,{status:s.key})}
-                        style={{background:obj.status===s.key?s.bg:"rgba(0,0,0,.03)",color:obj.status===s.key?s.color:"#94a3b8",border:`1px solid ${obj.status===s.key?s.color:"#e2e8f0"}`,borderRadius:8,padding:"3px 9px",fontSize:11,fontWeight:600,cursor:canEdit?"pointer":"default",fontFamily:"inherit",transition:"all .12s"}}>
+                        style={{background:curStatus===s.key?s.bg:"rgba(0,0,0,.03)",color:curStatus===s.key?s.color:"#94a3b8",border:`1px solid ${curStatus===s.key?s.color:"#e2e8f0"}`,borderRadius:8,padding:"3px 9px",fontSize:11,fontWeight:600,cursor:canEdit?"pointer":"default",fontFamily:"inherit",transition:"all .12s"}}>
                         {s.label}
                       </button>
-                    ))}
+                    )); })()}
                   </div>
 
                   {/* Сводка клиента/объекта + сворачивание */}
