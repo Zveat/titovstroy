@@ -671,6 +671,11 @@ const DEAL_STATUSES = [
 ];
 // Производственный статус → единый (производство перевешивает статус сделки, когда объект в работе)
 const PROD_TO_DEAL = { active:"work", paused:"paused", done:"done", cancel:"cancel" };
+// Обратная карта: клик по статусу объекта должен сразу отражаться в отображаемом статусе.
+// Т.к. unifiedStatusOf при наличии карточки производства всегда берёт производственный статус
+// (это нужно для старых объектов, где статус реально хранился в производстве) — без обратного
+// зеркалирования клик по кнопке ничего не менял бы визуально (см. баг «кнопки не работают»).
+const DEAL_TO_PROD = { work:"active", paused:"paused", done:"done", cancel:"cancel" };
 const PROD_STATUSES_LABELS = { new:"Новый", active:"В работе", paused:"Приостановлен", done:"Выполнен", cancel:"Расторгнут" };
 const OBJECTS_KEY         = "titovstroy-objects";
 const OBJECTS_BACKUPS_KEY = "titovstroy-objects-backups";
@@ -4506,9 +4511,9 @@ function MainApp({ currentUser, setCurrentUser }) {
 
   // ЕДИНЫЙ статус объекта для списка: производственный статус (В работе/Приостановлен/
   // Выполнен/Расторгнут) перевешивает статус сделки; иначе — статус объекта как есть.
-  // Ничего не записывает — только вычисляет для отображения.
-  // Статус ОБЪЕКТА — главный (объект первичен, финансы/производство вторичны).
-  // Показываем ровно то, что задано в карточке объекта, ничем не перебивая.
+  // Ничего не записывает — только вычисляет для отображения. Кнопки статуса объекта
+  // (saveObjField) при клике зеркалят выбор в production.prodStatus — иначе клик по
+  // кнопке визуально ничего не менял бы, пока production не «в курсе» нового статуса.
   const unifiedStatusOf = useCallback((o) => {
     // Статус ПРОИЗВОДСТВА (В работе/Приостановлен/Выполнен/Расторгнут) отражает реальное
     // состояние объекта и перевешивает статус сделки для ОТОБРАЖЕНИЯ и ФИЛЬТРА. Если карточки
@@ -4741,6 +4746,23 @@ function MainApp({ currentUser, setCurrentUser }) {
       withStamp: false, lines,
     });
   };
+  // Открыть построитель акта по объекту сразу по ВСЕМ его сметам (основная + доп. сметы/ДС) —
+  // кнопка «+ Сформировать АВР» раньше брала только первую (основную) смету объекта.
+  const openAvrBuilderAll = (obj, ests) => {
+    const lines = (ests || []).flatMap(e => buildAvrLinesFromEst(e));
+    if (lines.length === 0) { alert("В сметах этого объекта нет позиций с точной ценой для акта."); return; }
+    const cons = contractsRef.current.filter(c => c.objectId === obj.id && (c.type || "repair_fiz") !== "annex").sort((a, b) => (b.id || 0) - (a.id || 0));
+    const con = cons[0];
+    const existingNo = reportsRef.current.filter(r => r.objectId === obj.id).length + 1;
+    setAvrModal({
+      id: null, objectId: obj.id, estId: ests?.[0]?.id || null,
+      clientName: obj.clientName || "", clientType: obj.clientType || "физ",
+      clientIin: obj.clientIin || "", address: obj.address || "",
+      actNo: String(existingNo), actDate: new Date().toISOString().slice(0, 10),
+      contractNo: con?.number || "", contractDate: con?.date || "",
+      withStamp: false, lines,
+    });
+  };
   // HTML формы Р-1 (без НДС)
   const buildAvrHtml = (m) => {
     const esc = s => String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
@@ -4749,6 +4771,11 @@ function MainApp({ currentUser, setCurrentUser }) {
     const money = n => Math.round(Number(n) || 0).toLocaleString("ru-RU");
     const total = items.reduce((s, l) => s + Math.round(P(l) * Q(l)), 0);
     const dateStr = m.actDate ? new Date(m.actDate).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" }) : "";
+    const dateShort = m.actDate ? m.actDate.split("-").reverse().join(".") : "";
+    // Название документа (как у договора: номер + клиент + дата) — от него зависит имя файла
+    // при сохранении/печати в PDF (браузер подставляет заголовок вкладки), у голого «АВР №5»
+    // не разобрать, чей это акт.
+    const docTitle = ("АВР №" + (m.actNo || "б_н") + (m.clientName ? " " + m.clientName : "") + (dateShort ? " от " + dateShort : "")).replace(/[<>:"/\\|?*]/g, "_");
     const rowsHtml = items.map((l, i) => `<tr>
       <td class="c">${i + 1}</td>
       <td>${esc(l.name)}</td>
@@ -4759,7 +4786,7 @@ function MainApp({ currentUser, setCurrentUser }) {
     </tr>`).join("");
     const stampImg = m.withStamp ? `<img src="${window.location.origin}/stamp.jpg" alt="Печать" style="position:absolute;left:40px;bottom:-140px;width:200px;height:200px;object-fit:contain;opacity:.85;mix-blend-mode:multiply;pointer-events:none"/>` : "";
     return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>АВР №${esc(m.actNo)}</title>
+<title>${esc(docTitle)}</title>
 <style>
 *{box-sizing:border-box} body{font-family:'Times New Roman',Georgia,serif;color:#000;background:#fff;margin:0;padding:18mm 14mm}
 .form{text-align:right;font-size:10px;color:#444;margin-bottom:4px}
@@ -5045,7 +5072,13 @@ ${(m.avans !== "" && m.avans != null && Number(m.avans) > 0) ? `<p>4.2. Зака
 <p class="b">Общая стоимость работ составляет ${money(total)} ₸</p>
 ${(m.termDays !== "" && m.termDays != null) ? `<p class="b">Срок выполнения работ составляет ${esc(m.termDays)} календарных дней</p>` : ""}
 ${reqBlock}`;
-    return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${m.kind === "annex" ? "Приложение №" + esc(m.annexNo) : "Договор подряда №" + esc(m.number)}</title><style>${CSS}</style></head><body>${mainBody}${annexBody}
+    // Название документа (как у договора: номер + подрядчик + дата) — от него зависит имя
+    // файла при сохранении/печати в PDF, у голого «Приложение №2» не разобрать, к чему оно.
+    const docTitle = (m.kind === "annex"
+      ? "Приложение №" + (m.annexNo || "") + (w.name ? " " + w.name : "") + " к Договору №" + (m.mainNumber || "") + " от " + dd + "." + mm + "." + yy
+      : "Договор подряда №" + (m.number || "") + (w.name ? " " + w.name : "") + " от " + dd + "." + mm + "." + yy
+    ).replace(/[<>:"/\\|?*]/g, "_");
+    return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(docTitle)}</title><style>${CSS}</style></head><body>${mainBody}${annexBody}
 <div class="np"><button onclick="window.print()" style="padding:12px 32px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:Arial,sans-serif">🖨 Печать / Сохранить PDF</button></div>
 </body></html>`;
   };
@@ -7118,7 +7151,15 @@ ${reqBlock}`;
   ${sigBlock("Исполнитель:", "Заказчик:")}`;
     }
     const printBtn = forDocx ? "" : `\n<div class="np" style="margin-top:24px;text-align:center;padding:16px">\n  <button onclick="window.print()" style="padding:12px 36px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;font-weight:700;font-family:Verdana,sans-serif">🖨 Распечатать / Сохранить PDF</button>\n</div>`;
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Договор №${c.number||""}</title><style>${CSS}</style></head>
+    // Название документа (номер + клиент + дата, как при скачивании DOCX/GDoc) — иначе при
+    // печати/сохранении в PDF браузер подставляет в имя файла голый «Договор №123» без клиента.
+    const docLabelT = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Соглашение о дизайн-проекте",design_add:"Доп соглашение к дизайн-проекту",reservation:"Соглашение о резервировании"}[type] || "Договор";
+    const dateStrT = c.date ? c.date.split("-").reverse().join(".") : "";
+    const docTitle = (type === "annex"
+      ? "Приложение №" + (c.appendix || 2) + " Перечень доп работ к Договору №" + (c.mainNumber || c.number || "") + (dateStrT ? " от " + dateStrT : "")
+      : docLabelT + " №" + (c.number || "") + (client?.name ? " " + client.name : (c.estClient ? " " + c.estClient : "")) + (dateStrT ? " от " + dateStrT : "")
+    ).replace(/[<>:"/\\|?*]/g, "_");
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(docTitle)}</title><style>${CSS}</style></head>
   <body>${body}${printBtn}
   </body></html>`;
     return html;
@@ -10183,7 +10224,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           .filter(t=>!finFilterContract || (t.contractNo||"").trim()===finFilterContract.trim())
           .filter(t=>!finFilterCat || t.category===finFilterCat)
           .filter(t=>!fq || [t.category,t.subcategory,t.note,t.contractNo,t.account].some(v=>v&&String(v).toLowerCase().includes(fq)))
-          .sort((a,b)=>(b.date||b.createdAt||0)-(a.date||a.createdAt||0));
+          // Сортировка: сначала по дате операции (новые дни сверху), а В ПРЕДЕЛАХ ОДНОЙ ДАТЫ —
+          // по времени ДОБАВЛЕНИЯ (createdAt), затем сохранения (updatedAt), затем id. Раньше был
+          // только date → операции одного дня шли в случайном порядке ключей Firebase.
+          .sort((a,b)=>
+            ((b.date||b.createdAt||0)-(a.date||a.createdAt||0)) ||
+            ((b.createdAt||0)-(a.createdAt||0)) ||
+            ((b.updatedAt||0)-(a.updatedAt||0)) ||
+            String(b.id||"").localeCompare(String(a.id||""))
+          );
 
         const PERIODS=[["all","Всё"],["month","Месяц"],["3month","3 мес"],["year","Год"],["custom","Период"]];
         const TYPE_LABEL={income:"Доход",expense:"Расход",transfer:"Перевод"};
@@ -11529,7 +11578,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   category:m.type==="transfer"?"Перевод":m.category, subcategory:m.type==="transfer"?"":m.subcategory, note:m.note||"", contractNo:m.contractNo||"",
                   recipient:m.recipient||"",
                   isAdvance:m.type==="income"?!!m.isAdvance:false,
-                  included:m.included!==false, opuMonth:m.opuMonth, createdAt:m.createdAt||ts, updatedAt:Date.now() };
+                  included:m.included!==false, opuMonth:m.opuMonth, createdAt:m.createdAt||Date.now(), updatedAt:Date.now() };
                 const isNew = !m.id;
                 const _oldTx = m.id ? financeTxRef.current.find(x=>x.id===m.id) : null;
                 setFinTxModal(null);
@@ -11866,9 +11915,24 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             }
           }
           const updated = {...obj, ...patch, updatedAt: Date.now()};
+          // Мгновенно обновляем карточку в UI, не дожидаясь сети — иначе при медленном/просевшем
+          // облаке кнопки статуса выглядят «зависшими» (подсветка держится на currentObject,
+          // а он раньше обновлялся только ПОСЛЕ полного цикла saveObjects: чтение+мердж+бэкап+запись).
+          setCurrentObject(updated);
+          // Синхронизируем производственный статус: unifiedStatusOf для отображения (списки,
+          // фильтры, бейджи) при наличии карточки производства всегда берёт производственный
+          // статус, а не obj.status — без этого клик по кнопке нигде визуально не отражался бы.
+          if (patch.status) {
+            const pr = productionsRef.current.find(p => p.objectId === obj.id);
+            if (pr) {
+              const nextProdStatus = DEAL_TO_PROD[patch.status] || "new";
+              if (pr.prodStatus !== nextProdStatus) {
+                saveProductions(productionsRef.current.map(p => p.objectId === obj.id ? { ...p, prodStatus: nextProdStatus, updatedAt: Date.now() } : p), { replace: true });
+              }
+            }
+          }
           const list = objectsRef.current.map(x=>x.id===obj.id?updated:x);
           await saveObjects(list);
-          setCurrentObject(updated);
           logObjChange(currentUser, obj, patch);
         };
 
@@ -12524,14 +12588,13 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 {/* Отчёты объекта (АВР, форма Р-1) */}
                 {(()=>{
                   const objReports = reports.filter(r=>r.objectId===obj.id).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
-                  const mainEst = objEsts.find(_estIsMain) || objEsts[0];
                   return (
                     <div style={{marginTop:24}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                         <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>📑 Отчёты ({objReports.length})</div>
                         {currentUser.role!=="viewer" && (
                           <button className="btn btn-g" style={{fontSize:12,padding:"6px 14px"}}
-                            onClick={()=>{ if(!mainEst){ alert("Сначала создайте смету — акт формируется из её позиций."); return; } openAvrBuilder(obj,mainEst); }}>
+                            onClick={()=>{ if(objEsts.length===0){ alert("Сначала создайте смету — акт формируется из её позиций."); return; } openAvrBuilderAll(obj,objEsts); }}>
                             + Сформировать АВР
                           </button>
                         )}
