@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys } from "./utils.js";
 
 describe("isBackupRestorable — запрет массового восстановления из неполного файла", () => {
   it("полный подтверждённый файл — можно", () => {
@@ -639,6 +639,17 @@ describe("флеш и снятие меток по владельцу (блок�
     expect(isOwnDirtyMarker(ls.getItem("same__dirty"), "u1", "new-tab")).toBe(true);
     expect(isOwnDirtyMarker(ls.getItem("other__dirty"), "u1", "new-tab")).toBe(false);
     expect(isLegacyDirtyMarker(ls.getItem("legacy__dirty"))).toBe(true);
+  });
+});
+
+describe("visibleDirtyKeys — баннер только после фактической ошибки записи", () => {
+  it("не показывает выполняющуюся фоновую запись как недоступное облако", () => {
+    const inFlight = new Map([["titovstroy-presence-u1", 1]]);
+    expect(visibleDirtyKeys(["titovstroy-presence-u1"], inFlight)).toEqual([]);
+  });
+  it("после завершения неудачной записи dirty становится видимым", () => {
+    const inFlight = new Map();
+    expect(visibleDirtyKeys(["titovstroy-estimates"], inFlight)).toEqual(["titovstroy-estimates"]);
   });
 });
 

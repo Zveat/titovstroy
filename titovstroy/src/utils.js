@@ -566,6 +566,17 @@ export function listFlushableDirty(store, uid, tab, dirtySuffix = "__dirty") {
   return listOwnedDirty(store, uid, tab, dirtySuffix)
     .filter(base => !isLegacyDirtyMarker(store.getItem(base + dirtySuffix)));
 }
+// Для UI ошибки показываем только ЗАВЕРШИВШИЕСЯ неудачей записи. storage.set сначала
+// сохраняет durable-копию и ставит dirty-маркер, затем ждёт Firebase/REST. Пока запрос
+// действительно выполняется, такой marker означает "в процессе", а не "облако упало".
+// Иначе минутный heartbeat присутствия давал мигающий аварийный баннер при нормальной сети.
+export function visibleDirtyKeys(keys, inFlight) {
+  const list = Array.isArray(keys) ? keys : [];
+  const has = inFlight && typeof inFlight.has === "function"
+    ? key => inFlight.has(key)
+    : () => false;
+  return list.filter(key => !has(key));
+}
 // Можно ли УСПЕШНОЙ облачной записи этой вкладки снять dirty-метку ключа: свою или
 // отсутствующую — да. Legacy НЕ снимаем: обычное чтение намеренно не примешивает его локальную
 // копию, поэтому новая облачная запись не доказывает, что неизвестная старая правка сохранена.

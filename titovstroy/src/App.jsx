@@ -6,7 +6,7 @@ import { emptyProduction } from "./production/constants.js";
 import { createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
 function useDebounce(value, ms) {
@@ -1011,6 +1011,16 @@ const _race = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(_T
 const _fbKey = (k) => k.replace(/[^a-zA-Z0-9_]/g, "_"); // Firebase: только буквы/цифры/_
 const _TS_SUFFIX = "__wts"; // timestamp последней локальной записи
 const _DIRTY_SUFFIX = "__dirty"; // флаг: последняя запись в облако НЕ прошла — локальная копия новее
+// Число реально выполняющихся обычных storage.set по ключу. Durable dirty-маркер ставится
+// ДО сетевого await, но пока запрос в полёте это ещё не ошибка облака. UI исключает такие
+// ключи из аварийного счётчика; при неудаче set завершится, marker останется и станет видимым.
+const _storageWritesInFlight = new Map();
+const _beginStorageFlight = key => _storageWritesInFlight.set(key, (_storageWritesInFlight.get(key) || 0) + 1);
+const _endStorageFlight = key => {
+  const left = (_storageWritesInFlight.get(key) || 1) - 1;
+  if (left > 0) _storageWritesInFlight.set(key, left);
+  else _storageWritesInFlight.delete(key);
+};
 // Идентификатор ВКЛАДКИ (на загрузку страницы) + текущий пользователь — владелец dirty-записей.
 // Нужны, чтобы выход «с потерей» в одной вкладке не снимал dirty-метки другой вкладки
 // и не выбрасывал правки другого пользователя.
@@ -1413,6 +1423,7 @@ const storage = {
     // не трогаем ни localStorage, ни dirty, ни Firebase.
     const op = _beginEditorWrite();
     if (op.fail) return { value, fbOk: false, fbError: op.fail.reason };
+    _beginStorageFlight(key);
     // ЧУЖОЙ ЧЕРНОВИК: dirty-маркер другой вкладки/пользователя на ключе — их несохранённое
     // содержимое в localStorage[key] затирать НЕЛЬЗЯ (маркер без содержимого бесполезен: вкладка
     // отправила бы позже НАШЕ значение вместо своей правки). Пишем только в Firebase; наше
@@ -1470,6 +1481,7 @@ const storage = {
       }
       return { value, fbOk, fbError };
     } finally {
+      _endStorageFlight(key);
       _endEditorWrite();
     }
   },
@@ -1499,6 +1511,9 @@ const storage = {
   dirtyKeysOwned() { return listOwnedDirty(localStorage, _dirtyOwnerUid, _TAB_ID, _DIRTY_SUFFIX); },
   // Dirty-записи к АВТООТПРАВКЕ: свои И не legacy (см. listFlushableDirty — карантин legacy).
   dirtyKeysFlushable() { return listFlushableDirty(localStorage, _dirtyOwnerUid, _TAB_ID, _DIRTY_SUFFIX); },
+  // Для баннера: исключаем marker активного запроса. После реального отказа запрос завершится,
+  // marker останется и на следующем тике попадёт сюда.
+  dirtyKeysVisible() { return visibleDirtyKeys(this.dirtyKeysFlushable(), _storageWritesInFlight); },
   // Legacy-маркеры без владельца (карантин: не авто-отправляются, видны в баннере отдельно).
   legacyDirtyKeys() {
     return this.dirtyKeys().filter(base => { try { return isLegacyDirtyMarker(localStorage.getItem(base + _DIRTY_SUFFIX)); } catch { return false; } });
@@ -1526,7 +1541,8 @@ const storage = {
   async flushDirty() {
     if (!_fbDb) return 0;
     if (_writeGateFail()) return 0; // read-only вкладка не дожимает (это записи)
-    const keys = this.dirtyKeysFlushable();
+    // Не запускаем параллельный повтор того же ключа, пока исходная запись ещё выполняется.
+    const keys = this.dirtyKeysVisible();
     let done = 0;
     for (const key of keys) {
       try {
@@ -6390,7 +6406,7 @@ ${reqBlock}`;
       await storage.flushDirty();
       await Promise.all([loadEstimates(), loadContracts()]);
       if (["admin","manager","foreman"].includes(currentUser?.role)) await loadFinance();
-      const left = storage.dirtyKeysFlushable().length;
+      const left = storage.dirtyKeysVisible().length;
       setDirtyCount(left);
       // гасим только когда чисто ВЕЗДЕ: успех storage не должен скрывать ошибку производства
       if (left === 0 && _prodUnsyncedIds.current.size === 0) setCloudError(false);
@@ -6401,7 +6417,7 @@ ${reqBlock}`;
   // Авто-флеш зависших правок: при старте, периодически и при возврате сети
   useEffect(() => {
     let stop = false;
-    const flush = () => { if (!stop) storage.flushDirty().then(()=>{ if(!stop) { const left = storage.dirtyKeysFlushable().length; setDirtyCount(left); if (left === 0 && _prodUnsyncedIds.current.size === 0) setCloudError(false); } }).catch(()=>{}); };
+    const flush = () => { if (!stop) storage.flushDirty().then(()=>{ if(!stop) { const left = storage.dirtyKeysVisible().length; setDirtyCount(left); if (left === 0 && _prodUnsyncedIds.current.size === 0) setCloudError(false); } }).catch(()=>{}); };
     flush();
     const iv = setInterval(flush, 90000);
     const onOnline = () => _resyncRef.current && _resyncRef.current();
@@ -6410,7 +6426,7 @@ ${reqBlock}`;
   }, []);
   // Индикатор «есть несинхронизированные изменения» (свои — dirtyCount; legacy-карантин — отдельно)
   useEffect(() => {
-    const upd = () => { setDirtyCount(storage.dirtyKeysFlushable().length); setLegacyDirtyN(storage.legacyDirtyKeys().length); };
+    const upd = () => { setDirtyCount(storage.dirtyKeysVisible().length); setLegacyDirtyN(storage.legacyDirtyKeys().length); };
     upd();
     const iv = setInterval(upd, 5000);
     return () => clearInterval(iv);
