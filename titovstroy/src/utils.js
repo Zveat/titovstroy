@@ -483,3 +483,163 @@ export function isBackupRestorable(snap) {
   if (Array.isArray(snap._incomplete) && snap._incomplete.length) return { ok: false, reason: "файл помечен как НЕПОЛНЫЙ: " + snap._incomplete.join(", ") };
   return { ok: true };
 }
+
+// ── ВЛАДЕНИЕ DIRTY-ЗАПИСЯМИ (несинхронизированные локальные правки) ──
+// Маркер __dirty хранит владельца: { ts, uid, tab }. Раньше это был просто timestamp — при
+// выходе «с потерей» нельзя было отличить свою правку от правки ДРУГОЙ ВКЛАДКИ, а снятая метка
+// оставляла само значение в localStorage/_mem, и следующий пользователь получал чужую смету
+// (свежая локальная копия выигрывает в getResult). Теперь: выход трогает ТОЛЬКО свои записи
+// (uid+tab) и удаляет их ПОЛНОСТЬЮ (значение + __wts + __dirty + _mem).
+export function makeDirtyMarker(uid, tab) {
+  return JSON.stringify({ ts: Date.now(), uid: uid == null ? null : uid, tab: tab || "" });
+}
+// Своя ли dirty-запись — СТРОГО по маркеру {uid, tab}. Legacy-маркер (голый timestamp старых
+// версий) — владелец НЕИЗВЕСТЕН → НЕ своя: его нельзя ни авто-отправить под первым вошедшим,
+// ни удалить по чужому «выйти с потерей». Legacy остаётся в карантине до ручной выгрузки.
+export function isOwnDirtyMarker(raw, uid, tab) {
+  if (!raw) return false;
+  try {
+    const m = JSON.parse(raw);
+    if (!m || typeof m !== "object") return false; // legacy: число-timestamp — владелец неизвестен
+    if (m.tab !== tab) return false;               // правка другой вкладки — не наша
+    return m.uid == null || m.uid === uid;         // без uid (запись до логина) — вкладка решает
+  } catch { return false; } // legacy: не-JSON — владелец неизвестен
+}
+// Список БАЗОВЫХ ключей dirty-записей, принадлежащих (uid, tab). store — localStorage-совместимый.
+export function listOwnedDirty(store, uid, tab, dirtySuffix = "__dirty") {
+  const out = [];
+  try {
+    for (let i = 0; i < store.length; i++) {
+      const k = store.key(i);
+      if (!k || !k.endsWith(dirtySuffix)) continue;
+      if (isOwnDirtyMarker(store.getItem(k), uid, tab)) out.push(k.slice(0, -dirtySuffix.length));
+    }
+  } catch { /* хранилище недоступно — нечего перечислять */ }
+  return out;
+}
+// После аварийного закрытия вкладки её structured dirty-маркеры остаются с прежним tab.
+// Новая вкладка может принять их ТОЛЬКО после получения эксклюзивного editor-lock и только для
+// ТОГО ЖЕ uid. Чужой uid, uid:null и legacy не трогаются.
+export function adoptUserDirty(store, uid, newTab, dirtySuffix = "__dirty", adoptedAt = Date.now()) {
+  const adopted = [];
+  if (uid == null || !newTab) return adopted;
+  try {
+    for (let i = 0; i < store.length; i++) {
+      const key = store.key(i);
+      if (!key || !key.endsWith(dirtySuffix)) continue;
+      let marker;
+      try { marker = JSON.parse(store.getItem(key)); } catch { continue; }
+      if (!marker || typeof marker !== "object" || marker.uid !== uid || !marker.tab || marker.tab === newTab) continue;
+      store.setItem(key, JSON.stringify({ ...marker, tab: newTab, adoptedAt }));
+      adopted.push(key.slice(0, -dirtySuffix.length));
+    }
+  } catch {
+    return adopted;
+  }
+  return adopted;
+}
+// ПОДТВЕРЖДЁННАЯ потеря при выходе: удалить свои dirty-записи ЦЕЛИКОМ — метку, значение,
+// таймстемп записи (__wts) и копию в памяти (mem). Чужие вкладки/пользователи не затрагиваются.
+// Возвращает список удалённых базовых ключей.
+export function discardOwnedDirty(store, uid, tab, mem, suffixes = { dirty: "__dirty", ts: "__wts" }) {
+  const owned = listOwnedDirty(store, uid, tab, suffixes.dirty);
+  for (const base of owned) {
+    try {
+      store.removeItem(base + suffixes.dirty);
+      store.removeItem(base);
+      store.removeItem(base + suffixes.ts);
+    } catch { /* удаляем сколько можем */ }
+    if (mem) delete mem[base];
+  }
+  return owned;
+}
+
+// Legacy-маркер (голый timestamp/не-JSON из версий до владения) — владелец НЕИЗВЕСТЕН.
+export function isLegacyDirtyMarker(raw) {
+  if (!raw) return false;
+  try { const m = JSON.parse(raw); return !(m && typeof m === "object"); } catch { return true; }
+}
+// Ключи к АВТООТПРАВКЕ (flushDirty/«Повторить сейчас»): ТОЛЬКО свои (uid+tab) и НЕ legacy.
+// Legacy — в карантине: неизвестно чью правку нельзя автоматически отправлять под первым
+// вошедшим пользователем (владелец удалит её явно через «выход с потерей» или разберёт вручную).
+export function listFlushableDirty(store, uid, tab, dirtySuffix = "__dirty") {
+  return listOwnedDirty(store, uid, tab, dirtySuffix)
+    .filter(base => !isLegacyDirtyMarker(store.getItem(base + dirtySuffix)));
+}
+// Можно ли УСПЕШНОЙ облачной записи этой вкладки снять dirty-метку ключа: свою или
+// отсутствующую — да. Legacy НЕ снимаем: обычное чтение намеренно не примешивает его локальную
+// копию, поэтому новая облачная запись не доказывает, что неизвестная старая правка сохранена.
+// Метку ДРУГОЙ вкладки/пользователя НЕ снимаем: её правка ещё НЕ в облаке — поздний успешный
+// ответ одной вкладки не должен гасить несинхронизированность другой.
+export function mayClearDirtyOnSuccess(raw, uid, tab) {
+  return !raw || isOwnDirtyMarker(raw, uid, tab);
+}
+
+// ── LEASE-LOCK «ОДНА ВКЛАДКА РЕДАКТИРУЕТ» ──
+// Общий localStorage[key] на раздел не позволяет двум вкладкам безопасно редактировать
+// одновременно (вторая затирает черновик первой). Вместо переделки всего storage на per-tab
+// черновики: редактирует ТОЛЬКО вкладка-владелец lease ({uid, tab, token, heartbeatAt} в
+// localStorage), остальные — строго read-only. Heartbeat каждые 5с, протухание 30с.
+export const EDIT_LEASE_KEY = "titovstroy-edit-lease";
+export const LEASE_TTL_MS = 30000;
+export const LEASE_HEARTBEAT_MS = 5000;
+export function makeLease(uid, tab, now, token = "") {
+  return JSON.stringify({ uid: uid == null ? null : uid, tab: tab || "", token: token || "", heartbeatAt: now });
+}
+export function parseLease(raw) {
+  if (!raw) return null;
+  try {
+    const l = JSON.parse(raw);
+    if (!l || typeof l !== "object" || !l.tab || !Number(l.heartbeatAt)) return null;
+    return l;
+  } catch { return null; }
+}
+export function leaseAlive(lease, now) {
+  return !!(lease && Number(lease.heartbeatAt) > 0 && (now - Number(lease.heartbeatAt)) < LEASE_TTL_MS);
+}
+// Свободный lease означает только «можно ПОПРОБОВАТЬ захватить», но не право записи.
+export function canAcquireLease(raw, now) {
+  const l = parseLease(raw);
+  return !l || !leaseAlive(l, now);
+}
+// Право записи есть ТОЛЬКО у владельца живого lease с тем же fencing-token.
+export function ownsActiveLease(raw, uid, tab, token, now) {
+  const l = parseLease(raw);
+  return !!(l && leaseAlive(l, now) && l.uid === (uid == null ? null : uid) && l.tab === tab && l.token === token);
+}
+export function canWriteLease(raw, uid, tab, token, now) {
+  const l = parseLease(raw);
+  if (ownsActiveLease(raw, uid, tab, token, now)) return { ok: true, reason: "own" };
+  return {
+    ok: false,
+    reason: l && leaseAlive(l, now) ? "read-only-tab" : "lease-required",
+    holder: l ? { uid: l.uid, tab: l.tab } : null,
+  };
+}
+// Разрешён ли ЯВНЫЙ перехват: только если lease отсутствует или ПРОТУХ (владелец действительно
+// недоступен). Живой lease перехватывать нельзя — сначала закрыть ту вкладку (или дождаться TTL).
+export function mayTakeoverLease(raw, now) {
+  return canAcquireLease(raw, now);
+}
+export async function claimFallbackLease(store, uid, tab, token, opts = {}) {
+  const now = opts.now || (() => Date.now());
+  const wait = opts.wait || (ms => new Promise(r => setTimeout(r, ms)));
+  const raw = store.getItem(EDIT_LEASE_KEY);
+  if (!canAcquireLease(raw, now())) return false;
+  store.setItem(EDIT_LEASE_KEY, makeLease(uid, tab, now(), token));
+  await wait(opts.verifyDelayMs == null ? 100 : opts.verifyDelayMs);
+  return ownsActiveLease(store.getItem(EDIT_LEASE_KEY), uid, tab, token, now());
+}
+
+// Можно ли ИСПОЛЬЗОВАТЬ локальную копию раздела при чтении (getResult): НЕЛЬЗЯ, если на ключе
+// dirty-маркер ДРУГОГО пользователя/вкладки — иначе несохранённая смета пользователя A (аварийно
+// закрывшего вкладку) читалась бы пользователем B, становилась базой его сохранений и уезжала в
+// облако. Действует на ВСЕ локальные источники: свежий кеш 30с, dirty-ветку, старый фоллбек, _mem.
+// Legacy-маркер (владелец неизвестен) тоже запрещает обычное чтение. Его можно только выгрузить
+// отдельным recovery-файлом и разобрать вручную; автоматически примешивать неизвестные данные
+// к сессии первого вошедшего пользователя нельзя.
+export function mayUseLocalCopy(dirtyRaw, uid, tab) {
+  if (!dirtyRaw) return true;
+  if (isLegacyDirtyMarker(dirtyRaw)) return false;
+  return isOwnDirtyMarker(dirtyRaw, uid, tab);
+}

@@ -1,10 +1,12 @@
 import { useState, useMemo, useEffect, useCallback, useRef, Fragment } from "react";
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, get, set, runTransaction } from "firebase/database";
-import ProductionModule from "./production/ProductionModule.jsx";
+import ProductionModule, { flushPendingProduction, stopProductionSession, hasPendingProduction, productionDraftsAreDurable, startProductionSession, setProductionCommandHandler } from "./production/ProductionModule.jsx";
 import { emptyProduction } from "./production/constants.js";
+import { createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, _stageKey, normalizeProductionIds } from "./production/commands.js";
+import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
 function useDebounce(value, ms) {
@@ -860,28 +862,41 @@ function clearLoginAttempts(login) {
 // Firebase RTDB-транзакция сериализует одновременные записи → ни одна не теряется.
 // В базе значение ключа — СТРОКА JSON (как во всём storage), поэтому и в транзакции строка.
 const _appendAuditEntry = async (mk, entry) => {
-  if (_fbDb) {
-    try {
-      await _fbAuthReady;
-      const r = ref(_fbDb, _fbKey(mk));
-      const res = await _race(runTransaction(r, (cur) => {
-        let arr = [];
-        if (typeof cur === "string") { try { const p = JSON.parse(cur); if (Array.isArray(p)) arr = p; } catch {} }
-        else if (Array.isArray(cur)) arr = cur; // на случай старого формата (вложенный массив)
-        return JSON.stringify([entry, ...arr]);
-      }), 8000);
-      if (res !== _TIMEOUT) {
-        // синхронизируем локальный резерв со свежим значением
-        try { const v = res?.snapshot?.val(); if (typeof v === "string") { localStorage.setItem(mk, v); localStorage.setItem(mk + _TS_SUFFIX, Date.now().toString()); _mem[mk] = v; } } catch {}
-        return;
-      }
-    } catch (e) { console.warn("audit tx err", e); }
+  const op = _beginEditorWrite();
+  if (op.fail) return;
+  try {
+    if (_fbDb) {
+      try {
+        await _fbAuthReady;
+        const r = ref(_fbDb, _fbKey(mk));
+        const res = await _race(runTransaction(r, (cur) => {
+          let arr = [];
+          if (typeof cur === "string") { try { const p = JSON.parse(cur); if (Array.isArray(p)) arr = p; } catch {} }
+          else if (Array.isArray(cur)) arr = cur;
+          return JSON.stringify([entry, ...arr]);
+        }), 8000);
+        if (res !== _TIMEOUT) {
+          if (_mayApplyEditorResult(op.session) && !_foreignDirty(mk)) {
+            try {
+              const v = res?.snapshot?.val();
+              if (typeof v === "string") {
+                localStorage.setItem(mk, v);
+                localStorage.setItem(mk + _TS_SUFFIX, Date.now().toString());
+                _mem[mk] = v;
+              }
+            } catch {}
+          }
+          return;
+        }
+      } catch (e) { console.warn("audit tx err", e); }
+    }
+    const raw = await storage.get(mk);
+    let arr = [];
+    if (raw) { try { const p = JSON.parse(raw.value); if (Array.isArray(p)) arr = p; } catch {} }
+    await storage.set(mk, JSON.stringify([entry, ...arr]));
+  } finally {
+    _endEditorWrite();
   }
-  // Резерв (нет Firebase / таймаут транзакции): обычная запись. Одно устройство — гонки нет.
-  const raw = await storage.get(mk);
-  let arr = [];
-  if (raw) { try { const p = JSON.parse(raw.value); if (Array.isArray(p)) arr = p; } catch {} }
-  await storage.set(mk, JSON.stringify([entry, ...arr]));
 };
 const logChange = async (user, ev = {}) => {
   try {
@@ -996,6 +1011,152 @@ const _race = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(_T
 const _fbKey = (k) => k.replace(/[^a-zA-Z0-9_]/g, "_"); // Firebase: только буквы/цифры/_
 const _TS_SUFFIX = "__wts"; // timestamp последней локальной записи
 const _DIRTY_SUFFIX = "__dirty"; // флаг: последняя запись в облако НЕ прошла — локальная копия новее
+// Идентификатор ВКЛАДКИ (на загрузку страницы) + текущий пользователь — владелец dirty-записей.
+// Нужны, чтобы выход «с потерей» в одной вкладке не снимал dirty-метки другой вкладки
+// и не выбрасывал правки другого пользователя.
+const _TAB_ID = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+let _dirtyOwnerUid = null; // выставляется storage.setDirtyOwner при входе пользователя
+// Editor-lock включается только для авторизованного приложения. Публичные страницы работают
+// отдельно и не участвуют в блокировке внутренней ERP.
+let _leaseEnforced = false;
+let _editorLockHeld = false;
+let _editorLockMode = null; // "web" | "fallback"
+let _editorLockToken = null;
+let _editorSessionN = 0;
+let _editorGateN = 0;
+let _editorAcquireN = 0;
+let _editorReleaseRequested = false;
+let _editorInflight = 0;
+let _editorDrainWaiters = [];
+let _webLockRelease = null;
+let _webLockAcquire = null;
+const _newEditorToken = () => `${_TAB_ID}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+const _editorOwnsLocalLease = () => {
+  try {
+    return ownsActiveLease(
+      localStorage.getItem(EDIT_LEASE_KEY),
+      _dirtyOwnerUid,
+      _TAB_ID,
+      _editorLockToken,
+      Date.now(),
+    );
+  } catch { return false; }
+};
+const _editorMayWrite = () => {
+  if (!_leaseEnforced) return true;
+  if (!_editorLockHeld || _editorReleaseRequested) return false;
+  return _editorLockMode === "web" ? true : _editorOwnsLocalLease();
+};
+// Центральный fail-closed гейт: «lease свободен» не является правом записи.
+function _writeGateFail() {
+  if (!_leaseEnforced) return null;
+  return _editorMayWrite() ? null : { reason: "read-only-tab" };
+}
+function _beginEditorWrite() {
+  const fail = _writeGateFail();
+  if (fail) return { fail, session: null };
+  const session = _editorSessionN;
+  if (_leaseEnforced) _editorInflight++;
+  return { fail: null, session };
+}
+function _mayApplyEditorResult(session) {
+  return session === _editorSessionN && _editorMayWrite();
+}
+function _finishEditorRelease() {
+  const token = _editorLockToken;
+  try {
+    const l = parseLease(localStorage.getItem(EDIT_LEASE_KEY));
+    if (l && l.tab === _TAB_ID && l.token === token) localStorage.removeItem(EDIT_LEASE_KEY);
+  } catch {}
+  _editorLockHeld = false;
+  _editorLockMode = null;
+  _editorLockToken = null;
+  _editorReleaseRequested = false;
+  _editorSessionN++;
+  const release = _webLockRelease;
+  _webLockRelease = null;
+  if (release) release();
+  const waiters = _editorDrainWaiters;
+  _editorDrainWaiters = [];
+  waiters.forEach(r => r());
+}
+function _endEditorWrite() {
+  if (_leaseEnforced && _editorInflight > 0) _editorInflight--;
+  if (_editorReleaseRequested && _editorInflight === 0) _finishEditorRelease();
+}
+async function _acquireEditorLock() {
+  if (_editorLockHeld && !_editorReleaseRequested) return true;
+  if (_webLockAcquire) return _webLockAcquire;
+  _editorReleaseRequested = false;
+  const acquireN = ++_editorAcquireN;
+  const token = _newEditorToken();
+
+  if (typeof navigator !== "undefined" && navigator.locks && typeof navigator.locks.request === "function") {
+    let settle;
+    const acquired = new Promise(resolve => { settle = resolve; });
+    _webLockAcquire = acquired;
+    navigator.locks.request("titovstroy-editor", { mode: "exclusive", ifAvailable: true }, async lock => {
+      if (!lock) { settle(false); return; }
+      // Оболочка могла размонтироваться, пока браузер выдавал lock. Не оживляем завершённую сессию.
+      if (acquireN !== _editorAcquireN) { settle(false); return; }
+      _editorLockHeld = true;
+      _editorLockMode = "web";
+      _editorLockToken = token;
+      _editorSessionN++;
+      try { localStorage.setItem(EDIT_LEASE_KEY, makeLease(_dirtyOwnerUid, _TAB_ID, Date.now(), token)); } catch {}
+      settle(true);
+      await new Promise(resolve => { _webLockRelease = resolve; });
+    }).catch(() => settle(false)).finally(() => { _webLockAcquire = null; });
+    return acquired;
+  }
+
+  // Резерв для браузеров без Web Locks: write-then-verify с fencing-token. Гейт всё равно
+  // fail-closed и не разрешает запись, пока токен не подтверждён повторным чтением.
+  try {
+    const claimed = await claimFallbackLease(localStorage, _dirtyOwnerUid, _TAB_ID, token);
+    if (!claimed) return false;
+    if (acquireN !== _editorAcquireN) {
+      try {
+        const l = parseLease(localStorage.getItem(EDIT_LEASE_KEY));
+        if (l && l.tab === _TAB_ID && l.token === token) localStorage.removeItem(EDIT_LEASE_KEY);
+      } catch {}
+      return false;
+    }
+    _editorLockHeld = true;
+    _editorLockMode = "fallback";
+    _editorLockToken = token;
+    _editorSessionN++;
+    return true;
+  } catch {
+    return false;
+  }
+}
+function _heartbeatEditorLock() {
+  if (!_editorLockHeld || _editorReleaseRequested) return false;
+  if (_editorLockMode === "fallback" && !_editorOwnsLocalLease()) {
+    _editorLockHeld = false;
+    _editorLockToken = null;
+    _editorSessionN++;
+    return false;
+  }
+  try { localStorage.setItem(EDIT_LEASE_KEY, makeLease(_dirtyOwnerUid, _TAB_ID, Date.now(), _editorLockToken)); } catch {}
+  return true;
+}
+function _releaseEditorLock() {
+  // Отменяет в том числе ещё не завершившуюся попытку захвата.
+  _editorAcquireN++;
+  if (!_editorLockHeld) return Promise.resolve();
+  _editorReleaseRequested = true;
+  if (_editorInflight === 0) {
+    _finishEditorRelease();
+    return Promise.resolve();
+  }
+  return new Promise(resolve => _editorDrainWaiters.push(resolve));
+}
+// На ключе dirty-маркер ДРУГОГО пользователя/вкладки или legacy — локальную копию трогать нельзя.
+function _foreignDirty(key) {
+  try { return !mayUseLocalCopy(localStorage.getItem(key + _DIRTY_SUFFIX), _dirtyOwnerUid, _TAB_ID); } catch { return false; }
+}
 // ── REST-ФОЛБЭК ДЛЯ ОБЛАКА ──
 // Firebase SDK ходит по WebSocket — его нередко режут блокировщики рекламы, антивирусы,
 // корпоративные сети и «оптимизаторы» провайдеров. При этом сама база доступна: обычный
@@ -1050,10 +1211,16 @@ const storage = {
   // 'found' — данные есть; 'empty' — источник точно ответил, данных нет;
   // 'unavailable' — Firebase не ответил/ошибка И локальной копии нет (НЕЛЬЗЯ затирать!)
   async getResult(key) {
-    // Свежая локальная запись (<30с) — самый надёжный источник
+    // ВЛАДЕНИЕ: dirty-маркер ДРУГОГО пользователя/вкладки на ключе → локальную копию использовать
+    // НЕЛЬЗЯ ни из одного источника (свежий кеш 30с, dirty-ветка, старый фоллбек, _mem) — иначе
+    // несохранённая смета пользователя A (аварийно закрыл вкладку, без logout) читалась бы
+    // пользователем B, становилась базой его сохранений и уезжала в облако. При чужом маркере
+    // читаем ТОЛЬКО Firebase; облако молчит → unavailable, а не чужая копия.
+    const localAllowed = !_foreignDirty(key);
+    // Свежая локальная запись (<30с) — самый надёжный источник (если копия наша)
     try {
       const ts = parseInt(localStorage.getItem(key + _TS_SUFFIX) || "0");
-      if (Date.now() - ts < 30000) {
+      if (localAllowed && Date.now() - ts < 30000) {
         const v = localStorage.getItem(key);
         if (v) return { value: v, status: "found" };
       }
@@ -1064,7 +1231,7 @@ const storage = {
     // сохранении). ТЕПЕРЬ сверяем с облаком и объединяем по id: свежая правка не
     // теряется, но и старая локальная копия не прячет актуальные серверные данные.
     try {
-      if (localStorage.getItem(key + _DIRTY_SUFFIX)) {
+      if (localAllowed && localStorage.getItem(key + _DIRTY_SUFFIX)) {
         const localVal = localStorage.getItem(key);
         if (localVal) {
           if (_fbDb) {
@@ -1120,10 +1287,12 @@ const storage = {
         else fbResponded = false;
       } catch { fbResponded = false; }
     }
-    // Резерв: localStorage любой давности
-    try { const v = localStorage.getItem(key); if (v) return { value: v, status: "found" }; } catch(e) {}
-    if (_mem[key]) return { value: _mem[key], status: "found" };
-    // Ничего не нашли: различаем «точно пусто» и «недоступно»
+    // Резерв: localStorage/_mem любой давности — ТОЛЬКО если копия не помечена чужим dirty
+    if (localAllowed) {
+      try { const v = localStorage.getItem(key); if (v) return { value: v, status: "found" }; } catch(e) {}
+      if (_mem[key]) return { value: _mem[key], status: "found" };
+    }
+    // Ничего не нашли (или чужая копия под запретом): «точно пусто» либо «недоступно»
     return { value: null, status: fbResponded ? "empty" : "unavailable" };
   },
   // Чтение ТОЛЬКО из облака (Firebase). НИКОГДА не берёт localStorage/_mem — в отличие от
@@ -1164,23 +1333,29 @@ const storage = {
   // локальной копией, и автосинк позже неожиданно затолкал бы её в облако, хотя restore был
   // объявлен частичным. При успехе — синхронизируем локальное зеркало (и снимаем dirty).
   async setCloudOnly(key, value) {
+    const op = _beginEditorWrite();
+    if (op.fail) return { fbOk: false, fbError: op.fail.reason };
     let fbOk = false, fbError = null;
-    if (_fbDb) {
-      try {
-        await _fbAuthReady;
-        let res = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000);
-        if (res === _TIMEOUT) { await new Promise(r => setTimeout(r, 800)); res = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000); }
-        if (res !== _TIMEOUT) fbOk = true; else fbError = "timeout";
-      } catch(e) { fbError = e?.message || String(e); }
-      if (!fbOk) { try { if (await _fbRestSet(key, value)) { fbOk = true; fbError = null; } } catch {} }
-    } else {
-      try { if (await _fbRestSet(key, value)) fbOk = true; else fbError = "no cloud"; } catch(e) { fbError = e?.message || String(e); }
+    try {
+      if (_fbDb) {
+        try {
+          await _fbAuthReady;
+          let res = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000);
+          if (res === _TIMEOUT) { await new Promise(r => setTimeout(r, 800)); res = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000); }
+          if (res !== _TIMEOUT) fbOk = true; else fbError = "timeout";
+        } catch(e) { fbError = e?.message || String(e); }
+        if (!fbOk) { try { if (await _fbRestSet(key, value)) { fbOk = true; fbError = null; } } catch {} }
+      } else {
+        try { if (await _fbRestSet(key, value)) fbOk = true; else fbError = "no cloud"; } catch(e) { fbError = e?.message || String(e); }
+      }
+      if (fbOk && _mayApplyEditorResult(op.session) && !_foreignDirty(key)) {
+        try { localStorage.setItem(key, value); localStorage.setItem(key + _TS_SUFFIX, Date.now().toString()); if (mayClearDirtyOnSuccess(localStorage.getItem(key + _DIRTY_SUFFIX), _dirtyOwnerUid, _TAB_ID)) localStorage.removeItem(key + _DIRTY_SUFFIX); } catch(e) {}
+        _mem[key] = value;
+      }
+      return { fbOk, fbError };
+    } finally {
+      _endEditorWrite();
     }
-    if (fbOk) {
-      try { localStorage.setItem(key, value); localStorage.setItem(key + _TS_SUFFIX, Date.now().toString()); localStorage.removeItem(key + _DIRTY_SUFFIX); } catch(e) {}
-      _mem[key] = value;
-    }
-    return { fbOk, fbError };
   },
   // АТОМАРНОЕ чтение-слияние-запись СПИСКА через Firebase runTransaction. mutator получает
   // текущий массив (распарсенный), возвращает новый массив ИЛИ undefined для отмены. Хранилище
@@ -1189,41 +1364,79 @@ const storage = {
   // committed:false, БЕЗ отката на обычный set (иначе теряется атомарность). Нужно для аудита:
   // параллельная запись между чтением и сохранением не должна затираться восстановлением.
   async mutateTransaction(key, mutator) {
-    if (!_fbDb) return { committed: false, reason: "no-sdk" };
+    const op = _beginEditorWrite();
+    if (op.fail) return { committed: false, reason: op.fail.reason };
+    if (!_fbDb) { _endEditorWrite(); return { committed: false, reason: "no-sdk" }; }
     try {
       await _fbAuthReady;
       const res = await _race(runTransaction(ref(_fbDb, _fbKey(key)), (cur) => {
         let list;
-        if (cur == null) list = [];
+        const wasNull = cur == null; // ХОЛОДНЫЙ КЕШ: без активного listener'а первый прогон
+        // runTransaction всегда получает null, ДАЖЕ если на сервере есть данные (гоча SDK).
+        if (wasNull) list = [];
         else if (typeof cur === "string") { try { list = JSON.parse(cur); } catch { return; } } // битый JSON → отмена
         else if (Array.isArray(cur)) list = cur;
         else return; // неожиданная форма → отмена
         if (!Array.isArray(list)) return;
         const next = mutator(list);
-        if (next === undefined || !Array.isArray(next)) return; // отмена
+        if (next === undefined || !Array.isArray(next)) {
+          // Отмена мутатором. При wasNull НЕЛЬЗЯ просто abort'ить: «null» может быть холодным
+          // кешем, а не пустой базой — abort ушёл бы БЕЗ похода на сервер, и команда по
+          // существующей карточке ложно падала бы «no-card» (а retry бился бы вечно в тот же кеш).
+          // Документированный паттерн: возвращаем текущее («[]») — CAS против реального значения
+          // сервера провалится и SDK ПЕРЕзапустит колбэк уже с настоящими данными; если база
+          // ДЕЙСТВИТЕЛЬНО пуста — закоммитится безобидный «[]», а отмена вернётся через notOk.
+          if (wasNull) return JSON.stringify(list);
+          return; // отмена на РЕАЛЬНЫХ данных — честный конфликт
+        }
         return JSON.stringify(next);
       }), 15000);
       if (res === _TIMEOUT) return { committed: false, reason: "timeout" };
       if (res && res.committed) {
         const v = res.snapshot ? res.snapshot.val() : null;
         const val = typeof v === "string" ? v : (v == null ? null : JSON.stringify(v));
-        if (val != null) { try { localStorage.setItem(key, val); localStorage.setItem(key + _TS_SUFFIX, Date.now().toString()); localStorage.removeItem(key + _DIRTY_SUFFIX); } catch(e) {} _mem[key] = val; }
+        if (val != null && _mayApplyEditorResult(op.session) && !_foreignDirty(key)) {
+          try { localStorage.setItem(key, val); localStorage.setItem(key + _TS_SUFFIX, Date.now().toString()); if (mayClearDirtyOnSuccess(localStorage.getItem(key + _DIRTY_SUFFIX), _dirtyOwnerUid, _TAB_ID)) localStorage.removeItem(key + _DIRTY_SUFFIX); } catch(e) {}
+          _mem[key] = val;
+        }
         return { committed: true, value: val };
       }
       return { committed: false, reason: "aborted" };
-    } catch(e) { return { committed: false, reason: e?.message || String(e) }; }
+    } catch(e) {
+      return { committed: false, reason: e?.message || String(e) };
+    } finally {
+      _endEditorWrite();
+    }
   },
   async set(key, value) {
-    // Сначала localStorage — всегда надёжно и мгновенно
-    try { localStorage.setItem(key, value); localStorage.setItem(key + _TS_SUFFIX, Date.now().toString()); } catch(e) {}
-    _mem[key] = value;
+    // LEASE-ГЕЙТ (ДО любых записей): живой lease другой вкладки → эта вкладка read-only,
+    // не трогаем ни localStorage, ни dirty, ни Firebase.
+    const op = _beginEditorWrite();
+    if (op.fail) return { value, fbOk: false, fbError: op.fail.reason };
+    // ЧУЖОЙ ЧЕРНОВИК: dirty-маркер другой вкладки/пользователя на ключе — их несохранённое
+    // содержимое в localStorage[key] затирать НЕЛЬЗЯ (маркер без содержимого бесполезен: вкладка
+    // отправила бы позже НАШЕ значение вместо своей правки). Пишем только в Firebase; наше
+    // локальное зеркало пропускаем — getResult при чужом маркере и так читает только облако.
+    const _foreign = _foreignDirty(key);
+    if (!_foreign) {
+      // Сначала localStorage — мгновенно, но СРАЗУ как pending. Если вкладка потеряет editor-lock
+      // во время сетевого await, новая вкладка увидит владельца маркера и не примет эту копию за
+      // подтверждённый кеш. Снять маркер может только успешный ответ той же editor-сессии.
+      try {
+        localStorage.setItem(key, value);
+        localStorage.setItem(key + _TS_SUFFIX, Date.now().toString());
+        localStorage.setItem(key + _DIRTY_SUFFIX, makeDirtyMarker(_dirtyOwnerUid, _TAB_ID));
+      } catch(e) {}
+      _mem[key] = value;
+    }
     // Firebase — пишем СТРОКУ JSON целиком (а не вложенный объект),
     // иначе ключи с символами / . # $ [ ] (напр. названия работ со слэшем) ломают запись.
     let fbOk = false, fbError = null;
-    if (_fbDb) {
-      try {
-        await _fbAuthReady;
-        let res = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000);
+    try {
+      if (_fbDb) {
+        try {
+          await _fbAuthReady;
+          let res = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000);
         // Одна повторная попытка записи при таймауте/ошибке
         if (res === _TIMEOUT) {
           await new Promise(r=>setTimeout(r,800));
@@ -1242,20 +1455,23 @@ const storage = {
       }
       // SDK (WebSocket) не смог — пробуем обычным HTTPS-запросом (REST). Часто именно
       // WebSocket заблокирован блокировщиком/сетью, а сама база доступна.
-      if (!fbOk) {
-        try { if (await _fbRestSet(key, value)) { fbOk = true; fbError = null; } } catch {}
+        if (!fbOk) {
+          try { if (await _fbRestSet(key, value)) { fbOk = true; fbError = null; } } catch {}
+        }
+      } else {
+        fbError = "firebase not configured";
       }
-    } else {
-      fbError = "firebase not configured";
+      if (_mayApplyEditorResult(op.session)) {
+        try {
+          if (fbOk) {
+            if (mayClearDirtyOnSuccess(localStorage.getItem(key + _DIRTY_SUFFIX), _dirtyOwnerUid, _TAB_ID)) localStorage.removeItem(key + _DIRTY_SUFFIX);
+          }
+        } catch(e) {}
+      }
+      return { value, fbOk, fbError };
+    } finally {
+      _endEditorWrite();
     }
-    // Помечаем ключ «грязным», если в облако записать не удалось — тогда при
-    // следующей загрузке предпочтём локальную копию (см. getResult). При
-    // успешной записи флаг снимаем.
-    try {
-      if (fbOk) localStorage.removeItem(key + _DIRTY_SUFFIX);
-      else if (_fbDb) localStorage.setItem(key + _DIRTY_SUFFIX, Date.now().toString());
-    } catch(e) {}
-    return { value, fbOk, fbError };
   },
   // Список ключей с незасинхронизированными («грязными») правками
   dirtyKeys() {
@@ -1268,12 +1484,49 @@ const storage = {
     } catch(e) {}
     return out;
   },
-  // САМОИСЦЕЛЕНИЕ: дослать в облако все зависшие локальные правки, предварительно
-  // СЛИВ с сервером по id. Незасинканное не теряется, но и устаревшая локальная
-  // копия не затирает сервер. set() сам снимает «грязный» флаг при успехе.
+  // Текущий владелец dirty-записей (id залогиненного пользователя) — для маркеров.
+  setDirtyOwner(uid) { _dirtyOwnerUid = uid == null ? null : uid; },
+  adoptUserDirty() { return adoptUserDirty(localStorage, _dirtyOwnerUid, _TAB_ID, _DIRTY_SUFFIX); },
+  // ── EXCLUSIVE EDITOR LOCK (включается оболочкой ДО монтирования MainApp) ──
+  setLeaseEnforced(on) { _leaseEnforced = !!on; },
+  isReadOnlyTab() { return !!_writeGateFail(); },
+  acquireEditLease() { return _acquireEditorLock(); },
+  heartbeatEditLease() { return _heartbeatEditorLock(); },
+  releaseEditLease() { return _releaseEditorLock(); },
+  editorSession() { return _editorSessionN; },
+  mayApplyEditorResult(session) { return _mayApplyEditorResult(session); },
+  // Dirty-записи ИМЕННО этого пользователя и этой вкладки (legacy-маркеры не имеют владельца).
+  dirtyKeysOwned() { return listOwnedDirty(localStorage, _dirtyOwnerUid, _TAB_ID, _DIRTY_SUFFIX); },
+  // Dirty-записи к АВТООТПРАВКЕ: свои И не legacy (см. listFlushableDirty — карантин legacy).
+  dirtyKeysFlushable() { return listFlushableDirty(localStorage, _dirtyOwnerUid, _TAB_ID, _DIRTY_SUFFIX); },
+  // Legacy-маркеры без владельца (карантин: не авто-отправляются, видны в баннере отдельно).
+  legacyDirtyKeys() {
+    return this.dirtyKeys().filter(base => { try { return isLegacyDirtyMarker(localStorage.getItem(base + _DIRTY_SUFFIX)); } catch { return false; } });
+  },
+  legacyDirtySnapshot() {
+    return this.legacyDirtyKeys().map(key => ({
+      key,
+      value: (() => { try { return localStorage.getItem(key); } catch { return null; } })(),
+      writtenAt: (() => { try { return localStorage.getItem(key + _TS_SUFFIX); } catch { return null; } })(),
+      marker: (() => { try { return localStorage.getItem(key + _DIRTY_SUFFIX); } catch { return null; } })(),
+    }));
+  },
+  // ПОДТВЕРЖДЁННАЯ пользователем потеря при выходе: удалить СВОИ dirty-записи ЦЕЛИКОМ — метку,
+  // само значение, __wts и копию в _mem. Иначе следующий пользователь получил бы чужую смету
+  // (свежая локальная копия выигрывает в getResult), а её сохранение вернуло бы «потерянное» в
+  // облако. Записи ДРУГИХ вкладок/пользователей не трогаем — та вкладка сама дожмёт или спросит.
+  discardOwnDirty() {
+    return discardOwnedDirty(localStorage, _dirtyOwnerUid, _TAB_ID, _mem, { dirty: _DIRTY_SUFFIX, ts: _TS_SUFFIX });
+  },
+  // САМОИСЦЕЛЕНИЕ: дослать в облако зависшие локальные правки, предварительно СЛИВ с сервером
+  // по id. ТОЛЬКО СВОИ записи (этот пользователь + эта вкладка, dirtyKeysFlushable): глобальный
+  // флеш отправлял бы правки ДРУГОГО пользователя/вкладки под текущей сессией (правку другой
+  // вкладки дожмёт её собственный интервал; legacy-маркеры — в карантине). set() при успехе
+  // снимает только свой флаг.
   async flushDirty() {
     if (!_fbDb) return 0;
-    const keys = this.dirtyKeys();
+    if (_writeGateFail()) return 0; // read-only вкладка не дожимает (это записи)
+    const keys = this.dirtyKeysFlushable();
     let done = 0;
     for (const key of keys) {
       try {
@@ -1353,16 +1606,9 @@ function LoginScreen({ onLogin }) {
 
     if (ok) {
       clearLoginAttempts(login.trim());
-      // Тихая миграция: пароль был в старом формате (голый текст/simpleHash) — переписываем
-      // на sha256+соль сразу после успешного входа. Только если реально читали базу (не
-      // DEFAULT_USERS-фолбэк — иначе рискуем затереть настоящий список пользователей).
-      if (loadedFromStorage && !String(candidate.password||"").startsWith("sha256:")) {
-        try {
-          const newHash = await hashPassword(password);
-          const updatedUsers = users.map(u => u.id === candidate.id ? { ...u, password: newHash } : u);
-          await storage.set(USERS_KEY, JSON.stringify(updatedUsers));
-        } catch(e) {}
-      }
+      // Пароль не мигрируем ДО получения editor-lock: экран входа не имеет права менять общую
+      // базу, пока другая вкладка может быть активным редактором. Миграция выполняется только
+      // при следующей явной смене пароля из авторизованной вкладки.
       const { password: _pw, ...safeUser } = candidate; // не храним пароль в сессии
       const sessUser = { ...safeUser, authAt: Date.now() }; // время входа — для инвалидации сессии при смене пароля
       try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: sessUser, savedAt: Date.now() })); } catch(e) {}
@@ -4040,7 +4286,105 @@ export default function App() {
   const _progToken = (() => { const m = (typeof window !== "undefined" ? (window.location.hash || "") : "").match(/^#\/progress\/(.+)$/); return m ? decodeURIComponent(m[1]) : null; })();
   if (_progToken) return <PublicProgress token={_progToken} />;
   if (!currentUser) return <LoginScreen onLogin={setCurrentUser} />;
-  return <MainApp key={currentUser.id} currentUser={currentUser} setCurrentUser={setCurrentUser} />;
+  return <EditorSessionGate key={currentUser.id} currentUser={currentUser} setCurrentUser={setCurrentUser} />;
+}
+
+function EditorSessionGate({ currentUser, setCurrentUser }) {
+  const [mode, setMode] = useState("checking"); // checking | editor | readonly
+  const modeRef = useRef("checking");
+  const setSafeMode = useCallback((next) => { modeRef.current = next; setMode(next); }, []);
+  const viewerOnly = currentUser?.role === "viewer";
+
+  const tryAcquire = useCallback(async ({ explicit = false } = {}) => {
+    if (viewerOnly) {
+      setSafeMode("readonly");
+      if (explicit) window.alert("Для этой учётной записи доступен только просмотр.");
+      return false;
+    }
+    setSafeMode("checking");
+    const ok = await storage.acquireEditLease();
+    if (ok) {
+      storage.adoptUserDirty();
+      startProductionSession(currentUser?.id);
+      setSafeMode("editor");
+      return true;
+    }
+    setSafeMode("readonly");
+    if (explicit) window.alert("Редактирование сейчас активно в другой вкладке. Закройте её и повторите.");
+    return false;
+  }, [currentUser?.id, viewerOnly, setSafeMode]);
+
+  useEffect(() => {
+    let stopped = false;
+    const ownerUid = currentUser?.id ?? null;
+    const gateSession = ++_editorGateN;
+    storage.setDirtyOwner(ownerUid);
+    storage.setLeaseEnforced(true);
+    if (viewerOnly) {
+      setSafeMode("readonly");
+      return () => {
+        stopped = true;
+        storage.releaseEditLease().finally(() => {
+          if (_editorGateN === gateSession && _dirtyOwnerUid === ownerUid) {
+            storage.setLeaseEnforced(false);
+            storage.setDirtyOwner(null);
+          }
+        });
+      };
+    }
+    storage.acquireEditLease().then(ok => {
+      if (!stopped) {
+        if (ok) {
+          storage.adoptUserDirty();
+          startProductionSession(ownerUid);
+        }
+        setSafeMode(ok ? "editor" : "readonly");
+      } else if (ok) {
+        storage.releaseEditLease();
+      }
+    });
+    const iv = setInterval(() => {
+      if (stopped || modeRef.current !== "editor") return;
+      if (!storage.heartbeatEditLease()) setSafeMode("readonly");
+    }, LEASE_HEARTBEAT_MS);
+    const onLeave = () => {
+      // pagehide может уйти в back-forward cache без размонтирования React. Сразу переводим UI
+      // в read-only, чтобы после возврата форма не выглядела редактируемой при уже отпущенном lock.
+      setSafeMode("readonly");
+      storage.releaseEditLease();
+    };
+    window.addEventListener("beforeunload", onLeave);
+    window.addEventListener("pagehide", onLeave);
+    return () => {
+      stopped = true;
+      clearInterval(iv);
+      window.removeEventListener("beforeunload", onLeave);
+      window.removeEventListener("pagehide", onLeave);
+      storage.releaseEditLease().finally(() => {
+        if (_editorGateN === gateSession && _dirtyOwnerUid === ownerUid) {
+          storage.setLeaseEnforced(false);
+          storage.setDirtyOwner(null);
+        }
+      });
+    };
+  }, [currentUser?.id, viewerOnly, setSafeMode]);
+
+  if (mode === "checking") {
+    return (
+      <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8fafc",fontFamily:"'Inter','Segoe UI',sans-serif",color:"#64748b",fontSize:14}}>
+        Проверяю доступ к редактированию…
+      </div>
+    );
+  }
+
+  return (
+    <MainApp
+      currentUser={currentUser}
+      setCurrentUser={setCurrentUser}
+      editorTab={mode === "editor"}
+      takeoverEditLease={() => tryAcquire({ explicit: true })}
+    />
+  );
 }
 
 // Мигрирует ключи rows со старого формата (name) на новый (code).
@@ -4056,7 +4400,7 @@ function migrateRowsToCodeKeys(rows, catalog) {
   return result;
 }
 
-function MainApp({ currentUser, setCurrentUser }) {
+function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) {
   const [catalogVersion, setCatalogVersion] = useState(0);
   useEffect(() => {
     _onCatalogChange = () => setCatalogVersion(v => v + 1);
@@ -4087,13 +4431,15 @@ function MainApp({ currentUser, setCurrentUser }) {
   // Авторизация (currentUser приходит пропом из обёртки App — здесь компонент
   // монтируется только когда пользователь уже залогинен, поэтому хуки стабильны)
   const [logoutConfirm, setLogoutConfirm] = useState(false);
-  const doLogout = () => {
-    try{localStorage.removeItem(SESSION_KEY);}catch(e){}
-    // чистим глобальный кэш карточек прайса, чтобы данные не «протекли» к другому пользователю
-    try{ Object.keys(priceCardCache).forEach(k=>delete priceCardCache[k]); }catch(e){}
-    setCurrentUser(null); setLogoutConfirm(false);
-  };
+  // ЕДИНЫЙ безопасный путь завершения сессии — endSessionSafely (определён ниже, рядом с
+  // очередями производства; сюда попадает через ref). Любой выход — кнопка, принудительный
+  // после смены пароля — обязан идти через него: дожать несохранённое, при неудаче спросить/
+  // предупредить, и только потом чистить. Прямой setCurrentUser(null) запрещён.
+  const endSessionSafelyRef = useRef(null);
+  const doLogout = () => { endSessionSafelyRef.current && endSessionSafelyRef.current({ forced: false }); };
   const [loadError, setLoadError] = useState(false); // не удалось загрузить из Firebase — сохранение заблокировано
+  const [dirtyCount, setDirtyCount] = useState(0); // СВОИ незасинканные dirty-записи storage (этот пользователь+вкладка) — участвует в баннере
+  const [legacyDirtyN, setLegacyDirtyN] = useState(0); // legacy-маркеры без владельца (карантин — не авто-отправляются)
   const [cloudError, setCloudError] = useState(false); // последнее сохранение не ушло в облако (только локально)
   const [listBackups, setListBackups] = useState(null); // {label, items, onRestore}
 
@@ -4803,12 +5149,238 @@ function MainApp({ currentUser, setCurrentUser }) {
     const r = await saveListProtected(OBJECTS_KEY, OBJECTS_BACKUPS_KEY, list, (fl)=>{ objectsRef.current = fl; setObjects(fl); }, { loadedRef: _contractsLoaded, ...opts });
     return r;
   };
-  const saveProductions = async (list, opts = {}) => {
-    // identityKey: "objectId" — у production записей нет id, мердж по нему давал бы пустой
-    // результат и молча блокировал сохранение (см. историю бага с этапами). loadedRef —
-    // свой собственный _productionsLoaded, а не общий _contractsLoaded.
-    return await saveListProtected(PRODUCTIONS_KEY, PRODUCTIONS_BACKUPS_KEY, list, (fl)=>{ productionsRef.current = fl; setProductions(fl); }, { loadedRef: _productionsLoaded, identityKey: "objectId", ...opts });
-  };
+  // ── ЕДИНАЯ АТОМАРНАЯ ЗАПИСЬ ПРОИЗВОДСТВА (этап 2А) ──
+  // saveProductions(готовыйМассив) удалён: все изменения производства идут строго командами.
+  // Все изменения производства идут ТОЛЬКО через команды: mutateProductions(command). Команда
+  // применяется к самому свежему списку ВНУТРИ Firebase runTransaction (см. storage.mutateTransaction),
+  // поэтому параллельная правка другого поля/устройства не затирается «готовым устаревшим массивом».
+  // Локальная очередь (_prodQueue) упорядочивает команды одной вкладки; транзакция защищает между
+  // вкладками/устройствами. REST/обычный set для производства НЕ используем.
+  const _prodQueue = useRef(Promise.resolve());
+  // Множество НЕподтверждённых правок производства по changeId. Ошибка добавляет id, успешный
+  // повтор ТОГО ЖЕ changeId удаляет его. Баннер «ожидают синхронизации» — пока множество не пусто.
+  // changeId соглашение: "cm_*" — правки карточки из ProductionModule (его очередь сама повторяет
+  // и перебазирует), "bg_*" — фоновые команды App (авто-синк, зеркало статуса, замечания клиента,
+  // удаление): их при сетевой ошибке повторяет _prodRetryCmds + интервал ниже.
+  const _prodUnsyncedIds = useRef(new Set());
+  const _prodRetryCmds = useRef(new Map()); // changeId -> команда для фонового повтора (только bg_*)
+  const _prodDraftWarningShown = useRef(false);
+  const _prodRetryRevision = useRef(0);
+  const [prodUnsyncedN, setProdUnsyncedN] = useState(0);
+  // «Скрыть» в баннере синхронизации: реально скрывает (раньше только сбрасывал cloudError и при
+  // prodUnsyncedN>0 баннер оставался). Когда всё дожато (нет ошибок и ожидающих) — сброс, чтобы
+  // СЛЕДУЮЩАЯ проблема снова показала баннер.
+  const [syncBannerHidden, setSyncBannerHidden] = useState(false);
+  useEffect(() => { if (!cloudError && prodUnsyncedN === 0 && dirtyCount === 0 && legacyDirtyN === 0 && syncBannerHidden) setSyncBannerHidden(false); }, [cloudError, prodUnsyncedN, dirtyCount, legacyDirtyN, syncBannerHidden]);
+  const _refreshProdUnsynced = useCallback(() => { setProdUnsyncedN(_prodUnsyncedIds.current.size); }, []);
+  // Защита App-очереди от команд «после logout»: номер App-сессии производственных команд
+  // (инкремент при завершении) + флаг «сессия завершается» (новые bg_ не принимаются).
+  const _prodAppSession = useRef(0);
+  const _prodEndingRef = useRef(false);
+  // cloudError гасим ТОЛЬКО когда чисто ВЕЗДЕ: успех производства не должен скрывать
+  // незасинканные сметы/финансы (dirty-записи storage) — и наоборот.
+  const _clearCloudErrorIfAllClean = useCallback(() => {
+    if (_prodUnsyncedIds.current.size === 0 && storage.dirtyKeysFlushable().length === 0) setCloudError(false);
+  }, []);
+  const mutateProductions = useCallback((command) => {
+    // Read-only вкладка (lease у другой): команды производства НЕ выполняются вовсе —
+    // ни транзакции, ни учёта changeId (это не сетевая ошибка, повторять нечего).
+    if (command.type !== "resolve-change" && storage.isReadOnlyTab()) {
+      return Promise.resolve({ committed: false, reason: "read-only-tab" });
+    }
+    const editorSession = storage.editorSession();
+    // Завершение сессии: НОВЫЕ фоновые команды не принимаются (иначе эффект/таймер мог бы
+    // подбросить bg_ во время дожима хвоста, и она выполнилась бы уже после выхода).
+    if (isBlockedWhileEnding(command, _prodEndingRef.current)) {
+      return Promise.resolve({ committed: false, reason: "session-ending" });
+    }
+    const durableChangeId = command.changeId != null ? String(command.changeId) : "";
+    const durableBg = durableChangeId.startsWith("bg_");
+    if (durableBg && !command.__draftRevision) {
+      command = {
+        ...command,
+        __draftRevision: `${Date.now().toString(36)}_${(++_prodRetryRevision.current).toString(36)}`,
+      };
+    }
+    // 2Б: bg-команда сначала попадает в per-user localStorage, и только потом — в очередь.
+    // Crash после клика, но до ответа Firebase, не теряет зеркало статуса/синк/удаление.
+    if (durableBg && !saveProductionRetry(localStorage, currentUser?.id, command)) {
+      setCloudError(true);
+      if (!_prodDraftWarningShown.current) {
+        _prodDraftWarningShown.current = true;
+        window.alert("Не удалось сохранить резерв команды производства. Не закрывайте страницу до завершения синхронизации.");
+      }
+    }
+    const sess = _prodAppSession.current; // номер сессии НА МОМЕНТ ПОСТАНОВКИ в очередь
+    const run = async () => {
+      // Сессия завершилась, пока команда стояла в очереди — НЕ выполняем запись вовсе
+      // (проверка только «после await» недостаточна: транзакция уже успела бы записать).
+      if (sess !== _prodAppSession.current) return { committed: false, reason: "session-ended" };
+      const changeId = command.changeId != null ? command.changeId : null;
+      // resolve-change: правка отменена самим отправителем (например, пользователь вернул значение
+      // назад и дифф стал пуст) — снимаем changeId из «ожидающих» БЕЗ записи в базу.
+      if (command.type === "resolve-change") {
+        if (changeId != null) {
+          _prodRetryCmds.current.delete(changeId);
+          if (String(changeId).startsWith("bg_")) removeProductionRetry(localStorage, currentUser?.id, changeId, command.__draftRevision);
+          if (_prodUnsyncedIds.current.delete(changeId)) _refreshProdUnsynced();
+          _clearCloudErrorIfAllClean();
+        }
+        return { committed: true, list: productionsRef.current };
+      }
+      const _fail = (reason, conflict, list) => {
+        // Учёт changeId — в чистой accountProductionFailure (commands.js). Ключевое: конфликт
+        // bg_-команды снимает её и из retry, И из «ожидающих» (после «сеть упала → команда стала
+        // неактуальна» повторов больше нет — раньше id зависал в множестве и баннер горел вечно).
+        const acc = accountProductionFailure({ changeId, conflict, command },
+          { unsynced: _prodUnsyncedIds.current, retry: _prodRetryCmds.current });
+        if (conflict && changeId != null && String(changeId).startsWith("bg_")) {
+          removeProductionRetry(localStorage, currentUser?.id, changeId, command.__draftRevision);
+        }
+        _refreshProdUnsynced();
+        if (acc.cloudIssue) setCloudError(true);
+        else _clearCloudErrorIfAllClean();
+        return { committed: false, reason, conflict: !!conflict, list };
+      };
+      if (_productionsLoaded && !_productionsLoaded.current) return _fail("not-loaded", false);
+      const cmd = { ...command, ts: command.ts || Date.now() };
+      // Мутатор транзакции применяет команду к свежему списку. Если команда НЕ применима
+      // (ok:false — нет карточки/элемента, битая) — возвращаем undefined → runTransaction
+      // ОТМЕНЯЕТСЯ (committed:false), правка НЕ считается сохранённой (не «тихий успех»).
+      // createTxnApplier СБРАСЫВАЕТ notOk на каждом прогоне колбэка: SDK перезапускает его
+      // (холодный кеш → CAS → реальные данные), и «залипший» notOk первого прогона объявлял бы
+      // РЕАЛЬНО закоммиченное сохранение конфликтом (блокер rev4-аудита №1).
+      const applier = createTxnApplier(cmd);
+      const res = await storage.mutateTransaction(PRODUCTIONS_KEY, applier.mutate);
+      const notOk = applier.state.notOk, notOkList = applier.state.notOkList;
+      if (!storage.mayApplyEditorResult(editorSession)) {
+        return { committed: false, reason: "editor-session-ended" };
+      }
+      // Сессия завершилась, пока шла транзакция: запись (если успела) — легитимный «дожим»
+      // правок ЭТОГО пользователя, но React-state и учёты больше не трогаем.
+      if (sess !== _prodAppSession.current) return { committed: !!(res.committed && !notOk), reason: "session-ended" };
+      if (res.committed && !notOk) {
+        let next = [];
+        try { next = res.value ? JSON.parse(res.value) : []; } catch { next = productionsRef.current; }
+        if (Array.isArray(next)) { productionsRef.current = next; setProductions(next); }
+        // Успешный (повтор) этого changeId — снимаем его из «ожидающих» и из очереди повтора.
+        if (changeId != null) {
+          _prodRetryCmds.current.delete(changeId);
+          if (String(changeId).startsWith("bg_")) removeProductionRetry(localStorage, currentUser?.id, changeId, command.__draftRevision);
+          if (_prodUnsyncedIds.current.delete(changeId)) _refreshProdUnsynced();
+        }
+        _clearCloudErrorIfAllClean();
+        return { committed: true, list: next };
+      }
+      // Транзакция не прошла. conflict:true (+свежий список) — команда невалидна против текущих
+      // данных; иначе — сеть/SDK/не загружено (повторяемо).
+      return _fail(notOk || res.reason, !!notOk, notOk ? notOkList : undefined);
+    };
+    const next = _prodQueue.current.then(run, run);
+    _prodQueue.current = next.then(() => {}, () => {});
+    return next;
+  }, [currentUser?.id, _refreshProdUnsynced, _clearCloudErrorIfAllClean]);
+  // 2Б: связать module-scope очередь с App сразу после входа и поднять фоновые команды прошлого
+  // запуска. Это работает даже если пользователь ещё не открыл ни одной карточки объекта.
+  useEffect(() => {
+    if (!editorTab) return;
+    setProductionCommandHandler(mutateProductions);
+    const recovered = listProductionRetries(localStorage, currentUser?.id);
+    for (const cmd of recovered) {
+      _prodRetryCmds.current.set(cmd.changeId, cmd);
+      _prodUnsyncedIds.current.add(cmd.changeId);
+    }
+    if (recovered.length) {
+      _refreshProdUnsynced();
+      setCloudError(true);
+    }
+    flushPendingProduction().catch(() => {});
+    for (const cmd of recovered) mutateProductions({ ...cmd, __retryFlush: true });
+    return () => { setProductionCommandHandler(null); };
+  }, [editorTab, currentUser?.id, mutateProductions, _refreshProdUnsynced]);
+  // Фоновый повтор упавших ФОНОВЫХ команд производства (bg_*: авто-синк, статус, замечания,
+  // удаление). Правки карточки (cm_*) повторяет очередь самого ProductionModule.
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (_prodEndingRef.current) return; // сессия завершается — повторы гоняет только финальный флеш
+      if (_prodRetryCmds.current.size) for (const cmd of Array.from(_prodRetryCmds.current.values())) mutateProductions(cmd);
+    }, 15000);
+    return () => clearInterval(iv);
+  }, [mutateProductions]);
+  // Размонтирование MainApp (logout, смена пользователя через key={currentUser.id}) — остановка
+  // module-scope очереди производства. Страховка: все штатные пути выхода идут через
+  // endSessionSafely (он дожимает и предупреждает ДО остановки), сюда доезжает уже пустая очередь.
+  useEffect(() => () => { try { stopProductionSession(); } catch {} }, []);
+  // ЕДИНЫЙ флеш ВСЕГО производства: правки карточек (module-очередь) + упавшие фоновые команды
+  // (bg_*, с обходным флагом __retryFlush — при завершении сессии новые bg_ заблокированы, а эти
+  // повторы должны пройти) + СТАБИЛИЗАЦИЯ хвоста общей очереди (пока ждали — могли добавить ещё).
+  // Возвращает, сколько осталось несинхронизированным.
+  const flushAllProductionPending = useCallback(async () => {
+    try { await flushPendingProduction(); } catch(e) { console.warn("flush module pending err", e); }
+    if (_prodRetryCmds.current.size) {
+      await Promise.all(Array.from(_prodRetryCmds.current.values()).map(cmd => mutateProductions({ ...cmd, __retryFlush: true }).catch(() => {})));
+    }
+    await awaitQueueSettled(() => _prodQueue.current);
+    // Итог по ВСЕМ учётам: множество «ожидают синхронизации» покрывает и cm_ (правки карточек),
+    // и bg_ (фоновые); module pending — страховка на случай правки без попытки отправки.
+    return Math.max(_prodUnsyncedIds.current.size, hasPendingProduction());
+  }, [mutateProductions]);
+  // ЕДИНОЕ безопасное завершение сессии (кнопка «Выйти» и принудительный выход после смены
+  // пароля): 1) заблокировать НОВЫЕ фоновые команды; 2) дожать производство и обычные dirty;
+  // 3) неподтверждённое производство можно безопасно оставить в per-user 2Б-черновиках;
+  // 4) только данные, для которых durable-копии НЕТ, требуют confirm/alert о потере;
+  // 5) при подтверждённой потере обычные dirty удаляются целиком; 6) остановка очередей и выход.
+  const _endingSessionRef = useRef(false);
+  const endSessionSafely = useCallback(async ({ forced = false } = {}) => {
+    if (_endingSessionRef.current) return; // повторный вход (например, второй тик загрузки)
+    _endingSessionRef.current = true;
+    _prodEndingRef.current = true; // новые bg_ команды больше не принимаются, ретрай-таймер молчит
+    try {
+      let prodLeft = 0;
+      try { prodLeft = await flushAllProductionPending(); }
+      catch(e) { console.warn("logout flush err", e); prodLeft = Math.max(_prodUnsyncedIds.current.size, hasPendingProduction()); }
+      // Дожимаем и ОБЫЧНЫЕ dirty-записи (сметы, финансы, договоры, клиенты) — иначе несохранённая
+      // смета первого пользователя ушла бы в облако авто-флешем уже ПОСЛЕ входа следующего.
+      try { await storage.flushDirty(); } catch(e) { console.warn("logout flushDirty err", e); }
+      // Считаем и удаляем ТОЛЬКО СВОИ записи (этот пользователь + эта вкладка): выход в одной
+      // вкладке не должен снимать dirty другой вкладки или другого пользователя.
+      const ownedDirty = storage.dirtyKeysOwned(); // точный список ДО удаления
+      const dirtyLeft = ownedDirty.length;
+      const savedBgIds = new Set(listProductionRetries(localStorage, currentUser?.id).map(c => c.changeId));
+      const bgDurable = Array.from(_prodRetryCmds.current.keys()).every(id => savedBgIds.has(id));
+      const prodAtRisk = prodLeft > 0 && (!productionDraftsAreDurable() || !bgDurable);
+      const atRisk = (prodAtRisk ? prodLeft : 0) + dirtyLeft;
+      if (atRisk > 0) {
+        const what = [prodAtRisk ? `производство без резервного черновика: ${prodLeft}` : "", dirtyLeft > 0 ? `сметы/финансы/прочее: ${dirtyLeft}` : ""].filter(Boolean).join("; ");
+        if (forced) {
+          alert(`Внимание: несинхронизированные изменения (${what}) не удалось отправить — они будут потеряны. Выход принудительный: пароль был изменён.`);
+        } else {
+          const drop = window.confirm(`Несинхронизированные изменения (${what}) не удалось отправить — облако не отвечает.\n\nOK — выйти и ПОТЕРЯТЬ их.\nОтмена — остаться (попробуйте «Повторить сейчас» в баннере).`);
+          if (!drop) { setLogoutConfirm(false); return; } // остаёмся: finally вернёт очереди в работу
+        }
+        // Потеря подтверждена: удаляем СВОИ dirty-записи ЦЕЛИКОМ (метка + значение + __wts + _mem) —
+        // просто снятая метка оставляла локальную копию, и следующий пользователь получал чужую
+        // смету (свежая локальная копия выигрывает в getResult) и мог сохранить её в облако.
+        try { storage.discardOwnDirty(); setDirtyCount(storage.dirtyKeysFlushable().length); } catch(e) {}
+      }
+      // prodLeft с подтверждёнными durable-черновиками НЕ теряется: stop очистит только память,
+      // а следующий вход этого же uid поднимет команды из localStorage и повторит.
+      try{ localStorage.removeItem(SESSION_KEY); }catch(e){}
+      // чистим глобальный кэш карточек прайса, чтобы данные не «протекли» к другому пользователю
+      try{ Object.keys(priceCardCache).forEach(k=>delete priceCardCache[k]); }catch(e){}
+      // Инкремент App-сессии: команды, ЕЩЁ стоящие в _prodQueue, не выполнятся (проверка ДО
+      // транзакции), а ответы уже улетевших не тронут React-state. Затем — остановка module-очереди.
+      _prodAppSession.current++;
+      try{ stopProductionSession(); }catch(e){}
+      _prodRetryCmds.current.clear(); _prodUnsyncedIds.current.clear(); _refreshProdUnsynced();
+      try{ await storage.releaseEditLease(); }catch(e){}
+      setCurrentUser(null); setLogoutConfirm(false);
+    } finally {
+      _endingSessionRef.current = false;
+      _prodEndingRef.current = false; // при отмене выхода очереди снова работают штатно
+    }
+  }, [flushAllProductionPending, _refreshProdUnsynced, setCurrentUser, currentUser?.id]);
+  endSessionSafelyRef.current = endSessionSafely;
   const saveReports = async (list, opts = {}) => {
     return await saveListProtected(REPORTS_KEY, REPORTS_BACKUPS_KEY, list, (fl)=>{ reportsRef.current = fl; setReports(fl); }, { loadedRef: _contractsLoaded, ...opts });
   };
@@ -5193,19 +5765,10 @@ ${reqBlock}`;
 </body></html>`;
   };
   // upsert одной производственной карточки (ключ — objectId)
-  const onSaveProduction = useCallback(async (record) => {
-    const cur = productionsRef.current;
-    const exists = cur.some(p => p.objectId === record.objectId);
-    const list = exists ? cur.map(p => p.objectId === record.objectId ? record : p) : [...cur, record];
-    await saveProductions(list, { replace: true });
-  }, []);
-  // Удалить производственную карточку по objectId. removedIds ОБЯЗАТЕЛЕН: при честном мердже
-  // по identityKey запись, которой просто нет в переданном списке (но она есть на сервере),
-  // сохраняется — удаление нужно указывать явно, иначе карточка не удалится.
-  const onDeleteProduction = useCallback(async (objectId) => {
-    const list = productionsRef.current.filter(p => p.objectId !== objectId);
-    await saveProductions(list, { replace: true, allowEmpty: true, removedIds: [objectId] });
-  }, []);
+  // Удаление карточки — командой (идемпотентно, атомарно).
+  const onDeleteProduction = useCallback((objectId) => {
+    return mutateProductions({ type: "delete-production", objectId, changeId: "bg_del_" + objectId });
+  }, [mutateProductions]);
 
   // ── ДОСТУП КЛИЕНТА К ПРОГРЕССУ (публичная ссылка #/progress/<токен>) ──
   const prodEntriesRef = useRef([]);
@@ -5304,6 +5867,10 @@ ${reqBlock}`;
   const _publishDocsRef = useRef(null); // назначается ниже (после генераторов договоров/актов)
   // Забрать замечания клиента из ноды прогресса и завести их в «Замечания» производства (с пометкой «от клиента»)
   const syncClientRemarks = useCallback(async (objectId) => {
+    // ТАБУ владельца: авто-импорт замечаний ПИШЕТ в производство (create + defects) без действия
+    // владельца — на боевой выключен до отдельной приёмки. Если владелец решит, что это нужное
+    // бизнес-исключение из табу — гейт снимается осознанно одной строкой.
+    if (!IS_DEV_ENV) return;
     const obj = objectsRef.current.find(o => o.id === objectId);
     if (!obj || !obj.progressShared || !obj.progressToken) return;
     let node = {};
@@ -5311,14 +5878,14 @@ ${reqBlock}`;
     const remarks = Array.isArray(node.clientRemarks) ? node.clientRemarks : [];
     if (!remarks.length) return;
     const prod = productionsRef.current.find(p => p.objectId === objectId) || null;
-    const defects = prod ? (prod.defects || []) : [];
-    const known = new Set(defects.filter(d => d.clientRemarkId).map(d => d.clientRemarkId));
-    const toAdd = remarks.filter(rm => rm.id && !known.has(rm.id));
-    if (!toAdd.length) return;
-    const add = toAdd.map(rm => ({ id: genId(), text: rm.text || "", done: false, ts: rm.ts || Date.now(), author: "Клиент", source: "client", clientRemarkId: rm.id }));
-    const base = prod || emptyProduction(objectId, genId);
-    await onSaveProduction({ ...base, defects: [...add, ...defects], updatedAt: Date.now() });
-  }, [genId, onSaveProduction]);
+    // Готовим замечания-кандидаты (id стабильный — сам clientRemarkId, чтобы повтор синка был
+    // идемпотентен). Дедуп по clientRemarkId делается ВНУТРИ транзакции (merge-client-remarks),
+    // поэтому параллельная правка дефектов с другого устройства не затирается.
+    const cand = remarks.filter(rm => rm.id).map(rm => ({ id: "cr_" + rm.id, text: rm.text || "", done: false, ts: rm.ts || Date.now(), author: "Клиент", source: "client", clientRemarkId: rm.id }));
+    if (!cand.length) return;
+    if (!prod) await mutateProductions({ type: "create-if-missing", objectId, record: emptyProduction(objectId, genId), changeId: "bg_remarks_create_" + objectId });
+    await mutateProductions({ type: "merge-client-remarks", objectId, remarks: cand, changeId: "bg_remarks_" + objectId });
+  }, [genId, mutateProductions]);
   const syncRemarksRef = useRef(); syncRemarksRef.current = syncClientRemarks;
   // Доступ реально ещё активен (включён и срок 60 дней не истёк). Раньше срок проверялся
   // только на клиентской странице (косметически) — сама нода в базе продолжала жить и
@@ -5444,6 +6011,26 @@ ${reqBlock}`;
     return order.map(k => ({ cat: map[k].cat, name: map[k].name, unit: map[k].unit, qty: Math.round(map[k].qty * 100) / 100, priceClient: Math.round(map[k].priceClient), costPlan: Math.round(map[k].costPlan) }));
   }, [estimates]);
 
+  // МИГРАЦИЯ ID (одноразово): гранулярные команды адресуют элементы массивов (этапы/журнал/
+  // дефекты/чек-листы) по id. Старые данные могли иметь элементы без id или с повторяющимися id —
+  // их нельзя было бы точечно менять/удалять. Присваиваем стабильные уникальные id один раз после
+  // загрузки. Пишем одной подтверждённой командой replace-all-confirmed (через ту же транзакцию).
+  const _prodNormalizedRef = useRef(false);
+  useEffect(() => {
+    if (_prodNormalizedRef.current) return;
+    if (!_productionsLoaded.current) return;
+    // ТАБУ владельца: НЕ трогаем боевые данные производства автоматически. Нормализацию id
+    // (нужна для гранулярных команд) авто-запускаем ТОЛЬКО на dev-базе. На боевой она НЕ пишет
+    // сама — при необходимости владелец запустит вручную (осознанно) отдельной операцией.
+    if (!IS_DEV_ENV) { _prodNormalizedRef.current = true; return; }
+    const { changed } = normalizeProductionIds(productionsRef.current); // быстрая проверка по снимку
+    if (!changed) { _prodNormalizedRef.current = true; return; }
+    // Применяется ВНУТРИ транзакции к свежему списку (см. команду normalize-ids), детерминированно.
+    // Локальный state и флаг — ТОЛЬКО из подтверждённого результата (committed:true).
+    mutateProductions({ type: "normalize-ids", changeId: "bg_normalize" }).then(res => { if (res && res.committed) _prodNormalizedRef.current = true; });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedTick]);
+
   // АВТО-СИНХРОНИЗАЦИЯ этапов производства со сметами (без кнопок):
   // добавил позицию в смету/доп. смету → она сама появляется в Этапах и «Финансах по этапам»;
   // удалил смету/позицию → сметные этапы сами исчезают. Статус/сроки/ответственный
@@ -5451,50 +6038,29 @@ ${reqBlock}`;
   // вручную ценой, если имени нет в каталоге) и импортные карточки без объекта (fp:).
   const _stageSyncTimer = useRef(null);
   useEffect(() => {
+    // ТАБУ владельца: авто-синк ПИШЕТ в производство при загрузке — на боевой базе выключен до
+    // отдельной приёмки (как и normalize-ids). На dev-базе работает как раньше. После приёмки
+    // 2А владелец решает: снять гейт или оставить синк по явной кнопке.
+    if (!IS_DEV_ENV) return;
     if (!_estimatesLoaded.current || !_contractsLoaded.current || !_productionsLoaded.current) return;
     if (_stageSyncTimer.current) clearTimeout(_stageSyncTimer.current);
     _stageSyncTimer.current = setTimeout(() => {
       const prods = productionsRef.current;
       if (!prods.length) return;
-      const keyOf = s => ((s.cat || "") + "|" + (s.name || "")).toLowerCase().trim();
-      let anyChanged = false;
-      const updated = prods.map(p => {
-        if (!p.objectId || String(p.objectId).startsWith("fp:")) return p;
-        // НЕ пропускаем объект без смет: иначе сметные этапы удалённых смет висят вечно.
-        // built станет [] → сметные этапы (fromEst/каталог/плановая сумма) уберутся, ручные останутся.
-        // Верхний guard _estimatesLoaded не даёт стирать этапы, пока сметы не загружены из базы.
-        const built = buildStagesFromEstimate(p.objectId);
-        const builtKeys = new Set(built.map(keyOf));
-        const cur = p.stages || [];
-        let changed = false;
-        // Удаляем автоматически ТОЛЬКО явно сметные этапы (fromEst===true), которых больше нет
-        // в сметах. Раньше сюда же попадали любые этапы с именем из каталога ИЛИ ненулевой
-        // ценой/кол-вом — это могло стереть РУЧНОЙ этап, который прораб добавил сам и просто
-        // вписал цену/кол-во (или случайно назвал так же, как позиция в каталоге). Легаси-этапы
-        // без флага (созданы до его введения) теперь не трогаем автоматически — они «усыновляются»
-        // (получают fromEst:true) при первом же совпадении с текущей сметой чуть ниже.
-        const kept = cur.filter(s => builtKeys.has(keyOf(s)) || s.fromEst !== true);
-        if (kept.length !== cur.length) changed = true;
-        const used = new Set();
-        const next = kept.map(s => {
-          const b = built.find(x => keyOf(x) === keyOf(s));
-          if (!b) return s;
-          used.add(keyOf(b));
-          if (s.qty !== b.qty || s.priceClient !== b.priceClient || s.costPlan !== b.costPlan || (b.unit && s.unit !== b.unit)) { changed = true; return { ...s, unit: b.unit || s.unit, qty: b.qty, priceClient: b.priceClient, costPlan: b.costPlan, fromEst: true }; }
-          return s;
-        });
-        for (const b of built) {
-          if (used.has(keyOf(b))) continue;
-          changed = true;
-          next.push({ id: genId(), cat: b.cat, name: b.name, unit: b.unit || "", qty: b.qty, planStart: "", planEnd: "", factStart: "", factEnd: "", status: "todo", responsible: "", note: "", paid: false, priceClient: b.priceClient, costPlan: b.costPlan, fromEst: true });
-        }
-        if (!changed) return p;
-        anyChanged = true;
-        return { ...p, stages: next, updatedAt: Date.now() };
-      });
-      // ВАЖНО: replace:true — карточки производства без id (ключ objectId), а мердж по id
-      // в обычном режиме даёт пусто → блок «пусто поверх» молча отменял сохранение (этапы не удалялись).
-      if (anyChanged) saveProductions(updated, { replace: true });
+      // Для каждой реальной карточки шлём КОМАНДУ sync-estimate-stages: сборку сметных этапов
+      // (built) делаем здесь, а СЛИЯНИЕ (удаление ушедших сметных, обновление цифр, добавление
+      // новых, сохранение ручных этапов/сроков/статусов) — внутри транзакции на свежих данных.
+      // Каждому сметному этапу заранее даём стабильный id, чтобы повтор транзакции не плодил дубль.
+      for (const p of prods) {
+        if (!p.objectId || String(p.objectId).startsWith("fp:")) continue;
+        // Каждой сметной позиции даём стабильный estimateKey (cat|name) и заранее — id. Синк
+        // сопоставляет этапы по estimateKey, а НЕ по названию: ручной этап с именем как в смете
+        // (без estimateKey) не будет ни обновлён, ни удалён.
+        const built = buildStagesFromEstimate(p.objectId).map(b => ({ id: genId(), estimateKey: _stageKey(b), ...b }));
+        const hasEstStages = (p.stages || []).some(s => s.fromEst === true && s.estimateKey != null);
+        if (built.length === 0 && !hasEstStages) continue;
+        mutateProductions({ type: "sync-estimate-stages", objectId: p.objectId, estimateStages: built, changeId: "bg_sync_" + p.objectId });
+      }
     }, 1200);
     return () => { if (_stageSyncTimer.current) clearTimeout(_stageSyncTimer.current); };
     // loadedTick — чтобы синк перезапустился, когда productions/сметы догрузились ПОЗЖЕ estimates.
@@ -5508,10 +6074,10 @@ ${reqBlock}`;
     if (!window.confirm(`Перенести ${total} проектов из Финансов в Производство? Текущие записи производства будут заменены.`)) return;
     const finStatMap = { "новый":"new","активен":"active","в работе":"active","приостановлен":"paused","выполнен":"done","отменен":"cancel" };
     const stagesFromEst = (objId) => buildStagesFromEstimate(objId).map(s => ({
-      id: genId(), cat: s.cat||"Прочее", name: s.name||"", unit: s.unit||"", qty: s.qty||0,
+      id: genId(), estimateKey: _stageKey(s), cat: s.cat||"Прочее", name: s.name||"", unit: s.unit||"", qty: s.qty||0,
       planStart:"", planEnd:"", factStart:"", factEnd:"",
       status:"todo", responsible:"", note:"", paid:false,
-      priceClient: s.priceClient||0, costPlan: s.costPlan||0,
+      priceClient: s.priceClient||0, costPlan: s.costPlan||0, fromEst: true,
     }));
     const newProds = [];
     const extraObjs = [];
@@ -5557,11 +6123,12 @@ ${reqBlock}`;
       newProds.push(prod);
     }
     if (extraObjs.length > 0) await saveObjects([...objectsRef.current, ...extraObjs], { replace: true });
-    // Пользователь явно подтвердил в диалоге выше «текущие записи будут заменены» — hardReplace,
-    // не безопасный мердж (иначе старые production-карточки, которых нет в newProds, останутся).
-    await saveProductions(newProds, { replace: true, hardReplace: true, allowEmpty: true });
+    // Пользователь явно подтвердил «текущие записи будут заменены» — единственная НЕмерджащая
+    // команда полной замены (замена всего списка), атомарно через ту же очередь/транзакцию.
+    const migRes = await mutateProductions({ type: "replace-all-confirmed", list: newProds });
+    if (!migRes.committed) { alert("Не удалось перенести производство (нет связи с базой). Повторите."); return; }
     alert(`Перенесено ${newProds.length} объектов.${extraObjs.length ? ` Создано ${extraObjs.length} новых объектов.`:""}`);
-  }, [contractLinkMap, genId, buildStagesFromEstimate]);
+  }, [contractLinkMap, genId, buildStagesFromEstimate, mutateProductions]);
 
   // ── ФИНАНСЫ: загрузка/сохранение ──
   const loadFinance = useCallback(async () => {
@@ -5764,10 +6331,12 @@ ${reqBlock}`;
         setCurrentUser(prev=>{
           if(!prev) return prev;
           const fresh=uList.find(x=>x.id===prev.id);
-          // Пароль сменили после входа этой сессии → принудительный выход при загрузке/обновлении
+          // Пароль сменили после входа этой сессии → принудительный выход. НЕ мгновенный сброс:
+          // через единый безопасный путь (endSessionSafely: дожать несохранённое производство,
+          // предупредить о потере, и только потом чистить). setTimeout — выходим из апдейтера.
           if(fresh && fresh.pwChangedAt && fresh.pwChangedAt > (prev.authAt||0)){
-            try{ localStorage.removeItem(SESSION_KEY); }catch(e){}
-            return null;
+            setTimeout(() => { endSessionSafelyRef.current && endSessionSafelyRef.current({ forced: true }); }, 0);
+            return prev; // остаёмся смонтированными, пока безопасный выход не завершится
           }
           if(!fresh || (fresh.role===prev.role && fresh.name===prev.name)) return prev;
           const {password:_pw, ...freshSafe}=fresh; // пароль в сессии не храним
@@ -5809,35 +6378,39 @@ ${reqBlock}`;
 
   // ── САМОИСЦЕЛЕНИЕ СИНХРОНИЗАЦИИ ──
   const [resyncing, setResyncing] = useState(false);
-  const [dirtyCount, setDirtyCount] = useState(0);
   // Ручная пересинхронизация: дослать зависшие правки в облако (со слиянием) и перечитать всё с сервера
   const resyncNow = useCallback(async () => {
     if (resyncing) return;
     setResyncing(true);
     try {
+      // Дожимаем и ПРОИЗВОДСТВО целиком (правки карточек + фоновые bg_* + хвост очереди команд) —
+      // раньше кнопка «Повторить сейчас» гоняла только flushDirty. await: спиннер «Синхронизирую…»
+      // держится, пока попытки реально не завершились.
+      try { await flushAllProductionPending(); } catch(e) { console.warn("flush prod pending err", e); }
       await storage.flushDirty();
       await Promise.all([loadEstimates(), loadContracts()]);
       if (["admin","manager","foreman"].includes(currentUser?.role)) await loadFinance();
-      const left = storage.dirtyKeys().length;
+      const left = storage.dirtyKeysFlushable().length;
       setDirtyCount(left);
-      if (left === 0) setCloudError(false); // всё дожали — баннер «облако недоступно» больше не актуален
+      // гасим только когда чисто ВЕЗДЕ: успех storage не должен скрывать ошибку производства
+      if (left === 0 && _prodUnsyncedIds.current.size === 0) setCloudError(false);
     } catch(e) { console.warn("resync err", e); }
     setResyncing(false);
-  }, [resyncing, loadEstimates, loadContracts, loadFinance, currentUser?.role]);
+  }, [resyncing, loadEstimates, loadContracts, loadFinance, currentUser?.role, flushAllProductionPending]);
   const _resyncRef = useRef(resyncNow); _resyncRef.current = resyncNow;
   // Авто-флеш зависших правок: при старте, периодически и при возврате сети
   useEffect(() => {
     let stop = false;
-    const flush = () => { if (!stop) storage.flushDirty().then(()=>{ if(!stop) { const left = storage.dirtyKeys().length; setDirtyCount(left); if (left === 0) setCloudError(false); } }).catch(()=>{}); };
+    const flush = () => { if (!stop) storage.flushDirty().then(()=>{ if(!stop) { const left = storage.dirtyKeysFlushable().length; setDirtyCount(left); if (left === 0 && _prodUnsyncedIds.current.size === 0) setCloudError(false); } }).catch(()=>{}); };
     flush();
     const iv = setInterval(flush, 90000);
     const onOnline = () => _resyncRef.current && _resyncRef.current();
     window.addEventListener("online", onOnline);
     return () => { stop = true; clearInterval(iv); window.removeEventListener("online", onOnline); };
   }, []);
-  // Индикатор «есть несинхронизированные изменения»
+  // Индикатор «есть несинхронизированные изменения» (свои — dirtyCount; legacy-карантин — отдельно)
   useEffect(() => {
-    const upd = () => setDirtyCount(storage.dirtyKeys().length);
+    const upd = () => { setDirtyCount(storage.dirtyKeysFlushable().length); setLegacyDirtyN(storage.legacyDirtyKeys().length); };
     upd();
     const iv = setInterval(upd, 5000);
     return () => clearInterval(iv);
@@ -5847,6 +6420,7 @@ ${reqBlock}`;
   // opts.replace=true — записать ровно `list` (восстановление из бэкапа)
   // opts.removedIds — id, которые нужно удалить из объединённого набора (явное удаление)
   const saveEstimates = useCallback(async (list, opts = {}) => {
+    if (storage.isReadOnlyTab()) return;
     if (!_estimatesLoaded.current) { console.warn("saveEstimates заблокирован: данные ещё не загружены/недоступны"); return; }
     if (!Array.isArray(list)) { console.error("saveEstimates: список не массив — отмена"); return; }
     const { replace = false, removedIds = [] } = opts;
@@ -5940,6 +6514,7 @@ ${reqBlock}`;
   // строго последовательно (цепочка промисов на ключ), разные ключи — по-прежнему параллельно.
   const _saveQueues = useRef(new Map()); // key -> хвостовой промис очереди
   const _saveListProtectedRaw = useCallback(async (key, backupKey, list, applyState, opts = {}) => {
+    if (storage.isReadOnlyTab()) return;
     if (!Array.isArray(list)) { console.error("saveListProtected: не массив", key); return; }
     // identityKey — по какому полю мерджить (по умолчанию "id"; у production записей его нет,
     // там ключ — "objectId", иначе слияние молча даёт пустой список и сохранение блокируется).
@@ -6312,10 +6887,30 @@ ${reqBlock}`;
     // копию и «разрешить» восстановление, которое на деле ушло бы только в localStorage.
     const probe = await storage.getCloudResult(OBJECTS_KEY);
     if (probe.status === "unavailable") { window.alert("База (Firebase) сейчас недоступна — восстановление отменено. Проверьте интернет и повторите."); return; }
+    // Read-only вкладка (lease у другой) — восстановление запрещено (центральный гейт всё равно
+    // отбил бы каждую запись, но лучше честно сказать сразу).
+    if (storage.isReadOnlyTab()) { window.alert("Редактирование открыто в другой вкладке — восстановление возможно только из вкладки-редактора."); return; }
+    // 2Б-ОЧЕРЕДЬ ПРОИЗВОДСТВА: сначала дожимаем её, затем требуем ПОЛНУЮ чистоту. Иначе после
+    // restore старый durable-draft/retry мог бы примениться поверх только что восстановленной базы.
+    try { await flushAllProductionPending(); } catch {}
+    const productionPendingNow = () => {
+      const allRecovery = countAllProductionRecovery(localStorage);
+      return Math.max(
+        hasPendingProduction(),
+        _prodUnsyncedIds.current.size,
+        allRecovery.total,
+      );
+    };
+    if (productionPendingNow() > 0) {
+      window.alert(`❌ Восстановление отменено: есть несинхронизированные изменения производства (${productionPendingNow()}).\n\nСначала дождитесь их отправки в облако или устраните конфликт. Иначе старая команда может примениться поверх восстановленного бэкапа.`);
+      return;
+    }
     // НЕСИНХРОНИЗИРОВАННЫЕ ЛОКАЛЬНЫЕ ПРАВКИ: восстановление через setCloudOnly перезапишет
     // локальную копию и снимет dirty-флаг → незасинканные правки этого устройства пропадут
     // БЕЗ попадания даже в пред-бэкап. Поэтому сначала дожимаем их в облако; если не удалось —
     // ПОЛНОСТЬЮ запрещаем восстановление, пока правки не синхронизированы.
+    // Здесь НАМЕРЕННО глобальный dirtyKeys() (не «свои»): restore затирает localStorage целиком,
+    // значит блокировать обязаны и правки ДРУГОЙ вкладки, и legacy-карантин.
     let _dirty = storage.dirtyKeys();
     if (_dirty.length) {
       try { await storage.flushDirty(); } catch {}
@@ -6342,6 +6937,12 @@ ${reqBlock}`;
     if (storage.dirtyKeys().length) {
       try { await storage.flushDirty(); } catch {}
       if (storage.dirtyKeys().length) { window.alert("❌ Отменено: за время подтверждения появились несохранённые изменения. Синхронизируйте их и повторите."); return; }
+    }
+    // За время typed-confirm могла появиться и команда производства (она не имеет __dirty).
+    try { await flushAllProductionPending(); } catch {}
+    if (productionPendingNow() > 0) {
+      window.alert("❌ Отменено: за время подтверждения появились несохранённые изменения производства. Дождитесь синхронизации и повторите.");
+      return;
     }
     let done = 0, pubDone = 0, fail = 0; const cloudFailed = [], skipped = [];
     // Восстановление одного ключа: пред-бэкап ТЕКУЩЕГО значения в облако с проверкой fbOk;
@@ -8429,6 +9030,20 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
   // ─────────────────────────────────────────────────────────────────────────
   // РЕНДЕР
   // ─────────────────────────────────────────────────────────────────────────
+  const downloadLegacyDirty = () => {
+    const data = {
+      type: "titovstroy-legacy-local-recovery",
+      exportedAt: new Date().toISOString(),
+      entries: storage.legacyDirtySnapshot(),
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type:"application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `titovstroy-legacy-local-${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   const NAV_ITEMS = useMemo(() => {
     const r = currentUser.role;
     const isAdmin = r === "admin", isMgr = r === "manager", isForeman = r === "foreman", isUser = r === "user", isViewer = r === "viewer";
@@ -8470,11 +9085,21 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           <button onClick={()=>window.location.reload()} style={{background:"#fff",color:"#dc2626",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Обновить</button>
         </div>
       )}
-      {!loadError && cloudError && (
+      {/* Плашка read-only вкладки: lease редактирования у другой вкладки */}
+      {!editorTab && (
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:501,background:"#475569",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)",flexWrap:"wrap"}}>
+          {_isViewer
+            ? "Режим просмотра — изменения недоступны для этой учётной записи."
+            : "Сервис открыт для редактирования в другой вкладке — здесь только просмотр (изменения не сохраняются)."}
+          {!_isViewer && <button onClick={takeoverEditLease} style={{background:"#fff",color:"#475569",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Перехватить редактирование</button>}
+        </div>
+      )}
+      {!loadError && !syncBannerHidden && (cloudError || prodUnsyncedN > 0 || dirtyCount > 0 || legacyDirtyN > 0) && (
         <div style={{position:"fixed",top:0,left:0,right:0,zIndex:500,background:"#d97706",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)",flexWrap:"wrap"}}>
-          ⚠️ Данные сохранены ТОЛЬКО на этом устройстве — облако недоступно{dirtyCount>0?` (несинхронизировано: ${dirtyCount})`:""}. Приложение само дожмёт синхронизацию, когда облако ответит. Если баннер не гаснет — проверьте интернет и отключите блокировщик рекламы для этого сайта.
+          ⚠️ {prodUnsyncedN > 0 ? `Изменения производства ожидают синхронизации (${prodUnsyncedN}) — ` : ""}Данные могут быть сохранены ТОЛЬКО на этом устройстве — облако недоступно{dirtyCount>0?` (несинхронизировано: ${dirtyCount})`:""}. Приложение само дожмёт синхронизацию, когда облако ответит. Если баннер не гаснет — проверьте интернет и отключите блокировщик рекламы для этого сайта.{legacyDirtyN>0?` Есть старые несинхронизированные правки без владельца (${legacyDirtyN}) — они НЕ отправляются автоматически, обратитесь к администратору.`:""}
           <button onClick={resyncNow} disabled={resyncing} style={{background:"#fff",color:"#d97706",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:resyncing?"default":"pointer",fontFamily:"inherit"}}>{resyncing?"Синхронизирую…":"🔄 Повторить сейчас"}</button>
-          <button onClick={()=>setCloudError(false)} style={{background:"rgba(255,255,255,.25)",color:"#fff",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Скрыть</button>
+          {legacyDirtyN>0 && <button onClick={downloadLegacyDirty} style={{background:"#fff",color:"#92400e",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Скачать старые правки</button>}
+          <button onClick={()=>setSyncBannerHidden(true)} style={{background:"rgba(255,255,255,.25)",color:"#fff",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Скрыть</button>
         </div>
       )}
       {/* Панель администратора */}
@@ -8703,7 +9328,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       </div>
 
       {/* ── КОНТЕНТ ── */}
-      <div className={"sidebar-content"+(sideCollapsed?" collapsed":"")}>
+      <div className={"sidebar-content"+(sideCollapsed?" collapsed":"")} inert={!editorTab ? "" : undefined} aria-disabled={!editorTab}>
 
       {/* ═══════════════════════════════════════════════════════════════════
           ЭКРАН 0: ДАШБОРД
@@ -12281,8 +12906,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               if (!hasProd) {
                 const prod = emptyProduction(obj.id, genId);
                 prod.prodStatus = "new";
-                const prodRes = await saveProductions([...productionsRef.current, prod], { replace: true });
-                if (!prodRes) throw new Error("saveProductions заблокирован");
+                // create-if-missing — команда идемпотентна: если карточка уже появилась (гонка),
+                // не перезапишет её.
+                const prodRes = await mutateProductions({ type: "create-if-missing", objectId: obj.id, record: prod });
+                if (!prodRes.committed) throw new Error("mutateProductions(create) не подтверждён");
               }
             } catch (e) {
               console.warn("auto-create finProject/production err", e);
@@ -12303,7 +12930,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             if (pr) {
               const nextProdStatus = DEAL_TO_PROD[patch.status] || "new";
               if (pr.prodStatus !== nextProdStatus) {
-                saveProductions(productionsRef.current.map(p => p.objectId === obj.id ? { ...p, prodStatus: nextProdStatus, updatedAt: Date.now() } : p), { replace: true });
+                // set-status — команда трогает ТОЛЬКО prodStatus на свежей карточке (не шлём
+                // устаревший полный массив, иначе затёрли бы параллельную правку этапов).
+                mutateProductions({ type: "set-status", objectId: obj.id, status: nextProdStatus, changeId: "bg_status_" + obj.id });
               }
             }
           }
@@ -13057,7 +13686,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     estimates={estimates}
                     contracts={contracts}
                     productions={productions}
-                    onSaveProduction={onSaveProduction}
+                    productionsLoaded={_productionsLoaded.current && loadedTick >= 0}
+                    autoCreate={IS_DEV_ENV && editorTab}
                     onDeleteProduction={onDeleteProduction}
                     onToggleClientShare={toggleClientShare}
                     onSetClientVis={setClientVis}
@@ -13067,6 +13697,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     fmt={fmt}
                     genId={genId}
                     currentUser={currentUser}
+                    readOnly={!editorTab}
                     onAudit={(ev)=>logChange(currentUser, ev)}
                   />
                   </div>

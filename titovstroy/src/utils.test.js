@@ -523,3 +523,189 @@ describe("buildCalendarStages / foremanLoad — календарь произв�
     expect(load["Пётр"]).toBeUndefined();
   });
 });
+
+// ── Владение dirty-записями (блокеры rev8-аудита №1–2) ──
+import { makeDirtyMarker, isOwnDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, isLegacyDirtyMarker, mayClearDirtyOnSuccess } from "./utils.js";
+
+const fakeLS = () => {
+  const m = new Map();
+  return {
+    get length() { return m.size; },
+    key: (i) => Array.from(m.keys())[i] ?? null,
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => m.set(k, String(v)),
+    removeItem: (k) => m.delete(k),
+  };
+};
+
+describe("dirty-записи: владение и полное удаление при выходе с потерей", () => {
+  it("СЦЕНАРИЙ АУДИТОРА: A сохраняет смету без сети → выходит с потерей → B получает облако, а не локальную смету A", () => {
+    const ls = fakeLS(); const mem = {};
+    // пользователь A: запись в облако упала → локальное значение + __wts + dirty-маркер + _mem
+    ls.setItem("titovstroy-estimates", '[{"id":1,"name":"смета A (несохранённая)"}]');
+    ls.setItem("titovstroy-estimates__wts", String(Date.now()));
+    ls.setItem("titovstroy-estimates__dirty", makeDirtyMarker("userA", "tab1"));
+    mem["titovstroy-estimates"] = '[{"id":1,"name":"смета A (несохранённая)"}]';
+    // A подтвердил «выйти и ПОТЕРЯТЬ»
+    const removed = discardOwnedDirty(ls, "userA", "tab1", mem);
+    expect(removed).toEqual(["titovstroy-estimates"]);
+    // B входит: НИ значения (свежая локальная копия выигрывала бы в getResult),
+    // НИ __wts (окно 30с), НИ копии в памяти, НИ dirty-метки (авто-флеш) — только облако
+    expect(ls.getItem("titovstroy-estimates")).toBeNull();
+    expect(ls.getItem("titovstroy-estimates__wts")).toBeNull();
+    expect(ls.getItem("titovstroy-estimates__dirty")).toBeNull();
+    expect(mem["titovstroy-estimates"]).toBeUndefined();
+  });
+  it("ДВЕ ВКЛАДКИ: выход в первой не снимает dirty второй (и не удаляет её значение)", () => {
+    const ls = fakeLS(); const mem = {};
+    ls.setItem("titovstroy-estimates", "[правка вкладки 1]");
+    ls.setItem("titovstroy-estimates__dirty", makeDirtyMarker("userA", "tab1"));
+    ls.setItem("titovstroy-finance", "[правка вкладки 2]");
+    ls.setItem("titovstroy-finance__dirty", makeDirtyMarker("userA", "tab2"));
+    const removed = discardOwnedDirty(ls, "userA", "tab1", mem);
+    expect(removed).toEqual(["titovstroy-estimates"]);
+    // правка второй вкладки цела: и метка (она дожмёт/спросит сама), и значение
+    expect(ls.getItem("titovstroy-finance__dirty")).not.toBeNull();
+    expect(ls.getItem("titovstroy-finance")).toBe("[правка вкладки 2]");
+  });
+  it("ЧУЖОЙ ПОЛЬЗОВАТЕЛЬ в той же вкладке (теоретически): не трогаем", () => {
+    const ls = fakeLS();
+    ls.setItem("titovstroy-x__dirty", makeDirtyMarker("userB", "tab1"));
+    expect(listOwnedDirty(ls, "userA", "tab1")).toEqual([]);
+  });
+  it("legacy-маркер (голый timestamp старых версий) — КАРАНТИН: не удаляется чужим «выйти с потерей»", () => {
+    const ls = fakeLS();
+    ls.setItem("titovstroy-old", "старая правка неизвестного владельца");
+    ls.setItem("titovstroy-old__dirty", String(Date.now())); // формат до владения
+    const removed = discardOwnedDirty(ls, "userA", "tab1", {});
+    expect(removed).toEqual([]); // владелец неизвестен — по чужому подтверждению не удаляем
+    expect(ls.getItem("titovstroy-old")).toBe("старая правка неизвестного владельца");
+    expect(ls.getItem("titovstroy-old__dirty")).not.toBeNull();
+  });
+  it("isOwnDirtyMarker: свой uid+tab — да; чужая вкладка — нет; без uid — решает вкладка; пусто/legacy — нет", () => {
+    expect(isOwnDirtyMarker(makeDirtyMarker("u1", "t1"), "u1", "t1")).toBe(true);
+    expect(isOwnDirtyMarker(makeDirtyMarker("u1", "t2"), "u1", "t1")).toBe(false);
+    expect(isOwnDirtyMarker(makeDirtyMarker(null, "t1"), "u1", "t1")).toBe(true);
+    expect(isOwnDirtyMarker(null, "u1", "t1")).toBe(false);
+    expect(isOwnDirtyMarker("not-json{", "u1", "t1")).toBe(false); // legacy — владелец неизвестен
+    expect(isOwnDirtyMarker(String(Date.now()), "u1", "t1")).toBe(false); // legacy-timestamp
+  });
+});
+
+describe("флеш и снятие меток по владельцу (блокеры rev9-аудита №1–2)", () => {
+  it("СЦЕНАРИЙ АУДИТОРА: dirty пользователя B существует — A входит/выходит/жмёт «Повторить»: запись B не отправляется и не меняется", () => {
+    const ls = fakeLS();
+    ls.setItem("titovstroy-finance", "[правка B]");
+    ls.setItem("titovstroy-finance__dirty", makeDirtyMarker("userB", "tabB"));
+    // «Повторить»/авто-флеш сессии A: списка к отправке НЕТ
+    expect(listFlushableDirty(ls, "userA", "tabA")).toEqual([]);
+    // выход A «с потерей»: запись B цела — и метка, и значение
+    const removed = discardOwnedDirty(ls, "userA", "tabA", {});
+    expect(removed).toEqual([]);
+    expect(ls.getItem("titovstroy-finance")).toBe("[правка B]");
+    expect(ls.getItem("titovstroy-finance__dirty")).not.toBeNull();
+  });
+  it("СЦЕНАРИЙ АУДИТОРА: две вкладки правят ОДИН ключ titovstroy-estimates — успех первой не гасит метку второй", () => {
+    const ls = fakeLS();
+    // вкладка 1 упала в офлайн → её маркер; затем вкладка 2 перезаписала значение И маркер
+    ls.setItem("titovstroy-estimates", "[версия вкладки 2]");
+    ls.setItem("titovstroy-estimates__dirty", makeDirtyMarker("userA", "tab2"));
+    // поздний УСПЕШНЫЙ ответ вкладки 1: чужой маркер снимать НЕЛЬЗЯ (правка вкладки 2 не в облаке)
+    expect(mayClearDirtyOnSuccess(ls.getItem("titovstroy-estimates__dirty"), "userA", "tab1")).toBe(false);
+    // вкладка 2 при этом дожмёт её сама: ключ в ЕЁ списке к отправке
+    expect(listFlushableDirty(ls, "userA", "tab2")).toEqual(["titovstroy-estimates"]);
+  });
+  it("legacy остаётся в карантине и не снимается обычной успешной записью", () => {
+    const ls = fakeLS();
+    ls.setItem("titovstroy-old__dirty", String(Date.now()));
+    expect(listFlushableDirty(ls, "userA", "tab1")).toEqual([]); // авто-отправки нет
+    expect(isLegacyDirtyMarker(ls.getItem("titovstroy-old__dirty"))).toBe(true);
+    // обычное чтение legacy-копию не использует, поэтому новая облачная запись не подтверждает
+    // сохранность старой неизвестной правки и не имеет права снимать её метку
+    expect(mayClearDirtyOnSuccess(ls.getItem("titovstroy-old__dirty"), "userA", "tab1")).toBe(false);
+  });
+  it("mayClearDirtyOnSuccess: своя/отсутствующая — снять; чужой uid — нет", () => {
+    expect(mayClearDirtyOnSuccess(null, "u1", "t1")).toBe(true);
+    expect(mayClearDirtyOnSuccess(makeDirtyMarker("u1", "t1"), "u1", "t1")).toBe(true);
+    expect(mayClearDirtyOnSuccess(makeDirtyMarker("u2", "t1"), "u1", "t1")).toBe(false);
+  });
+  it("новый editor того же uid принимает dirty закрытой вкладки; чужие и legacy не трогает", () => {
+    const ls = fakeLS();
+    ls.setItem("same__dirty", makeDirtyMarker("u1", "old-tab"));
+    ls.setItem("other__dirty", makeDirtyMarker("u2", "old-tab"));
+    ls.setItem("legacy__dirty", String(Date.now()));
+    const adopted = adoptUserDirty(ls, "u1", "new-tab", "__dirty", 123);
+    expect(adopted).toEqual(["same"]);
+    expect(isOwnDirtyMarker(ls.getItem("same__dirty"), "u1", "new-tab")).toBe(true);
+    expect(isOwnDirtyMarker(ls.getItem("other__dirty"), "u1", "new-tab")).toBe(false);
+    expect(isLegacyDirtyMarker(ls.getItem("legacy__dirty"))).toBe(true);
+  });
+});
+
+// ── Lease-lock «одна вкладка редактирует» + владение при чтении (ТЗ rev11) ──
+import { EDIT_LEASE_KEY, LEASE_TTL_MS, makeLease, parseLease, leaseAlive, canAcquireLease, ownsActiveLease, canWriteLease, mayTakeoverLease, mayUseLocalCopy, claimFallbackLease } from "./utils.js";
+
+describe("lease-lock: одна вкладка редактирует (ТЗ rev11)", () => {
+  const NOW = 1_700_000_000_000;
+  it("право записи есть только у владельца живого lease с тем же fencing-token", () => {
+    const lease = makeLease("userA", "tab1", NOW, "token-1");
+    const st = canWriteLease(lease, "userA", "tab2", "token-2", NOW + 3000);
+    expect(st.ok).toBe(false);
+    expect(st.reason).toBe("read-only-tab");
+    expect(canWriteLease(lease, "userA", "tab1", "wrong", NOW + 3000).ok).toBe(false);
+    expect(canWriteLease(lease, "userA", "tab1", "token-1", NOW + 3000).ok).toBe(true);
+    expect(ownsActiveLease(lease, "userA", "tab1", "token-1", NOW + 3000)).toBe(true);
+  });
+  it("свободный или протухший lease можно захватить, но до захвата писать нельзя", () => {
+    const lease = makeLease("userA", "tab1", NOW, "token-1");
+    expect(mayTakeoverLease(lease, NOW + LEASE_TTL_MS - 1000)).toBe(false); // жив — нельзя
+    expect(mayTakeoverLease(lease, NOW + LEASE_TTL_MS + 1000)).toBe(true);  // протух — можно
+    expect(mayTakeoverLease(null, NOW)).toBe(true);                        // отсутствует — можно
+    expect(canAcquireLease(null, NOW)).toBe(true);
+    expect(canWriteLease(null, "userB", "tab2", "token-2", NOW).ok).toBe(false);
+    expect(canWriteLease(lease, "userB", "tab2", "token-2", NOW + LEASE_TTL_MS + 1000).ok).toBe(false);
+    expect(canWriteLease(lease, "userB", "tab2", "token-2", NOW + LEASE_TTL_MS + 1000).reason).toBe("lease-required");
+  });
+  it("после смены fencing-token поздний ответ старой вкладки не имеет права применяться", () => {
+    const t2lease = makeLease("userA", "tab2", NOW + LEASE_TTL_MS + 2000, "token-2");
+    expect(canWriteLease(t2lease, "userA", "tab1", "token-1", NOW + LEASE_TTL_MS + 3000).ok).toBe(false);
+  });
+  it("битый lease fail-closed для записи, но допускает новую попытку захвата", () => {
+    expect(canWriteLease("не json{", "u", "t", "token", NOW).ok).toBe(false);
+    expect(canAcquireLease("не json{", NOW)).toBe(true);
+    expect(parseLease("123")).toBe(null);
+    expect(leaseAlive(null, NOW)).toBe(false);
+  });
+  it("fallback-захват общего store даёт ровно одного редактора", async () => {
+    const ls = fakeLS();
+    const now = () => NOW;
+    const wait = () => Promise.resolve();
+    const [a, b] = await Promise.all([
+      claimFallbackLease(ls, "u", "tab-a", "token-a", { now, wait, verifyDelayMs: 0 }),
+      claimFallbackLease(ls, "u", "tab-b", "token-b", { now, wait, verifyDelayMs: 0 }),
+    ]);
+    expect([a, b].filter(Boolean)).toHaveLength(1);
+    const winner = parseLease(ls.getItem(EDIT_LEASE_KEY));
+    expect(winner && ["token-a", "token-b"].includes(winner.token)).toBe(true);
+  });
+});
+
+describe("mayUseLocalCopy — чтение локальной копии только владельцем (ТЗ rev11, тесты 1 и 7)", () => {
+  it("тест 1 ТЗ: A аварийно закрыл вкладку с dirty-сметой → B её локальную копию НЕ читает (только облако)", () => {
+    const markerA = makeDirtyMarker("userA", "tabA");
+    // B (другой uid, другая вкладка): локальная копия A под запретом — все 4 источника getResult
+    // (свежий кеш 30с, dirty-ветка, старый фоллбек, _mem) гейтятся этой функцией
+    expect(mayUseLocalCopy(markerA, "userB", "tabB")).toBe(false);
+    // и не отправляется: не в listFlushableDirty(B) и не в discardOwnedDirty(B)
+    const ls = fakeLS();
+    ls.setItem("titovstroy-estimates__dirty", markerA);
+    expect(listFlushableDirty(ls, "userB", "tabB")).toEqual([]);
+  });
+  it("тест 7 ТЗ: локальное значение с чужим uid/tab не возвращается ни по одной ветке", () => {
+    expect(mayUseLocalCopy(makeDirtyMarker("userA", "tab1"), "userA", "tab2")).toBe(false); // другая вкладка
+    expect(mayUseLocalCopy(makeDirtyMarker("userA", "tab1"), "userB", "tab1")).toBe(false); // другой uid
+    expect(mayUseLocalCopy(makeDirtyMarker("userA", "tab1"), "userA", "tab1")).toBe(true);  // своя
+    expect(mayUseLocalCopy(null, "userA", "tab1")).toBe(true);                              // нет dirty — обычный кеш
+    expect(mayUseLocalCopy(String(Date.now()), "userA", "tab1")).toBe(false);               // legacy: только ручная recovery-выгрузка
+  });
+});

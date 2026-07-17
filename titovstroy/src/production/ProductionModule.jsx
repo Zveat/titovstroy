@@ -1,27 +1,31 @@
 import { useState, useMemo, useEffect, useRef, Fragment } from "react";
 import { STAGE_STATUSES, emptyProduction } from "./constants.js";
 import { normCN } from "../utils.js";
+import { buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, _stageKey } from "./commands.js";
+import { listProductionDrafts, removeProductionDraft, saveProductionDraft } from "./drafts.js";
 
 // ─────────────────────────────────────────────────────────────────────────
 // ПРОИЗВОДСТВО — управление и контроль объектов в работе.
 // Полностью изолированный модуль: данные приходят через props, сохранение
-// делегируется в App.jsx (onSaveProduction). Не зависит от внутренностей App.
+// делегируется в App.jsx командами через setProductionCommandHandler. Не зависит от внутренностей App.
 //
 // props:
 //   objects        — живые объекты (liveObjects)
 //   estimates      — все сметы (для привязки и автозаполнения этапов)
 //   contracts      — все договоры (для отображения)
 //   productions    — массив производственных карточек [{objectId, ...}]
-//   onSaveProduction(record) — upsert одной карточки
+//   Командный handler привязывает MainApp через setProductionCommandHandler().
 //   buildStagesFromEstimate(objectId) — этапы из сметы [{cat, name, priceClient, costPlan}]
 //   fmt, genId, currentUser
 // ─────────────────────────────────────────────────────────────────────────
 
 const stByKey = (k) => STAGE_STATUSES.find(s => s.key === k) || STAGE_STATUSES[0];
 
-// Превратить строки сметы в строки-работы (наименования). cat = блок-заголовок.
+// Превратить строки сметы в строки-работы (наименования). cat = блок-заголовок. estimateKey
+// (стабильный ключ сметной позиции) ОБЯЗАТЕЛЕН — по нему автосинк сопоставляет этапы; без него
+// первый же синк добавил бы дубли этих же позиций.
 const estToStages = (fromEst, genId) => fromEst.map(s => ({
-  id: genId(), cat: s.cat || "Прочее", name: s.name || "", unit: s.unit || "", qty: s.qty || 0,
+  id: genId(), estimateKey: _stageKey(s), cat: s.cat || "Прочее", name: s.name || "", unit: s.unit || "", qty: s.qty || 0,
   planStart: "", planEnd: "", factStart: "", factEnd: "",
   status: "todo", responsible: "", note: "", paid: false,
   priceClient: s.priceClient || 0, costPlan: s.costPlan || 0, fromEst: true,
@@ -39,11 +43,258 @@ const groupByCat = (rows) => {
 // «№1012» и «1012» считались разными, и операции/проект могли не сойтись в финвкладке объекта,
 // хотя в разделе Финансы (где normCN) — сходились. Теперь один источник истины.
 
+// ── ОЧЕРЕДЬ СОХРАНЕНИЯ ПРОИЗВОДСТВА (MODULE-SCOPE: переживает размонтирование компонента) ──
+// Несохранённые правки живут в Map на уровне модуля И синхронно зеркалятся в per-user
+// localStorage-черновики. Поэтому они переживают размонтирование карточки, перезагрузку страницы
+// и падение браузера; после входа тем же пользователем очередь гидратируется и повторяется.
+const _pendingByObj = new Map();   // objectId -> { base, local, rev, ensure }
+                                   //   base   — последнее ПОДТВЕРЖДЁННОЕ сервером состояние (точка диффа)
+                                   //   local  — текущий локальный ввод пользователя
+                                   //   ensure — record создания, пока карточка НИ РАЗУ не подтверждена (иначе null)
+const _flushPromises = new Map();  // objectId -> Promise ИДУЩЕГО flush (single-flight: повторный
+                                   // вызов возвращает ТОТ ЖЕ Promise — ожидающие ждут реального конца)
+const _revByObj = new Map();       // objectId -> версия локальной правки
+const _confirmedByObj = new Map(); // objectId -> последняя подтверждённая сервером карточка
+const _draftByObj = new Map();     // objectId -> ЕДИНЫЙ draft-record новой карточки (одни id для UI и create)
+let _cmdFn = null;                 // актуальный командный handler MainApp
+let _uiApply = null;               // (objId, card) => void — обновить открытую карточку в UI (когда смонтированы)
+let _sessionN = 0;                 // номер production-сессии: stopProductionSession() инкрементирует;
+                                   // каждый await в flush сверяет номер — поздний ответ УЖЕ
+                                   // остановленной сессии не трогает состояние (и не воскрешает Map'ы)
+let _draftUid = null;
+let _draftStore = null;
+let _draftFailureShown = false;
+const _changeIdOf = (objId) => "cm_" + objId; // стабилен ПО ОБЪЕКТУ (не по попытке) — см. flush
+
+function _persistEntry(objId, entry) {
+  if (!_draftUid || !_draftStore || !entry) return false;
+  const ok = saveProductionDraft(_draftStore, _draftUid, objId, entry);
+  if (!ok && !_draftFailureShown) {
+    _draftFailureShown = true;
+    console.error("Не удалось сохранить локальный черновик производства", objId);
+    if (typeof window !== "undefined" && window.alert) {
+      window.alert("Не удалось сохранить локальный черновик производства. Не закрывайте страницу до синхронизации и освободите место в хранилище браузера.");
+    }
+  }
+  return ok;
+}
+function _removeEntryDraft(objId, maxRev = Infinity) {
+  if (!_draftUid || !_draftStore) return false;
+  return removeProductionDraft(_draftStore, _draftUid, objId, maxRev);
+}
+
+// Цикл-до-сходимости (НЕ рекурсия): повторная отправка при новых правках/перебазировании — внутри
+// ЭТОГО ЖЕ Promise, чтобы flushPendingProduction()/logout ждали ФАКТИЧЕСКОГО завершения, а не
+// первой попытки. Guard от патологического пинг-понга; остаток дожмёт фоновый интервал.
+async function _flushRun(objId) {
+  for (let guard = 0; guard < 20; guard++) {
+    if (!_cmdFn) return;
+    const sess = _sessionN;
+    const entry = _pendingByObj.get(objId);
+    if (!entry) return;
+    const startRev = entry.rev;
+    const batch = buildFlushBatch(entry.base, entry.local, objId, Date.now());
+    if (!batch && !entry.ensure) {
+      // Менять нечего (пользователь вернул всё как было) и создавать нечего: снимаем pending и
+      // ЯВНО гасим changeId в App (resolve-change) — иначе после ошибки баннер завис бы навсегда.
+      // await: «Повторить сейчас»/logout ждут и снятия баннера, а не только записи.
+      _pendingByObj.delete(objId);
+      _removeEntryDraft(objId, startRev);
+      try { await _cmdFn({ type: "resolve-change", changeId: _changeIdOf(objId) }); } catch { /* без записи в базу */ }
+      return;
+    }
+    // Новая (ни разу не подтверждённая) карточка: создаём В ТОЙ ЖЕ транзакции (ensureRecord) —
+    // record тот же объект, что и openProd в UI, поэтому id этапов/чек-листов совпадают.
+    // Для УЖЕ подтверждённой карточки ensure=null — удалённую с другого устройства не воскрешаем.
+    const cmd = batch || { type: "create-if-missing", objectId: objId, record: entry.ensure };
+    if (batch && entry.ensure) batch.ensureRecord = entry.ensure;
+    cmd.changeId = _changeIdOf(objId);
+    let res; try { res = await _cmdFn(cmd); } catch { res = { committed: false }; }
+    if (sess !== _sessionN) return; // сессия остановлена (logout) во время запроса — состояние не трогаем
+    const curRev = _revByObj.get(objId);
+    if (res && res.committed) {
+      const confirmed = (res.list || []).find(p => p && p.objectId === objId) || null;
+      if (confirmed) _confirmedByObj.set(objId, confirmed); // подтверждённая база — для следующих диффов
+      _draftByObj.delete(objId); // карточка существует на сервере — черновик создания больше не нужен
+      if (curRev === startRev) {
+        // новых правок не было — объект синхронизирован
+        _pendingByObj.delete(objId);
+        _removeEntryDraft(objId, startRev);
+        if (_uiApply && confirmed) _uiApply(objId, confirmed);
+        return;
+      }
+      // появились новые правки: базу двигаем на подтверждённое, НОВЫЙ локальный ввод сохраняем,
+      // следующая итерация отправит дифф подтверждённого против нового local.
+      const e = _pendingByObj.get(objId);
+      if (e) {
+        const nextEntry = { ...e, base: confirmed || e.base, ensure: null };
+        _persistEntry(objId, nextEntry);
+        _pendingByObj.set(objId, nextEntry);
+      }
+      continue;
+    }
+    if (res && res.conflict) {
+      // Команда НЕ применима к текущим серверным данным (не сеть): например, правленный элемент
+      // удалён с другого устройства. Повтор того же batch зациклился бы — перебазируем.
+      const server = (Array.isArray(res.list) ? res.list : []).find(p => p && p.objectId === objId) || null;
+      const e = _pendingByObj.get(objId);
+      if (!e) return;
+      if (!server && !e.ensure) {
+        // Карточку удалили на другом устройстве. Не воскрешаем автоматически, но и durable-draft
+        // молча не выбрасываем: владелец явно выбирает, какое действие считать истинным.
+        const restore = (typeof window !== "undefined" && window.confirm)
+          ? window.confirm("Карточка производства удалена на другом устройстве, но здесь остались несохранённые правки.\n\nOK — восстановить карточку с вашими правками.\nОтмена — принять удаление и удалить локальный черновик.")
+          : false;
+        if (sess !== _sessionN) return;
+        if (restore) {
+          const rev = (_revByObj.get(objId) || 0) + 1;
+          const record = { ...e.local, objectId: objId, updatedAt: Date.now() };
+          const nextEntry = { base: record, local: record, rev, ensure: record };
+          _revByObj.set(objId, rev);
+          _draftByObj.set(objId, record);
+          _persistEntry(objId, nextEntry);
+          _pendingByObj.set(objId, nextEntry);
+          if (_uiApply) _uiApply(objId, record);
+          continue;
+        }
+        _pendingByObj.delete(objId); _draftByObj.delete(objId); _confirmedByObj.delete(objId);
+        _removeEntryDraft(objId);
+        try { await _cmdFn({ type: "resolve-change", changeId: _changeIdOf(objId) }); } catch { /* без записи в базу */ }
+        return;
+      }
+      if (!server) return; // ensure есть, а конфликт без серверной карточки — оставляем фоновому повтору
+      const merged = rebaseLocalProduction(e.base, e.local, server, objId, {
+        // Правленный локально элемент удалён с другого устройства — ЯВНЫЙ выбор пользователя,
+        // а не молчаливое воскрешение (чужое удаление — тоже данные, терять его молча нельзя).
+        onDeletedConflict: (field, item) => {
+          const label = item.name || item.text || "элемент";
+          const ok = (typeof window !== "undefined" && window.confirm)
+            ? window.confirm(`«${label}» удалён с другого устройства, а вы его правили.\n\nOK — восстановить вашу версию.\nОтмена — принять удаление (ваша правка этого элемента будет отброшена).`)
+            : true; // без window (не браузер) — по умолчанию ничего не теряем
+          return ok ? "restore" : "drop";
+        },
+      });
+      if (sess !== _sessionN) return; // window.confirm мог висеть — перепроверяем сессию
+      _confirmedByObj.set(objId, server);
+      const rev = (_revByObj.get(objId) || 0) + 1; _revByObj.set(objId, rev);
+      const nextEntry = { base: server, local: merged, rev, ensure: null };
+      _persistEntry(objId, nextEntry);
+      _pendingByObj.set(objId, nextEntry);
+      if (_uiApply) _uiApply(objId, merged);
+      continue; // следующая итерация отправит перебазированный дифф
+    }
+    // Сетевая/прочая ошибка: entry остаётся в pending — повтор при следующей правке, фоновом
+    // интервале, уходе со страницы или явном «Повторить сейчас» (flushPendingProduction).
+    return;
+  }
+}
+// single-flight через Map промисов: пока flush объекта идёт, повторный вызов вернёт ТОТ ЖЕ Promise.
+function _flushObj(objId) {
+  if (objId == null) return Promise.resolve();
+  const running = _flushPromises.get(objId);
+  if (running) return running;
+  const p = _flushRun(objId).catch(error => {
+    console.error("Production flush failed", objId, error);
+  }).then(() => { if (_flushPromises.get(objId) === p) _flushPromises.delete(objId); });
+  _flushPromises.set(objId, p);
+  return p;
+}
+function _flushAllPending() { for (const objId of Array.from(_pendingByObj.keys())) _flushObj(objId); }
+
+// Начать production-сессию ПОСЛЕ получения editor-lock, но ДО монтирования MainApp.
+// Поднимает только черновики этого uid; данные другого пользователя даже не попадают в память.
+export function startProductionSession(uid, store = (typeof localStorage !== "undefined" ? localStorage : null)) {
+  _sessionN++;
+  _pendingByObj.clear(); _flushPromises.clear(); _revByObj.clear(); _confirmedByObj.clear(); _draftByObj.clear();
+  _cmdFn = null; _uiApply = null;
+  _draftUid = uid == null ? null : String(uid);
+  _draftStore = store;
+  _draftFailureShown = false;
+  if (!_draftUid || !_draftStore) return 0;
+  const drafts = listProductionDrafts(_draftStore, _draftUid);
+  for (const draft of drafts) {
+    const entry = { base: draft.base, local: draft.local, rev: draft.rev, ensure: draft.ensure || null };
+    _pendingByObj.set(draft.objectId, entry);
+    _revByObj.set(draft.objectId, draft.rev);
+    if (draft.ensure) _draftByObj.set(draft.objectId, draft.ensure);
+    else _confirmedByObj.set(draft.objectId, draft.base);
+  }
+  _ensureBgFlush();
+  return drafts.length;
+}
+
+// Handler задаётся MainApp сразу после создания mutateProductions, поэтому восстановленные после
+// reload черновики повторяются даже если пользователь ещё не открыл карточку объекта.
+export function setProductionCommandHandler(fn) {
+  _cmdFn = typeof fn === "function" ? fn : null;
+  if (_cmdFn) {
+    _ensureBgFlush();
+    if (_pendingByObj.size) _flushAllPending();
+  }
+}
+
+// Для App («Повторить сейчас», logout): дожать несохранённые правки производства.
+// Резолвится, когда ВСЕ flush-циклы реально завершились (включая повторные отправки внутри цикла).
+export function flushPendingProduction() {
+  return Promise.all(Array.from(_pendingByObj.keys()).map(objId => _flushObj(objId)));
+}
+// Есть ли несохранённые правки производства (для logout-подтверждения).
+export function hasPendingProduction() { return _pendingByObj.size; }
+export function productionDraftsAreDurable() {
+  if (_pendingByObj.size === 0) return true;
+  if (!_draftUid || !_draftStore) return false;
+  const saved = new Map(listProductionDrafts(_draftStore, _draftUid).map(d => [d.objectId, d]));
+  for (const [objectId, entry] of _pendingByObj) {
+    const draft = saved.get(objectId);
+    if (!draft || draft.rev < entry.rev) return false;
+  }
+  return true;
+}
+
+// Фоновый повтор + флеш при скрытии/закрытии страницы — на уровне МОДУЛЯ, именованными
+// функциями: одна регистрация (guard _bgTimer), ничего не копится при повторных монтированиях,
+// pending повторяется даже когда компонент размонтирован (пользователь ушёл из карточки объекта).
+let _bgTimer = null;
+function _bgTick() { if (_pendingByObj.size && _cmdFn) _flushAllPending(); }
+function _bgOnHide() { if (document.visibilityState === "hidden") _bgTick(); }
+function _ensureBgFlush() {
+  if (_bgTimer != null) return;
+  _bgTimer = setInterval(_bgTick, 12000);
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", _bgOnHide);
+  if (typeof window !== "undefined") { window.addEventListener("beforeunload", _bgTick); window.addEventListener("pagehide", _bgTick); }
+}
+
+// ВЫХОД ИЗ АККАУНТА / размонтирование MainApp: ПОЛНАЯ остановка и очистка module-scope
+// состояния — иначе очередь, черновики и интервал пережили бы logout, и правка одного
+// пользователя могла бы отправиться под другим. ВАЖНО: сама остановка НЕ отправляет ничего —
+// дождаться отправки (await flushPendingProduction) и спросить пользователя при неудаче обязан
+// ВЫЗЫВАЮЩИЙ (doLogout) ДО вызова. Инкремент _sessionN гарантирует, что запрос, ушедший до
+// остановки и ответивший после, не запишет ничего обратно в очищенные Map'ы.
+export function stopProductionSession() {
+  _sessionN++;
+  if (_bgTimer != null) { clearInterval(_bgTimer); _bgTimer = null; }
+  if (typeof document !== "undefined") document.removeEventListener("visibilitychange", _bgOnHide);
+  if (typeof window !== "undefined") { window.removeEventListener("beforeunload", _bgTick); window.removeEventListener("pagehide", _bgTick); }
+  _cmdFn = null; _uiApply = null;
+  _pendingByObj.clear(); _flushPromises.clear(); _revByObj.clear(); _confirmedByObj.clear(); _draftByObj.clear();
+  _draftUid = null; _draftStore = null; _draftFailureShown = false;
+}
+
+// ТОЛЬКО ДЛЯ ТЕСТОВ (vitest): доступ к внутренностям очереди. В коде приложения не использовать.
+export const __prodQueueTesting = {
+  pending: _pendingByObj, confirmed: _confirmedByObj, revs: _revByObj,
+  setCmd(fn) { _cmdFn = fn; },
+  flushObj: _flushObj,
+  persist: _persistEntry,
+};
+
 export default function ProductionModule({
   objects, entries = [], allObjects, unlinkedProjects, estimates, contracts, productions,
-  onSaveProduction, onDeleteProduction, onToggleClientShare, onSetClientVis, buildStagesFromEstimate,
+  productionsLoaded = true, // false, пока productions ещё грузятся — гейт автосоздания карточки
+  autoCreate = false, // ТАБУ: авто-создание карточки при открытии объекта — ТОЛЬКО где явно включено (App: dev-база)
+  onDeleteProduction, onToggleClientShare, onSetClientVis, buildStagesFromEstimate,
   finProjects, financeTx,
-  fmt, genId, currentUser, onAudit,
+  fmt, genId, currentUser, readOnly: externallyReadOnly = false, onAudit,
   embedObjectId, embedTab, clientInfoCard, // встроенный режим: карточка одного объекта внутри раздела «Объекты»
 }) {
   // карта запись производства по ключу записи (objectId реального объекта или "fp:<id>")
@@ -65,94 +316,136 @@ export default function ProductionModule({
     (allObjects || objects).find(o => o.id === activeId) ||
     (() => { const e = entryByKey[activeId]; if (e) return { id: activeId, clientName: e.name || "Проект", address: e.address || "", clientPhone: "" }; const pr = prodByObj[activeId]; return pr ? { id: activeId, clientName: pr.title || "Проект", address: pr.address || "", clientPhone: "" } : null; })()
   ) : null;
-  const openProd = openObj ? (prodByObj[openObj.id] || emptyProduction(openObj.id, genId)) : null;
-
-  // АВТОЗАПОЛНЕНИЕ: при первом открытии объекта тянем этапы из сметы (категория › подкатегория).
-  // Срабатывает только если карточки производства ещё нет — дальше пользователь управляет сам.
-  useEffect(() => {
-    if (!openObj) return;
-    if (prodByObj[openObj.id]) return; // карточка уже существует — не трогаем
-    const fromEst = buildStagesFromEstimate(openObj.id);
-    const base = emptyProduction(openObj.id, genId);
-    const record = { ...base, stages: fromEst.length ? estToStages(fromEst, genId) : [], updatedAt: Date.now() };
-    onSaveProduction(record);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId]);
-
-  // Локальный буфер карточки: patch() применяется к нему МГНОВЕННО (инстант UI, без ожидания
-  // сети), а реальное сохранение (onSaveProduction — полный цикл чтение+бэкап+запись в App.jsx)
-  // уходит с debounce и СТРОГО последовательно (не параллельно) — иначе при быстром вводе текста
-  // каждый символ гонял бы сеть, а параллельные записи могли завершиться в обратном порядке и
-  // затереть более новый ввод более старым.
-  const [localProd, setLocalProd] = useState(openProd);
-  const localProdRef = useRef(openProd);
-  const openKeyRef = useRef(openObj?.id);
-  const pendingRef = useRef(false);
-  const savingRef = useRef(false);
-  const dirtyAfterSaveRef = useRef(false);
-  const saveTimerRef = useRef(null);
-
-  const flushProdSave = () => {
-    if (savingRef.current) { dirtyAfterSaveRef.current = true; return; }
-    savingRef.current = true;
-    const toSave = localProdRef.current;
-    Promise.resolve(onSaveProduction(toSave)).finally(() => {
-      savingRef.current = false;
-      if (dirtyAfterSaveRef.current) { dirtyAfterSaveRef.current = false; flushProdSave(); }
-      else { pendingRef.current = false; }
-    });
+  // ЕДИНЫЙ draft новой карточки: он же openProd в UI, он же record команды создания — ОДНИ и те
+  // же id этапов/чек-листов. Раньше UI показывал один emptyProduction, а в Firebase создавался
+  // ДРУГОЙ (со своими random id) — быстрая правка чек-листа слала patch-item по UI-id, которого
+  // на сервере нет → no-item навсегда. Черновик стабилен по objectId (module-scope Map).
+  const getDraft = (objId) => {
+    let d = _draftByObj.get(objId);
+    if (!d) {
+      const fromEst = buildStagesFromEstimate(objId);
+      d = { ...emptyProduction(objId, genId), stages: fromEst.length ? estToStages(fromEst, genId) : [], updatedAt: Date.now() };
+      _draftByObj.set(objId, d);
+    }
+    return d;
   };
-  // flushProdSave — новая функция на каждый рендер; держим ссылку на актуальную, чтобы
-  // размонтирование/закрытие страницы дёргали свежую версию, а не «замороженную» в замыкании.
-  const flushRef = useRef(flushProdSave);
-  flushRef.current = flushProdSave;
+  // Мемоизируем: без useMemo новая identity openProd на каждый рендер зацикливала эффект
+  // синхронизации локального состояния.
+  const openProd = useMemo(() => {
+    if (!openObj) return null;
+    const raw = prodByObj[openObj.id] || _confirmedByObj.get(openObj.id) || getDraft(openObj.id);
+    // Только локальная форма: старые элементы получают детерминированные id для UI, но в Firebase
+    // это попадёт лишь при явном редактировании карточки через normalize-card-ids в том же batch.
+    return normalizeProductionIds([raw]).list[0] || raw;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prodByObj, openObj?.id]);
 
-  // ФЛЕШ ПРИ РАЗМОНТИРОВАНИИ (ушли из карточки объекта в список/на другой экран) и ПРИ
-  // СКРЫТИИ/ЗАКРЫТИИ СТРАНИЦЫ. Без этого несохранённая правка, набранная в последние
-  // ~600 мс перед уходом/закрытием, терялась (дебаунс не успевал сработать).
+  // АВТОЗАПОЛНЕНИЕ: при первом открытии объекта без карточки — создание через pending-очередь
+  // (стабильный changeId, повтор до подтверждения; раньше одноразовый неудачный create просто
+  // терялся). Только когда productions ЗАГРУЖЕНЫ — иначе можно завести draft для объекта,
+  // у которого карточка на сервере уже есть. ТАБУ: на боевой autoCreate выключен (открытие
+  // объекта — не «явное действие с данными»); первое РЕАЛЬНОЕ редактирование (patchProd)
+  // создаст карточку и там — это уже явное действие владельца.
   useEffect(() => {
-    const flushIfDirty = () => { if (pendingRef.current) { if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; } flushRef.current(); } };
-    const onHide = () => { if (document.visibilityState === "hidden") flushIfDirty(); };
-    document.addEventListener("visibilitychange", onHide);
-    window.addEventListener("beforeunload", flushIfDirty);
-    window.addEventListener("pagehide", flushIfDirty);
-    return () => {
-      document.removeEventListener("visibilitychange", onHide);
-      window.removeEventListener("beforeunload", flushIfDirty);
-      window.removeEventListener("pagehide", flushIfDirty);
-      flushIfDirty(); // размонтирование карточки — досылаем несохранённое
-    };
+    if (!openObj || !productionsLoaded || !autoCreate) return;
+    if (currentUser?.role === "viewer") return; // viewer не создаёт карточку даже на dev
+    const objId = openObj.id;
+    if (prodByObj[objId] || _confirmedByObj.get(objId)) return; // карточка уже есть — не трогаем
+    if (_pendingByObj.has(objId)) return; // создание/правки уже в очереди
+    const draft = getDraft(objId);
+    const rev = (_revByObj.get(objId) || 0) + 1; _revByObj.set(objId, rev);
+    const entry = { base: draft, local: draft, rev, ensure: draft };
+    _persistEntry(objId, entry);
+    _pendingByObj.set(objId, entry);
+    _flushObj(objId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, productionsLoaded, autoCreate]);
+
+  // ── СОХРАНЕНИЕ ПРОИЗВОДСТВА (per-object, single-flight, versioned; очередь — module-scope) ──
+  // patch() применяется МГНОВЕННО (инстант UI); в облако уходит ОДИН batch на пользовательское
+  // сохранение (все команды диффа целиком в одной транзакции). Сама очередь и flush — на уровне
+  // модуля (_pendingByObj/_flushObj выше): переживают размонтирование компонента. Здесь — только
+  // привязка к UI: локальное состояние открытой карточки, дебаунс, восстановление при открытии.
+  const initialLocal = () => {
+    const key = openObj?.id;
+    const draft = key != null ? _pendingByObj.get(key) : null;
+    return draft ? draft.local : openProd; // монтирование: несохранённые правки прошлого визита — восстанавливаем
+  };
+  const [localProd, setLocalProd] = useState(initialLocal);
+  const localProdRef = useRef(localProd);
+  const openKeyRef = useRef(openObj?.id);
+  const saveTimerRef = useRef(null);
+  // База диффа: свежайшее из подтверждённого транзакцией (_confirmedByObj) и props (подписка).
+  // props могут ЗАПАЗДЫВАТЬ после commit'а — дифф от устаревшей базы заново отправил бы старые
+  // значения и затёр правку другого устройства (репро аудитора: note D → снова B).
+  const bestBaseOf = (objId) => {
+    const conf = _confirmedByObj.get(objId);
+    const srv = prodByObj[objId] || null;
+    if (conf && srv) return (Number(conf.updatedAt) || 0) >= (Number(srv.updatedAt) || 0) ? conf : srv;
+    return conf || srv || null;
+  };
+
+  // Регистрация UI-моста для module-scope flush (обновить открытую карточку после подтверждения).
+  useEffect(() => {
+    _uiApply = (objId, card) => { if (objId === openKeyRef.current && card) { localProdRef.current = card; setLocalProd(card); } };
+    return () => { _uiApply = null; };
   }, []);
 
+  // Фоновый повтор/unload-флеш регистрируются на уровне модуля ОДИН раз (_ensureBgFlush) —
+  // ничего не копится при повторных монтированиях и работает даже после размонтирования.
+  useEffect(() => {
+    _ensureBgFlush();
+    if (_pendingByObj.size) _flushAllPending(); // хвост прошлого визита — досылаем сразу
+    return () => { _flushAllPending(); };       // размонтирование: попытка сразу; очередь живёт дальше
+  }, []);
+
+  // Переключение объекта / обновление из props.
   useEffect(() => {
     const key = openObj?.id;
     const objChanged = key !== openKeyRef.current;
     if (objChanged) {
       openKeyRef.current = key;
-      // Несохранённые правки ПРЕДЫДУЩЕГО объекта не бросаем — досылаем сразу, а не отменяем
-      // таймер молча (иначе быстрое переключение объектов теряло бы последний ввод).
-      if (pendingRef.current) {
-        if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
-        flushProdSave();
-      }
-      pendingRef.current = false;
+      // предыдущий объект: его pending уже в _pendingByObj — досылаем (не теряем при переключении)
+      if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+      if (_pendingByObj.size) _flushAllPending();
+      // новый объект: восстанавливаем несохранённые правки, если есть, иначе — серверное состояние
+      const draft = key != null ? _pendingByObj.get(key) : null;
+      const nextLocal = draft ? draft.local : openProd;
+      localProdRef.current = nextLocal; setLocalProd(nextLocal);
+      return;
     }
-    // Подхватываем обновление из props (сервер/другое устройство), только если сейчас нет
-    // несохранённых локальных правок — иначе не затираем то, что пользователь только что ввёл.
-    if (objChanged || !pendingRef.current) {
-      localProdRef.current = openProd;
-      setLocalProd(openProd);
+    // серверное обновление текущего объекта: подхватываем ТОЛЬКО если нет несохранённых правок
+    // (иначе затёрли бы ввод). Если props отстают от только что подтверждённого — берём подтверждённое.
+    if (key != null && !_pendingByObj.has(key)) {
+      const conf = _confirmedByObj.get(key);
+      const src = conf && openProd && (Number(conf.updatedAt) || 0) > (Number(openProd.updatedAt) || 0) ? conf : openProd;
+      localProdRef.current = src; setLocalProd(src);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openProd, openObj?.id]);
 
+  // Роль viewer — ТОЛЬКО чтение: жёсткий запрет на уровне данных (не только визуальный) —
+  // без него наблюдатель мог бы менять карточку или создать её первым же редактированием.
+  const readOnly = externallyReadOnly || currentUser?.role === "viewer";
   const patchProd = (patch) => {
+    if (readOnly) return; // запрет записи для viewer — обязателен именно здесь
+    const objId = openObj && openObj.id;
+    if (objId == null) return;
     const next = { ...localProdRef.current, ...patch, updatedAt: Date.now() };
-    localProdRef.current = next;
-    setLocalProd(next);
-    pendingRef.current = true;
+    const prevEntry = _pendingByObj.get(objId);
+    const known = bestBaseOf(objId); // подтверждённая серверная база (если карточка уже существует)
+    const base = prevEntry ? prevEntry.base : (known || getDraft(objId));
+    const ensure = prevEntry ? prevEntry.ensure : (known ? null : getDraft(objId));
+    const rev = (_revByObj.get(objId) || 0) + 1;
+    _revByObj.set(objId, rev);
+    const entry = { base, local: next, rev, ensure };
+    // Сначала синхронный durable draft, затем UI/память: crash после отображения правки не должен
+    // оставлять её только в React-state.
+    _persistEntry(objId, entry);
+    _pendingByObj.set(objId, entry);
+    localProdRef.current = next; setLocalProd(next);
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(flushProdSave, 600);
+    saveTimerRef.current = setTimeout(() => _flushObj(objId), 600);
   };
 
   // Данные из Финансов для текущего объекта — ДОЛЖНЫ быть до if(!openObj), иначе нарушение Rules of Hooks
@@ -199,6 +492,9 @@ export default function ProductionModule({
   const audit = (ev) => { try { if (onAudit) onAudit({ objectId: openObj.id, label: _objLbl, source: "manual", ...ev }); } catch (e) { console.warn("audit failed", e); } };
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+      {readOnly && <div style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 14px", fontSize: 12.5, color: "#64748b", marginBottom: 12 }}>👁 Режим просмотра — редактирование недоступно для вашей роли.</div>}
+      {/* fieldset disabled нативно глушит все input/button внутри; сам запрет записи — в patchProd */}
+      <fieldset disabled={readOnly} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
       {embedTab === "info" && <InfoTab prod={localProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={patchProd} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} clientInfoCard={clientInfoCard} audit={audit} />}
       {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={localProd} patch={patchProd} genId={genId} title="Чек-лист запуска объекта" />}
       {embedTab === "handover" && <ChecklistTab kind="checklistHandover" prod={localProd} patch={patchProd} genId={genId} title="Чек-лист сдачи объекта" />}
@@ -206,6 +502,7 @@ export default function ProductionModule({
       {embedTab === "finance" && <FinanceTab prod={localProd} patch={patchProd} fmt={fmt} finSummary={finSummary} />}
       {embedTab === "journal" && <JournalTab prod={localProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
       {embedTab === "defects" && <DefectsTab prod={localProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
+      </fieldset>
     </div>
   );
 }
