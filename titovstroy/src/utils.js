@@ -371,6 +371,24 @@ export function classifyCloudObj(r) {
   }
   return { value: null, ok: false };
 }
+
+// Firebase RTDB get() при потере сети может вернуть пустой ЛОКАЛЬНЫЙ кеш как обычный
+// snapshot.exists() === false. Такой ответ нельзя считать авторитетным «ключа в базе нет»:
+// иначе офлайн-правка выглядит как удаление на другом устройстве. Пустоту подтверждает только
+// успешный REST-ответ; найденное SDK-значение можно использовать как облачную копию.
+export function resolveVerifiedCloudRead(sdkResult, restResult) {
+  if (restResult && restResult.ok) {
+    return {
+      status: restResult.value === null ? "empty" : "found",
+      value: restResult.value ?? null,
+      source: "firebase",
+    };
+  }
+  if (sdkResult && sdkResult.status === "found") {
+    return { status: "found", value: sdkResult.value, source: "firebase" };
+  }
+  return { status: "unavailable", value: null, source: "firebase" };
+}
 // Решение по ПРЕД-БЭКАПУ раздела перед восстановлением (чистая логика для тестов).
 // Возвращает { action:"skip"|"proceed", backups }:
 //  - текущее значение раздела недоступно (unavailable) → skip (не знаем, что затираем);

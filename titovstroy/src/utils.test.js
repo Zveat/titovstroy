@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead } from "./utils.js";
 
 describe("isBackupRestorable — запрет массового восстановления из неполного файла", () => {
   it("полный подтверждённый файл — можно", () => {
@@ -164,6 +164,33 @@ describe("classifyCloudObj — чтение настроек/каталога/ц
   });
   it("литеральный null (очищенный раздел) → ok, value:null (не считается порчей)", () => {
     expect(classifyCloudObj({ status: "found", value: "null" })).toEqual({ value: null, ok: true });
+  });
+});
+
+describe("resolveVerifiedCloudRead — пустой SDK-кеш не равен удалению в облаке", () => {
+  it("офлайн: SDK показал пустой кеш, REST не ответил → unavailable, не empty", () => {
+    expect(resolveVerifiedCloudRead(
+      { status: "empty", value: null },
+      { ok: false },
+    )).toEqual({ status: "unavailable", value: null, source: "firebase" });
+  });
+  it("пустоту подтверждает только успешный REST-ответ null", () => {
+    expect(resolveVerifiedCloudRead(
+      { status: "empty", value: null },
+      { ok: true, value: null },
+    )).toEqual({ status: "empty", value: null, source: "firebase" });
+  });
+  it("REST может исправить ложную пустоту SDK и вернуть существующие данные", () => {
+    expect(resolveVerifiedCloudRead(
+      { status: "empty", value: null },
+      { ok: true, value: "[{\"objectId\":\"o1\"}]" },
+    )).toEqual({ status: "found", value: "[{\"objectId\":\"o1\"}]", source: "firebase" });
+  });
+  it("найденное SDK-значение остаётся доступным, если REST не ответил", () => {
+    expect(resolveVerifiedCloudRead(
+      { status: "found", value: "[]" },
+      { ok: false },
+    )).toEqual({ status: "found", value: "[]", source: "firebase" });
   });
 });
 

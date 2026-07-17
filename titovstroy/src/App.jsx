@@ -6,7 +6,7 @@ import { emptyProduction } from "./production/constants.js";
 import { applyProductionCommand, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
 function useDebounce(value, ms) {
@@ -1312,9 +1312,7 @@ const storage = {
   async getCloudResult(key) {
     // SDK не сконфигурирован — только чистый REST
     if (!_fbDb) {
-      const rr = await _fbRestGet(key);
-      if (rr.ok) return { status: rr.value === null ? "empty" : "found", value: rr.value, source: "firebase" };
-      return { status: "unavailable", value: null, source: "firebase" };
+      return resolveVerifiedCloudRead(null, await _fbRestGet(key));
     }
     try {
       await _fbAuthReady;
@@ -1322,16 +1320,14 @@ const storage = {
       if (snap === _TIMEOUT) { await new Promise(r => setTimeout(r, 500)); snap = await _race(get(ref(_fbDb, _fbKey(key))), 8000); }
       if (snap !== _TIMEOUT) {
         if (snap && snap.exists()) { const v = snap.val(); return { status: "found", value: typeof v === "string" ? v : JSON.stringify(v), source: "firebase" }; }
-        return { status: "empty", value: null, source: "firebase" };
+        // В офлайне SDK может отдать пустой локальный кеш. Подтверждаем «ключа нет»
+        // независимым REST-чтением; если REST не отвечает, это unavailable, не empty.
+        return resolveVerifiedCloudRead({ status: "empty", value: null }, await _fbRestGet(key));
       }
       // SDK не ответил (WebSocket мог быть заблокирован) — пробуем REST тем же ключом
-      const rr = await _fbRestGet(key);
-      if (rr.ok) return { status: rr.value === null ? "empty" : "found", value: rr.value, source: "firebase" };
-      return { status: "unavailable", value: null, source: "firebase" };
+      return resolveVerifiedCloudRead(null, await _fbRestGet(key));
     } catch (e) {
-      const rr = await _fbRestGet(key);
-      if (rr.ok) return { status: rr.value === null ? "empty" : "found", value: rr.value, source: "firebase" };
-      return { status: "unavailable", value: null, source: "firebase" };
+      return resolveVerifiedCloudRead(null, await _fbRestGet(key));
     }
   },
   async get(key) {

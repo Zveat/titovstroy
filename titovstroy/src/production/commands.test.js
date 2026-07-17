@@ -650,6 +650,23 @@ describe("этап 2Б — durable-черновики производства �
     expect(listProductionDrafts(store, "u")).toEqual([]);
   });
 
+  it("офлайн-ошибка при выходе не выдаётся за удаление карточки и не открывает confirm", async () => {
+    const previousWindow = globalThis.window;
+    let confirms = 0;
+    globalThis.window = { confirm: () => { confirms++; return true; } };
+    try {
+      __prodQueueTesting.setCmd(async () => ({ committed: false, conflict: false, reason: "conflict-unverified" }));
+      __prodQueueTesting.pending.set("o1", entry(1));
+      __prodQueueTesting.revs.set("o1", 1);
+      await flushPendingProduction();
+      expect(confirms).toBe(0);
+      expect(hasPendingProduction()).toBe(1);
+    } finally {
+      if (previousWindow === undefined) delete globalThis.window;
+      else globalThis.window = previousWindow;
+    }
+  });
+
   it("фоновые bg-команды переживают reload, обновляются по changeId и снимаются только явно", () => {
     const store = fakeStore();
     const first = { type: "set-status", objectId: "o1", status: "active", changeId: "bg_status_o1", __draftRevision: "r1" };
