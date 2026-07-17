@@ -6,7 +6,7 @@ import { emptyProduction } from "./production/constants.js";
 import { applyProductionCommand, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
 function useDebounce(value, ms) {
@@ -4749,15 +4749,9 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     const main = mainContractOf(contract);
     return {
       id:"", contractNo: main?.number||"",
-      client: obj?.clientType==="юр" ? "Юр лицо" : "Физ лицо",
-      category: obj?.objType || "Вторичка",
-      description: [obj?.clientName, obj?.address, obj?.clientPhone].filter(Boolean).join(" | "),
       budget: finBudgetOfContract(main)||0,
-      status:"активен", rawStatus:"в работе",
       createdAt: main?.date || new Date().toISOString().slice(0,10),
-      closedAt:"", b24:"нет",
-      contractSigned: main ? "да" : "нет",
-      avr:"нет", comment:"", objectId: obj?.id||"",
+      comment:"", objectId: obj?.id||"",
     };
   };
   // завести проект в финансах из объекта (или открыть существующий). Доп. соглашение
@@ -4925,28 +4919,50 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     }) || null;
   }, [liveObjects, contractLinkMap]);
 
+  // Единый статус объекта для всех экранов и расчётов: производственная карточка
+  // перевешивает старое поле object.status, когда объект уже в производстве.
+  const unifiedStatusOf = useCallback((o) => {
+    const pr = productions.find(p => p.objectId === o.id);
+    const derived = pr && PROD_TO_DEAL[pr.prodStatus];
+    return derived || o.status || "new";
+  }, [productions]);
+  const financeProjectStatusKeyOf = useCallback((project) => {
+    const object = matchFpToObject(project);
+    return object
+      ? unifiedStatusOf(object)
+      : financeStatusMeta(project?.rawStatus || project?.status || "").key;
+  }, [matchFpToObject, unifiedStatusOf]);
+  const isActiveFinanceProject = useCallback(
+    project => isActiveFinanceStatus(financeProjectStatusKeyOf(project)),
+    [financeProjectStatusKeyOf],
+  );
+  const isCountedFinanceProject = useCallback(
+    project => !["cancel", "refuse", "archive"].includes(financeProjectStatusKeyOf(project)),
+    [financeProjectStatusKeyOf],
+  );
+
   // Производство = ТОЛЬКО объекты, у которых есть активный финпроект (Финансы → Проекты).
   // Без «подписанных объектов» и без старых карточек. Отказ/архив исключены.
   const productionObjects = useMemo(() => {
     const ids = new Set();
     for (const p of (finProjects || [])) {
-      if ((p.rawStatus || p.status) === "отменен") continue;
+      if (!isActiveFinanceProject(p)) continue;
       const o = matchFpToObject(p);
-      if (o && o.status !== "refuse" && o.status !== "archive") ids.add(o.id);
+      if (o) ids.add(o.id);
     }
     return liveObjects.filter(o => ids.has(o.id));
-  }, [liveObjects, finProjects, matchFpToObject]);
+  }, [liveObjects, finProjects, matchFpToObject, isActiveFinanceProject]);
 
   // Проекты из Финансов, которые НЕ привязаны ни к одному объекту — их тоже можно
   // добавить в производство вручную (разовая миграция текущих работ из Google-таблиц).
   const unlinkedFinProjects = useMemo(() => {
-    return (finProjects || []).filter(p => (p.rawStatus || p.status) !== "отменен" && !matchFpToObject(p));
-  }, [finProjects, matchFpToObject]);
+    return (finProjects || []).filter(p => isActiveFinanceProject(p) && !matchFpToObject(p));
+  }, [finProjects, matchFpToObject, isActiveFinanceProject]);
 
   // ── ЕДИНЫЙ ИСТОЧНИК ПРОИЗВОДСТВА: одна запись на КАЖДЫЙ финпроект (Финансы → Проекты) ──
   // Производство = все финпроекты (включая без сметы/импортированные, выполненные и отменённые).
   // К объекту привязываемся для сметы/этапов; если объекта нет — карточка живёт по ключу "fp:<id>".
-  const FIN_TO_PROD = { "новый":"new","активен":"active","в работе":"active","приостановлен":"paused","выполнен":"done","отменен":"cancel" };
+  const FIN_TO_PROD = { new:"new", approval:"new", signed:"new", work:"active", paused:"paused", done:"done", cancel:"cancel", refuse:"cancel", archive:"cancel" };
   const prodEntries = useMemo(() => {
     const txByCN = {};
     for (const t of (financeTx || [])) { if (t.deletedAt || t.included === false) continue; const cn = normCN(t.contractNo); (txByCN[cn] || (txByCN[cn] = [])).push(t); }
@@ -4960,7 +4976,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       const income = tx.filter(t => t.type === "income").reduce((s, t) => s + (Number(t.amount) || 0), 0);
       const expense = tx.filter(t => t.type === "expense").reduce((s, t) => s + (Number(t.amount) || 0), 0);
       const budget = Number(fp.budget) || 0;
-      const finStatus = (fp.rawStatus || fp.status || "").toLowerCase();
+      const finStatus = financeProjectStatusKeyOf(fp);
       entries.push({
         key: objectId || ("fp:" + fp.id), objectId, fpId: fp.id,
         name: (o?.clientName) || fp.description || fp.client || "Проект",
@@ -4973,23 +4989,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       });
     }
     return entries;
-  }, [finProjects, financeTx, matchFpToObject]);
-
-  // ЕДИНЫЙ статус объекта для списка: производственный статус (В работе/Приостановлен/
-  // Выполнен/Расторгнут) перевешивает статус сделки; иначе — статус объекта как есть.
-  // Ничего не записывает — только вычисляет для отображения. Кнопки статуса объекта
-  // (saveObjField) при клике зеркалят выбор в production.prodStatus — иначе клик по
-  // кнопке визуально ничего не менял бы, пока production не «в курсе» нового статуса.
-  const unifiedStatusOf = useCallback((o) => {
-    // Статус ПРОИЗВОДСТВА (В работе/Приостановлен/Выполнен/Расторгнут) отражает реальное
-    // состояние объекта и перевешивает статус сделки для ОТОБРАЖЕНИЯ и ФИЛЬТРА. Если карточки
-    // производства нет или её статус ещё «new» — показываем статус объекта как есть.
-    // (Боевые объекты хранят реальный статус в производстве: object.status у многих = "archive",
-    //  а по производству они "done/active" — без этого они ошибочно висели бы в «Архиве».)
-    const pr = productions.find(p => p.objectId === o.id);
-    const derived = pr && PROD_TO_DEAL[pr.prodStatus];
-    return derived || o.status || "new";
-  }, [productions]);
+  }, [finProjects, financeTx, matchFpToObject, financeProjectStatusKeyOf]);
   const financeObjectOf = (project) => {
     if (project?.objectId) {
       const direct = liveObjects.find(o => o.id === project.objectId);
@@ -6136,9 +6136,9 @@ ${reqBlock}`;
   // Миграция: перенести все проекты из Финансов в Производство (один раз)
   // Определён ПОСЛЕ buildStagesFromEstimate чтобы избежать temporal dead zone
   const migrateFinanceToProd = useCallback(async () => {
-    const total = finProjectsRef.current.filter(p => (p.rawStatus||p.status) !== "отменен").length;
+    const total = finProjectsRef.current.filter(p => !["cancel","refuse","archive"].includes(financeStatusMeta(p.rawStatus||p.status).key)).length;
     if (!window.confirm(`Перенести ${total} проектов из Финансов в Производство? Текущие записи производства будут заменены.`)) return;
-    const finStatMap = { "новый":"new","активен":"active","в работе":"active","приостановлен":"paused","выполнен":"done","отменен":"cancel" };
+    const finStatMap = { new:"new", approval:"new", signed:"new", work:"active", paused:"paused", done:"done", cancel:"cancel", refuse:"cancel", archive:"cancel" };
     const stagesFromEst = (objId) => buildStagesFromEstimate(objId).map(s => ({
       id: genId(), estimateKey: _stageKey(s), cat: s.cat||"Прочее", name: s.name||"", unit: s.unit||"", qty: s.qty||0,
       planStart:"", planEnd:"", factStart:"", factEnd:"",
@@ -6150,8 +6150,8 @@ ${reqBlock}`;
     const seen = new Set();
     const curObjs = objectsRef.current.filter(o => !o.deletedAt);
     for (const fp of finProjectsRef.current) {
-      const st = fp.rawStatus || fp.status || "";
-      if (st === "отменен") continue;
+      const st = financeStatusMeta(fp.rawStatus || fp.status || "").key;
+      if (["cancel","refuse","archive"].includes(st)) continue;
       let objId = fp.objectId || "";
       if (!objId && fp.contractNo) {
         const link = contractLinkMap[normCN(fp.contractNo)];
@@ -9452,7 +9452,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         const monthName = new Date().toLocaleDateString("ru-RU",{month:"long"});
         // ── Finance KPIs (только для admin/manager) ──
         // «Активные» = НЕ отменён и НЕ выполнен (т.е. в работе + новые). Завершённые в активные не входят.
-        const _isActiveFin = p => { const s=(p.rawStatus||p.status||"").toLowerCase(); return s!=="отменен"&&s!=="выполнен"; };
+        const _isActiveFin = isActiveFinanceProject;
         const _finKpi = (_isAdmin||_isMgr) ? (() => {
           const active = (finProjects||[]).filter(_isActiveFin);
           const txMap = {}; for(const t of (financeTx||[])){if(t.deletedAt||t.included===false) continue; const cn=normCN(t.contractNo); if(!txMap[cn])txMap[cn]={inc:0,exp:0}; if(t.type==="income")txMap[cn].inc+=(Number(t.amount)||0); else txMap[cn].exp+=(Number(t.amount)||0); }
@@ -9618,7 +9618,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             <div style={{background:"linear-gradient(135deg,#fffbeb,#fef3c7)",border:"1px solid rgba(217,119,6,.25)",borderRadius:12,padding:"16px 20px",marginBottom:24,boxShadow:"0 1px 4px rgba(217,119,6,.1)"}}>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
                 <span style={{fontSize:16}}>⚠️</span>
-                <span style={{fontWeight:700,fontSize:14,color:"#92400e"}}>Требуют внимания — {staleObjs.length} объект{staleObjs.length===1?"":"ов"} без движения 14+ дней</span>
+                <button onClick={openStaleObjects} style={{background:"none",border:"none",padding:0,fontWeight:700,fontSize:14,color:"#92400e",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                  Требуют внимания — {staleObjs.length} объект{staleObjs.length===1?"":"ов"} без движения 14+ дней
+                </button>
+                <button onClick={openStaleObjects} style={{marginLeft:"auto",background:"#fff",border:"1px solid #fcd34d",borderRadius:7,padding:"4px 9px",color:"#92400e",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Показать все</button>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:6}}>
                 {staleObjs.slice(0,4).map(o=>{
@@ -9639,7 +9642,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     </div>
                   );
                 })}
-                {staleObjs.length>4&&<div style={{fontSize:12,color:"#b45309",paddingLeft:4}}>+{staleObjs.length-4} ещё — <button onClick={openStaleObjects} style={{background:"none",border:"none",padding:0,color:"#b45309",cursor:"pointer",textDecoration:"underline",fontFamily:"inherit",fontSize:12}}>смотреть все</button></div>}
+                {staleObjs.length>4&&<div style={{fontSize:12,color:"#b45309",paddingLeft:4}}>+{staleObjs.length-4} ещё</div>}
               </div>
             </div>
           )}
@@ -10949,7 +10952,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               const _inM = ts => { const d=new Date(ts||0); const n=new Date(); return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear(); };
               const _ds = d => { const x=new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
               // Активные = НЕ отменён и НЕ выполнен (в работе + новые)
-              const activeFp = (finProjects||[]).filter(p=>{const s=(p.rawStatus||p.status||"").toLowerCase(); return s!=="отменен"&&s!=="выполнен";});
+              const activeFp = (finProjects||[]).filter(isActiveFinanceProject);
               const txMap = {}; for(const t of (financeTx||[])){ if(t.deletedAt||t.included===false) continue; const cn=_norm(t.contractNo); if(!txMap[cn])txMap[cn]={inc:0,exp:0}; if(t.type==="income")txMap[cn].inc+=(Number(t.amount)||0); else txMap[cn].exp+=(Number(t.amount)||0); }
               // ВСЁ по АКТИВНЫМ проектам — числа сходятся: Бюджет = Получено + Дебиторка
               const totalBudget = activeFp.reduce((s,p)=>s+(Number(p.budget)||0),0);
@@ -11324,7 +11327,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   {(()=>{
                     const projIncH={};
                     for(const t of financeTx){ if(t.deletedAt||t.included===false)continue; const cn=normCN(t.contractNo); if(!cn)continue; if(t.type==="income") projIncH[cn]=(projIncH[cn]||0)+(Number(t.amount)||0); }
-                    const debtH = finProjects.filter(p=>(p.rawStatus||p.status)!=="отменен").reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projIncH[normCN(p.contractNo)]||0)),0);
+                    const debtH = finProjects.filter(isCountedFinanceProject).reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projIncH[normCN(p.contractNo)]||0)),0);
                     return <>
                       <div style={{textAlign:"right"}}>
                         <div style={{fontSize:11,color:"rgba(255,255,255,.6)"}}>Дебиторка (по проектам)</div>
@@ -11630,7 +11633,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         else if(t.type==="expense"&&t.category===_C_COGS) txByContract[k].cogs+=amt;
                       });
                       const pMonthMap = {};
-                      finProjects.filter(p=>(p.rawStatus||p.status)!=="отменен").forEach(p=>{ const k=pmKey(p); if(!k) return;
+                      finProjects.filter(isCountedFinanceProject).forEach(p=>{ const k=pmKey(p); if(!k) return;
                         if(!pMonthMap[k]) pMonthMap[k]={count:0,budget:0,inc:0,gross:0};
                         const cx = txByContract[_normCn(p.contractNo)] || {inc:0,cogs:0};
                         pMonthMap[k].count++;
@@ -11986,7 +11989,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               accounts.forEach(a=>{ const tp=a.accType||"bank"; byType[tp]=(byType[tp]||0)+(balances[a.name]||0); });
               const cash = byType.cash+byType.bank+byType.card+byType.ewallet;
               // Дебиторка (денежная — клиенты должны оплатить деньгами по проектам)
-              const receivablesMoney = finProjects.filter(p=>(p.rawStatus||p.status)!=="отменен").reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projInc[normCN(p.contractNo)]||0)),0);
+              const receivablesMoney = finProjects.filter(isCountedFinanceProject).reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projInc[normCN(p.contractNo)]||0)),0);
               // Авансы клиентов (обязательство)
               const advances = financeTx.filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&t.isAdvance).reduce((s,t)=>s+(Number(t.amount)||0),0);
 
@@ -12354,7 +12357,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                 </span>
                               </div>
                               <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
-                                {[["Б24",yesno(p.b24)],["Договор",view.contractSigned],["АВР",view.hasAvr]].map(([l,v])=>(
+                                {[["Договор",view.contractSigned],["АВР",view.hasAvr]].map(([l,v])=>(
                                   <span key={l} style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:6,background:yesno(v)?"#f0fdf4":"#fef2f2",color:yesno(v)?"#059669":"#dc2626",display:"inline-flex",alignItems:"center",gap:3}}>{yesno(v)?"✓":"✗"} {l}</span>
                                 ))}
                                 {p.contractNo && <button onClick={e=>{ e.stopPropagation(); navigate(undefined,"ops",{finFilterContract:p.contractNo}); }} style={{marginLeft:"auto",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:7,padding:"4px 9px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📋 Операции</button>}
@@ -12950,7 +12953,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 const contract = contractsRef.current.find(c => c.objectId === obj.id) || null;
                 const estTotal = estimates.filter(e => e.objectId === obj.id).reduce((s, e) => s + (Number(e.total) || 0), 0);
                 const draft = finProjDraftFromObject(obj, contract);
-                const proj = { ...draft, id: genId(), budget: draft.budget || estTotal || 0, status: "новый", rawStatus: "новый" };
+                const proj = { ...draft, id: genId(), budget: draft.budget || estTotal || 0 };
                 // saveListProtected при блокировке (loadedRef/база недоступна/"пусто поверх")
                 // молча возвращает undefined БЕЗ throw — try/catch сам по себе это не ловит,
                 // нужно явно проверить результат, иначе статус менялся бы, даже если проект

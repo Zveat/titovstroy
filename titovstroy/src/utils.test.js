@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus } from "./utils.js";
 
 describe("объекты без движения и единый источник данных финпроекта", () => {
   it("считает зависшим только живой объект на согласовании без движения 14+ дней", () => {
@@ -29,7 +29,16 @@ describe("объекты без движения и единый источни�
 
   it("не маскирует непривязанный старый финпроект и сохраняет его legacy-информацию только для показа", () => {
     const view = buildFinanceProjectView({ project:{ description:"Старый проект", contractNo:"88", category:"Другое", rawStatus:"в работе" } });
-    expect(view).toMatchObject({ linked:false, customerName:"Старый проект", contractNo:"88", category:"Другое" });
+    expect(view).toMatchObject({ linked:false, customerName:"Старый проект", contractNo:"88", category:"Другое", statusKey:"work", statusLabel:"В работе" });
+  });
+
+  it("объединяет старые и новые названия статусов в один фильтр", () => {
+    expect(financeStatusMeta("в работе")).toMatchObject({ key:"work", label:"В работе" });
+    expect(financeStatusMeta("активен")).toMatchObject({ key:"work", label:"В работе" });
+    expect(financeStatusMeta("work")).toMatchObject({ key:"work", label:"В работе" });
+    expect(isActiveFinanceStatus("в работе")).toBe(true);
+    expect(isActiveFinanceStatus("выполнен")).toBe(false);
+    expect(isActiveFinanceStatus("archive")).toBe(false);
   });
 });
 

@@ -15,14 +15,64 @@ export function isStaleApprovalObject(object, now = Date.now(), days = 14) {
   return lastMovement > 0 && (now - lastMovement) >= days * 24 * 60 * 60 * 1000;
 }
 
+const FINANCE_STATUS_META = {
+  new:      { key:"new",      label:"Новый",              color:"#64748b", bg:"#f3f4f6" },
+  approval: { key:"approval", label:"Согласование сметы", color:"#d97706", bg:"rgba(217,119,6,.12)" },
+  signed:   { key:"signed",   label:"Договор подписан",   color:"#059669", bg:"rgba(5,150,105,.1)" },
+  refuse:   { key:"refuse",   label:"Потерян",            color:"#dc2626", bg:"rgba(220,38,38,.1)" },
+  work:     { key:"work",     label:"В работе",           color:"#2563eb", bg:"#eff6ff" },
+  paused:   { key:"paused",   label:"Приостановлен",      color:"#d97706", bg:"rgba(217,119,6,.1)" },
+  done:     { key:"done",     label:"Выполнен",           color:"#059669", bg:"#ecfdf5" },
+  cancel:   { key:"cancel",   label:"Расторгнут",         color:"#dc2626", bg:"rgba(220,38,38,.12)" },
+  archive:  { key:"archive",  label:"Архив",              color:"#64748b", bg:"rgba(107,114,128,.12)" },
+};
+const FINANCE_STATUS_ALIASES = {
+  "": "new",
+  "новый": "new",
+  "новая": "new",
+  "согласование": "approval",
+  "согласование сметы": "approval",
+  "договор подписан": "signed",
+  "активен": "work",
+  "active": "work",
+  "progress": "work",
+  "в работе": "work",
+  "приостановлен": "paused",
+  "выполнен": "done",
+  "отменен": "cancel",
+  "отменён": "cancel",
+  "расторгнут": "cancel",
+  "отказ": "refuse",
+  "потерян": "refuse",
+  "архив": "archive",
+};
+
+// Старые финпроекты хранят русские статусы, связанные объекты — системные ключи.
+// Нормализация нужна только для отображения/расчётов: данные в базе не меняются.
+export function financeStatusMeta(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  const key = FINANCE_STATUS_ALIASES[raw] || raw || "new";
+  return FINANCE_STATUS_META[key] || {
+    key,
+    label: String(value || "Новый"),
+    color: "#64748b",
+    bg: "#f1f5f9",
+  };
+}
+
+export function isActiveFinanceStatus(value) {
+  return !["done", "cancel", "refuse", "archive"].includes(financeStatusMeta(value).key);
+}
+
 // Финансовый проект хранит деньги и ссылку objectId. Описательные поля всегда
 // вычисляются из объекта, производства, договора и актов, чтобы их нельзя было
 // независимо изменить в двух разделах.
 export function buildFinanceProjectView({ project = {}, object = null, production = null, contract = null, reports = [], status = null } = {}) {
   const linked = !!object;
   const clientType = object?.clientType === "юр" ? "Юр лицо" : object ? "Физ лицо" : (project.client || "—");
-  const statusKey = status?.key || (linked ? (object.status || "new") : (project.rawStatus || project.status || ""));
-  const statusLabel = status?.label || statusKey || "—";
+  const legacyStatus = financeStatusMeta(linked ? (object.status || "new") : (project.rawStatus || project.status || ""));
+  const statusKey = status?.key || legacyStatus.key;
+  const statusLabel = status?.label || legacyStatus.label;
   const hasAvr = linked
     ? reports.some(r => r && r.objectId === object.id && r.type === "avr")
     : project.avr === "да";
@@ -45,8 +95,8 @@ export function buildFinanceProjectView({ project = {}, object = null, productio
     contractNo: contract?.number || project.contractNo || "",
     statusKey,
     statusLabel,
-    statusColor: status?.color || "#64748b",
-    statusBg: status?.bg || "#f1f5f9",
+    statusColor: status?.color || legacyStatus.color,
+    statusBg: status?.bg || legacyStatus.bg,
     saleDate: production?.saleDate || "",
     startDate: production?.startDate || "",
     planEndDate: production?.planEndDate || "",
