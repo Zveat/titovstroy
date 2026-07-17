@@ -168,29 +168,25 @@ describe("classifyCloudObj — чтение настроек/каталога/ц
 });
 
 describe("resolveVerifiedCloudRead — пустой SDK-кеш не равен удалению в облаке", () => {
-  it("офлайн: SDK показал пустой кеш, REST не ответил → unavailable, не empty", () => {
+  it("офлайн: REST не ответил → unavailable, не empty", () => {
     expect(resolveVerifiedCloudRead(
-      { status: "empty", value: null },
       { ok: false },
     )).toEqual({ status: "unavailable", value: null, source: "firebase" });
   });
   it("пустоту подтверждает только успешный REST-ответ null", () => {
     expect(resolveVerifiedCloudRead(
-      { status: "empty", value: null },
       { ok: true, value: null },
     )).toEqual({ status: "empty", value: null, source: "firebase" });
   });
-  it("REST может исправить ложную пустоту SDK и вернуть существующие данные", () => {
+  it("REST возвращает существующие данные", () => {
     expect(resolveVerifiedCloudRead(
-      { status: "empty", value: null },
       { ok: true, value: "[{\"objectId\":\"o1\"}]" },
     )).toEqual({ status: "found", value: "[{\"objectId\":\"o1\"}]", source: "firebase" });
   });
-  it("найденное SDK-значение остаётся доступным, если REST не ответил", () => {
-    expect(resolveVerifiedCloudRead(
-      { status: "found", value: "[]" },
-      { ok: false },
-    )).toEqual({ status: "found", value: "[]", source: "firebase" });
+  it("локальный SDK-кеш не может подменить провалившееся REST-чтение", () => {
+    // Второй аргумент имитирует локальный SDK-кеш "[]": функция его принципиально игнорирует.
+    expect(resolveVerifiedCloudRead({ ok: false }, { status: "found", value: "[]" }))
+      .toEqual({ status: "unavailable", value: null, source: "firebase" });
   });
 });
 

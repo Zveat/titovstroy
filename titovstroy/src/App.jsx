@@ -1310,25 +1310,10 @@ const storage = {
   // статусом "found". Нужно для ПОЛНОГО БЭКАПА: файл можно назвать полным, только если каждый
   // раздел реально прочитан из базы. Возвращает { status:'found'|'empty'|'unavailable', value, source:'firebase' }.
   async getCloudResult(key) {
-    // SDK не сконфигурирован — только чистый REST
-    if (!_fbDb) {
-      return resolveVerifiedCloudRead(null, await _fbRestGet(key));
-    }
-    try {
-      await _fbAuthReady;
-      let snap = await _race(get(ref(_fbDb, _fbKey(key))), 8000);
-      if (snap === _TIMEOUT) { await new Promise(r => setTimeout(r, 500)); snap = await _race(get(ref(_fbDb, _fbKey(key))), 8000); }
-      if (snap !== _TIMEOUT) {
-        if (snap && snap.exists()) { const v = snap.val(); return { status: "found", value: typeof v === "string" ? v : JSON.stringify(v), source: "firebase" }; }
-        // В офлайне SDK может отдать пустой локальный кеш. Подтверждаем «ключа нет»
-        // независимым REST-чтением; если REST не отвечает, это unavailable, не empty.
-        return resolveVerifiedCloudRead({ status: "empty", value: null }, await _fbRestGet(key));
-      }
-      // SDK не ответил (WebSocket мог быть заблокирован) — пробуем REST тем же ключом
-      return resolveVerifiedCloudRead(null, await _fbRestGet(key));
-    } catch (e) {
-      return resolveVerifiedCloudRead(null, await _fbRestGet(key));
-    }
+    // Здесь принципиально НЕ используем SDK: get()/runTransaction при офлайне могут вернуть
+    // локальный кеш (в том числе временный "[]") как найденное значение. Только REST-ответ
+    // доказывает текущее состояние сервера; его отсутствие означает unavailable, не удаление.
+    return resolveVerifiedCloudRead(await _fbRestGet(key));
   },
   async get(key) {
     const r = await this.getResult(key);
