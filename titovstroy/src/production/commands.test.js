@@ -681,13 +681,46 @@ describe("этап 2Б — durable-черновики производства �
         calls++;
         seen.push(cmd.type);
         if (calls === 1) return { committed: false, conflict: true, list: [] };
-        return { committed: true, list: [card({ brigade: "МОЯ ПРАВКА" })] };
+        const applied = applyProductionCommand([], cmd);
+        expect(applied.ok).toBe(true);
+        return { committed: true, list: applied.list };
       });
       await __prodQueueTesting.flushObj("o1");
       expect(confirms).toBe(1);
-      expect(seen).toEqual(["batch", "create-if-missing"]);
+      expect(seen).toEqual(["batch", "batch"]);
       expect(hasPendingProduction()).toBe(0);
       expect(__prodQueueTesting.confirmed.get("o1")?.brigade).toBe("МОЯ ПРАВКА");
+    } finally {
+      if (previousWindow === undefined) delete globalThis.window;
+      else globalThis.window = previousWindow;
+    }
+  });
+
+  it("гонка восстановления: карточка уже вернулась на сервер — локальный diff всё равно применяется", async () => {
+    const previousWindow = globalThis.window;
+    globalThis.window = { confirm: () => true };
+    try {
+      const base = card({ note: "[ТЕСТ 18.07]" });
+      const local = card({ note: "[ТЕСТ 18.07]\\n[ОФЛАЙН-ТЕСТ]" });
+      const restoredServer = card({ note: "[ТЕСТ 18.07]", responsible: "чужая свежая правка" });
+      const pending = { base, local, rev: 1, ensure: null };
+      __prodQueueTesting.pending.set("o1", pending);
+      __prodQueueTesting.revs.set("o1", 1);
+      let calls = 0;
+      __prodQueueTesting.setCmd(async cmd => {
+        calls++;
+        if (calls === 1) return { committed: false, conflict: true, list: [] };
+        // Между ложным/устаревшим конфликтом и подтверждением карточка уже есть на сервере.
+        // ensureRecord станет no-op, но batch обязан донести diff note и сохранить чужое поле.
+        const applied = applyProductionCommand([restoredServer], cmd);
+        expect(applied.ok).toBe(true);
+        return { committed: true, list: applied.list };
+      });
+      await __prodQueueTesting.flushObj("o1");
+      const confirmed = __prodQueueTesting.confirmed.get("o1");
+      expect(confirmed.note).toContain("[ОФЛАЙН-ТЕСТ]");
+      expect(confirmed.responsible).toBe("чужая свежая правка");
+      expect(hasPendingProduction()).toBe(0);
     } finally {
       if (previousWindow === undefined) delete globalThis.window;
       else globalThis.window = previousWindow;

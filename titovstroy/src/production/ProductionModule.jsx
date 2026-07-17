@@ -149,7 +149,12 @@ async function _flushRun(objId) {
         if (restore) {
           const rev = (_revByObj.get(objId) || 0) + 1;
           const record = { ...e.local, objectId: objId, updatedAt: Date.now() };
-          const nextEntry = { base: record, local: record, rev, ensure: record };
+          // КРИТИЧНО: base оставляем прежней подтверждённой версией, а local — восстановленной.
+          // Тогда следующий batch несёт И ensureRecord (создать, если карточки правда нет),
+          // И реальный diff base→local. Раньше base=local=record давал только create-if-missing:
+          // если карточка между проверкой и повтором уже существовала, create становился no-op,
+          // черновик удалялся как «успешный», а офлайн-правка терялась.
+          const nextEntry = { base: e.base, local: record, rev, ensure: record };
           _revByObj.set(objId, rev);
           _draftByObj.set(objId, record);
           _persistEntry(objId, nextEntry);

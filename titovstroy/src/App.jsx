@@ -3,7 +3,7 @@ import { initializeApp } from "firebase/app";
 import { getDatabase, ref, get, set, runTransaction } from "firebase/database";
 import ProductionModule, { flushPendingProduction, stopProductionSession, hasPendingProduction, productionDraftsAreDurable, startProductionSession, setProductionCommandHandler } from "./production/ProductionModule.jsx";
 import { emptyProduction } from "./production/constants.js";
-import { createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, _stageKey, normalizeProductionIds } from "./production/commands.js";
+import { applyProductionCommand, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
@@ -5288,9 +5288,34 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
         _clearCloudErrorIfAllClean();
         return { committed: true, list: next };
       }
-      // Транзакция не прошла. conflict:true (+свежий список) — команда невалидна против текущих
-      // данных; иначе — сеть/SDK/не загружено (повторяемо).
-      return _fail(notOk || res.reason, !!notOk, notOk ? notOkList : undefined);
+      // SDK может сначала прогнать transaction-callback по холодному локальному cache=[].
+      // Если соединение ещё поднимается, этот предварительный no-card нельзя выдавать за
+      // подтверждённое удаление карточки: пользователь увидит ложный confirm, а черновик может
+      // быть обработан против неавторитетного списка. Любой логический конфликт перепроверяем
+      // отдельным облачным чтением (SDK→REST). Только если команда НЕ применима и к свежему
+      // списку Firebase, возвращаем conflict:true; при недоступном облаке оставляем pending.
+      if (notOk) {
+        try {
+          const freshResult = await storage.getCloudResult(PRODUCTIONS_KEY);
+          if (freshResult.status === "unavailable") return _fail("conflict-unverified", false);
+          let fresh = [];
+          if (freshResult.status === "found" && freshResult.value) {
+            try { fresh = JSON.parse(freshResult.value); } catch { return _fail("conflict-cloud-json", false); }
+          }
+          if (!Array.isArray(fresh)) return _fail("conflict-cloud-shape", false);
+          const verified = applyProductionCommand(fresh, cmd);
+          if (verified.ok) {
+            // Конфликт был только в холодном кеше. Fresh-read заодно прогревает SDK; следующий
+            // фоновый retry применит тот же идемпотентный batch, durable-draft пока не удаляем.
+            return _fail("stale-transaction-cache", false);
+          }
+          return _fail(verified.reason || notOk, true, fresh);
+        } catch {
+          return _fail("conflict-unverified", false);
+        }
+      }
+      // Транзакция не дошла до подтверждённого логического конфликта: сеть/SDK/таймаут.
+      return _fail(res.reason, false);
     };
     const next = _prodQueue.current.then(run, run);
     _prodQueue.current = next.then(() => {}, () => {});
