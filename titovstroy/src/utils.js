@@ -9,6 +9,53 @@
 // приложению для связки договоров/финпроектов/операций между собой.
 export const normCN = (s) => String(s||"").trim().toLowerCase().replace(/[\s№#]/g,"");
 
+export function isStaleApprovalObject(object, now = Date.now(), days = 14) {
+  if (!object || object.deletedAt || object.status !== "approval") return false;
+  const lastMovement = Number(object.updatedAt || object.createdAt || 0);
+  return lastMovement > 0 && (now - lastMovement) >= days * 24 * 60 * 60 * 1000;
+}
+
+// Финансовый проект хранит деньги и ссылку objectId. Описательные поля всегда
+// вычисляются из объекта, производства, договора и актов, чтобы их нельзя было
+// независимо изменить в двух разделах.
+export function buildFinanceProjectView({ project = {}, object = null, production = null, contract = null, reports = [], status = null } = {}) {
+  const linked = !!object;
+  const clientType = object?.clientType === "юр" ? "Юр лицо" : object ? "Физ лицо" : (project.client || "—");
+  const statusKey = status?.key || (linked ? (object.status || "new") : (project.rawStatus || project.status || ""));
+  const statusLabel = status?.label || statusKey || "—";
+  const hasAvr = linked
+    ? reports.some(r => r && r.objectId === object.id && r.type === "avr")
+    : project.avr === "да";
+  const contractSigned = linked
+    ? !!(contract && contract.contractStatus === "signed")
+    : project.contractSigned === "да";
+  return {
+    linked,
+    object,
+    production,
+    contract,
+    objectId: object?.id || project.objectId || "",
+    customerName: object?.clientName || (linked ? "Без клиента" : project.description || project.client || "Проект без объекта"),
+    customerPhone: object?.clientPhone || "",
+    customerType: clientType,
+    address: object?.address || "",
+    area: object?.area || "",
+    category: object?.objType || (linked ? "—" : project.category || "—"),
+    manager: object?.manager || production?.responsible || "",
+    contractNo: contract?.number || project.contractNo || "",
+    statusKey,
+    statusLabel,
+    statusColor: status?.color || "#64748b",
+    statusBg: status?.bg || "#f1f5f9",
+    saleDate: production?.saleDate || "",
+    startDate: production?.startDate || "",
+    planEndDate: production?.planEndDate || "",
+    factEndDate: production?.factEndDate || "",
+    contractSigned,
+    hasAvr,
+  };
+}
+
 export const CATALOG_DEFAULTS = Object.freeze({ renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[] });
 // Дефолты + текущее состояние + патч, одним местом.
 export const withCatalogOverrides = (cur, patch = {}) => ({ ...CATALOG_DEFAULTS, ...(cur||{}), ...patch });

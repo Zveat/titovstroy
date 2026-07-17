@@ -1,5 +1,37 @@
 import { describe, it, expect } from "vitest";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView } from "./utils.js";
+
+describe("объекты без движения и единый источник данных финпроекта", () => {
+  it("считает зависшим только живой объект на согласовании без движения 14+ дней", () => {
+    const now = new Date("2026-07-18T00:00:00Z").getTime();
+    expect(isStaleApprovalObject({ status:"approval", updatedAt:now-14*86400000 }, now)).toBe(true);
+    expect(isStaleApprovalObject({ status:"approval", updatedAt:now-13*86400000 }, now)).toBe(false);
+    expect(isStaleApprovalObject({ status:"work", updatedAt:now-30*86400000 }, now)).toBe(false);
+    expect(isStaleApprovalObject({ status:"approval", updatedAt:now-30*86400000, deletedAt:now }, now)).toBe(false);
+  });
+
+  it("берёт описательные поля финпроекта из объекта/производства/договора, не из дублей проекта", () => {
+    const view = buildFinanceProjectView({
+      project:{ objectId:"o1", contractNo:"СТАРЫЙ", client:"Юр лицо", category:"Старое", description:"Старое имя", createdAt:"2020-01-01" },
+      object:{ id:"o1", clientName:"Айжан", clientPhone:"8701", clientType:"физ", address:"Новый адрес", objType:"Новостройка", manager:"Звеат", status:"work" },
+      production:{ objectId:"o1", saleDate:"2026-01-10", startDate:"2026-02-01", planEndDate:"2026-05-01", factEndDate:"" },
+      contract:{ objectId:"o1", number:"2026-15", contractStatus:"signed" },
+      reports:[{ objectId:"o1", type:"avr" }],
+      status:{ key:"work", label:"В работе", color:"#00f", bg:"#eef" },
+    });
+    expect(view).toMatchObject({
+      linked:true, customerName:"Айжан", customerType:"Физ лицо", address:"Новый адрес",
+      category:"Новостройка", contractNo:"2026-15", statusLabel:"В работе",
+      saleDate:"2026-01-10", startDate:"2026-02-01", planEndDate:"2026-05-01",
+      contractSigned:true, hasAvr:true,
+    });
+  });
+
+  it("не маскирует непривязанный старый финпроект и сохраняет его legacy-информацию только для показа", () => {
+    const view = buildFinanceProjectView({ project:{ description:"Старый проект", contractNo:"88", category:"Другое", rawStatus:"в работе" } });
+    expect(view).toMatchObject({ linked:false, customerName:"Старый проект", contractNo:"88", category:"Другое" });
+  });
+});
 
 describe("isBackupRestorable — запрет массового восстановления из неполного файла", () => {
   it("полный подтверждённый файл — можно", () => {

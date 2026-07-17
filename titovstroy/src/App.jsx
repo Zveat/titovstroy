@@ -6,7 +6,7 @@ import { emptyProduction } from "./production/constants.js";
 import { applyProductionCommand, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
 function useDebounce(value, ms) {
@@ -4687,7 +4687,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   useEffect(() => { finProjectsRef.current = finProjects; }, [finProjects]);
   const [finProjModal, setFinProjModal] = useState(null);
   const [finProjSearch, setFinProjSearch] = useState("");
-  const [finProjStatusFilter, setFinProjStatusFilter] = useState("в работе");
+  const [finProjStatusFilter, setFinProjStatusFilter] = useState("");
   const [finProjCatFilter, setFinProjCatFilter] = useState("");
 
   // ── Связь фин-проектов с объектами (по номеру договора) ──
@@ -4787,6 +4787,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [statusConflictsOpen, setStatusConflictsOpen] = useState(false); // раскрыта ли панель «Проверка статусов»
   const [objectFilterType, setObjectFilterType] = useState("");
   const [objectFilterManager, setObjectFilterManager] = useState("");
+  const [objectAttentionFilter, setObjectAttentionFilter] = useState("");
   const [objectDateSort, setObjectDateSort] = useState("new"); // new = сначала новые, old = сначала старые
   const [objectDateFrom, setObjectDateFrom] = useState("");
   const [objectDateTo, setObjectDateTo] = useState("");
@@ -4842,14 +4843,27 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
         if(objectFilterManager && (o.manager||"")!==objectFilterManager) return false;
         if(objectDateFrom && (o.createdAt||0) < new Date(objectDateFrom).getTime()) return false;
         if(objectDateTo && (o.createdAt||0) > new Date(objectDateTo).getTime()+86399999) return false;
+        if(objectAttentionFilter === "stale-approval" && !isStaleApprovalObject(o)) return false;
         if(q && !((o.clientName||"").toLowerCase().includes(q)||(o.address||"").toLowerCase().includes(q)||(o.clientPhone||"").toLowerCase().includes(q))) return false;
         return true;
       })
       .sort((a,b)=>{ const da=a.createdAt||0, db=b.createdAt||0; return objectDateSort==="old" ? da-db : db-da; });
-  }, [objects, objectFilterStatus, objectFilterType, objectFilterManager, objectDateSort, objectDateFrom, objectDateTo, debouncedObjectSearch]);
+  }, [objects, objectFilterStatus, objectFilterType, objectFilterManager, objectAttentionFilter, objectDateSort, objectDateFrom, objectDateTo, debouncedObjectSearch]);
 
   // Только «живые» (не удалённые) объекты — используется в дашборде, аналитике и всех расчётах
   const liveObjects = useMemo(() => objects.filter(o=>!o.deletedAt), [objects]);
+  const openStaleObjects = useCallback(() => {
+    setObjectAttentionFilter("stale-approval");
+    setObjectFilterStatus("");
+    setObjectFilterType("");
+    setObjectFilterManager("");
+    setObjectDateFrom("");
+    setObjectDateTo("");
+    setObjectSearch("");
+    setCurrentObject(null);
+    setObjectTab("list");
+    setScreen("objects");
+  }, []);
 
   // ── «Что горит» / «Проверка базы»: детектор проблем (read-only, чистая функция из utils) ──
   const _allIssues = useMemo(() => computeIssues({ objects, productions, finProjects, financeTx, contracts, estimates, clients: contractClients }), [objects, productions, finProjects, financeTx, contracts, estimates, contractClients]);
@@ -4976,6 +4990,36 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     const derived = pr && PROD_TO_DEAL[pr.prodStatus];
     return derived || o.status || "new";
   }, [productions]);
+  const financeObjectOf = (project) => {
+    if (project?.objectId) {
+      const direct = liveObjects.find(o => o.id === project.objectId);
+      if (direct) return direct;
+    }
+    return project?.contractNo ? (contractLinkMap[normCN(project.contractNo)]?.object || null) : null;
+  };
+  const financeContractOf = (project, object) => {
+    if (!object) return null;
+    if (project?.contractNo) {
+      const exact = contracts.find(c => !c.deletedAt && c.objectId === object.id && c.number && normCN(c.number) === normCN(project.contractNo)
+        && c.type !== "podryad" && c.type !== "podryad_annex");
+      if (exact) return mainContractOf(exact);
+    }
+    const candidates = contracts
+      .filter(c => !c.deletedAt && c.objectId === object.id && c.type !== "podryad" && c.type !== "podryad_annex"
+        && c.type !== "annex" && c.type !== "design_add")
+      .sort((a,b) => {
+        const signed = Number(b.contractStatus === "signed") - Number(a.contractStatus === "signed");
+        return signed || (Number(b.updatedAt || b.createdAt || b.id || 0) - Number(a.updatedAt || a.createdAt || a.id || 0));
+      });
+    return candidates[0] || null;
+  };
+  const financeProjectViewOf = (project) => {
+    const object = financeObjectOf(project);
+    const production = object ? (productions.find(p => p.objectId === object.id) || null) : null;
+    const contract = financeContractOf(project, object);
+    const status = object ? (DEAL_STATUSES.find(s => s.key === unifiedStatusOf(object)) || DEAL_STATUSES[0]) : null;
+    return buildFinanceProjectView({ project, object, production, contract, reports, status });
+  };
   // Что «подсказывает» производство/финансы — используется только как рекомендация
   // в панели проверки статусов (не влияет на отображение автоматически).
   const suggestedStatusOf = useCallback((o) => {
@@ -9402,7 +9446,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         const signedObjs = liveObjects.filter(o=>o.status==="signed");
         const pipelineSum = approvalObjs.reduce((s,o)=>s+_objVal(o), 0);
         const now = Date.now();
-        const staleObjs = approvalObjs.filter(o=>(now-(o.updatedAt||o.createdAt||0))>14*864e5);
+        const staleObjs = approvalObjs.filter(o=>isStaleApprovalObject(o, now));
         const recentObjects = [...liveObjects].sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0)).slice(0,6);
         const recentContracts = [...contracts].filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,5);
         const monthName = new Date().toLocaleDateString("ru-RU",{month:"long"});
@@ -9452,7 +9496,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                 {navHistory.length > 0 && <button onClick={goBack} style={{background:"none",border:"1px solid #ccc",borderRadius:6,padding:"4px 12px",cursor:"pointer",marginRight:8,fontSize:14,color:"#fff",borderColor:"rgba(255,255,255,.4)"}}>← Назад</button>}
-                {staleObjs.length>0&&<span style={{background:"rgba(251,191,36,.2)",color:"#fde68a",border:"1px solid rgba(251,191,36,.3)",borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:700}}>⚠ {staleObjs.length} требуют внимания</span>}
+                {staleObjs.length>0&&<button onClick={openStaleObjects} style={{background:"rgba(251,191,36,.2)",color:"#fde68a",border:"1px solid rgba(251,191,36,.3)",borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⚠ {staleObjs.length} требуют внимания</button>}
                 <button onClick={resyncNow} disabled={resyncing}
                   title={dirtyCount>0 ? `Есть несинхронизированные изменения (${dirtyCount}). Нажмите, чтобы синхронизировать с сервером.` : "Обновить данные с сервера"}
                   style={{fontSize:11,fontWeight:700,display:"flex",alignItems:"center",gap:5,padding:"4px 12px",borderRadius:20,cursor:resyncing?"default":"pointer",fontFamily:"inherit",border:"1px solid "+(dirtyCount>0?"rgba(251,191,36,.5)":"rgba(255,255,255,.25)"),background:dirtyCount>0?"rgba(251,191,36,.2)":"rgba(255,255,255,.15)",color:dirtyCount>0?"#fde68a":"rgba(255,255,255,.9)",backdropFilter:"blur(4px)"}}>
@@ -9581,7 +9625,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   const days = Math.floor((now-(o.updatedAt||o.createdAt||0))/864e5);
                   const val = _objVal(o);
                   return (
-                    <div key={o.id} onClick={()=>{ setCurrentObject(o); setObjectTab("info"); setScreen("objects"); }}
+                    <div key={o.id} onClick={()=>{ setCurrentObject({...o}); setObjectTab("workspace"); setObjWsTab("info"); setScreen("objects"); }}
                       style={{display:"flex",alignItems:"center",gap:10,background:"rgba(255,255,255,.7)",borderRadius:8,padding:"8px 12px",cursor:"pointer",transition:"background .1s"}}
                       onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,.95)"}
                       onMouseLeave={e=>e.currentTarget.style.background="rgba(255,255,255,.7)"}>
@@ -9595,7 +9639,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     </div>
                   );
                 })}
-                {staleObjs.length>4&&<div style={{fontSize:12,color:"#b45309",paddingLeft:4}}>+{staleObjs.length-4} ещё — <span style={{cursor:"pointer",textDecoration:"underline"}} onClick={()=>setScreen("objects")}>смотреть все</span></div>}
+                {staleObjs.length>4&&<div style={{fontSize:12,color:"#b45309",paddingLeft:4}}>+{staleObjs.length-4} ещё — <button onClick={openStaleObjects} style={{background:"none",border:"none",padding:0,color:"#b45309",cursor:"pointer",textDecoration:"underline",fontFamily:"inherit",fontSize:12}}>смотреть все</button></div>}
               </div>
             </div>
           )}
@@ -9649,14 +9693,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:"20px 22px",boxShadow:"0 1px 3px rgba(15,23,42,.07),0 4px 12px rgba(15,23,42,.04)"}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
                   <span style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>🕐 Последние объекты</span>
-                  <span onClick={()=>setScreen("objects")} style={{color:"#2563eb",cursor:"pointer",fontSize:11,fontWeight:600}}>все →</span>
+                  <button onClick={()=>{ setObjectAttentionFilter(""); setCurrentObject(null); setObjectTab("list"); setScreen("objects"); }} style={{background:"none",border:"none",padding:0,color:"#2563eb",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>все →</button>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:1}}>
                   {recentObjects.map((o,i,arr)=>{
                     const st = DEAL_STATUSES.find(s=>s.key===unifiedStatusOf(o))||DEAL_STATUSES[0];
                     const val = _objVal(o);
                     return (
-                      <div key={o.id} onClick={()=>{ setCurrentObject(o); setObjectTab("info"); setScreen("objects"); }}
+                      <div key={o.id} onClick={()=>{ setCurrentObject({...o}); setObjectTab("workspace"); setObjWsTab("info"); setScreen("objects"); }}
                         style={{display:"flex",alignItems:"center",gap:10,padding:"9px 10px",borderRadius:8,cursor:"pointer",transition:"background .1s",borderBottom:i<arr.length-1?"1px solid #f3f4f6":"none"}}
                         onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"}
                         onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
@@ -12169,21 +12213,20 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 else if (t.type==="expense") projStats[cn].expense += Number(t.amount)||0;
               }
               const sorted = [...finProjects].sort((a,b)=>(a.createdAt||"").localeCompare(b.createdAt||""));
-              const allStatuses = [...new Set(sorted.map(p=>p.rawStatus||p.status).filter(Boolean))];
-              const allCats = [...new Set(sorted.map(p=>p.category).filter(Boolean))];
+              const allStatuses = [...new Map(sorted.map(p=>financeProjectViewOf(p)).filter(v=>v.statusKey).map(v=>[v.statusKey,{key:v.statusKey,label:v.statusLabel,color:v.statusColor}])).values()];
+              const allCats = [...new Set(sorted.map(p=>financeProjectViewOf(p).category).filter(v=>v&&v!=="—"))];
               const q = finProjSearch.toLowerCase();
               const filtered = sorted
-                .filter(p=>!finProjStatusFilter || (p.rawStatus||p.status)===finProjStatusFilter)
-                .filter(p=>!finProjCatFilter || p.category===finProjCatFilter)
-                .filter(p=>!q || (p.contractNo||"").toLowerCase().includes(q)||(p.description||"").toLowerCase().includes(q)||(p.client||"").toLowerCase().includes(q)||(p.comment||"").toLowerCase().includes(q));
-              const STATUS_COL = { активен:"#2563eb", выполнен:"#059669", отменен:"#94a3b8", приостановлен:"#f59e0b", новый:"#7c3aed" };
+                .filter(p=>!finProjStatusFilter || financeProjectViewOf(p).statusKey===finProjStatusFilter)
+                .filter(p=>!finProjCatFilter || financeProjectViewOf(p).category===finProjCatFilter)
+                .filter(p=>{
+                  if (!q) return true;
+                  const v = financeProjectViewOf(p);
+                  return [v.contractNo,v.customerName,v.customerPhone,v.address,v.category,p.comment]
+                    .some(x=>String(x||"").toLowerCase().includes(q));
+                });
               const days = (a,b) => { if(!a||!b) return null; const d=Math.round((new Date(b)-new Date(a))/86400000); return d>=0?d:null; };
               const yesno = v => v==="да"||v==="yes"||v===true||v==="1"||v==="Да"||v==="ДА";
-              const yn = v => <span style={{color:yesno(v)?"#059669":"#dc2626",fontWeight:700}}>{yesno(v)?"✓":"✗"}</span>;
-              const thS = {padding:"8px 10px",fontWeight:700,fontSize:11,color:"#64748b",background:"#f8fafc",whiteSpace:"nowrap",textAlign:"right",borderBottom:"1px solid #e2e8f0"};
-              const thSL = {...thS,textAlign:"left"};
-              const tdS = {padding:"8px 10px",fontSize:12,whiteSpace:"nowrap",borderBottom:"1px solid #f1f5f9",textAlign:"right",color:"#0f172a"};
-              const tdSL = {...tdS,textAlign:"left"};
               // totals
               const totBudget = filtered.reduce((s,p)=>s+(Number(p.budget)||0),0);
               const totIncome = filtered.reduce((s,p)=>s+(projStats[normCN(p.contractNo)]?.income||0),0);
@@ -12198,14 +12241,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       <h2 style={{margin:0,fontSize:18,fontWeight:800,color:"#0f172a"}}>🏗 Проекты</h2>
                       <span style={{fontSize:13,color:"#94a3b8",fontWeight:600}}>{filtered.length} из {finProjects.length}</span>
                     </div>
-                    {!finReadonly && <button onClick={()=>setFinProjModal({id:"",contractNo:"",client:"Физ лицо",category:"Вторичка",description:"",budget:0,status:"активен",createdAt:"",closedAt:"",b24:"нет",contractSigned:"нет",avr:"нет",comment:""})}
+                    {!finReadonly && <button onClick={()=>setFinProjModal({id:"",objectId:"",contractNo:"",budget:0,b24:"нет",comment:""})}
                       style={{background:"#059669",color:"#fff",border:"none",borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 2px 8px rgba(5,150,105,.3)"}}>+ Проект</button>}
                   </div>
                   {/* Фильтры */}
                   <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
                     <input className="fi" style={{flex:"1 1 180px",maxWidth:260}} value={finProjSearch} onChange={e=>setFinProjSearch(e.target.value)} placeholder="🔍 Поиск..."/>
-                    {[["","Все статусы"],...allStatuses.map(s=>[s,s])].map(([v,l])=>{
-                      const col=STATUS_COL[v]||"#64748b";
+                    {[{key:"",label:"Все статусы",color:"#2563eb"},...allStatuses].map(({key:v,label:l,color})=>{
+                      const col=color||"#64748b";
                       const on=finProjStatusFilter===v;
                       return <button key={v} onClick={()=>setFinProjStatusFilter(v)} style={{fontSize:12,fontWeight:700,padding:"6px 12px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(on?(v?col:"#2563eb"):"#e2e8f0"),background:on?(v?col+"18":"#eff6ff"):"#fff",color:on?(v?col:"#2563eb"):"#94a3b8"}}>{l}</button>;
                     })}
@@ -12236,18 +12279,18 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   {/* Карточки проектов */}
                   <div className="fin-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>
                     {filtered.map(p=>{
+                      const view = financeProjectViewOf(p);
                       const st = projStats[normCN(p.contractNo)]||{income:0,expense:0};
                       const income = st.income;
                       const expense = st.expense;
                       const debt = Math.max(0,(Number(p.budget)||0)-income);
                       const marginVal = income-expense;
                       const marginPct = income>0 ? Math.round(marginVal/income*100) : null;
-                      const col = STATUS_COL[p.rawStatus||p.status]||"#64748b";
-                      const dur = days(p.createdAt, p.closedAt);
+                      const col = view.statusColor;
+                      const dur = days(view.startDate, view.factEndDate);
                       const budgetFill = p.budget>0 ? Math.min(100,Math.round(income/p.budget*100)) : 0;
                       const mCol = marginPct===null?"#94a3b8":marginPct>=30?"#059669":marginPct>=0?"#f59e0b":"#dc2626";
                       const mBg  = marginPct===null?"#f8fafc":marginPct>=30?"#f0fdf4":marginPct>=0?"#fffbeb":"#fef2f2";
-                      const link = linkForContractNo(p.contractNo);
                       return (
                         <div key={p.id||p.contractNo} onClick={()=>{ if(!finReadonly) setFinProjModal({...p}); }}
                           style={{background:"#fff",border:"1px solid #eef2f7",borderRadius:16,cursor:finReadonly?"default":"pointer",boxShadow:"0 1px 3px rgba(15,23,42,.07)",transition:"box-shadow .15s,transform .15s",overflow:"hidden",display:"flex",flexDirection:"column"}}
@@ -12258,18 +12301,21 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             {/* Шапка */}
                             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8}}>
                               <div style={{flex:1,minWidth:0}}>
-                                <div style={{fontSize:14,fontWeight:800,color:"#0f172a",letterSpacing:"-.2px",lineHeight:1.3,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{p.description||p.comment||"—"}</div>
-                                <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>{String(p.contractNo||"").replace(/^№+/,"№")}</div>
+                                <div style={{fontSize:14,fontWeight:800,color:"#0f172a",letterSpacing:"-.2px",lineHeight:1.3,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{view.customerName}{view.address?` · ${view.address}`:""}</div>
+                                <div style={{fontSize:11,color:view.linked?"#94a3b8":"#dc2626",marginTop:3,fontWeight:view.linked?400:700}}>
+                                  {view.linked ? (view.contractNo ? `Договор №${String(view.contractNo).replace(/^№+/,"")}` : "Договор не создан") : "⚠ Не привязан к объекту"}
+                                </div>
                               </div>
-                              <span style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:20,background:col+"18",color:col,whiteSpace:"nowrap",flexShrink:0,lineHeight:1.6}}>{p.rawStatus||p.status}</span>
+                              <span style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:20,background:view.statusBg,color:col,whiteSpace:"nowrap",flexShrink:0,lineHeight:1.6}}>{view.statusLabel}</span>
                             </div>
                             {/* Мета-чипы */}
                             <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:12,fontSize:10,alignItems:"center",minHeight:22}}>
-                              {[p.client,p.category].filter(Boolean).map((m,i)=><span key={i} style={{color:"#64748b",background:"#f1f5f9",borderRadius:6,padding:"2px 7px",fontWeight:600}}>{m}</span>)}
-                              {p.createdAt&&<span style={{color:"#94a3b8"}}>🤝 {p.createdAt}</span>}
-                              {p.startDate&&<span style={{color:"#94a3b8"}}>🔨 {p.startDate}</span>}
-                              {p.closedAt&&<span style={{color:"#94a3b8"}}>✓ {p.closedAt}{dur!==null?` · ${dur}д.`:""}</span>}
-                              {link?.object && <button onClick={e=>{ e.stopPropagation(); openObjectFromFinance(link.object); }} title="Открыть объект" style={{background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:6,padding:"2px 7px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↗</button>}
+                              {[view.customerType,view.category].filter(Boolean).map((m,i)=><span key={i} style={{color:"#64748b",background:"#f1f5f9",borderRadius:6,padding:"2px 7px",fontWeight:600}}>{m}</span>)}
+                              {view.saleDate&&<span style={{color:"#94a3b8"}} title="Дата продажи">🤝 {view.saleDate}</span>}
+                              {view.startDate&&<span style={{color:"#94a3b8"}} title="Дата начала работ">🔨 {view.startDate}</span>}
+                              {view.planEndDate&&<span style={{color:"#94a3b8"}} title="Плановая дата окончания">📅 {view.planEndDate}</span>}
+                              {view.factEndDate&&<span style={{color:"#059669"}} title="Фактическая дата окончания">✓ {view.factEndDate}{dur!==null?` · ${dur}д.`:""}</span>}
+                              {view.object && <button onClick={e=>{ e.stopPropagation(); openObjectFromFinance(view.object); }} title="Открыть объект" style={{background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:6,padding:"2px 7px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↗ Объект</button>}
                             </div>
                             {/* Прогресс оплаты */}
                             <div style={{marginBottom:12}}>
@@ -12308,7 +12354,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                 </span>
                               </div>
                               <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
-                                {[["Б24",p.b24],["Договор",p.contractSigned],["АВР",p.avr]].map(([l,v])=>(
+                                {[["Б24",yesno(p.b24)],["Договор",view.contractSigned],["АВР",view.hasAvr]].map(([l,v])=>(
                                   <span key={l} style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:6,background:yesno(v)?"#f0fdf4":"#fef2f2",color:yesno(v)?"#059669":"#dc2626",display:"inline-flex",alignItems:"center",gap:3}}>{yesno(v)?"✓":"✗"} {l}</span>
                                 ))}
                                 {p.contractNo && <button onClick={e=>{ e.stopPropagation(); navigate(undefined,"ops",{finFilterContract:p.contractNo}); }} style={{marginLeft:"auto",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:7,padding:"4px 9px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📋 Операции</button>}
@@ -12323,8 +12369,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   {/* Модалка проекта */}
                   {finProjModal !== null && (()=>{
                     const mp = finProjModal;
+                    const view = financeProjectViewOf(mp);
                     const setp = (k,v) => setFinProjModal(p=>({...p,[k]:v}));
                     const savep = async () => {
+                      if (!mp.id && !mp.objectId) { window.alert("Сначала выберите объект. Новый финансовый проект без объекта создавать нельзя."); return; }
                       const proj = {...mp, id: mp.id||genId(), budget:Number(mp.budget)||0, paidFact:Number(mp.paidFact)||0, expenses:Number(mp.expenses)||0, updatedAt:Date.now()};
                       const cur = finProjectsRef.current;
                       const list = mp.id ? cur.map(x=>x.id===mp.id?proj:x) : [proj,...cur];
@@ -12346,7 +12394,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                           </div>
                           {/* показываем расчётные цифры если проект существует */}
                           {mp.id && (()=>{ const st=projStats[normCN(mp.contractNo)]||{income:0,expense:0}; const debt=Math.max(0,(Number(mp.budget)||0)-st.income); const mrg=st.income>0?Math.round((st.income-st.expense)/st.income*100):null;
-                            const link=linkForContractNo(mp.contractNo); const plan=link?.planTotal||0; const pCost=link?.planCost||0; const pMrgPct=link?.planMarginPct;
+                            const link=view.contractNo ? linkForContractNo(view.contractNo) : null; const plan=link?.planTotal||0; const pCost=link?.planCost||0; const pMrgPct=link?.planMarginPct;
                             const Cell=({l,v,c})=><div><div style={{fontSize:10,color:"#94a3b8"}}>{l}</div><div style={{fontWeight:800,color:c}}>{v}</div></div>;
                             return <>
                               {/* ФАКТ (по ДДС) */}
@@ -12373,66 +12421,52 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                           })()}
                           {/* Связь с объектом / выбор объекта */}
                           {(()=>{
-                            const link = linkForContractNo(mp.contractNo);
-                            const linkedObj = link?.object;
-                            const plan = link?.planTotal||0;
-                            // список объектов с договорами для выбора
-                            const objOpts = contracts.filter(c=>c.number&&c.objectId).map(c=>{
-                              const o=objects.find(x=>x.id===c.objectId);
-                              return {num:c.number, label:`${c.number} — ${o?.address||o?.clientName||"объект"}`};
-                            });
-                            const seen=new Set(); const uniqOpts=objOpts.filter(o=>{const k=normCN(o.num); if(seen.has(k))return false; seen.add(k); return true;});
-                            return <div style={{background:linkedObj?"#eff6ff":"#fafafa",border:"1px solid "+(linkedObj?"#bfdbfe":"#eee"),borderRadius:10,padding:"10px 14px",marginBottom:11}}>
-                              <div style={{fontSize:11,color:"#64748b",fontWeight:700,marginBottom:6}}>🔗 Связь с объектом</div>
-                              {!mp.id && <select className="fi" style={{marginBottom:linkedObj?8:0}} value="" onChange={e=>{ const opt=uniqOpts.find(o=>o.num===e.target.value); if(opt){ const c=contracts.find(x=>x.number===opt.num&&x.objectId); const o=objects.find(x=>x.id===c?.objectId); const d=finProjDraftFromObject(o,c); setFinProjModal(p=>({...p,...d,id:p.id})); } }}>
-                                <option value="">— выбрать объект (подтянет № / бюджет) —</option>
-                                {uniqOpts.map(o=><option key={o.num} value={o.num}>{o.label}</option>)}
-                              </select>}
-                              {linkedObj ? <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                                <div style={{fontSize:12,color:"#1e40af"}}>📍 {linkedObj.address||linkedObj.clientName||"объект"}{plan>0&&<span style={{color:"#64748b"}}> · смета (план): <b>{fM(plan)} ₸</b></span>}</div>
-                                <button onClick={()=>{ setFinProjModal(null); openObjectFromFinance(linkedObj); }} style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:7,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↗ Открыть объект</button>
-                              </div> : <div style={{fontSize:11,color:"#94a3b8"}}>Объект с таким № договора не найден. Введите № вручную или выберите выше.</div>}
+                            const objectOptions = [...liveObjects].sort((a,b)=>String(a.clientName||a.address||"").localeCompare(String(b.clientName||b.address||""),"ru"));
+                            return <div style={{background:view.linked?"#eff6ff":"#fff7ed",border:"1px solid "+(view.linked?"#bfdbfe":"#fdba74"),borderRadius:10,padding:"11px 14px",marginBottom:11}}>
+                              <div style={{fontSize:11,color:view.linked?"#1e40af":"#9a3412",fontWeight:800,marginBottom:6}}>{view.linked?"🔗 Проект связан с объектом":"⚠ Проект не привязан к объекту"}</div>
+                              <select className="fi" style={{marginBottom:view.linked?8:0}} value={view.objectId||""} onChange={e=>{
+                                const object = liveObjects.find(o=>o.id===e.target.value);
+                                if (!object) { setp("objectId",""); return; }
+                                const contract = financeContractOf(mp, object);
+                                setFinProjModal(prev=>({
+                                  ...prev,
+                                  objectId:object.id,
+                                  ...(!prev.id ? { contractNo:contract?.number||"", budget:finBudgetOfContract(contract)||Number(prev.budget)||0 } : {}),
+                                }));
+                              }}>
+                                <option value="">— выбрать объект —</option>
+                                {objectOptions.map(o=>{
+                                  const c=financeContractOf(mp,o);
+                                  return <option key={o.id} value={o.id}>{o.clientName||"Без клиента"} — {o.address||"без адреса"}{c?.number?` · №${c.number}`:""}</option>;
+                                })}
+                              </select>
+                              {view.object && <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                                <div style={{fontSize:12,color:"#1e40af"}}>📍 {view.address||view.customerName}</div>
+                                <button onClick={()=>{ setFinProjModal(null); openObjectFromFinance(view.object); }} style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:7,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↗ Открыть объект</button>
+                              </div>}
                             </div>;
                           })()}
                           <div style={{display:"grid",gap:11}}>
-                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                              <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>№ договора *</div><input className="fi" value={mp.contractNo} onChange={e=>setp("contractNo",e.target.value)} placeholder="0918#1002"/></div>
-                              <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Заказчик</div>
-                                <select className="fi" value={mp.client||"Физ лицо"} onChange={e=>setp("client",e.target.value)}>
-                                  {["Физ лицо","Юр лицо"].map(c=><option key={c} value={c}>{c}</option>)}
-                                </select>
+                            <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:"12px 14px"}}>
+                              <div style={{fontSize:11,fontWeight:800,color:"#475569",marginBottom:8}}>Данные объекта · только просмотр</div>
+                              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:"9px 14px"}}>
+                                {[
+                                  ["Заказчик",view.customerName],
+                                  ["Тип заказчика",view.customerType],
+                                  ["Категория",view.category],
+                                  ["Статус",view.statusLabel],
+                                  ["№ договора",view.contractNo||"Не создан"],
+                                  ["Дата продажи",view.saleDate||"—"],
+                                  ["Дата начала",view.startDate||"—"],
+                                  ["План окончания",view.planEndDate||"—"],
+                                  ["Факт окончания",view.factEndDate||"—"],
+                                  ["Ответственный",view.manager||"—"],
+                                ].map(([label,value])=><div key={label}><div style={{fontSize:10,color:"#94a3b8",marginBottom:2}}>{label}</div><div style={{fontSize:12,color:"#0f172a",fontWeight:700}}>{value}</div></div>)}
                               </div>
+                              <div style={{fontSize:10.5,color:"#64748b",marginTop:9,lineHeight:1.4}}>Эти сведения меняются только в карточке объекта и сразу отображаются здесь.</div>
                             </div>
-                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                              <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Категория</div>
-                                <select className="fi" value={mp.category||""} onChange={e=>setp("category",e.target.value)}>
-                                  <option value="">— не указана —</option>
-                                  {["Вторичка","Коммерческие объекты","Частичные работы, услуги","Новостройки","Другое"].map(c=><option key={c} value={c}>{c}</option>)}
-                                </select>
-                              </div>
-                              <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Статус</div>
-                                <select className="fi" value={mp.rawStatus||mp.status||"в работе"} onChange={e=>{ const raw=e.target.value; const mapped={выполнен:"выполнен",отменен:"отменен","в работе":"активен",новый:"активен"}; setp("rawStatus",raw); setp("status",mapped[raw]||"активен"); }}>
-                                  {["в работе","новый","выполнен","отменен"].map(s=><option key={s} value={s}>{s}</option>)}
-                                </select>
-                              </div>
-                            </div>
-                            <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Описание работ</div><input className="fi" value={mp.description||""} onChange={e=>setp("description",e.target.value)}/></div>
                             <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Стоимость проекта, ₸</div><input type="number" className="fi" value={mp.budget||0} onChange={e=>setp("budget",e.target.value)}/></div>
-                            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
-                              <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Дата продажи</div><input type="date" className="fi" value={mp.createdAt||""} onChange={e=>setp("createdAt",e.target.value)}/></div>
-                              <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Дата начала работ</div><input type="date" className="fi" value={mp.startDate||""} onChange={e=>setp("startDate",e.target.value)}/></div>
-                              <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Дата закрытия</div><input type="date" className="fi" value={mp.closedAt||""} onChange={e=>setp("closedAt",e.target.value)}/></div>
-                            </div>
-                            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
-                              {[["b24","B24 внесён?"],["contractSigned","Договор заключён?"],["avr","АВР?"]].map(([k,l])=>(
-                                <div key={k}><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>{l}</div>
-                                  <select className="fi" value={mp[k]||"нет"} onChange={e=>setp(k,e.target.value)}>
-                                    <option value="да">да</option><option value="нет">нет</option>
-                                  </select>
-                                </div>
-                              ))}
-                            </div>
-                            <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Комментарий</div><input className="fi" value={mp.comment||""} onChange={e=>setp("comment",e.target.value)}/></div>
+                            <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Финансовый комментарий</div><input className="fi" value={mp.comment||""} onChange={e=>setp("comment",e.target.value)}/></div>
                           </div>
                           <div style={{display:"flex",gap:8,marginTop:18}}>
                             {mp.id && <button onClick={delp} style={{background:"#fef2f2",color:"#dc2626",border:"1px solid #fecaca",borderRadius:9,padding:"10px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Удалить</button>}
@@ -13022,6 +13056,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   <span style={{fontSize:13,color:"#2563eb"}}>{objectDateSort==="new"?"↓":"↑"}</span>
                 </button>
               </div>
+              {objectAttentionFilter === "stale-approval" && (
+                <div style={{display:"flex",alignItems:"center",gap:8,background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:9,padding:"8px 11px",color:"#92400e",fontSize:12,fontWeight:700}}>
+                  <span style={{flex:1}}>⚠ Показаны только объекты на согласовании без движения 14+ дней</span>
+                  <button onClick={()=>setObjectAttentionFilter("")} style={{background:"#fff",border:"1px solid #fcd34d",borderRadius:7,padding:"4px 9px",color:"#92400e",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Показать все</button>
+                </div>
+              )}
               {/* Фильтр по статусу */}
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 <button onClick={()=>setObjectFilterStatus("")}
@@ -13072,7 +13112,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               {(()=>{
               const usRows = filteredObjects.filter(o=>!objectFilterStatus||unifiedStatusOf(o)===objectFilterStatus);
               // Проекты из Финансов без объекта — тоже показываем (клик = создать объект, с подтверждением)
-              const orphanFps = prodEntries.filter(e=>!e.objectId).filter(e=>{
+              const orphanFps = (objectAttentionFilter ? [] : prodEntries.filter(e=>!e.objectId)).filter(e=>{
                 const pr = productions.find(p=>p.objectId===e.key);
                 const us = PROD_TO_DEAL[pr?.prodStatus||e.prodStatusDefault]||"new";
                 if(objectFilterStatus && us!==objectFilterStatus) return false;
@@ -13082,7 +13122,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 return true;
               });
               return (<>
-              <div style={{fontSize:12,color:"#94a3b8"}}>Объектов: {usRows.length}{orphanFps.length>0?` · проектов из Финансов без объекта: ${orphanFps.length}`:""}</div>
+              <div style={{fontSize:12,color:"#94a3b8"}}>Объектов: {usRows.length}{!objectAttentionFilter&&orphanFps.length>0?` · проектов из Финансов без объекта: ${orphanFps.length}`:""}</div>
+              {objectAttentionFilter && usRows.length === 0 && (
+                <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:"18px",textAlign:"center",color:"#166534",fontSize:13,fontWeight:700}}>
+                  ✓ Сейчас нет объектов без движения 14+ дней
+                </div>
+              )}
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>
               {usRows.map(obj=>{
                 const st = DEAL_STATUSES.find(s=>s.key===unifiedStatusOf(obj))||DEAL_STATUSES[0];
