@@ -6,7 +6,7 @@ import { emptyProduction } from "./production/constants.js";
 import { applyProductionCommand, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
 function useDebounce(value, ms) {
@@ -701,6 +701,8 @@ const STORAGE_KEY        = "titovstroy-estimates";
 const BACKUPS_KEY        = "titovstroy-estimates-backups"; // снимки архива для восстановления
 const USERS_KEY          = "titovstroy-users";
 const USERS_BACKUPS_KEY  = "titovstroy-users-backups";
+const ROLE_PERMISSIONS_KEY = "titovstroy-role-permissions";
+const ROLE_PERMISSIONS_BACKUPS_KEY = "titovstroy-role-permissions-backups";
 const SESSION_KEY        = "titovstroy-session";
 const PRESENCE_KEY       = "titovstroy-presence"; // { [userId]: lastSeenTs } — кто когда был онлайн
 const PRESENCE_ONLINE_MS = 2 * 60 * 1000; // «в сети», если активность была <2 мин назад
@@ -2055,7 +2057,7 @@ function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note })
 
 
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
-function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
+function AdminPageContent({ currentUser, presence = {}, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
   const [tab, setTab] = useState("users");
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2081,6 +2083,10 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
   const [adminEditItem, setAdminEditItem] = useState(null); // {mode:"newClient"|"editClient"|"newCA"|"editCA"|"newWorker"|"editWorker", data:{}}
   const [adminSubTab, setAdminSubTab] = useState("list"); // "list"|"clientEditor"|"caEditor"|"workerEditor"
   const [workerSearch, setWorkerSearch] = useState(""); // поиск в справочнике подрядчиков
+  const [permissionRole, setPermissionRole] = useState("sales_head");
+  const [permissionDraft, setPermissionDraft] = useState(() => normalizeRolePermissions(rolePermissions));
+  const [permissionMsg, setPermissionMsg] = useState("");
+  useEffect(() => { setPermissionDraft(normalizeRolePermissions(rolePermissions)); }, [rolePermissions]);
 
   const openCatalogBackups = async () => {
     const bRaw = await storage.get(CATALOG_BACKUPS_KEY);
@@ -2267,7 +2273,10 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
     const curCat = (localCatalog?.catRenames||{})[origCatKey] || origCatKey; const curSub = (localCatalog?.subRenames||{})[key] || origSubKey;
     await saveCatalog({ ...(localCatalog||{}), hiddenSubs:hs, custom:((localCatalog||{}).custom||[]).filter(w => !(w.cat===curCat && w.sub===curSub)) }); Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
   };
-  const roleLabel = r => r==="admin"?"👑 Администратор":r==="viewer"?"👁 Наблюдатель":r==="manager"?"🧑‍💼 Руководитель":r==="foreman"?"🔨 Прораб":"👤 Замерщик";
+  const roleLabel = r => {
+    const role = ROLE_DEFINITIONS.find(x => x.key === r);
+    return role ? `${role.icon} ${role.label}` : "👤 Замерщик";
+  };
   const roleColor = r => r==="admin" ? "#ffffff" : r==="viewer" ? "#94a3b8" : "#94a3b8";
   const PRESENCE_ONLINE = 2 * 60 * 1000;
   const formatLastSeen = (ts) => {
@@ -2296,7 +2305,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
 
       {/* Табы */}
       <div className="admin-tabs" style={{display:"flex",gap:3,marginBottom:24,background:"#f8fafc",borderRadius:10,padding:4,overflowX:"auto"}}>
-        {[["users","👥 Сотрудники"],["clients","👥 Клиенты"],["contragents","🏢 Реквизиты"],["workers","🔨 Подрядчики"],["prices","💰 Прайс-лист"],["backups","🗄 Бэкапы"],["audit","📋 Журнал"],["check","🔍 Проверка базы"]].map(([t,label])=>(
+        {[["users","👥 Сотрудники"],["permissions","🔐 Права ролей"],["clients","👥 Клиенты"],["contragents","🏢 Реквизиты"],["workers","🔨 Подрядчики"],["prices","💰 Прайс-лист"],["backups","🗄 Бэкапы"],["audit","📋 Журнал"],["check","🔍 Проверка базы"]].map(([t,label])=>(
           <button key={t} onClick={()=>{ setTab(t); setAdminSubTab("list"); }} style={{
             flex:1,padding:"11px",borderRadius:8,border:"none",cursor:"pointer",
             fontFamily:"inherit",fontSize:12,fontWeight:700,whiteSpace:"nowrap",
@@ -2310,6 +2319,90 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
         <div style={{textAlign:"center",padding:"60px 0",color:"#94a3b8"}}>
           <div style={{fontSize:24,marginBottom:8}}>⏳</div>Загрузка...
         </div>
+      ) : tab === "permissions" ? (
+        <div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
+            {ROLE_DEFINITIONS.map(role => (
+              <button key={role.key} onClick={()=>setPermissionRole(role.key)} className="btn"
+                style={{padding:"8px 12px",background:permissionRole===role.key?"#eff6ff":"#fff",color:permissionRole===role.key?"#2563eb":"#64748b",border:`1px solid ${permissionRole===role.key?"#93c5fd":"#e2e8f0"}`}}>
+                {role.icon} {role.label}
+              </button>
+            ))}
+          </div>
+          {(()=>{
+            const p = permissionDraft[permissionRole] || DEFAULT_ROLE_PERMISSIONS[permissionRole];
+            const locked = permissionRole === "admin";
+            const setPermission = (key, value) => {
+              if (locked) return;
+              setPermissionDraft(prev => ({...prev,[permissionRole]:{...prev[permissionRole],[key]:value}}));
+              setPermissionMsg("");
+            };
+            const scopeRows = [
+              ["dashboard","Главная","Какие объекты входят в показатели главной"],
+              ["objects","Объекты","Какие карточки объектов доступны"],
+              ["calendar","Календарь","Какие объекты видны в календаре"],
+              ["documents","Прочие документы","Доступ к договорам и документам"],
+              ["analytics","Аналитика","По каким объектам строится аналитика"],
+            ];
+            const editRows = [
+              ["objectEdit","Карточки объектов"],
+              ["estimateEdit","Сметы и КП"],
+              ["productionEdit","Производство"],
+              ["documentEdit","Документы"],
+            ];
+            const Select = ({value,onChange,children}) => (
+              <select className="fi" value={value} onChange={e=>onChange(e.target.value)} disabled={locked} style={{width:"100%",maxWidth:210}}>{children}</select>
+            );
+            return (
+              <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,overflow:"hidden"}}>
+                <div style={{padding:"16px 18px",borderBottom:"1px solid #e2e8f0",background:"#f8fafc"}}>
+                  <div style={{fontWeight:800,color:"#0f172a"}}>{roleLabel(permissionRole)}</div>
+                  <div style={{fontSize:12,color:"#64748b",marginTop:3}}>{locked?"Администратор всегда имеет полный доступ, чтобы систему нельзя было случайно заблокировать.":"Изменения начнут действовать у сотрудников этой роли после сохранения и обновления страницы."}</div>
+                </div>
+                <div style={{padding:"8px 18px"}}>
+                  {scopeRows.map(([key,label,sub])=>(
+                    <div key={key} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(145px,210px)",gap:16,alignItems:"center",padding:"11px 0",borderBottom:"1px solid #f1f5f9"}}>
+                      <div><div style={{fontSize:13,fontWeight:700,color:"#334155"}}>{label}</div><div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{sub}</div></div>
+                      <Select value={p[key]} onChange={v=>setPermission(key,v)}>
+                        <option value="none">Нет доступа</option><option value="own">Только свои</option><option value="all">Все</option>
+                      </Select>
+                    </div>
+                  ))}
+                  <div style={{fontSize:11,fontWeight:800,color:"#64748b",textTransform:"uppercase",letterSpacing:".06em",marginTop:18,marginBottom:4}}>Редактирование</div>
+                  {editRows.map(([key,label])=>(
+                    <div key={key} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(145px,210px)",gap:16,alignItems:"center",padding:"10px 0",borderBottom:"1px solid #f1f5f9"}}>
+                      <div style={{fontSize:13,fontWeight:700,color:"#334155"}}>{label}</div>
+                      <Select value={p[key]} onChange={v=>setPermission(key,v)}>
+                        <option value="none">Только просмотр</option><option value="own">Редактировать свои</option><option value="all">Редактировать все</option>
+                      </Select>
+                    </div>
+                  ))}
+                  <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(145px,210px)",gap:16,alignItems:"center",padding:"10px 0",borderBottom:"1px solid #f1f5f9"}}>
+                    <div><div style={{fontSize:13,fontWeight:700,color:"#334155"}}>Финансы</div><div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>ДДС, P&L, баланс, проекты и операции</div></div>
+                    <Select value={p.finance} onChange={v=>setPermission("finance",v)}>
+                      <option value="none">Нет доступа</option><option value="view">Только просмотр</option><option value="edit">Просмотр и изменение</option>
+                    </Select>
+                  </div>
+                  <label style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,padding:"12px 0",borderBottom:"1px solid #f1f5f9",cursor:locked?"default":"pointer"}}>
+                    <span><span style={{fontSize:13,fontWeight:700,color:"#334155"}}>Детальные финансовые результаты</span><span style={{display:"block",fontSize:11,color:"#94a3b8",marginTop:2}}>Себестоимость, прибыль, маржа и долги в объектах и аналитике</span></span>
+                    <input type="checkbox" checked={p.financialDetails} disabled={locked} onChange={e=>setPermission("financialDetails",e.target.checked)} style={{width:18,height:18}}/>
+                  </label>
+                  <label style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,padding:"12px 0",cursor:locked?"default":"pointer"}}>
+                    <span><span style={{fontSize:13,fontWeight:700,color:"#334155"}}>Показывать закрытые разделы</span><span style={{display:"block",fontSize:11,color:"#94a3b8",marginTop:2}}>Пункт остаётся в меню и показывает понятное сообщение «Доступ закрыт»</span></span>
+                    <input type="checkbox" checked={p.showLocked} disabled={locked} onChange={e=>setPermission("showLocked",e.target.checked)} style={{width:18,height:18}}/>
+                  </label>
+                </div>
+                {!locked && <div style={{padding:"14px 18px",borderTop:"1px solid #e2e8f0",display:"flex",alignItems:"center",gap:12,justifyContent:"flex-end"}}>
+                  {permissionMsg && <span style={{fontSize:12,color:permissionMsg.startsWith("✓")?"#059669":"#dc2626"}}>{permissionMsg}</span>}
+                  <button className="btn btn-g" onClick={async()=>{
+                    const ok = await onSaveRolePermissions(permissionDraft);
+                    setPermissionMsg(ok ? "✓ Права сохранены" : "Не удалось сохранить в облако");
+                  }}>💾 Сохранить права</button>
+                </div>}
+              </div>
+            );
+          })()}
+        </div>
       ) : tab === "users" ? (
         <div>
           {/* Список сотрудников — карточки богатые (роль, онлайн, кнопки), поэтому шире: 2 колонки */}
@@ -2319,7 +2412,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                 <div className="user-row" style={{display:"flex",alignItems:"flex-start",gap:12}}>
                   {/* Аватар */}
                   <div style={{width:42,height:42,borderRadius:10,background:"#eff6ff",border:"1px solid #eff6ff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:18}}>
-                    {u.role==="admin"?"👑":u.role==="viewer"?"👁":u.role==="manager"?"🧑‍💼":"👤"}
+                    {ROLE_DEFINITIONS.find(r=>r.key===u.role)?.icon || "👤"}
                   </div>
                   <div style={{flex:1,minWidth:120}}>
                     <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
@@ -2359,6 +2452,8 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                       <select className="fi" value={editingUser.role||"user"} onChange={e=>setEditingUser(p=>({...p,role:e.target.value}))} disabled={u.id===currentUser.id}>
                         <option value="user">👤 Замерщик</option>
                         <option value="manager">🧑‍💼 Руководитель</option>
+                        <option value="sales_head">📈 Руководитель отдела продаж</option>
+                        <option value="foreman">🔨 Прораб</option>
                         <option value="admin">👑 Администратор</option>
                         <option value="viewer">👁 Наблюдатель</option>
                       </select>
@@ -2397,6 +2492,8 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
                 <select className="fi" value={newRole} onChange={e=>setNewRole(e.target.value)}>
                   <option value="user">👤 Замерщик</option>
                   <option value="manager">🧑‍💼 Руководитель</option>
+                  <option value="sales_head">📈 Руководитель отдела продаж</option>
+                  <option value="foreman">🔨 Прораб</option>
                   <option value="admin">👑 Администратор</option>
                   <option value="viewer">👁 Наблюдатель</option>
                 </select>
@@ -4512,6 +4609,26 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [allUsers, setAllUsers] = useState(DEFAULT_USERS);
   const allUsersRef = useRef(DEFAULT_USERS);
   useEffect(() => { allUsersRef.current = allUsers; }, [allUsers]);
+  const [rolePermissions, setRolePermissions] = useState(() => normalizeRolePermissions());
+  useEffect(() => {
+    let cancelled = false;
+    storage.getResult(ROLE_PERMISSIONS_KEY).then(result => {
+      if (cancelled || result.status !== "found" || !result.value) return;
+      try { setRolePermissions(normalizeRolePermissions(JSON.parse(result.value))); } catch {}
+    }).catch(()=>{});
+    return () => { cancelled = true; };
+  }, []);
+  const currentPermissions = useMemo(
+    () => permissionsForRole(rolePermissions, currentUser.role),
+    [rolePermissions, currentUser.role],
+  );
+  const saveRolePermissions = useCallback(async (next) => {
+    const normalized = normalizeRolePermissions(next);
+    const res = await storage.set(ROLE_PERMISSIONS_KEY, JSON.stringify(normalized));
+    if (res?.fbOk === false) return false;
+    setRolePermissions(normalized);
+    return true;
+  }, []);
 
   // Присутствие { [userId]: lastSeenTs } — пишет каждый, видит только админ
   const [presence, setPresence] = useState({});
@@ -4859,14 +4976,45 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     [estimatorDashboard],
   );
   const accessibleObjects = useMemo(
-    () => currentUser.role === "user"
+    () => currentPermissions.objects === "own"
       ? objects.filter(o => estimatorObjectIds.has(o.id))
       : objects,
-    [objects, currentUser.role, estimatorObjectIds],
+    [objects, currentPermissions.objects, estimatorObjectIds],
   );
   const accessibleEstimates = useMemo(
-    () => currentUser.role === "user" ? estimatorDashboard.ownEstimates : estimates,
-    [estimates, currentUser.role, estimatorDashboard],
+    () => currentPermissions.objects === "own" ? estimatorDashboard.ownEstimates : estimates,
+    [estimates, currentPermissions.objects, estimatorDashboard],
+  );
+  const isOwnEstimate = useCallback((est) => !!est && (
+    (est.objectId && estimatorObjectIds.has(est.objectId))
+    || (currentUser.id && est.createdById === currentUser.id)
+    || (currentUser.name && est.createdBy === currentUser.name)
+  ), [currentUser.id, currentUser.name, estimatorObjectIds]);
+  const canEditEstimate = useCallback(
+    (est) => accessAllows(currentPermissions.estimateEdit, isOwnEstimate(est)),
+    [currentPermissions.estimateEdit, isOwnEstimate],
+  );
+  const canEditCurrentEstimate = useMemo(() => {
+    const existing = estimates.find(e => e.id === currentId);
+    const ownsDraft = !existing && (
+      proj?._createdById === currentUser.id
+      || proj?._createdBy === currentUser.name
+    );
+    return accessAllows(currentPermissions.estimateEdit, existing ? isOwnEstimate(existing) : ownsDraft);
+  }, [currentId, currentPermissions.estimateEdit, currentUser.id, currentUser.name, estimates, isOwnEstimate, proj?._createdBy, proj?._createdById]);
+  const isOwnDocument = useCallback((doc) => !!doc && (
+    (currentUser.id && doc.createdById === currentUser.id)
+    || (currentUser.name && doc.createdBy === currentUser.name)
+    || (doc.objectId && estimatorObjectIds.has(doc.objectId))
+  ), [currentUser.id, currentUser.name, estimatorObjectIds]);
+  const canEditCurrentDocument = accessAllows(currentPermissions.documentEdit, isOwnDocument(currentContract));
+  const analyticsObjects = useMemo(
+    () => currentPermissions.analytics === "own" ? estimatorDashboard.ownObjects : objects,
+    [objects, currentPermissions.analytics, estimatorDashboard],
+  );
+  const analyticsEstimates = useMemo(
+    () => currentPermissions.analytics === "own" ? estimatorDashboard.ownEstimates : estimates,
+    [estimates, currentPermissions.analytics, estimatorDashboard],
   );
 
   const filteredObjects = useMemo(() => {
@@ -5149,6 +5297,11 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     if (!currentId) return null;
     const cur = estimatesRef.current;
     const exists = cur.find(e => e.id === currentId);
+    const ownsDraft = !exists && (
+      proj?._createdById === currentUser.id
+      || proj?._createdBy === currentUser.name
+    );
+    if (!accessAllows(currentPermissions.estimateEdit, exists ? isOwnEstimate(exists) : ownsDraft)) return null;
     // ЗАЩИТА: не затирать смету с позициями пустой версией (если не явный сброс)
     if (exists && countFilled(exists.rows) > 0 && countFilled(rows) === 0 && !_allowEmptySave.current) return null;
     // parentId/dsNumber берём из стейта (новая ДС) ИЛИ из сохранённой записи (открытая ДС). Игнорируем самоссылку.
@@ -5172,7 +5325,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     if (_autoSaveRef.current) clearTimeout(_autoSaveRef.current);
     _autoSaveRef.current = setTimeout(_flushEstimate, 900);
     return () => clearTimeout(_autoSaveRef.current);
-  }, [rows, proj, discount, markup, note, estStatus, estSentAt, estComment]);
+  }, [rows, proj, discount, markup, note, estStatus, estSentAt, estComment, currentPermissions.estimateEdit, isOwnEstimate]);
   // ПРИНУДИТЕЛЬНЫЙ ФЛЕШ при уходе из редактора сметы: если пользователь ушёл (сменил экран
   // верхней навигацией) до срабатывания дебаунса — всё равно сохраняем, чтобы смета не пропала.
   useEffect(() => {
@@ -6496,7 +6649,9 @@ ${reqBlock}`;
   // Финансы грузим для админа, руководителя и прораба (прораб видит финансы ВНУТРИ объекта:
   // вкладка Финансы + карточки. Сам раздел «Финансы» ему всё равно закрыт через effScreen).
   // Замерщику финансы НЕ грузим — он видит себестоимость/маржу только в смете при заполнении.
-  useEffect(() => { const r = currentUser?.role; if (r === "admin" || r === "manager" || r === "foreman") loadFinance(); }, [currentUser?.role, loadFinance]);
+  useEffect(() => {
+    if (currentPermissions.finance !== "none" || currentPermissions.financialDetails) loadFinance();
+  }, [currentPermissions.finance, currentPermissions.financialDetails, loadFinance]);
 
   // ── САМОИСЦЕЛЕНИЕ СИНХРОНИЗАЦИИ ──
   const [resyncing, setResyncing] = useState(false);
@@ -6511,7 +6666,7 @@ ${reqBlock}`;
       try { await flushAllProductionPending(); } catch(e) { console.warn("flush prod pending err", e); }
       await storage.flushDirty();
       await Promise.all([loadEstimates(), loadContracts()]);
-      if (["admin","manager","foreman"].includes(currentUser?.role)) await loadFinance();
+      if (currentPermissions.finance !== "none" || currentPermissions.financialDetails) await loadFinance();
       const left = storage.dirtyKeysVisible().length;
       setDirtyCount(left);
       // гасим только когда чисто ВЕЗДЕ: успех storage не должен скрывать ошибку производства
@@ -6881,10 +7036,11 @@ ${reqBlock}`;
       data[s.k] = r.list;
       mark(s.k, r.ok, s.label);
     }
-    // Настройки финансов, каталог, ПЕРЕОПРЕДЕЛЕНИЯ ЦЕН (раньше в бэкап не входили)
+    // Настройки финансов, каталог, цены и матрица прав.
     const meta = await _readObj(FINANCE_META_KEY); data.financeMeta = meta.value; mark("financeMeta", meta.ok, "Финансы: настройки");
     const cat = await _readObj(CATALOG_KEY); data.catalog = cat.value; mark("catalog", cat.ok, "Каталог");
     const prices = await _readObj(PRICES_KEY); data.prices = prices.value; mark("prices", prices.ok, "Цены (переопределения)");
+    const permissions = await _readObj(ROLE_PERMISSIONS_KEY); data.rolePermissions = permissions.value; mark("rolePermissions", permissions.ok, "Матрица прав");
     // Журнал аудита: индекс месяцев + каждый помесячный ключ + легаси-журнал (раньше не входил)
     let auditOk = true;
     const auditIdx = await _readArr(AUDIT_INDEX_KEY);
@@ -7106,6 +7262,7 @@ ${reqBlock}`;
     if (has("financeMeta")) await restoreKey(FINANCE_META_KEY, FINANCE_META_BACKUPS_KEY, objVal(d.financeMeta), "Финансы: настройки");
     if (has("catalog")) await restoreKey(CATALOG_KEY, CATALOG_BACKUPS_KEY, objVal(d.catalog), "Каталог");
     if (has("prices")) await restoreKey(PRICES_KEY, PRICES_BACKUPS_KEY, objVal(d.prices), "Цены (переопределения)");
+    if (has("rolePermissions")) await restoreKey(ROLE_PERMISSIONS_KEY, ROLE_PERMISSIONS_BACKUPS_KEY, normalizeRolePermissions(objVal(d.rolePermissions)), "Матрица прав");
     // ПУБЛИЧНЫЕ НОДЫ (КП/кабинеты/документы) — с пред-бэкапом: перед перезаписью снимаем текущие
     // значения в PUBLIC_NODES_BACKUPS_KEY (один облачный снимок, откат возможен). Если снять/
     // подтвердить снимок не удалось — публичные ноды НЕ трогаем (иначе теряем принятие КП,
@@ -7372,6 +7529,7 @@ ${reqBlock}`;
   const isSearching = search.trim().length > 0;
   // Мемоизированные вычисления аналитики — пересчитываются только при изменении данных
   const analyticsData = useMemo(() => {
+    const liveObjects = analyticsObjects.filter(o => o && !o.deletedAt);
     const now = Date.now();
     let fromTs = 0, toTs = now;
     if(statsPeriod==="custom"){
@@ -7407,9 +7565,7 @@ ${reqBlock}`;
     // ── ОБЪЕКТ-ЦЕНТРИЧНАЯ МОДЕЛЬ ──
     // Единица учёта — ОБЪЕКТ (сделка). Стоимость объекта = сумма всех его смет (основная + доп. сметы).
     const accessibleObjectIds = new Set(liveObjects.map(o => o.id));
-    const scopedEstimates = currentUser.role === "user"
-      ? estimates.filter(e => e.objectId && accessibleObjectIds.has(e.objectId))
-      : estimates;
+    const scopedEstimates = analyticsEstimates.filter(e => e.objectId && accessibleObjectIds.has(e.objectId));
     const estByObj = {}; // objectId -> [сметы]
     for(const e of scopedEstimates){ if(e.objectId){ (estByObj[e.objectId]||(estByObj[e.objectId]=[])).push(e); } }
     const objVal  = (o) => (estByObj[o.id]||[]).reduce((s,e)=>s+(e.total||0),0);
@@ -7427,7 +7583,7 @@ ${reqBlock}`;
     const baseCon = contracts
       .filter(c => !c.deletedAt)
       .filter(c => c.objectId)
-      .filter(c => currentUser.role !== "user" || accessibleObjectIds.has(c.objectId))
+      .filter(c => accessibleObjectIds.has(c.objectId))
       .filter(c => inRange(new Date(c.date||0).getTime()))
       .filter(c => (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0)
       .filter(c => !statsManager || (c.manager||"")=== statsManager);
@@ -7564,7 +7720,7 @@ ${reqBlock}`;
       wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin,
       funnel, winRateOverall, winRateSent, signedB, refuseB, catProfit, monthly, staleSent,
       avgDealDays, avgApprovalDays, signedObjsCount: signedObjs.length, convByType, topObjects, objVal };
-  }, [estimates, contracts, liveObjects, currentUser.role, statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers, catalogVersion]);
+  }, [analyticsObjects, analyticsEstimates, contracts, statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers, catalogVersion]);
 
   // Защита от краша: если activeCat не в Gdyn — берём первый
   const safeCat = Gdyn[activeCat] ? activeCat : (Object.keys(Gdyn)[0]||"");
@@ -7599,6 +7755,7 @@ ${reqBlock}`;
 
   // ── Открыть смету на редактирование ──
   const openEstimate = (est) => {
+    if (!canEditEstimate(est)) return;
     setCurrentId(est.id);
     setCurrentParentId(est.parentId || null);
     setCurrentDsNumber(est.dsNumber || null);
@@ -7621,6 +7778,7 @@ ${reqBlock}`;
 
   // ── Новая смета ──
   const newEstimate = () => {
+    if (currentPermissions.estimateEdit === "none") return;
     const id = genId();
     setCurrentId(id);
     setCurrentParentId(null);
@@ -7662,6 +7820,11 @@ ${reqBlock}`;
   const saveAndBack = async () => {
     const cur = estimatesRef.current;
     const exists = cur.find(e => e.id === currentId);
+    const draftOwnerMatches = !exists && currentPermissions.estimateEdit === "own";
+    if (!accessAllows(currentPermissions.estimateEdit, draftOwnerMatches || isOwnEstimate(exists))) {
+      _backFromEditor();
+      return;
+    }
     // ЗАЩИТА: не затирать смету с позициями пустой версией (если не явный сброс)
     if (exists && countFilled(exists.rows) > 0 && countFilled(rows) === 0 && !_allowEmptySave.current) {
       if (_autoSaveRef.current) clearTimeout(_autoSaveRef.current);
@@ -7719,6 +7882,7 @@ ${reqBlock}`;
 
   // ── Новая доп. смета (ДС) к существующей ──
   const newSupplementaryEstimate = (parentEst) => {
+    if (!canEditEstimate(parentEst)) return;
     const cur = estimatesRef.current;
     const siblings = cur.filter(e => e.parentId === parentEst.id);
     const dsNumber = siblings.length + 1;
@@ -9175,36 +9339,29 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   const NAV_ITEMS = useMemo(() => {
-    const r = currentUser.role;
-    const isAdmin = r === "admin", isMgr = r === "manager", isForeman = r === "foreman", isUser = r === "user", isViewer = r === "viewer";
+    const show = access => access !== "none" || currentPermissions.showLocked;
     return [
-      ...(isAdmin||isMgr||isUser||isForeman ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
-      { id:"objects", icon:"📦", label:"Объекты" },
-      ...(isAdmin||isMgr||isForeman||isUser ? [{ id:"calendar", icon:"📅", label:"Календарь" }] : []),
-      ...(!isViewer&&!isForeman ? [{ id:"contracts", icon:"📄", label:"Прочие документы", short:"Документы" }] : []),
-      ...(isAdmin||isMgr||isUser ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
-      ...(isAdmin||isMgr||isUser ? [{ id:"finance", icon:"💰", label:"Финансы" }] : []),
-      ...(isAdmin||isUser ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
+      ...(show(currentPermissions.dashboard) ? [{ id:"dashboard", icon:"⌂", label:"Главная" }] : []),
+      ...(show(currentPermissions.objects) ? [{ id:"objects", icon:"📦", label:"Объекты" }] : []),
+      ...(show(currentPermissions.calendar) ? [{ id:"calendar", icon:"📅", label:"Календарь" }] : []),
+      ...(show(currentPermissions.documents) ? [{ id:"contracts", icon:"📄", label:"Прочие документы", short:"Документы" }] : []),
+      ...(show(currentPermissions.analytics) ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
+      ...(show(currentPermissions.finance) ? [{ id:"finance", icon:"💰", label:"Финансы" }] : []),
+      ...(show(currentPermissions.admin) ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
     ];
-  }, [currentUser.role]);
+  }, [currentPermissions]);
 
   // Роли доступа
   const _r = currentUser.role;
-  const _isAdmin = _r === "admin", _isMgr = _r === "manager", _isForeman = _r === "foreman", _isUser = _r === "user", _isViewer = _r === "viewer";
+  const _isAdmin = _r === "admin", _isMgr = _r === "manager", _isSalesHead = _r === "sales_head", _isForeman = _r === "foreman", _isUser = _r === "user", _isViewer = _r === "viewer";
   // Эффективный экран с учётом ограничений роли
   const effScreen = (() => {
     // «Производство» объединено с «Объекты» — отдельного экрана больше нет, все ведёт в Объекты
     if (screen==="production") return "objects";
-    if (_isViewer && (screen==="dashboard"||screen==="analytics"||screen==="admin"||screen==="deals"||screen==="finance"||screen==="calendar")) return "objects";
-    if (_isForeman && (screen==="analytics"||screen==="finance"||screen==="contracts"||screen==="admin")) return "objects";
-    // Замерщик видит все разделы в меню, но закрытые экраны получают понятное
-    // объяснение вместо молчаливого возврата в «Объекты».
-    if (!_isAdmin && !_isMgr && !_isUser && screen==="finance") return "objects";
-    if (!_isAdmin && !_isUser && screen==="admin") return "objects";
     return screen;
   })();
-  // Руководитель видит финансы только для чтения
-  const finReadonly = _isMgr;
+  const finReadonly = currentPermissions.finance === "view";
+  const hasFinancialDetails = currentPermissions.financialDetails;
   const restrictedSection = (name, audience = "руководству") => (
     <div className="page">
       <div style={{maxWidth:560,margin:"56px auto",textAlign:"center",background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:"40px 28px",boxShadow:"0 1px 3px rgba(15,23,42,.07)"}}>
@@ -9474,8 +9631,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       ═══════════════════════════════════════════════════════════════════ */}
       {/* ── ГЛАВНАЯ ПРОРАБА: «Мои задачи» (без финансовых KPI — прораб финансы не видит) ── */}
       {/* ── КАЛЕНДАРЬ ПРОИЗВОДСТВА (admin/manager/foreman) ── */}
-      {effScreen === "calendar" && _isUser && restrictedSection("Календарь", "руководству и производству")}
-      {effScreen === "calendar" && !_isUser && (
+      {effScreen === "calendar" && currentPermissions.calendar === "none" && restrictedSection("Календарь", "сотрудникам с соответствующим правом")}
+      {effScreen === "calendar" && currentPermissions.calendar !== "none" && (
         <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40}}>
           <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"22px 26px",marginBottom:20,boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
             <div style={{fontSize:21,fontWeight:900,color:"#fff",marginBottom:3}}>📅 Календарь производства</div>
@@ -9486,7 +9643,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       )}
 
       {/* Главная прораба: только производственные задачи, без финансовых KPI. */}
-      {effScreen === "dashboard" && _isForeman && (
+      {effScreen === "dashboard" && currentPermissions.dashboard === "none" && restrictedSection("Главная", "сотрудникам с соответствующим правом")}
+      {effScreen === "dashboard" && currentPermissions.dashboard !== "none" && _isForeman && (
         <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40}}>
           <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"24px 28px",marginBottom:24,boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
             <div style={{fontSize:20,fontWeight:900,color:"#fff",marginBottom:4}}>Мои задачи</div>
@@ -9496,7 +9654,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           <IssuePanel issues={_myIssues} onNav={openIssue} onDismiss={dismissIssueTomorrow} emptyText="✓ По вашим объектам всё в порядке" />
         </div>
       )}
-      {effScreen === "dashboard" && !_isForeman && (()=>{
+      {effScreen === "dashboard" && currentPermissions.dashboard !== "none" && !_isForeman && (()=>{
         const thisMonth = new Date().getMonth();
         const thisYear = new Date().getFullYear();
         const _inMonth = ts => { const d=new Date(ts||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; };
@@ -9525,7 +9683,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         // ── Finance KPIs (только для admin/manager) ──
         // «Активные» = НЕ отменён и НЕ выполнен (т.е. в работе + новые). Завершённые в активные не входят.
         const _isActiveFin = isActiveFinanceProject;
-        const _finKpi = (_isAdmin||_isMgr) ? (() => {
+        const _finKpi = hasFinancialDetails ? (() => {
           const active = (finProjects||[]).filter(_isActiveFin);
           const txMap = {}; for(const t of (financeTx||[])){if(t.deletedAt||t.included===false) continue; const cn=normCN(t.contractNo); if(!txMap[cn])txMap[cn]={inc:0,exp:0}; if(t.type==="income")txMap[cn].inc+=(Number(t.amount)||0); else txMap[cn].exp+=(Number(t.amount)||0); }
           const totalInc = active.reduce((s,p)=>s+(txMap[normCN(p.contractNo)]?.inc||0),0);
@@ -9539,7 +9697,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         // ── Production KPIs ── Состояние берём через unifiedStatusOf (production перевешивает
         // сырой object.status, как и везде в списках/карточках) — иначе на объектах, где реальный
         // статус исторически хранится в производстве, эти счётчики занижены/неверны.
-        const _prodKpi = (_isAdmin||_isMgr||_isUser) ? (() => {
+        const _prodKpi = currentPermissions.dashboard !== "none" ? (() => {
           const _ds = d => { const x=new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
           const today = _ds(new Date());
           const prodByObj = {}; for(const p of (productions||[])) prodByObj[p.objectId]=p;
@@ -9598,11 +9756,11 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           </div>
 
           {/* ── ЧТО ГОРИТ СЕГОДНЯ ── */}
-          {(_isAdmin||_isMgr||_isUser) && (
+          {currentPermissions.dashboard !== "none" && (
             <div style={{marginBottom:24}}>
-              <div style={{fontSize:16,fontWeight:900,color:"#0f172a",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>🔥 {_isUser ? "Что требует внимания" : "Что горит сегодня"}</div>
+              <div style={{fontSize:16,fontWeight:900,color:"#0f172a",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>🔥 {(_isUser||_isSalesHead) ? "Что требует внимания" : "Что горит сегодня"}</div>
               <IssuePanel
-                issues={_isUser ? _myIssues : _todayIssues}
+                issues={_isUser ? _myIssues : (hasFinancialDetails ? _todayIssues : _todayIssues.filter(i=>i.group!=="Финансы"))}
                 onNav={openIssue}
                 onDismiss={dismissIssueTomorrow}
                 emptyText={_isUser ? "✓ По вашим объектам всё в порядке" : "✓ Всё под контролем — срочных задач нет"}
@@ -9615,8 +9773,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             {[
               {label:"Объектов за "+monthName, value:objectsThisMonth.length, sub:"активность месяца", icon:"📋", accent:"#2563eb"},
               {label:"Объём за "+monthName, value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма смет", icon:"💰", accent:"#059669"},
-              {label:"Прибыль за "+monthName, value:fmt(Math.round(profitMonth))+" ₸", sub:"по подписанным", icon:"📈", accent:profitMonth>0?"#059669":"#ef4444"},
-              {label:"Маржа за "+monthName, value:marginMonth+"%", sub:"рентабельность", icon:"🎯", accent:marginMonth>=35?"#059669":marginMonth>=20?"#d97706":"#ef4444"},
+              ...(hasFinancialDetails ? [
+                {label:"Прибыль за "+monthName, value:fmt(Math.round(profitMonth))+" ₸", sub:"по подписанным", icon:"📈", accent:profitMonth>0?"#059669":"#ef4444"},
+                {label:"Маржа за "+monthName, value:marginMonth+"%", sub:"рентабельность", icon:"🎯", accent:marginMonth>=35?"#059669":marginMonth>=20?"#d97706":"#ef4444"},
+              ] : []),
               {label:"Пайплайн (согласование)", value:fmt(Math.round(pipelineSum))+" ₸", sub:approvalObjs.length+" объектов", icon:"🔄", accent:"#d97706"},
               {label:"Договоров подписано", value:signedObjs.length, sub:"из "+liveObjects.filter(o=>{ const us=unifiedStatusOf(o); return us!=="archive"&&us!=="refuse"; }).length+" активных", icon:"✅", accent:"#059669"},
             ].map((s,i)=>(
@@ -9827,7 +9987,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               {navHistory.length > 0 && <button onClick={goBack} style={{background:"none",border:"1px solid rgba(255,255,255,.4)",borderRadius:6,padding:"4px 12px",cursor:"pointer",fontSize:14,color:"#fff"}}>← Назад</button>}
               {saving && <span style={{fontSize:11,color:"#94a3b8"}}>💾</span>}
               <button className="btn btn-o" style={{padding:"6px 9px",fontSize:14}} onClick={()=>setScreen("analytics")} title="Статистика">📊</button>
-              {currentUser.role !== "viewer" && (
+              {currentPermissions.estimateEdit !== "none" && (
                 <button className="btn btn-g" style={{padding:"7px 14px",fontSize:12,whiteSpace:"nowrap"}} onClick={newEstimate}>+ Новая</button>
               )}
             </div>
@@ -9892,7 +10052,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       ))}
                     </div>
                     {/* Фильтр по сотруднику */}
-                    {currentUser.role !== "user" && nonViewerUsers.length > 1 && (
+                    {currentPermissions.objects === "all" && nonViewerUsers.length > 1 && (
                       <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
                         <button onClick={()=>setListFilterManager("")}
                           style={{background:!listFilterManager?"#eff6ff":"rgba(0,0,0,.03)",color:!listFilterManager?"#2563eb":"#94a3b8",border:`1px solid ${!listFilterManager?"rgba(136,136,204,.4)":"#e2e8f0"}`,borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
@@ -9924,7 +10084,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     <div style={{fontSize:40,marginBottom:16}}>📋</div>
                     <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>Смет пока нет</div>
                     <div style={{fontSize:13,color:"#334155",marginBottom:24}}>Нажмите «+ Новая смета» чтобы начать</div>
-                    {currentUser.role !== "viewer" && (
+                    {currentPermissions.estimateEdit !== "none" && (
                       <button className="btn btn-g" onClick={newEstimate}>+ Создать первую смету</button>
                     )}
                   </div>
@@ -9952,8 +10112,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                           <div style={{width:2,height:14,background:"#e2e8f0",borderRadius:2,flexShrink:0}}/>
                           <span style={{fontSize:10,color:"#059669",fontWeight:700,background:"rgba(5,150,105,.08)",borderRadius:3,padding:"1px 6px"}}>ДС-{est.dsNumber||"?"}</span>
                         </div>}
-                        <div className="est-card up" style={{padding:"10px 14px",marginLeft:isChild?16:0,borderLeft:isChild?"3px solid #d1fae5":"none"}}
-                          onClick={() => { if(currentUser.role==="viewer") return; openEstimate(est); }}>
+                        <div className="est-card up" style={{padding:"10px 14px",marginLeft:isChild?16:0,borderLeft:isChild?"3px solid #d1fae5":"none",cursor:canEditEstimate(est)?"pointer":"default"}}
+                          onClick={() => openEstimate(est)}>
                           {/* Строка 1: имя + сумма */}
                           <div style={{display:"flex",alignItems:"center",gap:8}}>
                             {(() => { const s=STATUSES.find(x=>x.key===(est.status||"new"))||STATUSES[0]; return <span style={{fontSize:10,fontWeight:700,color:s.color,background:s.bg,borderRadius:4,padding:"1px 7px",flexShrink:0,whiteSpace:"nowrap"}}>{s.label}</span>; })()}
@@ -9975,7 +10135,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             <span style={{flex:1}}/>
                             <span style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>{fmtDate(est.updatedAt)}</span>
                             {author&&<span style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>· {author}</span>}
-                            <button onClick={()=>{
+                            {accessAllows(currentPermissions.documentEdit, isOwnEstimate(est)) && <button onClick={()=>{
                               const catalog = getEffectiveCatalog();
                               const mm = 1 + (est.markup||0) / 100;
                               const works = Object.entries(est.rows||{}).filter(([,r])=>Number(r?.qty)>0).map(([key,r])=>{
@@ -10001,35 +10161,35 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                               const parentContract = isDs ? contracts.find(c=>c.estId===est.parentId && (c.type||"repair_fiz")!=="annex") : null;
                               const mainNumber = parentContract?.number || "";
                               const mainDate = parentContract?.date || "";
-                              const newContract = {id:Date.now().toString(),number:"",date:new Date().toISOString().split("T")[0],clientId:parentContract?.clientId||"",contragentId:parentContract?.contragentId||contragents[0]?.id||"",works,discount:est.discount||0,appendix:annexNum,estId:est.id,estClient:dProj?.name||"",estPhone:dProj?.phone||"",estAddress:dProj?.address||"",note:"",type:isDs?"annex":"repair_fiz",...(isDs?{mainNumber,mainDate}:{})};
+                              const newContract = {id:Date.now().toString(),number:"",date:new Date().toISOString().split("T")[0],clientId:parentContract?.clientId||"",contragentId:parentContract?.contragentId||contragents[0]?.id||"",works,discount:est.discount||0,appendix:annexNum,estId:est.id,estClient:dProj?.name||"",estPhone:dProj?.phone||"",estAddress:dProj?.address||"",note:"",type:isDs?"annex":"repair_fiz",createdBy:currentUser.name,createdById:currentUser.id,...(isDs?{mainNumber,mainDate}:{})};
                               setCurrentContract(newContract);
                               setContractTab("editor");
                               setScreen("contracts");
                             }} title={est.parentId?"Создать приложение":"Создать договор"}
                               style={{background:"rgba(184,144,74,.08)",color:"#2563eb",border:"1px solid #eff6ff",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
                               📄
-                            </button>
-                            {currentUser.role !== "viewer" && !isChild && !est.objectId && (
+                            </button>}
+                            {accessAllows(currentPermissions.objectEdit, isOwnEstimate(est)) && !isChild && !est.objectId && (
                               <button onClick={()=>moveEstimateToObject(est)}
                                 title="Создать объект из этой сметы и перенести в раздел Объекты"
                                 style={{background:"rgba(37,99,235,.08)",color:"#2563eb",border:"1px solid rgba(37,99,235,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0,fontWeight:700}}>
                                 📦 В объект
                               </button>
                             )}
-                            {currentUser.role !== "viewer" && !isChild && (
+                            {canEditEstimate(est) && !isChild && (
                               <button onClick={()=>newSupplementaryEstimate(est)}
                                 title="Создать доп. смету (ДС)"
                                 style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0,fontWeight:700}}>
                                 +ДС
                               </button>
                             )}
-                            {currentUser.role !== "viewer" && (
+                            {canEditEstimate(est) && (
                               <button onClick={()=>duplicateEstimate(est)}
                                 style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(100,100,200,.15)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
                                 ⧉
                               </button>
                             )}
-                            {(currentUser.role==="admin" || (currentUser.role==="user" && est.createdBy===currentUser.name)) && (
+                            {canEditEstimate(est) && (
                               <button onClick={async ()=>{ if(await confirmTyped("Удалить смету?\nЭто действие нельзя отменить.")) deleteEstimate(est.id); }}
                                 style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
                                 🗑
@@ -10073,7 +10233,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       {/* ═══════════════════════════════════════════════════════════════════
           ЭКРАН 2: РЕДАКТОР СМЕТЫ
       ═══════════════════════════════════════════════════════════════════ */}
-      {screen === "editor" && (
+      {screen === "editor" && !canEditCurrentEstimate && restrictedSection("Редактирование сметы", "сотрудникам с соответствующим правом")}
+      {screen === "editor" && canEditCurrentEstimate && (
         <div>
           {/* HEADER */}
           <div className="editor-header" style={{background:"#ffffff",borderBottom:"1px solid #e2e8f0",padding:"11px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10,gap:8}}>
@@ -10670,7 +10831,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           </div>
 
           {/* Плавающая кнопка итога */}
-          {screen === "editor" && grand > 0 && (
+          {screen === "editor" && canEditCurrentEstimate && grand > 0 && (
             <div style={{position:"fixed",bottom:22,right:18,zIndex:50}}>
               <button
                 onClick={()=>{
@@ -10917,8 +11078,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       )}
 
       {/* ЭКРАН: АНАЛИТИКА */}
-      {effScreen === "analytics" && _isUser && restrictedSection("Аналитика")}
-      {effScreen === "analytics" && !_isUser && (()=>{
+      {effScreen === "analytics" && currentPermissions.analytics === "none" && restrictedSection("Аналитика", "сотрудникам с соответствующим правом")}
+      {effScreen === "analytics" && currentPermissions.analytics !== "none" && (()=>{
         const { baseEst, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType, TYPE_L2,
           wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin, funnel, winRateOverall, winRateSent, catProfit, monthly, staleSent,
           avgDealDays, avgApprovalDays, signedObjsCount, convByType, topObjects, objVal } = analyticsData;
@@ -10951,13 +11112,13 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   </div>
                 )}
               </div>
-              <div style={{flex:"1 1 200px"}}>
+              {currentPermissions.analytics === "all" && <div style={{flex:"1 1 200px"}}>
                 <div style={{fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>Менеджер</div>
                 <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                   <button onClick={()=>setStatsManager("")} style={{fontSize:11,fontWeight:600,padding:"5px 12px",borderRadius:7,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(!statsManager?"#2563eb":"rgba(0,0,0,.04)"),background:!statsManager?"rgba(136,136,204,.15)":"transparent",color:!statsManager?"#2563eb":"#94a3b8"}}>🏢 Все</button>
                   {managers.map(m=>(<button key={m} onClick={()=>setStatsManager(m)} style={{fontSize:11,fontWeight:600,padding:"5px 12px",borderRadius:7,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(statsManager===m?"#2563eb":"rgba(0,0,0,.04)"),background:statsManager===m?"rgba(136,136,204,.15)":"transparent",color:statsManager===m?"#2563eb":"#94a3b8"}}>👤 {m}</button>))}
                 </div>
-              </div>
+              </div>}
             </div>
             <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14,marginBottom:20}}>
               {[["Создано объектов",totalEst,"в периоде, без архива","#2563eb","📋"],["Объём объектов",fmt(totalSumEst)+" ₸","сумма смет","#2563eb","💰"],["Ср. чек",fmt(avgEst)+" ₸","на объект","#059669","🎯"],["Договоров",totalCon,"по объектам","#2563eb","📄"],["Объём договоров",fmt(totalSumCon)+" ₸","сумма договоров","#2563eb","🧾"],["Средний договор",fmt(avgCon)+" ₸","на договор","#059669","📊"]].map(([l,v,s,c,ic],i)=>(
@@ -10976,7 +11137,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             </div>
 
             {/* ── A. Финансовый обзор ── */}
-            <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
+            {hasFinancialDetails && <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
               <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
                 <span style={{fontSize:11,color:"#059669",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>💰 Финансы — подписанные договоры (заработано)</span>
                 <span style={{fontSize:11,color:"#94a3b8"}}>в выбранном периоде</span>
@@ -10997,7 +11158,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               <div style={{marginTop:12,paddingTop:12,borderTop:"1px dashed #e5e7eb",display:"flex",gap:18,flexWrap:"wrap",fontSize:12,color:"#64748b"}}>
                 <span>Потенциал (все активные объекты с суммой): <b style={{color:"#334155"}}>{fmt(Math.round(allRevenue))} ₸</b> выручка · прибыль <b style={{color:"#059669"}}>{fmt(Math.round(allProfit))} ₸</b> · маржа <b style={{color:"#334155"}}>{allMargin}%</b></span>
               </div>
-            </div>
+            </div>}
 
             {/* ── B. Воронка с деньгами и конверсией ── */}
             <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
@@ -11016,7 +11177,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                           <div style={{width:`${Math.round(f.sum/maxSum*100)}%`,minWidth:f.count>0?2:0,height:"100%",background:f.bg,borderLeft:`3px solid ${f.color}`}}/>
                           <span style={{position:"absolute",left:10,top:0,height:"100%",display:"flex",alignItems:"center",gap:8,fontSize:11,fontWeight:700,color:f.color}}>{f.count} шт · {fmt(Math.round(f.sum))} ₸</span>
                         </div>
-                        <span className="an-bar-right" style={{fontSize:11,color:"#059669",width:130,textAlign:"right",flexShrink:0}}>{f.profit>0?"приб. "+fmt(Math.round(f.profit))+" ₸":"—"}</span>
+                        {hasFinancialDetails && <span className="an-bar-right" style={{fontSize:11,color:"#059669",width:130,textAlign:"right",flexShrink:0}}>{f.profit>0?"приб. "+fmt(Math.round(f.profit))+" ₸":"—"}</span>}
                       </div>
                     ))}
                   </div>
@@ -11075,10 +11236,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               return (
                 <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
                   <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
-                    <span style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>💼 Финансы и производство</span>
+                    <span style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>{hasFinancialDetails?"💼 Финансы и производство":"🏗 Производство"}</span>
                     <span style={{fontSize:11,color:"#94a3b8"}}>текущий снимок · не зависит от периода</span>
                   </div>
-                  {activeFp.length>0 && <>
+                  {hasFinancialDetails && activeFp.length>0 && <>
                     <div style={{fontSize:10,color:"#059669",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>💰 Финансы по проектам</div>
                     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:prodAnyCount>0?16:0}}>{finCards.map(Card)}</div>
                   </>}
@@ -11100,10 +11261,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     <div style={{display:"flex",alignItems:"flex-end",gap:10,height:160,overflowX:"auto",paddingBottom:4}}>
                       {monthly.map(m=>(
                         <div key={m.key} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,minWidth:46,flex:"1 0 46px"}}>
-                          <div style={{fontSize:9,color:"#059669",fontWeight:700,whiteSpace:"nowrap"}}>{m.profit>0?Math.round(m.profit/1000)+"k":""}</div>
+                          <div style={{fontSize:9,color:"#059669",fontWeight:700,whiteSpace:"nowrap"}}>{hasFinancialDetails&&m.profit>0?Math.round(m.profit/1000)+"k":""}</div>
                           <div style={{display:"flex",alignItems:"flex-end",gap:2,height:110,width:"100%",justifyContent:"center"}}>
                             <div title={"Выручка: "+fmt(Math.round(m.revenue))+" ₸"} style={{width:14,height:`${Math.max(2,Math.round(m.revenue/maxRev*110))}px`,background:"#93c5fd",borderRadius:"3px 3px 0 0"}}/>
-                            <div title={"Прибыль: "+fmt(Math.round(m.profit))+" ₸"} style={{width:14,height:`${Math.max(2,Math.round(Math.max(0,m.profit)/maxRev*110))}px`,background:"#059669",borderRadius:"3px 3px 0 0"}}/>
+                            {hasFinancialDetails && <div title={"Прибыль: "+fmt(Math.round(m.profit))+" ₸"} style={{width:14,height:`${Math.max(2,Math.round(Math.max(0,m.profit)/maxRev*110))}px`,background:"#059669",borderRadius:"3px 3px 0 0"}}/>}
                           </div>
                           <div style={{fontSize:9,fontWeight:700,color:m.conv>=40?"#059669":m.conv>=20?"#d97706":"#94a3b8",whiteSpace:"nowrap"}} title="Конверсия в подписанные">{m.total>0?m.conv+"%":""}</div>
                           <div style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>{m.label}</div>
@@ -11114,7 +11275,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 })()}
                 <div style={{display:"flex",gap:16,marginTop:10,fontSize:11,color:"#94a3b8"}}>
                   <span><span style={{display:"inline-block",width:10,height:10,background:"#93c5fd",borderRadius:2,marginRight:5}}/>Выручка</span>
-                  <span><span style={{display:"inline-block",width:10,height:10,background:"#059669",borderRadius:2,marginRight:5}}/>Прибыль</span>
+                  {hasFinancialDetails && <span><span style={{display:"inline-block",width:10,height:10,background:"#059669",borderRadius:2,marginRight:5}}/>Прибыль</span>}
                   <span>% — конверсия в подписанные за месяц</span>
                 </div>
               </div>
@@ -11165,26 +11326,26 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             {/* ── C. Менеджеры по прибыли ── */}
             {!statsManager && managerStats.length>0 && (
               <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
-                <div style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>👥 Менеджеры — прибыль и конверсия</div>
+                <div style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>👥 Менеджеры — {hasFinancialDetails?"прибыль и конверсия":"оборот и конверсия"}</div>
                 <div style={{display:"flex",flexDirection:"column",gap:6}}>
                   <div style={{display:"flex",alignItems:"center",gap:10,padding:"0 12px",fontSize:9,color:"#94a3b8",textTransform:"uppercase",letterSpacing:.5}}>
                     <span style={{flex:1}}>Менеджер</span>
                     <span style={{width:70,textAlign:"right"}}>Оборот</span>
-                    <span style={{width:70,textAlign:"right"}}>Прибыль</span>
-                    <span style={{width:46,textAlign:"right"}}>Маржа</span>
+                    {hasFinancialDetails && <span style={{width:70,textAlign:"right"}}>Прибыль</span>}
+                    {hasFinancialDetails && <span style={{width:46,textAlign:"right"}}>Маржа</span>}
                     <span style={{width:54,textAlign:"right"}}>Конв.</span>
                   </div>
                   {managerStats.map(m=>(
                     <div key={m.name} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"#f9fafb",borderRadius:8,cursor:"pointer"}} onClick={()=>setStatsManager(m.name)}>
                       <span style={{fontSize:13,color:"#0f172a",flex:1,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>👤 {m.name} <span style={{fontSize:10,color:"#94a3b8"}}>· {m.count}</span></span>
                       <span style={{fontSize:12,fontWeight:600,color:"#334155",width:70,textAlign:"right"}}>{fmt(Math.round(m.sum/1000))}k</span>
-                      <span style={{fontSize:12,fontWeight:700,color:"#059669",width:70,textAlign:"right"}}>{fmt(Math.round(m.profit/1000))}k</span>
-                      <span style={{fontSize:12,fontWeight:700,width:46,textAlign:"right",color:m.margin>=35?"#059669":m.margin>=20?"#d97706":"#ef4444"}}>{m.margin}%</span>
+                      {hasFinancialDetails && <span style={{fontSize:12,fontWeight:700,color:"#059669",width:70,textAlign:"right"}}>{fmt(Math.round(m.profit/1000))}k</span>}
+                      {hasFinancialDetails && <span style={{fontSize:12,fontWeight:700,width:46,textAlign:"right",color:m.margin>=35?"#059669":m.margin>=20?"#d97706":"#ef4444"}}>{m.margin}%</span>}
                       <span style={{fontSize:12,fontWeight:700,color:"#7c3aed",width:54,textAlign:"right"}}>{m.conv}%</span>
                     </div>
                   ))}
                 </div>
-                <div style={{fontSize:10,color:"#94a3b8",marginTop:8}}>Оборот/прибыль — в тыс. ₸. Конверсия = подписано / активные объекты (кроме архива).</div>
+                <div style={{fontSize:10,color:"#94a3b8",marginTop:8}}>{hasFinancialDetails?"Оборот/прибыль":"Оборот"} — в тыс. ₸. Конверсия = подписано / активные объекты (кроме архива).</div>
               </div>
             )}
 
@@ -11265,7 +11426,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             )}
 
             {/* ── D. Рентабельность по категориям ── */}
-            {catProfit.length>0 && (
+            {hasFinancialDetails && catProfit.length>0 && (
               <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
                 <div style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>🏗 Рентабельность по категориям работ</div>
                 <div style={{display:"flex",flexDirection:"column",gap:6}}>
@@ -11288,8 +11449,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       })()}
 
       {/* ── ЭКРАН: ФИНАНСЫ (независимый учёт ДДС + P&L) ── */}
-      {effScreen === "finance" && _isUser && restrictedSection("Финансы")}
-      {effScreen === "finance" && !_isUser && (()=>{
+      {effScreen === "finance" && currentPermissions.finance === "none" && restrictedSection("Финансы")}
+      {effScreen === "finance" && currentPermissions.finance !== "none" && (()=>{
         const fM = n => new Intl.NumberFormat("ru-RU").format(Math.round(n||0));
         const now = new Date();
         const periodStart = (()=>{
@@ -12863,7 +13024,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       })()}
 
       {/* ── ТЕСТ: СДЕЛКИ (смета+договор в одной карточке) ── */}
-      {effScreen === "objects" && (()=>{
+      {effScreen === "objects" && currentPermissions.objects === "none" && restrictedSection("Объекты", "сотрудникам с соответствующим правом")}
+      {effScreen === "objects" && currentPermissions.objects !== "none" && (()=>{
         // Данные клиента берём прямо из объекта (inline-поля)
         const objProj = (obj) => ({
           ...EMPTY_PROJ,
@@ -12913,6 +13075,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         };
         // ── Вспомогательные функции для workspace ──
         const openObjectEstimate = (obj) => {
+          if (!accessAllows(currentPermissions.estimateEdit, estimatorObjectIds.has(obj.id))) return;
           const id = genId();
           const cats2 = Object.keys(Gdyn);
           const newEst = {
@@ -12946,6 +13109,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         };
 
         const openObjectEstimateEdit = (est, obj) => {
+          if (!accessAllows(currentPermissions.estimateEdit, estimatorObjectIds.has(obj.id))) return;
           setObjectReturnId(obj.id);
           setCurrentObjectId(obj.id);
           const _validParent = est.parentId && est.parentId!==est.id ? est.parentId : null;
@@ -12969,6 +13133,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         };
 
         const openObjectContract = async (obj, fromEst=null) => {
+          if (!accessAllows(currentPermissions.documentEdit, estimatorObjectIds.has(obj.id))) return;
           const clientId = await ensureObjClient(obj);
           const works = fromEst ? estToContractWorks(fromEst) : [];
           const isDs = !!(fromEst && fromEst.parentId && fromEst.parentId!==fromEst.id);
@@ -13114,7 +13279,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 <div style={{fontSize:12,color:"rgba(255,255,255,.7)",marginTop:3}}>{objectTab==="workspace" ? "Карточка объекта · сметы и договора" : "Клиенты, сметы и договора"}</div>
               </div>
               <div style={{flex:1}}/>
-              {objectTab==="list" && currentUser.role!=="viewer" && (<>
+              {objectTab==="list" && currentPermissions.objectEdit !== "none" && (<>
                 {(()=>{const trashed=objectsRef.current.filter(o=>o.deletedAt); return trashed.length>0&&(<button onClick={()=>setObjectTab("trash")} style={{background:"rgba(220,38,38,.12)",color:"#dc2626",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"7px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginRight:4}}>🗑 Корзина ({trashed.length})</button>);})()}
                 <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={async ()=>{
                   const newObj = {id:genId(),clientId:"",clientName:"",clientPhone:"",clientType:"физ",clientIin:"",clientDoc:"",address:"",objType:"Вторичка",area:"",status:"new",note:"",manager:currentUser.name,createdBy:currentUser.name,createdById:currentUser.id,createdAt:Date.now(),updatedAt:Date.now()};
@@ -13189,7 +13354,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 ))}
               </div>
               {/* Фильтр по сотруднику */}
-              {currentUser.role !== "user" && nonViewerUsers.length>1 && (
+              {currentPermissions.objects === "all" && nonViewerUsers.length>1 && (
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   <button onClick={()=>setObjectFilterManager("")}
                     style={{background:!objectFilterManager?"#eff6ff":"rgba(0,0,0,.03)",color:!objectFilterManager?"#2563eb":"#94a3b8",border:`1px solid ${!objectFilterManager?"rgba(37,99,235,.4)":"#e2e8f0"}`,borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Все сотрудники</button>
@@ -13265,7 +13430,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         </div>
                         <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
                           <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap"}}>{st.label}</span>
-                          {(currentUser.role==="admin"||(currentUser.role==="user"&&obj.createdById===currentUser.id)) && (
+                          {accessAllows(currentPermissions.objectEdit, estimatorObjectIds.has(obj.id)) && (
                             <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить объект в корзину?")){ saveObjects(objectsRef.current.map(x=>x.id===obj.id?{...x,deletedAt:Date.now()}:x)); logChange(currentUser,{entity:"object",entityId:obj.id,objectId:obj.id,label:_objLabel(obj),action:"удалил объект"}); }}}
                               title="В корзину (можно восстановить)" style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.15)",borderRadius:6,padding:"2px 7px",fontSize:11,cursor:"pointer",fontFamily:"inherit",marginTop:2}}>🗑</button>
                           )}
@@ -13274,7 +13439,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       {/* Финансовый блок — единый вид для всех карточек (как в «Производстве»).
                           У лида бюджет = сумма смет (помечено «смета»), оплаты ещё нет.
                           Видно только admin/manager — у остальных ролей нет доступа к финансам вообще. */}
-                      {(_isAdmin||_isMgr||_isForeman) && <div style={{marginBottom:10}}>
+                      {hasFinancialDetails && <div style={{marginBottom:10}}>
                         {fin.budget>0 ? <>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
                             <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{fmt(fin.income)} <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>из {fmt(fin.budget)} ₸{fin._est?" · смета":""}</span></span>
@@ -13340,7 +13505,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         </div>
                         <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap",flexShrink:0}}>{st.label}</span>
                       </div>
-                      {(_isAdmin||_isMgr||_isForeman) && <div style={{marginBottom:10}}>
+                      {hasFinancialDetails && <div style={{marginBottom:10}}>
                         {e.budget>0 ? <>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
                             <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{fmt(e.income)} <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>из {fmt(e.budget)} ₸</span></span>
@@ -13434,7 +13599,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               _allCons.filter(c=>_conIsChild(c) && c.mainNumber && normCN(c.mainNumber)===normCN(m.number)).sort((a,b)=>(a.appendix||0)-(b.appendix||0)).forEach(ch=>objCons.push(ch));
             });
             _allCons.filter(c=>_conIsChild(c) && !(c.mainNumber && _conMains.some(m=>normCN(m.number)===normCN(c.mainNumber)))).forEach(ch=>objCons.push(ch));
-            const canEdit = currentUser.role==="admin"||(currentUser.role==="user"&&obj.createdById===currentUser.id);
+            const canEdit = editorTab && accessAllows(currentPermissions.objectEdit, estimatorObjectIds.has(obj.id));
             // Текст печатаем локально (отзывчиво), сохраняем на blur. Синхронизируем скрытую запись клиента.
             const setObjLocal = (patch) => setCurrentObject(p=>({...p,...patch}));
             const persistObj = () => setCurrentObject(p=>{
@@ -13601,7 +13766,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 <div style={{marginTop:0}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                     <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>📋 Сметы ({objEsts.length})</div>
-                    {currentUser.role!=="viewer" && (
+                    {accessAllows(currentPermissions.estimateEdit, estimatorObjectIds.has(obj.id)) && (
                       <button className="btn btn-g" style={{fontSize:12,padding:"6px 14px"}} onClick={()=>openObjectEstimate(obj)}>+ Новая смета</button>
                     )}
                   </div>
@@ -13613,12 +13778,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
                     {objEsts.map((est,estIdx)=>{
                       const isChild = !_estIsMain(est);
+                      const canEditEstimate = accessAllows(currentPermissions.estimateEdit, estimatorObjectIds.has(obj.id));
+                      const canEditDocument = accessAllows(currentPermissions.documentEdit, estimatorObjectIds.has(obj.id));
                       const estNum = isChild ? (est.dsNumber||1)+1 : 1;
                       const posCount = Object.values(est.rows||{}).filter(r=>Number(r?.qty)>0).length;
                       const stEst = STATUSES.find(s=>s.key===(est.status||"new"))||STATUSES[0];
                       return (
-                        <div key={est.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 16px",cursor:"pointer",marginLeft:isChild?16:0,borderLeft:isChild?"3px solid #d1fae5":"1px solid #e5e7eb"}}
-                          onClick={()=>openObjectEstimateEdit(est, obj)}>
+                        <div key={est.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 16px",cursor:canEditEstimate?"pointer":"default",marginLeft:isChild?16:0,borderLeft:isChild?"3px solid #d1fae5":"1px solid #e5e7eb"}}
+                          onClick={canEditEstimate?()=>openObjectEstimateEdit(est, obj):undefined}>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
@@ -13634,13 +13801,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
                               <div style={{fontWeight:800,fontSize:15,color:"#0f172a"}}>{fmt(est.total||0)} ₸</div>
                               <div style={{display:"flex",gap:4}} onClick={e=>e.stopPropagation()}>
-                                <button title={isChild?"Создать доп. соглашение из этой доп. сметы":"Создать договор из сметы"} onClick={()=>openObjectContract(obj,est)}
+                                {canEditDocument && <button title={isChild?"Создать доп. соглашение из этой доп. сметы":"Создать договор из сметы"} onClick={()=>openObjectContract(obj,est)}
                                   style={{background:"rgba(184,144,74,.08)",color:"#2563eb",border:"1px solid #eff6ff",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄 {isChild?"Доп. соглашение":"Договор"}</button>
-                                {currentUser.role!=="viewer" && (
+                                }
+                                {canEditDocument && (
                                   <button title="Сформировать акт выполненных работ (Р-1) по этой смете" onClick={()=>openAvrBuilder(obj,est)}
                                     style={{background:"rgba(124,58,237,.08)",color:"#7c3aed",border:"1px solid rgba(124,58,237,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>📋 Акт</button>
                                 )}
-                                {currentUser.role!=="viewer" && !_isUser && !isChild && (
+                                {canEditDocument && !_isUser && !isChild && (
                                   <button title="Договор подряда с подрядчиком (работы из этой сметы, суммы редактируются). Подрядчика и «новый договор / приложение» выбираешь в редакторе." onClick={()=>{
                                     const ws = estimateToWorks(est);
                                     const podCount = contractsRef.current.filter(c=>c.type==="podryad").length;
@@ -13650,15 +13818,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                   }}
                                     style={{background:"rgba(124,58,237,.08)",color:"#7c3aed",border:"1px solid rgba(124,58,237,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>👷 Подряд</button>
                                 )}
-                                {currentUser.role!=="viewer" && !isChild && (
+                                {canEditEstimate && !isChild && (
                                   <button title="Создать доп. смету к этой смете" onClick={()=>{ setObjectReturnId(obj.id); newSupplementaryEstimate(est); }}
                                     style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>+ Доп. смета</button>
                                 )}
-                                {currentUser.role!=="viewer" && (
+                                {canEditEstimate && (
                                   <button title="Дублировать" onClick={()=>duplicateEstimate(est)}
                                     style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(100,100,200,.15)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>⧉</button>
                                 )}
-                                {(currentUser.role==="admin"||(currentUser.role==="user"&&est.createdBy===currentUser.name)) && (
+                                {canEditEstimate && (
                                   <button title="Удалить смету" onClick={async ()=>{ if(await confirmTyped("Удалить смету?\nЭто действие нельзя отменить.")) deleteEstimate(est.id); }}
                                     style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                                 )}
@@ -13716,7 +13884,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       const _isPod = c.type==="podryad"||c.type==="podryad_annex";
                       const _workerName = _isPod ? ((workers.find(w=>w.id===c.workerId)?.name)||c.worker?.name||"") : "";
                       // Замерщику подряд виден, но открывать нельзя (себестоимость)
-                      const _podLocked = _isUser && _isPod;
+                      const _podLocked = currentPermissions.documentEdit==="none" || (_isUser && _isPod);
                       return (
                         <div key={c.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 16px",cursor:_podLocked?"default":"pointer",transition:"all .12s",marginLeft:isAnnex?16:0,borderLeft:isAnnex?"3px solid #ede9fe":"1px solid #e5e7eb",opacity:_podLocked?.75:1}}
                           onClick={_podLocked?undefined:()=>{ setCurrentContract({...c}); setObjectReturnId(obj.id); setContractTab("editor"); setScreen("contracts"); }}>
@@ -13747,7 +13915,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                     title={isAnx ? (exists?"Обновить проект основного договора (учесть доп. соглашение)":"Завести проект по основному договору (с учётом доп. соглашения)") : (exists?"Открыть проект в финансах":"Завести проект в финансах")}
                                     style={{background:exists?"#f0fdf4":"rgba(5,150,105,.1)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 {isAnx ? (exists?"В проект ✓":"В проект") : (exists?"В финансах ✓":"В финансы")}</button>;
                                 })()}
-                                {(currentUser.role==="admin"||(currentUser.role==="user"&&c.createdBy===currentUser.name)) && (
+                                {accessAllows(currentPermissions.documentEdit, estimatorObjectIds.has(obj.id)) && (
                                   <button onClick={async ()=>{ if(await confirmTyped("Удалить договор?\nЭто действие нельзя отменить через интерфейс.")) saveContracts(contractsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
                                     style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                                 )}
@@ -13768,7 +13936,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     <div style={{marginTop:24}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                         <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>📑 Отчёты ({objReports.length})</div>
-                        {currentUser.role!=="viewer" && (
+                        {accessAllows(currentPermissions.documentEdit, estimatorObjectIds.has(obj.id)) && (
                           <button className="btn btn-g" style={{fontSize:12,padding:"6px 14px"}}
                             onClick={()=>{ if(objEsts.length===0){ alert("Сначала создайте смету — акт формируется из её позиций."); return; } openAvrBuilderAll(obj,objEsts); }}>
                             + Сформировать АВР
@@ -13801,15 +13969,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                 <div style={{display:"flex",gap:4}}>
                                   <button title="Печать / PDF" onClick={()=>openOrPrintHtml(buildAvrHtml({...r, lines:(r.lines||[]).map(l=>({...l,included:true,doneQty:l.doneQty}))}))}
                                     style={{background:"#e2e8f0",color:"#334155",border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🖨 Печать</button>
-                                  {currentUser.role!=="viewer" && !(r.estId && estimates.some(e=>e.id===r.estId)) && (
+                                  {accessAllows(currentPermissions.estimateEdit, estimatorObjectIds.has(obj.id)) && !(r.estId && estimates.some(e=>e.id===r.estId)) && (
                                     <button title="Восстановить смету из этого акта (если исходная смета пропала)" onClick={()=>restoreEstimateFromAvr(r, obj)}
                                       style={{background:"#ecfdf5",color:"#059669",border:"1px solid rgba(5,150,105,.25)",borderRadius:4,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>↩ В смету</button>
                                   )}
-                                  {currentUser.role!=="viewer" && (
+                                  {accessAllows(currentPermissions.documentEdit, estimatorObjectIds.has(obj.id)) && (
                                     <button title="Редактировать акт" onClick={()=>setAvrModal({ ...r, lines:(r.lines||[]).map(l=>({...l,included:true,doneQty:l.doneQty})) })}
                                       style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
                                   )}
-                                  {(currentUser.role==="admin"||(currentUser.role==="user"&&r.createdBy===currentUser.name)) && (
+                                  {accessAllows(currentPermissions.documentEdit, estimatorObjectIds.has(obj.id)) && (
                                     <button title="Удалить акт" onClick={async ()=>{ if(await confirmTyped("Удалить акт?\nЭто действие нельзя отменить через интерфейс.")) saveReports(reportsRef.current.filter(x=>x.id!==r.id),{removedIds:[r.id],allowEmpty:true}); }}
                                       style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                                   )}
@@ -13827,7 +13995,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 {/* Вкладка «Финансы» объекта: видят admin/manager/foreman (руководство + прораб —
                     финансы ВНУТРИ объекта). Замерщик (user) и viewer — пометка «доступ закрыт».
                     Замерщик видит себестоимость/маржу только в смете при заполнении, больше нигде. */}
-                {objWsTab==="finance" && !(_isAdmin||_isMgr||_isForeman) && (
+                {objWsTab==="finance" && !hasFinancialDetails && (
                   <div style={{maxWidth:480,margin:"32px auto",textAlign:"center",background:"#f9fafb",border:"1px dashed #e5e7eb",borderRadius:12,padding:"32px 24px"}}>
                     <div style={{fontSize:38,marginBottom:12}}>🔒</div>
                     <div style={{fontWeight:800,fontSize:16,color:"#0f172a",marginBottom:6}}>Доступ закрыт</div>
@@ -13842,21 +14010,21 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   </div>
                 )}
                 {/* Производственные вкладки (и производственная часть «Информации») — встроенный модуль Производства */}
-                {["info","launch","stages","finance","journal","defects","handover"].includes(objWsTab) && !(objWsTab==="finance" && !(_isAdmin||_isMgr||_isForeman)) && (
+                {["info","launch","stages","finance","journal","defects","handover"].includes(objWsTab) && !(objWsTab==="finance" && !hasFinancialDetails) && (
                   <div style={{marginTop: objWsTab==="info" ? 14 : 0}}>
                   <ProductionModule
                     embedObjectId={obj.id}
                     embedTab={objWsTab}
                     clientInfoCard={clientCardNode}
-                    objects={objects}
+                    objects={accessibleObjects}
                     entries={prodEntries}
-                    allObjects={objects}
+                    allObjects={accessibleObjects}
                     unlinkedProjects={unlinkedFinProjects}
-                    estimates={estimates}
-                    contracts={contracts}
+                    estimates={accessibleEstimates}
+                    contracts={contracts.filter(c=>c.objectId===obj.id)}
                     productions={productions}
                     productionsLoaded={_productionsLoaded.current && loadedTick >= 0}
-                    autoCreate={IS_DEV_ENV && editorTab}
+                    autoCreate={IS_DEV_ENV && editorTab && accessAllows(currentPermissions.productionEdit, estimatorObjectIds.has(obj.id))}
                     onDeleteProduction={onDeleteProduction}
                     onToggleClientShare={toggleClientShare}
                     onSetClientVis={setClientVis}
@@ -13866,7 +14034,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     fmt={fmt}
                     genId={genId}
                     currentUser={currentUser}
-                    readOnly={!editorTab}
+                    readOnly={!editorTab || !accessAllows(currentPermissions.productionEdit, estimatorObjectIds.has(obj.id))}
                     onAudit={(ev)=>logChange(currentUser, ev)}
                   />
                   </div>
@@ -13878,7 +14046,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         );
       })()}
 
-      {effScreen === "contracts" && (
+      {effScreen === "contracts" && currentPermissions.documents === "none" && restrictedSection("Прочие документы", "сотрудникам с соответствующим правом")}
+      {effScreen === "contracts" && currentPermissions.documents !== "none" && (
         <div className="page" style={{maxWidth:960,minHeight:"100vh"}}>
           {/* Шапка + табы — скрываем в режиме редактора договора (у него своя шапка) */}
           {contractTab !== "editor" && (<>
@@ -13899,11 +14068,11 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 </button>
               )}
               {contractTab === "list" && (()=>{
-                const _seeDoc = c => currentUser.role==="admin"||currentUser.role==="manager"||c.createdById===currentUser.id||c.createdBy===currentUser.name;
+                const _seeDoc = c => currentPermissions.documents==="all"||c.createdById===currentUser.id||c.createdBy===currentUser.name;
                 const trashedCount = contracts.filter(c=>c.deletedAt && _seeDoc(c)).length;
                 return (<>
                   {trashedCount>0 && <button onClick={()=>setContractTab("trash")} style={{background:"rgba(220,38,38,.12)",color:"#ef4444",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"8px 13px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>🗑 Корзина ({trashedCount})</button>}
-                  {currentUser.role !== "viewer" && <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:"",createdBy:currentUser.name,createdById:currentUser.id}); setContractTab("editor"); }}>+ Новый</button>}
+                  {currentPermissions.documentEdit!=="none" && <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:"",createdBy:currentUser.name,createdById:currentUser.id}); setContractTab("editor"); }}>+ Новый</button>}
                 </>);
               })()}
             </div>
@@ -13964,7 +14133,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   const _docCat = c => { const t=c.type||"repair_fiz"; if(t==="podryad"||t==="podryad_annex") return "podryad"; if(t==="design"||t==="design_add") return "design"; if(t==="reservation") return "reserve"; return "repair"; };
                   const _matchType = c => !contractTypeFilter || _docCat(c)===contractTypeFilter;
                   // Видимость по роли: админ и руководитель видят все договоры, обычный сотрудник — только свои
-                  const _canSeeAllDocs = currentUser.role==="admin" || currentUser.role==="manager";
+                  const _canSeeAllDocs = currentPermissions.documents==="all";
                   const _isOwnDoc = c => c.createdById===currentUser.id || (c.createdBy && c.createdBy===currentUser.name);
                   const roots = contracts.filter(c=>!c.deletedAt && !childIds.has(c.id) && (_canSeeAllDocs || _isOwnDoc(c)) && (_isPodType(c) || !c.objectId || !_objIds.has(c.objectId)) && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus) && _matchType(c));
 
@@ -13991,7 +14160,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     const isPod = c.type==="podryad" || c.type==="podryad_annex";
                     const workerName = isPod ? workerNameOf(c) : "";
                     // Замерщику подряд виден, но открывать нельзя (себестоимость)
-                    const _podLocked = _isUser && isPod;
+                    const _podLocked = !accessAllows(currentPermissions.documentEdit, _isOwnDoc(c)) || (_isUser && isPod);
                     return (
                       <div key={c.id}>
                         {isChild && <div style={{display:"flex",alignItems:"center",gap:6,marginLeft:26,marginBottom:2,marginTop:4}}>
@@ -14029,7 +14198,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             <div style={{textAlign:"right",flexShrink:0}}>
                               <div style={{fontWeight:800,fontSize:16,color:"#0f172a"}}>{fmt(total)} ₸</div>
                               <div style={{display:"flex",gap:5,marginTop:6}}>
-                                {c.type==="podryad" && !isChild && currentUser.role!=="viewer" && !_isUser && (
+                                {c.type==="podryad" && !isChild && accessAllows(currentPermissions.documentEdit, _isOwnDoc(c)) && !_isUser && (
                                   <button title="Создать доп. приложение к этому договору подряда" onClick={e=>{e.stopPropagation(); createPodryadAnnex(c);}}
                                     style={{background:"#ecfdf5",color:"#059669",border:"1px solid rgba(5,150,105,.25)",borderRadius:5,padding:"3px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ Приложение</button>
                                 )}
@@ -14043,7 +14212,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                   const ca2 = contragents.find(x=>x.id===c.contragentId);
                                   generateContractGDoc(c, cl, ca2);
                                 }} style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>}
-                                {(currentUser.role==="admin" || (currentUser.role==="user" && c.createdBy===currentUser.name)) && (
+                                {accessAllows(currentPermissions.documentEdit, c.createdById===currentUser.id||c.createdBy===currentUser.name) && (
                                   <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить в корзину?")){ saveContracts(contractsRef.current.map(x=>x.id===c.id?{...x,deletedAt:Date.now()}:x)); logChange(currentUser,{entity:"contract",entityId:c.id,objectId:c.objectId||"",label:c.contractNo||c.objectName||"Договор",action:"удалил договор"}); }}}
                                     style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                                 )}
@@ -14076,7 +14245,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 
             {/* ── КОРЗИНА ДОГОВОРОВ ── */}
             {contractTab === "trash" && (()=>{
-              const _seeDoc = c => currentUser.role==="admin"||currentUser.role==="manager"||c.createdById===currentUser.id||c.createdBy===currentUser.name;
+              const _seeDoc = c => currentPermissions.documents==="all"||c.createdById===currentUser.id||c.createdBy===currentUser.name;
               const trashed = contracts.filter(c=>c.deletedAt && _seeDoc(c));
               return (
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -14103,8 +14272,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         </div>
                         <div style={{display:"flex",gap:6,alignItems:"center"}}>
                           <span style={{fontWeight:700,fontSize:14,color:"#64748b"}}>{fmt(total)} ₸</span>
-                          <button onClick={()=>saveContracts(contractsRef.current.map(x=>x.id===c.id?{...x,deletedAt:undefined}:x))}
-                            style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:5,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>↩ Восстановить</button>
+                          {accessAllows(currentPermissions.documentEdit, isOwnDocument(c)) && <button onClick={()=>saveContracts(contractsRef.current.map(x=>x.id===c.id?{...x,deletedAt:undefined}:x))}
+                            style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:5,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>↩ Восстановить</button>}
                           {currentUser.role==="admin" && <button onClick={async ()=>{ if(await confirmTyped("Удалить договор навсегда?")) saveContracts(contractsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
                             style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✕ Удалить</button>}
                         </div>
@@ -14117,7 +14286,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             })()}
 
             {/* ── РЕДАКТОР ДОГОВОРА ── */}
-            {contractTab === "editor" && currentContract && !currentContract._mode && (
+            {contractTab === "editor" && currentContract && !currentContract._mode && !canEditCurrentDocument && restrictedSection("Редактирование документа", "сотрудникам с соответствующим правом")}
+            {contractTab === "editor" && currentContract && !currentContract._mode && canEditCurrentDocument && (
               <ContractEditor
                 contract={currentContract}
                 clients={contractClients}
@@ -14190,11 +14360,13 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       {/* ═══════════════════════════════════════════════════════════════════
           ЭКРАН 4: АДМИНКА
       ═══════════════════════════════════════════════════════════════════ */}
-      {effScreen === "admin" && _isUser && restrictedSection("Админка")}
-      {effScreen === "admin" && currentUser.role === "admin" && (
+      {effScreen === "admin" && currentPermissions.admin === "none" && restrictedSection("Админка")}
+      {effScreen === "admin" && currentPermissions.admin === "full" && (
         <AdminPageContent
           currentUser={currentUser}
           presence={presence}
+          rolePermissions={rolePermissions}
+          onSaveRolePermissions={saveRolePermissions}
           onUsersChanged={async ()=>{
             const u=await storage.get(USERS_KEY);
             if(!u) return;
