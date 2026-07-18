@@ -6,7 +6,7 @@ import { emptyProduction } from "./production/constants.js";
 import { applyProductionCommand, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
 function useDebounce(value, ms) {
@@ -4633,6 +4633,9 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [objects, setObjects] = useState([]);
   const objectsRef = useRef([]);
   useEffect(() => { objectsRef.current = objects; }, [objects]);
+  // Желаемый статус показываем сразу после клика. Он убирается, когда объект и
+  // производственная карточка подтвердили то же состояние.
+  const [pendingObjectStatuses, setPendingObjectStatuses] = useState({});
 
   // Производственные карточки объектов (раздел «Производство»)
   const [productions, setProductions] = useState([]);
@@ -4922,10 +4925,25 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   // Единый статус объекта для всех экранов и расчётов: производственная карточка
   // перевешивает старое поле object.status, когда объект уже в производстве.
   const unifiedStatusOf = useCallback((o) => {
+    if (pendingObjectStatuses[o.id]) return pendingObjectStatuses[o.id];
     const pr = productions.find(p => p.objectId === o.id);
     const derived = pr && PROD_TO_DEAL[pr.prodStatus];
     return derived || o.status || "new";
-  }, [productions]);
+  }, [productions, pendingObjectStatuses]);
+  useEffect(() => {
+    setPendingObjectStatuses(prev => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [objectId, wanted] of Object.entries(prev)) {
+        const object = objects.find(o => o.id === objectId);
+        if (!object) { delete next[objectId]; changed = true; continue; }
+        const production = productions.find(p => p.objectId === objectId);
+        const actual = (production && PROD_TO_DEAL[production.prodStatus]) || object.status || "new";
+        if (actual === wanted) { delete next[objectId]; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [objects, productions]);
   const financeProjectStatusKeyOf = useCallback((project) => {
     const object = matchFpToObject(project);
     return object
@@ -6237,7 +6255,7 @@ ${reqBlock}`;
         await storage.set(FINANCE_META_BACKUPS_KEY, JSON.stringify(bk.slice(0,20)));
       }
       const res = await storage.set(FINANCE_META_KEY, JSON.stringify(meta));
-      if (res && res.fbOk === false) setCloudError(true); else setCloudError(false);
+      if (res && res.fbOk === false) setCloudError(true); else _clearCloudErrorIfAllClean();
     } catch(e) { console.error(e); setCloudError(true); }
   };
 
@@ -6564,10 +6582,10 @@ ${reqBlock}`;
       } catch(e) { console.warn("backup err", e); }
       const res = await storage.set(STORAGE_KEY, JSON.stringify(finalList));
       if (res && res.fbOk === false) { console.error("Firebase save FAILED:", res.fbError); setCloudError(true); setSyncStatus("error"); }
-      else { setCloudError(false); setSyncStatus("saved"); setTimeout(()=>setSyncStatus("idle"), 3000); }
+      else { _clearCloudErrorIfAllClean(); setSyncStatus("saved"); setTimeout(()=>setSyncStatus("idle"), 3000); }
     } catch(e) { console.error(e); setCloudError(true); setSyncStatus("error"); }
     setSaving(false);
-  }, [currentUser]);
+  }, [currentUser, _clearCloudErrorIfAllClean]);
 
   // ── УНИВЕРСАЛЬНОЕ защищённое сохранение списка (договоры, клиенты, контрагенты) ──
   // Та же логика, что у смет: слияние по id, бэкап, защита от затирания, баннер при сбое облака.
@@ -6653,10 +6671,10 @@ ${reqBlock}`;
       }
       const res = await storage.set(key, JSON.stringify(finalList));
       if (res && res.fbOk === false) { console.error("Firebase save FAILED:", key, res.fbError); setCloudError(true); }
-      else { setCloudError(false); }
+      else { _clearCloudErrorIfAllClean(); }
     } catch(e) { console.error(e); setCloudError(true); }
     return finalList;
-  }, [currentUser]);
+  }, [currentUser, _clearCloudErrorIfAllClean]);
 
   // Обёртка-очередь: каждый вызов встаёт в хвост очереди СВОЕГО ключа и запускается только
   // после завершения предыдущего вызова того же ключа. Возвращаемый промис резолвится тем же,
@@ -9116,11 +9134,11 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     return [
       ...(isAdmin||isMgr||isUser||isForeman ? [{ id:"dashboard", icon:"⌂",  label:"Главная" }] : []),
       { id:"objects", icon:"📦", label:"Объекты" },
-      ...(isAdmin||isMgr||isForeman ? [{ id:"calendar", icon:"📅", label:"Календарь" }] : []),
+      ...(isAdmin||isMgr||isForeman||isUser ? [{ id:"calendar", icon:"📅", label:"Календарь" }] : []),
       ...(!isViewer&&!isForeman ? [{ id:"contracts", icon:"📄", label:"Прочие документы", short:"Документы" }] : []),
-      ...(isAdmin||isMgr ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
+      ...(isAdmin||isMgr||isUser ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
       ...(isAdmin||isMgr||isUser ? [{ id:"finance", icon:"💰", label:"Финансы" }] : []),
-      ...(isAdmin ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
+      ...(isAdmin||isUser ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
     ];
   }, [currentUser.role]);
 
@@ -9133,14 +9151,23 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     if (screen==="production") return "objects";
     if (_isViewer && (screen==="dashboard"||screen==="analytics"||screen==="admin"||screen==="deals"||screen==="finance"||screen==="calendar")) return "objects";
     if (_isForeman && (screen==="analytics"||screen==="finance"||screen==="contracts"||screen==="admin")) return "objects";
-    if (_isUser && (screen==="analytics"||screen==="admin"||screen==="calendar")) return "objects";
-    // Замерщик доходит до экрана «Финансы», но внутри видит пометку «доступ закрыт» (см. рендер раздела finance)
+    // Замерщик видит все разделы в меню, но закрытые экраны получают понятное
+    // объяснение вместо молчаливого возврата в «Объекты».
     if (!_isAdmin && !_isMgr && !_isUser && screen==="finance") return "objects";
-    if (!_isAdmin && screen==="admin") return "objects";
+    if (!_isAdmin && !_isUser && screen==="admin") return "objects";
     return screen;
   })();
   // Руководитель видит финансы только для чтения
   const finReadonly = _isMgr;
+  const restrictedSection = (name, audience = "руководству") => (
+    <div className="page">
+      <div style={{maxWidth:560,margin:"56px auto",textAlign:"center",background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:"40px 28px",boxShadow:"0 1px 3px rgba(15,23,42,.07)"}}>
+        <div style={{fontSize:42,marginBottom:14}}>🔒</div>
+        <div style={{fontWeight:800,fontSize:18,color:"#0f172a",marginBottom:8}}>Доступ закрыт</div>
+        <div style={{fontSize:13,color:"#64748b",lineHeight:1.6}}>Раздел «{name}» доступен только {audience}.<br/>Если нужен доступ — обратитесь к администратору.</div>
+      </div>
+    </div>
+  );
 
   return (
     <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#f8fafc",minHeight:"100vh",color:"#0f172a",display:"flex",flexDirection:"column"}}>
@@ -9299,8 +9326,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         @media(max-width:380px){
           .kpi-grid{grid-template-columns:1fr!important}
         }
-        .mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:#ffffff;border-top:1px solid #e2e8f0;z-index:50;box-shadow:0 -4px 16px rgba(15,23,42,.06);padding-bottom:env(safe-area-inset-bottom,0px)}
-        .mob-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;gap:3px;border-top:2px solid transparent;transition:all .15s}
+        .mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:#ffffff;border-top:1px solid #e2e8f0;z-index:50;box-shadow:0 -4px 16px rgba(15,23,42,.06);padding-bottom:env(safe-area-inset-bottom,0px);overflow-x:auto;-webkit-overflow-scrolling:touch}
+        .mob-nav-item{flex:1 0 62px;min-width:62px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;gap:3px;border-top:2px solid transparent;transition:all .15s}
         .mob-nav-item.active{border-top-color:#2563eb;background:rgba(37,99,235,.06)}
         .fin-row:hover{background:#f8fafc}
         .fin-row:hover{box-shadow:0 8px 24px rgba(15,23,42,.10)!important;transform:translateY(-2px)}
@@ -9401,7 +9428,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       ═══════════════════════════════════════════════════════════════════ */}
       {/* ── ГЛАВНАЯ ПРОРАБА: «Мои задачи» (без финансовых KPI — прораб финансы не видит) ── */}
       {/* ── КАЛЕНДАРЬ ПРОИЗВОДСТВА (admin/manager/foreman) ── */}
-      {effScreen === "calendar" && (
+      {effScreen === "calendar" && _isUser && restrictedSection("Календарь", "руководству и производству")}
+      {effScreen === "calendar" && !_isUser && (
         <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40}}>
           <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"22px 26px",marginBottom:20,boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
             <div style={{fontSize:21,fontWeight:900,color:"#fff",marginBottom:3}}>📅 Календарь производства</div>
@@ -9411,9 +9439,67 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         </div>
       )}
 
-      {/* Главная «Мои задачи» — прораб И замерщик (без финансов: замерщик видит финансы
-          только в смете, прораб — внутри объекта, но не на дашборде). */}
-      {effScreen === "dashboard" && (_isForeman||_isUser) && (
+      {/* Главная замерщика: только его объекты и сметы, без себестоимости/маржи. */}
+      {effScreen === "dashboard" && _isUser && (()=>{
+        const d = buildEstimatorDashboard({ objects, estimates, productions, user:currentUser });
+        const statRows = DEAL_STATUSES.map(s => ({ ...s, count:d.statusCounts[s.key] || 0 })).filter(s => s.count > 0);
+        return (
+        <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40}}>
+          <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"24px 28px",marginBottom:20,boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
+            <div style={{fontSize:20,fontWeight:900,color:"#fff",marginBottom:4}}>Моя работа</div>
+            <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>{new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"})} · <span style={{color:"#bfdbfe",fontWeight:600}}>{currentUser.name}</span></div>
+          </div>
+          <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:12,marginBottom:20}}>
+            {[
+              ["Мои объекты",d.objectCount,"#2563eb","📦"],
+              ["Активные",d.activeCount,"#059669","▶"],
+              ["На согласовании",d.approvalCount,"#d97706","⏳"],
+              ["Договор подписан",d.signedCount,"#059669","✓"],
+              ["Смет подготовлено",d.estimateCount,"#7c3aed","📋"],
+              ["Сумма моих смет",d.estimateTotal ? `${fmt(d.estimateTotal)} ₸` : "—","#0f172a","₸"],
+            ].map(([label,value,color,icon])=>(
+              <div key={label} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"16px",minHeight:112,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:8,color:"#64748b",fontSize:11,fontWeight:700,marginBottom:12}}><span>{label}</span><span>{icon}</span></div>
+                <div className="kpi-val" style={{fontSize:22,fontWeight:900,color}}>{value}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{fontSize:16,fontWeight:900,color:"#0f172a",marginBottom:10}}>Мои объекты по статусам</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:20}}>
+            {statRows.length ? statRows.map(s=>(
+              <button key={s.key} onClick={()=>{ setObjectFilterStatus(s.key); setObjectAttentionFilter(""); setCurrentObject(null); setObjectTab("list"); setScreen("objects"); }}
+                style={{background:s.bg,color:s.color,border:`1px solid ${s.color}55`,borderRadius:8,padding:"8px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                {s.label} · {s.count}
+              </button>
+            )) : <div style={{color:"#64748b",fontSize:13}}>Объекты пока не добавлены</div>}
+          </div>
+          <div style={{fontSize:16,fontWeight:900,color:"#0f172a",marginBottom:10}}>Что требует внимания</div>
+          <IssuePanel issues={_myIssues} onNav={openIssue} onDismiss={dismissIssueTomorrow} emptyText="✓ По вашим объектам всё в порядке" />
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,marginTop:22,marginBottom:10}}>
+            <div style={{fontSize:16,fontWeight:900,color:"#0f172a"}}>Недавние объекты</div>
+            <button onClick={()=>{ setObjectFilterStatus(""); setObjectAttentionFilter(""); setCurrentObject(null); setObjectTab("list"); setScreen("objects"); }} style={{background:"none",border:"none",padding:0,color:"#2563eb",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>Все объекты →</button>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:10}}>
+            {d.recentObjects.map(o=>{
+              const key = d.statusOf(o);
+              const st = DEAL_STATUSES.find(s=>s.key===key) || DEAL_STATUSES[0];
+              return (
+                <button key={o.id} onClick={()=>{ setCurrentObject({...o}); setObjectTab("workspace"); setObjWsTab("info"); setScreen("objects"); }}
+                  style={{textAlign:"left",background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"14px",cursor:"pointer",fontFamily:"inherit"}}>
+                  <div style={{fontSize:13,fontWeight:800,color:"#0f172a",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{o.clientName||o.address||"Без названия"}</div>
+                  <div style={{fontSize:11,color:"#64748b",marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{o.address||"Адрес не указан"}</div>
+                  <span style={{display:"inline-block",fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:20,padding:"3px 8px",marginTop:9}}>{st.label}</span>
+                </button>
+              );
+            })}
+            {!d.recentObjects.length && <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"24px",color:"#64748b",fontSize:13}}>Создайте первый объект, и здесь появится рабочая сводка.</div>}
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* Главная прораба: только производственные задачи, без финансовых KPI. */}
+      {effScreen === "dashboard" && _isForeman && (
         <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40}}>
           <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"24px 28px",marginBottom:24,boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
             <div style={{fontSize:20,fontWeight:900,color:"#fff",marginBottom:4}}>Мои задачи</div>
@@ -10840,7 +10926,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       )}
 
       {/* ЭКРАН: АНАЛИТИКА */}
-      {effScreen === "analytics" && (()=>{
+      {effScreen === "analytics" && _isUser && restrictedSection("Аналитика")}
+      {effScreen === "analytics" && !_isUser && (()=>{
         const { baseEst, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType, TYPE_L2,
           wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin, funnel, winRateOverall, winRateSent, catProfit, monthly, staleSent,
           avgDealDays, avgApprovalDays, signedObjsCount, convByType, topObjects, objVal } = analyticsData;
@@ -11210,13 +11297,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       })()}
 
       {/* ── ЭКРАН: ФИНАНСЫ (независимый учёт ДДС + P&L) ── */}
-      {effScreen === "finance" && _isUser && (
-        <div style={{maxWidth:520,margin:"48px auto",textAlign:"center",background:"#fff",border:"1px solid #e2e8f0",borderRadius:16,padding:"40px 28px",boxShadow:"0 1px 3px rgba(15,23,42,.07)"}}>
-          <div style={{fontSize:44,marginBottom:14}}>🔒</div>
-          <div style={{fontWeight:800,fontSize:18,color:"#0f172a",marginBottom:8}}>Доступ закрыт</div>
-          <div style={{fontSize:13,color:"#64748b",lineHeight:1.5}}>Раздел «Финансы» доступен только руководству.<br/>Если нужен доступ — обратитесь к администратору.</div>
-        </div>
-      )}
+      {effScreen === "finance" && _isUser && restrictedSection("Финансы")}
       {effScreen === "finance" && !_isUser && (()=>{
         const fM = n => new Intl.NumberFormat("ru-RU").format(Math.round(n||0));
         const now = new Date();
@@ -12930,11 +13011,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         };
 
         const saveObjField = async (obj, patch) => {
+          const requestedStatus = patch.status || "";
+          if (requestedStatus) {
+            // Подсветка реагирует на клик немедленно. Это только UI-состояние:
+            // подтверждение и повторы по-прежнему проходят через защищённые очереди.
+            setPendingObjectStatuses(prev => ({ ...prev, [obj.id]: requestedStatus }));
+          }
           // При подписании договора (статус «Заключён») СНАЧАЛА заводим зависимости —
-          // проект в Финансах и карточку Производства, и только при их успехе меняем
-          // статус объекта. Раньше статус сохранялся первым шагом, а зависимости —
-          // отдельно: при сбое сети объект тихо оставался «подписан» без финпроекта и
-          // без производства. Теперь либо всё получилось, либо статус вообще не меняется.
+          // проект в Финансах и карточку Производства, и только после их подтверждения
+          // меняем статус объекта. Повтор безопасен: обе операции идемпотентны.
           if (patch.status === "signed") {
             // Существование проекта проверяем по СВЕЖИМ данным с сервера, а не по локальному
             // кэшу (finProjectsRef.current): Финансы грузятся в память только у admin/manager,
@@ -12946,9 +13031,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               let projList;
               if (fpRaw.status === "found" && fpRaw.value) { try { const p = JSON.parse(fpRaw.value); projList = Array.isArray(p) ? p : []; } catch { projList = finProjectsRef.current || []; } }
               else if (fpRaw.status === "empty") { projList = []; }
-              else { projList = finProjectsRef.current || []; } // база недоступна — fallback на локальный кэш (может тоже быть пуст)
+              else { throw new Error("финансовые проекты недоступны"); }
               const exists = projList.some(p => p.objectId === obj.id
                 || (p.contractNo && contractsRef.current.some(c => c.objectId === obj.id && normCN(c.number) === normCN(p.contractNo))));
+              const dependencyWrites = [];
               if (!exists) {
                 const contract = contractsRef.current.find(c => c.objectId === obj.id) || null;
                 const estTotal = estimates.filter(e => e.objectId === obj.id).reduce((s, e) => s + (Number(e.total) || 0), 0);
@@ -12958,8 +13044,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 // молча возвращает undefined БЕЗ throw — try/catch сам по себе это не ловит,
                 // нужно явно проверить результат, иначе статус менялся бы, даже если проект
                 // на самом деле не создан.
-                const fpRes = await saveFinanceProjects([...projList, proj], { loadedRef: null });
-                if (!fpRes) throw new Error("saveFinanceProjects заблокирован");
+                dependencyWrites.push(
+                  saveFinanceProjects([...projList, proj], { loadedRef: null })
+                    .then(fpRes => { if (!fpRes) throw new Error("saveFinanceProjects заблокирован"); }),
+                );
               }
               const hasProd = productionsRef.current.some(p => p.objectId === obj.id);
               if (!hasProd) {
@@ -12967,11 +13055,17 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 prod.prodStatus = "new";
                 // create-if-missing — команда идемпотентна: если карточка уже появилась (гонка),
                 // не перезапишет её.
-                const prodRes = await mutateProductions({ type: "create-if-missing", objectId: obj.id, record: prod });
-                if (!prodRes.committed) throw new Error("mutateProductions(create) не подтверждён");
+                dependencyWrites.push(
+                  mutateProductions({ type: "create-if-missing", objectId: obj.id, record: prod })
+                    .then(prodRes => { if (!prodRes.committed) throw new Error("mutateProductions(create) не подтверждён"); }),
+                );
               }
+              // Финансовый проект и production-карточка независимы, поэтому создаём их
+              // параллельно. Это заметно сокращает ожидание статуса «Договор подписан».
+              await Promise.all(dependencyWrites);
             } catch (e) {
               console.warn("auto-create finProject/production err", e);
+              setPendingObjectStatuses(prev => { const next = { ...prev }; delete next[obj.id]; return next; });
               alert("Не удалось перевести в статус «Договор подписан»: не получилось создать проект в Финансах и карточку Производства (нет связи с базой). Статус НЕ изменён — попробуйте ещё раз.");
               return;
             }
@@ -12981,9 +13075,13 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           // облаке кнопки статуса выглядят «зависшими» (подсветка держится на currentObject,
           // а он раньше обновлялся только ПОСЛЕ полного цикла saveObjects: чтение+мердж+бэкап+запись).
           setCurrentObject(updated);
+          const list = objectsRef.current.map(x=>x.id===obj.id?updated:x);
+          objectsRef.current = list;
+          setObjects(list);
           // Синхронизируем производственный статус: unifiedStatusOf для отображения (списки,
           // фильтры, бейджи) при наличии карточки производства всегда берёт производственный
           // статус, а не obj.status — без этого клик по кнопке нигде визуально не отражался бы.
+          let productionWrite = Promise.resolve({ committed: true });
           if (patch.status) {
             const pr = productionsRef.current.find(p => p.objectId === obj.id);
             if (pr) {
@@ -12991,12 +13089,22 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               if (pr.prodStatus !== nextProdStatus) {
                 // set-status — команда трогает ТОЛЬКО prodStatus на свежей карточке (не шлём
                 // устаревший полный массив, иначе затёрли бы параллельную правку этапов).
-                mutateProductions({ type: "set-status", objectId: obj.id, status: nextProdStatus, changeId: "bg_status_" + obj.id });
+                productionWrite = mutateProductions({ type: "set-status", objectId: obj.id, status: nextProdStatus, changeId: "bg_status_" + obj.id });
               }
             }
           }
-          const list = objectsRef.current.map(x=>x.id===obj.id?updated:x);
-          await saveObjects(list);
+          const [objectSaved] = await Promise.all([saveObjects(list), productionWrite]);
+          if (!objectSaved) {
+            // Guard не разрешил даже локально принять запись (например, исходные данные не
+            // загрузились). Возвращаем прежний объект и не создаём ложное ощущение сохранения.
+            const rollback = objectsRef.current.map(x=>x.id===obj.id?obj:x);
+            objectsRef.current = rollback;
+            setObjects(rollback);
+            setCurrentObject(obj);
+            if (requestedStatus) setPendingObjectStatuses(prev => { const next = { ...prev }; delete next[obj.id]; return next; });
+            window.alert("Статус не сохранён: база ещё не готова или недоступна. Обновите страницу и попробуйте снова.");
+            return;
+          }
           logObjChange(currentUser, obj, patch);
         };
 
@@ -14091,6 +14199,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       {/* ═══════════════════════════════════════════════════════════════════
           ЭКРАН 4: АДМИНКА
       ═══════════════════════════════════════════════════════════════════ */}
+      {effScreen === "admin" && _isUser && restrictedSection("Админка")}
       {effScreen === "admin" && currentUser.role === "admin" && (
         <AdminPageContent
           currentUser={currentUser}
