@@ -1,5 +1,44 @@
 import { describe, it, expect } from "vitest";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows } from "./utils.js";
+
+describe("матрица прав ролей", () => {
+  it("руководитель продаж видит все объекты и общую аналитику без финансовых деталей", () => {
+    const p = permissionsForRole({}, "sales_head");
+    expect(p).toMatchObject({
+      dashboard:"all",
+      objects:"all",
+      analytics:"all",
+      finance:"none",
+      financialDetails:false,
+      objectEdit:"none",
+    });
+  });
+
+  it("замерщик видит только свои объекты и свою аналитику", () => {
+    const p = permissionsForRole({}, "user");
+    expect(p.objects).toBe("own");
+    expect(p.analytics).toBe("own");
+    expect(accessAllows(p.objects, true)).toBe(true);
+    expect(accessAllows(p.objects, false)).toBe(false);
+  });
+
+  it("сохранённые настройки накладываются на пресет, но администратора нельзя заблокировать", () => {
+    const matrix = normalizeRolePermissions({
+      sales_head:{ objectEdit:"all", analytics:"own" },
+      admin:{ objects:"none", admin:"none", finance:"none" },
+    });
+    expect(matrix.sales_head.objectEdit).toBe("all");
+    expect(matrix.sales_head.analytics).toBe("own");
+    expect(matrix.sales_head.financialDetails).toBe(false);
+    expect(matrix.admin).toMatchObject({ objects:"all", admin:"full", finance:"edit" });
+  });
+
+  it("битые значения не проходят в рабочую матрицу", () => {
+    const p = permissionsForRole({ user:{ objects:"чужое", finance:"owner" } }, "user");
+    expect(p.objects).toBe("own");
+    expect(p.finance).toBe("none");
+  });
+});
 
 describe("главная замерщика", () => {
   const user = { id:"u1", name:"Замерщик" };
@@ -121,7 +160,7 @@ describe("isBackupRestorable — запрет массового восстан�
 
 describe("validateBackupSchema — проверка структуры и СОДЕРЖИМОГО файла ДО записи в Firebase", () => {
   const SPECS = [{ key: "objects" }, { key: "contracts" }, { key: "estimates" }, { key: "productions", idKey: "objectId" }, { key: "users" }];
-  const good = () => ({ _type: "titovstroy-backup", data: { objects: [{ id: "o1" }], contracts: [{ id: 1 }], productions: [{ objectId: "o1" }], users: [{ id: "u1" }], financeMeta: { a: 1 }, prices: null, publicNodes: { kp: { e1: { v: 1 } }, progress: {}, docs: {} }, audit: { index: ["2026-07"], months: { "2026-07": [{ ts: 1, action: "изменил" }] }, legacy: [] } } });
+  const good = () => ({ _type: "titovstroy-backup", data: { objects: [{ id: "o1" }], contracts: [{ id: 1 }], productions: [{ objectId: "o1" }], users: [{ id: "u1" }], financeMeta: { a: 1 }, prices: null, rolePermissions: { user: { objects: "own" } }, publicNodes: { kp: { e1: { v: 1 } }, progress: {}, docs: {} }, audit: { index: ["2026-07"], months: { "2026-07": [{ ts: 1, action: "изменил" }] }, legacy: [] } } });
   it("корректный файл проходит", () => {
     expect(validateBackupSchema(good(), SPECS).ok).toBe(true);
   });
@@ -159,6 +198,10 @@ describe("validateBackupSchema — проверка структуры и СОД
   });
   it("catalog — строка вместо объекта → ошибка", () => {
     const s = good(); s.data.catalog = "строка";
+    expect(validateBackupSchema(s, SPECS).ok).toBe(false);
+  });
+  it("матрица прав — массив вместо объекта → ошибка", () => {
+    const s = good(); s.data.rolePermissions = [];
     expect(validateBackupSchema(s, SPECS).ok).toBe(false);
   });
   it("publicNodes.kp значение не объект → ошибка", () => {
