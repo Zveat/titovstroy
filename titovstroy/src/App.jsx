@@ -1514,6 +1514,22 @@ const storage = {
   discardOwnDirty() {
     return discardOwnedDirty(localStorage, _dirtyOwnerUid, _TAB_ID, _mem, { dirty: _DIRTY_SUFFIX, ts: _TS_SUFFIX });
   },
+  // Технические фоновые ключи не являются пользовательскими правками. Старые версии
+  // могли оставить для них dirty-маркер и из-за этого спрашивать о потере данных при
+  // обычном выходе сразу после входа. Удаляем только локальный технический снимок;
+  // рабочие разделы (объекты, сметы, финансы и т.д.) этот метод не принимает.
+  discardTechnicalDirty(key) {
+    if (key !== WORKSPACE_BACKUPS_KEY) return false;
+    try {
+      localStorage.removeItem(key);
+      localStorage.removeItem(key + _TS_SUFFIX);
+      localStorage.removeItem(key + _DIRTY_SUFFIX);
+      delete _mem[key];
+      return true;
+    } catch {
+      return false;
+    }
+  },
   // САМОИСЦЕЛЕНИЕ: дослать в облако зависшие локальные правки, предварительно СЛИВ с сервером
   // по id. ТОЛЬКО СВОИ записи (этот пользователь + эта вкладка, dirtyKeysFlushable): глобальный
   // флеш отправлял бы правки ДРУГОГО пользователя/вкладки под текущей сессией (правку другой
@@ -4302,6 +4318,7 @@ function EditorSessionGate({ currentUser, setCurrentUser }) {
     const ok = await storage.acquireEditLease();
     if (ok) {
       storage.adoptUserDirty();
+      storage.discardTechnicalDirty(WORKSPACE_BACKUPS_KEY);
       startProductionSession(currentUser?.id);
       setSafeMode("editor");
       return true;
@@ -4333,6 +4350,7 @@ function EditorSessionGate({ currentUser, setCurrentUser }) {
       if (!stopped) {
         if (ok) {
           storage.adoptUserDirty();
+          storage.discardTechnicalDirty(WORKSPACE_BACKUPS_KEY);
           startProductionSession(ownerUid);
         }
         setSafeMode(ok ? "editor" : "readonly");
@@ -6378,7 +6396,6 @@ ${reqBlock}`;
   }, [currentDeal]);
 
   const _estimatesLoaded = useRef(false); // защита: не сохранять пока не загрузились из Firebase
-  const _needResaveClean = useRef(null); // результат санитизации, который надо сохранить после снятия блокировки
 
   // Чистка испорченных смет: parentId не может ссылаться на саму смету или на несуществующую/тоже-дочернюю.
   const sanitizeEstimates = (list) => {
@@ -6414,8 +6431,9 @@ ${reqBlock}`;
           if (Array.isArray(parsed)) {
             const clean = sanitizeEstimates(parsed);
             setEstimates(clean); estimatesRef.current = clean; ok = true;
-            // если санитизация что-то починила — пометим для сохранения после снятия блокировки
-            if (JSON.stringify(clean) !== JSON.stringify(parsed)) { _needResaveClean.current = clean; }
+            // Санитизация при загрузке нужна для безопасного отображения, но не является
+            // действием пользователя. Не пишем её автоматически: фоновая запись при входе
+            // не должна создавать dirty-черновик и блокировать обычный выход из аккаунта.
           }
           else console.error("loadEstimates: данные не массив — не трогаем");
         } catch(e) {
@@ -6460,7 +6478,6 @@ ${reqBlock}`;
           // живут прямо внутри своей сметы как «сиротские» строки.
           if (Array.isArray(parsedCat?.custom) && parsedCat.custom.some(w => w?.cat === EXTRA_CAT)) {
             parsedCat = { ...parsedCat, custom: parsedCat.custom.filter(w => w?.cat !== EXTRA_CAT) };
-            try { await storage.set(CATALOG_KEY, JSON.stringify(parsedCat)); } catch(e) { console.warn("cat cleanup save err", e); }
           }
           setCatalogOverrides(parsedCat);
         }
@@ -6471,8 +6488,6 @@ ${reqBlock}`;
     }
     // Разрешаем запись ТОЛЬКО если успешно подтвердили состояние базы
     _estimatesLoaded.current = ok;
-    // теперь, когда запись разрешена, сохраняем результат санитизации (если что-то чинили)
-    if (ok && _needResaveClean.current) { const c = _needResaveClean.current; _needResaveClean.current = null; saveEstimates(c, { replace: true }); }
     setLoadingList(false);
     _bumpLoaded();
   }, [_bumpLoaded]);
@@ -6795,7 +6810,10 @@ ${reqBlock}`;
         if (prev && prev._sig === sig) return;
         snap._sig = sig;
         arr = [snap, ...arr].slice(0, 30);
-        await storage.set(WORKSPACE_BACKUPS_KEY, JSON.stringify(arr));
+        // Автоматический технический снимок не является пользовательской правкой.
+        // При недоступном облаке просто повторим его после следующего изменения/входа,
+        // но не создаём dirty-копию и не блокируем выход ложным предупреждением.
+        await storage.setCloudOnly(WORKSPACE_BACKUPS_KEY, JSON.stringify(arr));
       } catch (e) { console.warn("ws snapshot err", e); }
     }, 8000);
     return () => { if (_wsSnapTimer.current) clearTimeout(_wsSnapTimer.current); };
@@ -9467,68 +9485,6 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         </div>
       )}
 
-      {/* Главная замерщика: только его объекты и сметы, без себестоимости/маржи. */}
-      {effScreen === "dashboard" && _isUser && (()=>{
-        const d = estimatorDashboard;
-        const statRows = DEAL_STATUSES.map(s => ({ ...s, count:d.statusCounts[s.key] || 0 })).filter(s => s.count > 0);
-        return (
-        <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40}}>
-          <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"24px 28px",marginBottom:20,boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
-            <div style={{fontSize:20,fontWeight:900,color:"#fff",marginBottom:4}}>Моя работа</div>
-            <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>{new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"})} · <span style={{color:"#bfdbfe",fontWeight:600}}>{currentUser.name}</span></div>
-          </div>
-          <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:12,marginBottom:20}}>
-            {[
-              ["Мои объекты",d.objectCount,"#2563eb","📦"],
-              ["Активные",d.activeCount,"#059669","▶"],
-              ["На согласовании",d.approvalCount,"#d97706","⏳"],
-              ["Договор подписан",d.signedCount,"#059669","✓"],
-              ["Смет подготовлено",d.estimateCount,"#7c3aed","📋"],
-              ["Сумма моих смет",d.estimateTotal ? `${fmt(d.estimateTotal)} ₸` : "—","#0f172a","₸"],
-              ["Объектов за месяц",d.monthObjectCount,"#2563eb","📅"],
-              ["Объём за месяц",d.monthEstimateTotal ? `${fmt(d.monthEstimateTotal)} ₸` : "—","#059669","💰"],
-              ["Пайплайн",d.pipelineTotal ? `${fmt(d.pipelineTotal)} ₸` : "—","#d97706","↻"],
-            ].map(([label,value,color,icon])=>(
-              <div key={label} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"16px",minHeight:112,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:8,color:"#64748b",fontSize:11,fontWeight:700,marginBottom:12}}><span>{label}</span><span>{icon}</span></div>
-                <div className="kpi-val" style={{fontSize:22,fontWeight:900,color}}>{value}</div>
-              </div>
-            ))}
-          </div>
-          <div style={{fontSize:16,fontWeight:900,color:"#0f172a",marginBottom:10}}>Мои объекты по статусам</div>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:20}}>
-            {statRows.length ? statRows.map(s=>(
-              <button key={s.key} onClick={()=>{ setObjectFilterStatus(s.key); setObjectAttentionFilter(""); setCurrentObject(null); setObjectTab("list"); setScreen("objects"); }}
-                style={{background:s.bg,color:s.color,border:`1px solid ${s.color}55`,borderRadius:8,padding:"8px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                {s.label} · {s.count}
-              </button>
-            )) : <div style={{color:"#64748b",fontSize:13}}>Объекты пока не добавлены</div>}
-          </div>
-          <div style={{fontSize:16,fontWeight:900,color:"#0f172a",marginBottom:10}}>Что требует внимания</div>
-          <IssuePanel issues={_myIssues} onNav={openIssue} onDismiss={dismissIssueTomorrow} emptyText="✓ По вашим объектам всё в порядке" />
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,marginTop:22,marginBottom:10}}>
-            <div style={{fontSize:16,fontWeight:900,color:"#0f172a"}}>Недавние объекты</div>
-            <button onClick={()=>{ setObjectFilterStatus(""); setObjectAttentionFilter(""); setCurrentObject(null); setObjectTab("list"); setScreen("objects"); }} style={{background:"none",border:"none",padding:0,color:"#2563eb",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>Все объекты →</button>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:10}}>
-            {d.recentObjects.map(o=>{
-              const key = d.statusOf(o);
-              const st = DEAL_STATUSES.find(s=>s.key===key) || DEAL_STATUSES[0];
-              return (
-                <button key={o.id} onClick={()=>{ setCurrentObject({...o}); setObjectTab("workspace"); setObjWsTab("info"); setScreen("objects"); }}
-                  style={{textAlign:"left",background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"14px",cursor:"pointer",fontFamily:"inherit"}}>
-                  <div style={{fontSize:13,fontWeight:800,color:"#0f172a",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{o.clientName||o.address||"Без названия"}</div>
-                  <div style={{fontSize:11,color:"#64748b",marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{o.address||"Адрес не указан"}</div>
-                  <span style={{display:"inline-block",fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:20,padding:"3px 8px",marginTop:9}}>{st.label}</span>
-                </button>
-              );
-            })}
-            {!d.recentObjects.length && <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"24px",color:"#64748b",fontSize:13}}>Создайте первый объект, и здесь появится рабочая сводка.</div>}
-          </div>
-        </div>
-        );
-      })()}
-
       {/* Главная прораба: только производственные задачи, без финансовых KPI. */}
       {effScreen === "dashboard" && _isForeman && (
         <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40}}>
@@ -9540,12 +9496,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           <IssuePanel issues={_myIssues} onNav={openIssue} onDismiss={dismissIssueTomorrow} emptyText="✓ По вашим объектам всё в порядке" />
         </div>
       )}
-      {effScreen === "dashboard" && !(_isForeman||_isUser) && (()=>{
+      {effScreen === "dashboard" && !_isForeman && (()=>{
         const thisMonth = new Date().getMonth();
         const thisYear = new Date().getFullYear();
         const _inMonth = ts => { const d=new Date(ts||0); return d.getMonth()===thisMonth&&d.getFullYear()===thisYear; };
         // объекты и их суммы
-        const _estByObjId = {}; for(const e of estimates){ if(e.objectId){ (_estByObjId[e.objectId]||(_estByObjId[e.objectId]=[])).push(e); } }
+        const _estByObjId = {}; for(const e of accessibleEstimates){ if(e.objectId){ (_estByObjId[e.objectId]||(_estByObjId[e.objectId]=[])).push(e); } }
         const _objVal = o => (_estByObjId[o.id]||[]).reduce((s,e)=>s+(e.total||0),0);
         const _objCost = o => { const cat = getEffectiveCatalog(); const lk = new Map(); for(const w of cat){ if(w?.name)lk.set(w.name,w); if(w?.code)lk.set(w.code,w); } let c=0; for(const e of (_estByObjId[o.id]||[])){ for(const [k,r] of Object.entries(e.rows||{})){ const q=Number(r?.qty||0); if(!q) continue; const w=lk.get(k); if(w)c+=rowCostPerUnit(r,w)*q; } } return c; };
         // Только реально созданные в этом месяце объекты (импортированные миграцией исключаем — у них дата создания искусственная)
@@ -9565,7 +9521,6 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         const now = Date.now();
         const staleObjs = approvalObjs.filter(o=>isStaleApprovalObject(o, now));
         const recentObjects = [...liveObjects].sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0)).slice(0,6);
-        const recentContracts = [...contracts].filter(c=>(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0).sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,5);
         const monthName = new Date().toLocaleDateString("ru-RU",{month:"long"});
         // ── Finance KPIs (только для admin/manager) ──
         // «Активные» = НЕ отменён и НЕ выполнен (т.е. в работе + новые). Завершённые в активные не входят.
@@ -9584,7 +9539,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         // ── Production KPIs ── Состояние берём через unifiedStatusOf (production перевешивает
         // сырой object.status, как и везде в списках/карточках) — иначе на объектах, где реальный
         // статус исторически хранится в производстве, эти счётчики занижены/неверны.
-        const _prodKpi = (_isAdmin||_isMgr) ? (() => {
+        const _prodKpi = (_isAdmin||_isMgr||_isUser) ? (() => {
           const _ds = d => { const x=new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
           const today = _ds(new Date());
           const prodByObj = {}; for(const p of (productions||[])) prodByObj[p.objectId]=p;
@@ -9642,11 +9597,16 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             </div>
           </div>
 
-          {/* ── ЧТО ГОРИТ СЕГОДНЯ (admin/manager) ── */}
-          {(_isAdmin||_isMgr) && (
+          {/* ── ЧТО ГОРИТ СЕГОДНЯ ── */}
+          {(_isAdmin||_isMgr||_isUser) && (
             <div style={{marginBottom:24}}>
-              <div style={{fontSize:16,fontWeight:900,color:"#0f172a",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>🔥 Что горит сегодня</div>
-              <IssuePanel issues={_todayIssues} onNav={openIssue} onDismiss={dismissIssueTomorrow} emptyText="✓ Всё под контролем — срочных задач нет" />
+              <div style={{fontSize:16,fontWeight:900,color:"#0f172a",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>🔥 {_isUser ? "Что требует внимания" : "Что горит сегодня"}</div>
+              <IssuePanel
+                issues={_isUser ? _myIssues : _todayIssues}
+                onNav={openIssue}
+                onDismiss={dismissIssueTomorrow}
+                emptyText={_isUser ? "✓ По вашим объектам всё в порядке" : "✓ Всё под контролем — срочных задач нет"}
+              />
             </div>
           )}
 
