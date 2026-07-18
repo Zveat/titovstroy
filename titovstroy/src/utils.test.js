@@ -1,5 +1,42 @@
 import { describe, it, expect } from "vitest";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard } from "./utils.js";
+
+describe("главная замерщика", () => {
+  const user = { id:"u1", name:"Замерщик" };
+  const objects = [
+    { id:"o1", createdById:"u1", status:"approval", updatedAt:30 },
+    { id:"o2", manager:"Замерщик", status:"signed", updatedAt:20 },
+    { id:"o3", createdById:"u2", status:"new", updatedAt:40 },
+    { id:"o4", createdById:"u1", status:"approval", deletedAt:1, updatedAt:50 },
+  ];
+  const estimates = [
+    { id:"e1", objectId:"o1", createdBy:"Замерщик", total:100 },
+    { id:"e2", objectId:"o2", createdById:"u2", total:200 },
+    { id:"e3", objectId:"o3", createdById:"u2", total:999 },
+  ];
+
+  it("показывает только свои живые объекты и связанные с ними сметы", () => {
+    const d = buildEstimatorDashboard({ objects, estimates, user });
+    expect(d.ownObjects.map(o => o.id)).toEqual(["o1", "o2"]);
+    expect(d.ownEstimates.map(e => e.id)).toEqual(["e1", "e2"]);
+    expect(d.objectCount).toBe(2);
+    expect(d.estimateCount).toBe(2);
+    expect(d.estimateTotal).toBe(300);
+  });
+
+  it("учитывает единый производственный статус и сортирует недавние объекты", () => {
+    const d = buildEstimatorDashboard({
+      objects,
+      estimates,
+      productions:[{ objectId:"o1", prodStatus:"active" }],
+      user,
+    });
+    expect(d.statusOf(objects[0])).toBe("work");
+    expect(d.approvalCount).toBe(0);
+    expect(d.signedCount).toBe(2);
+    expect(d.recentObjects.map(o => o.id)).toEqual(["o1", "o2"]);
+  });
+});
 
 describe("объекты без движения и единый источник данных финпроекта", () => {
   it("считает зависшим только живой объект на согласовании без движения 14+ дней", () => {
