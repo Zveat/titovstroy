@@ -64,6 +64,29 @@ export function isActiveFinanceStatus(value) {
   return !["done", "cancel", "refuse", "archive"].includes(financeStatusMeta(value).key);
 }
 
+const OBJECT_EDIT_FIELDS = Object.freeze([
+  "clientName","clientPhone","clientType","clientIin","clientDoc","clientDirector",
+  "clientDirectorShort","clientEmail","clientBank","clientBik","clientAccount",
+  "address","objType","area","note",
+]);
+
+// Возвращает только действительно изменённые и разрешённые поля карточки объекта.
+// Обычный focus/blur, просмотр read-only карточки и изменение запрещённого поля
+// не должны создавать запись в Firebase и ложную dirty-метку.
+export function buildAuthorizedObjectPatch(saved, draft, { canEdit = false, canAssign = false } = {}) {
+  if (!saved || !draft || saved.id !== draft.id) return {};
+  const patch = {};
+  if (canEdit) {
+    for (const key of OBJECT_EDIT_FIELDS) {
+      if (!Object.is(saved[key] ?? "", draft[key] ?? "")) patch[key] = draft[key] ?? "";
+    }
+  }
+  if (canAssign && !Object.is(saved.manager ?? "", draft.manager ?? "")) {
+    patch.manager = draft.manager ?? "";
+  }
+  return patch;
+}
+
 export const ROLE_DEFINITIONS = Object.freeze([
   { key:"admin", label:"Администратор", icon:"👑" },
   { key:"manager", label:"Руководитель", icon:"🧑‍💼" },
@@ -74,10 +97,22 @@ export const ROLE_DEFINITIONS = Object.freeze([
 ]);
 
 const FULL_ADMIN_ACCESS = Object.freeze({
-  dashboard:"all", objects:"all", calendar:"all", documents:"all", analytics:"all",
-  finance:"edit", admin:"full", financialDetails:true,
-  objectEdit:"all", estimateEdit:"all", productionEdit:"all", documentEdit:"all",
-  showLocked:false,
+  dashboard:"all", objects:"all", calendar:"all", estimates:"all", production:"all",
+  documents:"all", analytics:"all", finance:"edit", admin:"full",
+  objectCreate:"all", objectEdit:"all", objectDelete:"all", objectStatus:"all",
+  objectAssign:"all", objectExport:"all", calendarEdit:"all",
+  estimateCreate:"all", estimateEdit:"all", estimateDelete:"all", estimateStatus:"all",
+  estimatePublish:"all", estimateExport:"all",
+  productionEdit:"all", productionStages:"all", productionQuality:"all",
+  productionClientAccess:"all",
+  documentCreate:"all", documentEdit:"all", documentDelete:"all", documentExport:"all",
+  analyticsExport:"all",
+  financeCreate:"all", financeEdit:"all", financeDelete:"all", financeExport:"all",
+  financeDirectories:"all",
+  adminUsers:"all", adminRoles:"all", adminClients:"all", adminContractors:"all",
+  adminCatalog:"all", adminPrices:"all", adminBackups:"all", adminRestore:"all",
+  adminAudit:"all", adminDbCheck:"all",
+  financialDetails:true, showLocked:false,
 });
 
 // Централизованные пресеты ролей. Сохранённая в базе матрица накладывается поверх
@@ -85,39 +120,138 @@ const FULL_ADMIN_ACCESS = Object.freeze({
 export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
   admin: FULL_ADMIN_ACCESS,
   manager: {
-    dashboard:"all", objects:"all", calendar:"all", documents:"all", analytics:"all",
+    dashboard:"all", objects:"all", calendar:"all", estimates:"all", production:"all",
+    documents:"all", analytics:"all",
     finance:"view", admin:"none", financialDetails:true,
-    objectEdit:"none", estimateEdit:"all", productionEdit:"all", documentEdit:"all",
+    objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
+    objectAssign:"none", objectExport:"all", calendarEdit:"none",
+    estimateCreate:"all", estimateEdit:"all", estimateDelete:"all", estimateStatus:"all",
+    estimatePublish:"all", estimateExport:"all",
+    productionEdit:"all", productionStages:"all", productionQuality:"all", productionClientAccess:"all",
+    documentCreate:"all", documentEdit:"all", documentDelete:"all", documentExport:"all",
+    analyticsExport:"all",
+    financeCreate:"none", financeEdit:"none", financeDelete:"none", financeExport:"all",
+    financeDirectories:"none",
+    adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
+    adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
+    adminAudit:"none", adminDbCheck:"none",
     showLocked:false,
   },
   sales_head: {
-    dashboard:"all", objects:"all", calendar:"all", documents:"all", analytics:"all",
+    dashboard:"all", objects:"all", calendar:"all", estimates:"all", production:"all",
+    documents:"all", analytics:"all",
     finance:"none", admin:"none", financialDetails:false,
-    objectEdit:"none", estimateEdit:"none", productionEdit:"none", documentEdit:"none",
+    objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
+    objectAssign:"none", objectExport:"all", calendarEdit:"none",
+    estimateCreate:"none", estimateEdit:"none", estimateDelete:"none", estimateStatus:"none",
+    estimatePublish:"none", estimateExport:"all",
+    productionEdit:"none", productionStages:"none", productionQuality:"none", productionClientAccess:"none",
+    documentCreate:"none", documentEdit:"none", documentDelete:"none", documentExport:"all",
+    analyticsExport:"all",
+    financeCreate:"none", financeEdit:"none", financeDelete:"none", financeExport:"none",
+    financeDirectories:"none",
+    adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
+    adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
+    adminAudit:"none", adminDbCheck:"none",
     showLocked:true,
   },
   foreman: {
-    dashboard:"own", objects:"all", calendar:"all", documents:"none", analytics:"none",
+    dashboard:"own", objects:"all", calendar:"all", estimates:"none", production:"all",
+    documents:"none", analytics:"none",
     finance:"none", admin:"none", financialDetails:true,
-    objectEdit:"none", estimateEdit:"none", productionEdit:"all", documentEdit:"none",
+    objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
+    objectAssign:"none", objectExport:"none", calendarEdit:"own",
+    estimateCreate:"none", estimateEdit:"none", estimateDelete:"none", estimateStatus:"none",
+    estimatePublish:"none", estimateExport:"none",
+    productionEdit:"all", productionStages:"all", productionQuality:"all", productionClientAccess:"all",
+    documentCreate:"none", documentEdit:"none", documentDelete:"none", documentExport:"none",
+    analyticsExport:"none",
+    financeCreate:"none", financeEdit:"none", financeDelete:"none", financeExport:"none",
+    financeDirectories:"none",
+    adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
+    adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
+    adminAudit:"none", adminDbCheck:"none",
     showLocked:false,
   },
   user: {
-    dashboard:"own", objects:"own", calendar:"own", documents:"own", analytics:"own",
+    dashboard:"own", objects:"own", calendar:"own", estimates:"own", production:"own",
+    documents:"own", analytics:"own",
     finance:"none", admin:"none", financialDetails:false,
-    objectEdit:"own", estimateEdit:"own", productionEdit:"own", documentEdit:"own",
+    objectCreate:"all", objectEdit:"own", objectDelete:"own", objectStatus:"own",
+    objectAssign:"none", objectExport:"own", calendarEdit:"own",
+    estimateCreate:"all", estimateEdit:"own", estimateDelete:"own", estimateStatus:"own",
+    estimatePublish:"own", estimateExport:"own",
+    productionEdit:"own", productionStages:"own", productionQuality:"own", productionClientAccess:"none",
+    documentCreate:"all", documentEdit:"own", documentDelete:"own", documentExport:"own",
+    analyticsExport:"own",
+    financeCreate:"none", financeEdit:"none", financeDelete:"none", financeExport:"none",
+    financeDirectories:"none",
+    adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
+    adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
+    adminAudit:"none", adminDbCheck:"none",
     showLocked:true,
   },
   viewer: {
-    dashboard:"none", objects:"all", calendar:"none", documents:"none", analytics:"none",
+    dashboard:"none", objects:"all", calendar:"none", estimates:"none", production:"none",
+    documents:"none", analytics:"none",
     finance:"none", admin:"none", financialDetails:false,
-    objectEdit:"none", estimateEdit:"none", productionEdit:"none", documentEdit:"none",
+    objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
+    objectAssign:"none", objectExport:"none", calendarEdit:"none",
+    estimateCreate:"none", estimateEdit:"none", estimateDelete:"none", estimateStatus:"none",
+    estimatePublish:"none", estimateExport:"none",
+    productionEdit:"none", productionStages:"none", productionQuality:"none", productionClientAccess:"none",
+    documentCreate:"none", documentEdit:"none", documentDelete:"none", documentExport:"none",
+    analyticsExport:"none",
+    financeCreate:"none", financeEdit:"none", financeDelete:"none", financeExport:"none",
+    financeDirectories:"none",
+    adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
+    adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
+    adminAudit:"none", adminDbCheck:"none",
     showLocked:false,
   },
 });
 
 const SCOPE_VALUES = new Set(["none", "own", "all"]);
-const EDIT_VALUES = new Set(["none", "own", "all"]);
+const SCOPE_KEYS = [
+  "dashboard","objects","calendar","estimates","production","documents","analytics",
+  "objectCreate","objectEdit","objectDelete","objectStatus","objectAssign","objectExport",
+  "calendarEdit",
+  "estimateCreate","estimateEdit","estimateDelete","estimateStatus","estimatePublish","estimateExport",
+  "productionEdit","productionStages","productionQuality","productionClientAccess",
+  "documentCreate","documentEdit","documentDelete","documentExport","analyticsExport",
+  "financeCreate","financeEdit","financeDelete","financeExport","financeDirectories",
+  "adminUsers","adminRoles","adminClients","adminContractors","adminCatalog","adminPrices",
+  "adminBackups","adminRestore","adminAudit","adminDbCheck",
+];
+
+const LEGACY_DERIVED_KEYS = Object.freeze({
+  estimates:"objects",
+  production:"objects",
+  objectCreate:"objectEdit",
+  objectDelete:"objectEdit",
+  objectStatus:"objectEdit",
+  objectAssign:"objectEdit",
+  objectExport:"objects",
+  calendarEdit:"calendar",
+  estimateCreate:"estimateEdit",
+  estimateDelete:"estimateEdit",
+  estimateStatus:"estimateEdit",
+  estimatePublish:"estimateEdit",
+  estimateExport:"estimates",
+  productionStages:"productionEdit",
+  productionQuality:"productionEdit",
+  productionClientAccess:"productionEdit",
+  documentCreate:"documentEdit",
+  documentDelete:"documentEdit",
+  documentExport:"documents",
+  analyticsExport:"analytics",
+});
+
+const FINANCE_ACTION_KEYS = ["financeCreate","financeEdit","financeDelete","financeExport","financeDirectories"];
+const ADMIN_ACTION_KEYS = [
+  "adminUsers","adminRoles","adminClients","adminContractors","adminCatalog","adminPrices",
+  "adminBackups","adminRestore","adminAudit","adminDbCheck",
+];
 
 export function normalizeRolePermissions(saved = {}) {
   const src = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
@@ -126,11 +260,29 @@ export function normalizeRolePermissions(saved = {}) {
     const base = DEFAULT_ROLE_PERMISSIONS[role.key];
     const patch = src[role.key] && typeof src[role.key] === "object" ? src[role.key] : {};
     const merged = { ...base, ...patch };
-    for (const key of ["dashboard","objects","calendar","documents","analytics"]) {
-      if (!SCOPE_VALUES.has(merged[key])) merged[key] = base[key];
+    // Старые матрицы знали только права уровня раздела и одно право "изменение".
+    // Новые действия наследуем из старого поля лишь когда в сохранённой матрице
+    // собственного значения ещё нет. Бизнес-данные при этом не затрагиваются.
+    for (const [key, legacyKey] of Object.entries(LEGACY_DERIVED_KEYS)) {
+      if (!(key in patch) && legacyKey in patch && SCOPE_VALUES.has(patch[legacyKey])) {
+        merged[key] = patch[legacyKey];
+      }
     }
-    for (const key of ["objectEdit","estimateEdit","productionEdit","documentEdit"]) {
-      if (!EDIT_VALUES.has(merged[key])) merged[key] = base[key];
+    if (!("productionEdit" in patch) && SCOPE_VALUES.has(patch.production)) {
+      merged.productionEdit = patch.production;
+    }
+    for (const key of FINANCE_ACTION_KEYS) {
+      if (!(key in patch) && "finance" in patch) {
+        merged[key] = patch.finance === "edit" ? "all" : "none";
+      }
+    }
+    for (const key of ADMIN_ACTION_KEYS) {
+      if (!(key in patch) && "admin" in patch) {
+        merged[key] = patch.admin === "full" ? "all" : "none";
+      }
+    }
+    for (const key of SCOPE_KEYS) {
+      if (!SCOPE_VALUES.has(merged[key])) merged[key] = base[key];
     }
     if (!["none","view","edit"].includes(merged.finance)) merged.finance = base.finance;
     if (!["none","full"].includes(merged.admin)) merged.admin = base.admin;

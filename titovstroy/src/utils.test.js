@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, buildAuthorizedObjectPatch } from "./utils.js";
 
 describe("матрица прав ролей", () => {
   it("руководитель продаж видит все объекты и общую аналитику без финансовых деталей", () => {
@@ -11,6 +11,10 @@ describe("матрица прав ролей", () => {
       finance:"none",
       financialDetails:false,
       objectEdit:"none",
+      objectCreate:"none",
+      objectDelete:"none",
+      estimateExport:"all",
+      analyticsExport:"all",
     });
   });
 
@@ -20,6 +24,8 @@ describe("матрица прав ролей", () => {
     expect(p.analytics).toBe("own");
     expect(accessAllows(p.objects, true)).toBe(true);
     expect(accessAllows(p.objects, false)).toBe(false);
+    expect(p.estimateEdit).toBe("own");
+    expect(p.analyticsExport).toBe("own");
   });
 
   it("сохранённые настройки накладываются на пресет, но администратора нельзя заблокировать", () => {
@@ -31,12 +37,77 @@ describe("матрица прав ролей", () => {
     expect(matrix.sales_head.analytics).toBe("own");
     expect(matrix.sales_head.financialDetails).toBe(false);
     expect(matrix.admin).toMatchObject({ objects:"all", admin:"full", finance:"edit" });
+    expect(matrix.admin.adminRoles).toBe("all");
+    expect(matrix.admin.adminRestore).toBe("all");
   });
 
   it("битые значения не проходят в рабочую матрицу", () => {
     const p = permissionsForRole({ user:{ objects:"чужое", finance:"owner" } }, "user");
     expect(p.objects).toBe("own");
     expect(p.finance).toBe("none");
+    expect(p.objectDelete).toBe("own");
+  });
+
+  it("старая матрица автоматически раскладывается на детальные действия", () => {
+    const p = permissionsForRole({
+      user:{
+        objects:"all",
+        objectEdit:"own",
+        estimateEdit:"none",
+        productionEdit:"all",
+        documentEdit:"own",
+        finance:"edit",
+        admin:"none",
+      },
+    }, "user");
+    expect(p.estimates).toBe("all");
+    expect(p.production).toBe("all");
+    expect(p.objectStatus).toBe("own");
+    expect(p.objectDelete).toBe("own");
+    expect(p.estimateCreate).toBe("none");
+    expect(p.productionStages).toBe("all");
+    expect(p.documentCreate).toBe("own");
+    expect(p.financeCreate).toBe("all");
+    expect(p.financeDirectories).toBe("all");
+    expect(p.adminUsers).toBe("none");
+  });
+
+  it("явное детальное право не перезаписывается старым общим правом", () => {
+    const p = permissionsForRole({
+      user:{ objectEdit:"all", objectDelete:"none", estimateEdit:"all", estimatePublish:"own" },
+    }, "user");
+    expect(p.objectDelete).toBe("none");
+    expect(p.objectStatus).toBe("all");
+    expect(p.estimatePublish).toBe("own");
+    expect(p.estimateDelete).toBe("all");
+  });
+});
+
+describe("сохранение карточки объекта по реальным изменениям", () => {
+  const saved = { id:"o1", clientName:"Анна", address:"Абая 1", manager:"Замерщик", note:"" };
+
+  it("обычный blur без изменений не создаёт запись", () => {
+    expect(buildAuthorizedObjectPatch(saved, { ...saved }, { canEdit:true, canAssign:true })).toEqual({});
+  });
+
+  it("режим просмотра не может сохранить даже изменённый локальный черновик", () => {
+    expect(buildAuthorizedObjectPatch(saved, { ...saved, address:"Чужое изменение" })).toEqual({});
+  });
+
+  it("право назначения меняет только менеджера, но не остальные поля", () => {
+    expect(buildAuthorizedObjectPatch(
+      saved,
+      { ...saved, manager:"Руководитель", address:"Новый адрес" },
+      { canAssign:true },
+    )).toEqual({ manager:"Руководитель" });
+  });
+
+  it("право редактирования сохраняет только фактически изменённые данные", () => {
+    expect(buildAuthorizedObjectPatch(
+      saved,
+      { ...saved, address:"Бухар Жырау 10", note:"Позвонить" },
+      { canEdit:true },
+    )).toEqual({ address:"Бухар Жырау 10", note:"Позвонить" });
   });
 });
 
