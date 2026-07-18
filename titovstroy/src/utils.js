@@ -64,6 +64,94 @@ export function isActiveFinanceStatus(value) {
   return !["done", "cancel", "refuse", "archive"].includes(financeStatusMeta(value).key);
 }
 
+export const ROLE_DEFINITIONS = Object.freeze([
+  { key:"admin", label:"Администратор", icon:"👑" },
+  { key:"manager", label:"Руководитель", icon:"🧑‍💼" },
+  { key:"sales_head", label:"Руководитель отдела продаж", icon:"📈" },
+  { key:"foreman", label:"Прораб", icon:"🔨" },
+  { key:"user", label:"Замерщик", icon:"👤" },
+  { key:"viewer", label:"Наблюдатель", icon:"👁" },
+]);
+
+const FULL_ADMIN_ACCESS = Object.freeze({
+  dashboard:"all", objects:"all", calendar:"all", documents:"all", analytics:"all",
+  finance:"edit", admin:"full", financialDetails:true,
+  objectEdit:"all", estimateEdit:"all", productionEdit:"all", documentEdit:"all",
+  showLocked:false,
+});
+
+// Централизованные пресеты ролей. Сохранённая в базе матрица накладывается поверх
+// них, поэтому новые права получают безопасные значения без миграции данных.
+export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
+  admin: FULL_ADMIN_ACCESS,
+  manager: {
+    dashboard:"all", objects:"all", calendar:"all", documents:"all", analytics:"all",
+    finance:"view", admin:"none", financialDetails:true,
+    objectEdit:"none", estimateEdit:"all", productionEdit:"all", documentEdit:"all",
+    showLocked:false,
+  },
+  sales_head: {
+    dashboard:"all", objects:"all", calendar:"all", documents:"all", analytics:"all",
+    finance:"none", admin:"none", financialDetails:false,
+    objectEdit:"none", estimateEdit:"none", productionEdit:"none", documentEdit:"none",
+    showLocked:true,
+  },
+  foreman: {
+    dashboard:"own", objects:"all", calendar:"all", documents:"none", analytics:"none",
+    finance:"none", admin:"none", financialDetails:true,
+    objectEdit:"none", estimateEdit:"none", productionEdit:"all", documentEdit:"none",
+    showLocked:false,
+  },
+  user: {
+    dashboard:"own", objects:"own", calendar:"own", documents:"own", analytics:"own",
+    finance:"none", admin:"none", financialDetails:false,
+    objectEdit:"own", estimateEdit:"own", productionEdit:"own", documentEdit:"own",
+    showLocked:true,
+  },
+  viewer: {
+    dashboard:"none", objects:"all", calendar:"none", documents:"none", analytics:"none",
+    finance:"none", admin:"none", financialDetails:false,
+    objectEdit:"none", estimateEdit:"none", productionEdit:"none", documentEdit:"none",
+    showLocked:false,
+  },
+});
+
+const SCOPE_VALUES = new Set(["none", "own", "all"]);
+const EDIT_VALUES = new Set(["none", "own", "all"]);
+
+export function normalizeRolePermissions(saved = {}) {
+  const src = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+  const result = {};
+  for (const role of ROLE_DEFINITIONS) {
+    const base = DEFAULT_ROLE_PERMISSIONS[role.key];
+    const patch = src[role.key] && typeof src[role.key] === "object" ? src[role.key] : {};
+    const merged = { ...base, ...patch };
+    for (const key of ["dashboard","objects","calendar","documents","analytics"]) {
+      if (!SCOPE_VALUES.has(merged[key])) merged[key] = base[key];
+    }
+    for (const key of ["objectEdit","estimateEdit","productionEdit","documentEdit"]) {
+      if (!EDIT_VALUES.has(merged[key])) merged[key] = base[key];
+    }
+    if (!["none","view","edit"].includes(merged.finance)) merged.finance = base.finance;
+    if (!["none","full"].includes(merged.admin)) merged.admin = base.admin;
+    merged.financialDetails = merged.financialDetails === true;
+    merged.showLocked = merged.showLocked === true;
+    result[role.key] = merged;
+  }
+  // Главного администратора нельзя случайно лишить доступа к матрице и данным.
+  result.admin = { ...FULL_ADMIN_ACCESS };
+  return result;
+}
+
+export function permissionsForRole(matrix, role) {
+  const normalized = normalizeRolePermissions(matrix);
+  return normalized[role] || normalized.viewer;
+}
+
+export function accessAllows(access, ownerMatches = false) {
+  return access === "all" || (access === "own" && ownerMatches);
+}
+
 // Дашборд замерщика строится только по его объектам/сметам. Финансовые операции,
 // себестоимость и маржа сюда намеренно не попадают.
 export function buildEstimatorDashboard({ objects = [], estimates = [], productions = [], user = null, now = Date.now() } = {}) {
@@ -612,7 +700,7 @@ export function validateBackupSchema(snap, arraySpecs = []) {
       if (it[idKey] == null || it[idKey] === "") return { ok: false, error: `раздел «${key}»: элемент #${i} без «${idKey}»` };
     }
   }
-  for (const k of ["financeMeta", "catalog", "prices"]) {
+  for (const k of ["financeMeta", "catalog", "prices", "rolePermissions"]) {
     if (has(d, k) && !(d[k] === null || isPlain(d[k]))) return { ok: false, error: `«${k}» должен быть объектом или пустым` };
   }
   if (has(d, "publicNodes")) {
