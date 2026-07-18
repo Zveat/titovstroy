@@ -64,6 +64,57 @@ export function isActiveFinanceStatus(value) {
   return !["done", "cancel", "refuse", "archive"].includes(financeStatusMeta(value).key);
 }
 
+// Дашборд замерщика строится только по его объектам/сметам. Финансовые операции,
+// себестоимость и маржа сюда намеренно не попадают.
+export function buildEstimatorDashboard({ objects = [], estimates = [], productions = [], user = null } = {}) {
+  const uid = user?.id;
+  const name = String(user?.name || "").trim();
+  const liveObjects = objects.filter(o => o && !o.deletedAt);
+  const ownEstimateObjectIds = new Set(
+    estimates
+      .filter(e => e && !e.deletedAt && ((uid && e.createdById === uid) || (name && e.createdBy === name)))
+      .map(e => e.objectId)
+      .filter(Boolean),
+  );
+  const ownObjects = liveObjects.filter(o =>
+    (uid && o.createdById === uid)
+    || (name && (o.manager === name || o.createdBy === name))
+    || ownEstimateObjectIds.has(o.id),
+  );
+  const ownObjectIds = new Set(ownObjects.map(o => o.id));
+  const ownEstimates = estimates.filter(e =>
+    e && !e.deletedAt && (
+      ownObjectIds.has(e.objectId)
+      || (uid && e.createdById === uid)
+      || (name && e.createdBy === name)
+    ),
+  );
+  const prodByObject = new Map(productions.filter(Boolean).map(p => [p.objectId, p]));
+  const prodStatus = { active:"work", paused:"paused", done:"done", cancel:"cancel" };
+  const statusOf = o => prodStatus[prodByObject.get(o.id)?.prodStatus] || o.status || "new";
+  const statusCounts = {};
+  for (const o of ownObjects) {
+    const status = statusOf(o);
+    statusCounts[status] = (statusCounts[status] || 0) + 1;
+  }
+  const terminal = new Set(["done", "cancel", "archive", "refuse"]);
+  return {
+    ownObjects,
+    ownEstimates,
+    statusCounts,
+    objectCount: ownObjects.length,
+    activeCount: ownObjects.filter(o => !terminal.has(statusOf(o))).length,
+    approvalCount: statusCounts.approval || 0,
+    signedCount: ["signed", "work", "paused", "done"].reduce((sum, key) => sum + (statusCounts[key] || 0), 0),
+    estimateCount: ownEstimates.length,
+    estimateTotal: ownEstimates.reduce((sum, e) => sum + (Number(e.total) || 0), 0),
+    recentObjects: [...ownObjects]
+      .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))
+      .slice(0, 6),
+    statusOf,
+  };
+}
+
 // Финансовый проект хранит деньги и ссылку objectId. Описательные поля всегда
 // вычисляются из объекта, производства, договора и актов, чтобы их нельзя было
 // независимо изменить в двух разделах.
