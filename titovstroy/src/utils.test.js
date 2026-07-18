@@ -36,6 +36,28 @@ describe("главная замерщика", () => {
     expect(d.signedCount).toBe(2);
     expect(d.recentObjects.map(o => o.id)).toEqual(["o1", "o2"]);
   });
+
+  it("считает месячные показатели и пайплайн только по объектам замерщика", () => {
+    const now = new Date("2026-07-18T12:00:00Z").getTime();
+    const d = buildEstimatorDashboard({
+      now,
+      user,
+      objects:[
+        { id:"july-own", createdById:"u1", status:"approval", createdAt:new Date("2026-07-05T00:00:00Z").getTime() },
+        { id:"june-own", createdById:"u1", status:"approval", createdAt:new Date("2026-06-30T00:00:00Z").getTime() },
+        { id:"july-other", createdById:"u2", status:"approval", createdAt:new Date("2026-07-06T00:00:00Z").getTime() },
+      ],
+      estimates:[
+        { id:"own-july-est", objectId:"july-own", total:150 },
+        { id:"own-june-est", objectId:"june-own", total:250 },
+        { id:"other-est", objectId:"july-other", total:999 },
+      ],
+    });
+    expect(d.ownObjects.map(o => o.id)).toEqual(["july-own", "june-own"]);
+    expect(d.monthObjectCount).toBe(1);
+    expect(d.monthEstimateTotal).toBe(150);
+    expect(d.pipelineTotal).toBe(400);
+  });
 });
 
 describe("объекты без движения и единый источник данных финпроекта", () => {
