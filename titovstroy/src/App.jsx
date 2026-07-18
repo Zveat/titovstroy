@@ -2056,6 +2056,184 @@ function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note })
 }
 
 
+const ROLE_PERMISSION_MATRIX_ROWS = [
+  { label:"Главная", viewKey:"dashboard" },
+  { label:"Объекты", viewKey:"objects", editKey:"objectEdit" },
+  { label:"Календарь", viewKey:"calendar" },
+  { label:"Сметы и КП", inheritedView:"Как объекты", editKey:"estimateEdit" },
+  { label:"Производство", inheritedView:"Как объекты", editKey:"productionEdit" },
+  { label:"Документы", viewKey:"documents", editKey:"documentEdit" },
+  { label:"Аналитика", viewKey:"analytics" },
+];
+
+function PermissionSelect({ value, onChange, disabled, label, children }) {
+  return (
+    <select
+      className="fi"
+      value={value}
+      onChange={e=>onChange(e.target.value)}
+      disabled={disabled}
+      aria-label={label}
+      style={{width:"100%",minWidth:0,height:36,padding:"5px 28px 5px 9px",fontSize:12,borderRadius:7}}
+    >
+      {children}
+    </select>
+  );
+}
+
+// Держим черновик матрицы в отдельном компоненте. Иначе каждый выбор в select
+// перерисовывает всю тяжёлую Админку (прайс, справочники, сотрудники) и кажется,
+// что кнопка срабатывает с задержкой.
+function RolePermissionsEditor({ rolePermissions, onSaveRolePermissions }) {
+  const [permissionRole, setPermissionRole] = useState("sales_head");
+  const [permissionDraft, setPermissionDraft] = useState(() => normalizeRolePermissions(rolePermissions));
+  const [permissionMsg, setPermissionMsg] = useState("");
+  const [permissionSaving, setPermissionSaving] = useState(false);
+
+  useEffect(() => {
+    setPermissionDraft(normalizeRolePermissions(rolePermissions));
+  }, [rolePermissions]);
+
+  const p = permissionDraft[permissionRole] || DEFAULT_ROLE_PERMISSIONS[permissionRole];
+  const locked = permissionRole === "admin";
+  const role = ROLE_DEFINITIONS.find(x => x.key === permissionRole);
+  const roleLabel = role ? `${role.icon} ${role.label}` : "👤 Замерщик";
+
+  const setPermission = (key, value) => {
+    if (locked) return;
+    setPermissionDraft(prev => ({
+      ...prev,
+      [permissionRole]: { ...prev[permissionRole], [key]: value },
+    }));
+    setPermissionMsg("");
+  };
+
+  const savePermissions = async () => {
+    if (permissionSaving) return;
+    setPermissionSaving(true);
+    setPermissionMsg("");
+    try {
+      const ok = await onSaveRolePermissions(permissionDraft);
+      setPermissionMsg(ok ? "✓ Права сохранены" : "Не удалось сохранить в облако");
+    } finally {
+      setPermissionSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <style>{`
+        .role-perm-row{display:grid;grid-template-columns:minmax(125px,1fr) minmax(118px,160px) minmax(118px,160px);gap:8px;align-items:center}
+        @media(max-width:700px){
+          .role-perm-row{grid-template-columns:minmax(105px,1fr) minmax(112px,1fr) minmax(112px,1fr)}
+        }
+      `}</style>
+      <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:10}}>
+        {ROLE_DEFINITIONS.map(item => (
+          <button
+            key={item.key}
+            type="button"
+            onClick={()=>setPermissionRole(item.key)}
+            className="btn"
+            style={{padding:"6px 9px",fontSize:11,background:permissionRole===item.key?"#eff6ff":"#fff",color:permissionRole===item.key?"#2563eb":"#64748b",border:`1px solid ${permissionRole===item.key?"#93c5fd":"#e2e8f0"}`}}
+          >
+            {item.icon} {item.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,overflow:"hidden"}}>
+        <div style={{padding:"10px 12px",borderBottom:"1px solid #e2e8f0",background:"#f8fafc"}}>
+          <div style={{fontSize:13,fontWeight:800,color:"#0f172a"}}>{roleLabel}</div>
+          <div style={{fontSize:10,color:"#64748b",marginTop:2}}>
+            {locked
+              ? "Администратор всегда имеет полный доступ, чтобы систему нельзя было случайно заблокировать."
+              : "Изменения начнут действовать у сотрудников этой роли после сохранения и обновления страницы."}
+          </div>
+        </div>
+
+        <div style={{padding:"6px 12px"}}>
+          <div className="role-perm-row" style={{padding:"3px 0 6px",borderBottom:"1px solid #e2e8f0"}}>
+            <div style={{fontSize:10,fontWeight:800,color:"#94a3b8",textTransform:"uppercase"}}>Раздел</div>
+            <div style={{fontSize:10,fontWeight:800,color:"#94a3b8",textTransform:"uppercase"}}>Просмотр</div>
+            <div style={{fontSize:10,fontWeight:800,color:"#94a3b8",textTransform:"uppercase"}}>Изменение</div>
+          </div>
+
+          {ROLE_PERMISSION_MATRIX_ROWS.map(row=>(
+            <div key={row.label} className="role-perm-row" style={{padding:"6px 0",borderBottom:"1px solid #f1f5f9"}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#334155"}}>{row.label}</div>
+              {row.viewKey ? (
+                <PermissionSelect value={p[row.viewKey]} onChange={v=>setPermission(row.viewKey,v)} disabled={locked} label={`Просмотр: ${row.label}`}>
+                  <option value="none">Нет доступа</option>
+                  <option value="own">Только свои</option>
+                  <option value="all">Все</option>
+                </PermissionSelect>
+              ) : (
+                <div style={{height:36,display:"flex",alignItems:"center",padding:"0 9px",border:"1px solid #e2e8f0",borderRadius:7,background:"#f8fafc",fontSize:11,color:"#94a3b8"}}>
+                  {row.inheritedView}
+                </div>
+              )}
+              {row.editKey ? (
+                <PermissionSelect value={p[row.editKey]} onChange={v=>setPermission(row.editKey,v)} disabled={locked} label={`Изменение: ${row.label}`}>
+                  <option value="none">Нет доступа</option>
+                  <option value="own">Только свои</option>
+                  <option value="all">Все</option>
+                </PermissionSelect>
+              ) : (
+                <div style={{fontSize:12,color:"#cbd5e1",textAlign:"center"}}>—</div>
+              )}
+            </div>
+          ))}
+
+          <div className="role-perm-row" style={{padding:"6px 0",borderBottom:"1px solid #f1f5f9"}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#334155"}}>Финансы</div>
+            <PermissionSelect value={p.finance} onChange={v=>setPermission("finance",v)} disabled={locked} label="Доступ к финансам">
+              <option value="none">Нет доступа</option>
+              <option value="view">Просмотр</option>
+              <option value="edit">Просмотр и изменение</option>
+            </PermissionSelect>
+            <div style={{fontSize:12,color:"#cbd5e1",textAlign:"center"}}>—</div>
+          </div>
+
+          <div className="role-perm-row" style={{padding:"6px 0",borderBottom:"1px solid #f1f5f9"}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#334155"}}>Админка</div>
+            <PermissionSelect value={p.admin} onChange={v=>setPermission("admin",v)} disabled={locked} label="Доступ к админке">
+              <option value="none">Нет доступа</option>
+              <option value="full">Полный доступ</option>
+            </PermissionSelect>
+            <div style={{fontSize:12,color:"#cbd5e1",textAlign:"center"}}>—</div>
+          </div>
+
+          <label style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"8px 0",borderBottom:"1px solid #f1f5f9",cursor:locked?"default":"pointer"}}>
+            <span>
+              <span style={{fontSize:12,fontWeight:700,color:"#334155"}}>Детальные финрезультаты</span>
+              <span style={{display:"block",fontSize:10,color:"#94a3b8",marginTop:1}}>Себестоимость, прибыль, маржа и долги</span>
+            </span>
+            <input type="checkbox" checked={p.financialDetails} disabled={locked} onChange={e=>setPermission("financialDetails",e.target.checked)} style={{width:18,height:18}}/>
+          </label>
+
+          <label style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"8px 0",cursor:locked?"default":"pointer"}}>
+            <span>
+              <span style={{fontSize:12,fontWeight:700,color:"#334155"}}>Показывать закрытые разделы</span>
+              <span style={{display:"block",fontSize:10,color:"#94a3b8",marginTop:1}}>Оставлять пункт меню с сообщением «Доступ закрыт»</span>
+            </span>
+            <input type="checkbox" checked={p.showLocked} disabled={locked} onChange={e=>setPermission("showLocked",e.target.checked)} style={{width:18,height:18}}/>
+          </label>
+        </div>
+
+        {!locked && (
+          <div style={{padding:"9px 12px",borderTop:"1px solid #e2e8f0",display:"flex",alignItems:"center",gap:10,justifyContent:"flex-end"}}>
+            {permissionMsg && <span style={{fontSize:12,color:permissionMsg.startsWith("✓")?"#059669":"#dc2626"}}>{permissionMsg}</span>}
+            <button type="button" className="btn btn-g" disabled={permissionSaving} onClick={savePermissions} style={{padding:"8px 12px",fontSize:12}}>
+              {permissionSaving ? "Сохраняем..." : "💾 Сохранить права"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
 function AdminPageContent({ currentUser, presence = {}, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
   const [tab, setTab] = useState("users");
@@ -2083,11 +2261,6 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, rolePerm
   const [adminEditItem, setAdminEditItem] = useState(null); // {mode:"newClient"|"editClient"|"newCA"|"editCA"|"newWorker"|"editWorker", data:{}}
   const [adminSubTab, setAdminSubTab] = useState("list"); // "list"|"clientEditor"|"caEditor"|"workerEditor"
   const [workerSearch, setWorkerSearch] = useState(""); // поиск в справочнике подрядчиков
-  const [permissionRole, setPermissionRole] = useState("sales_head");
-  const [permissionDraft, setPermissionDraft] = useState(() => normalizeRolePermissions(rolePermissions));
-  const [permissionMsg, setPermissionMsg] = useState("");
-  useEffect(() => { setPermissionDraft(normalizeRolePermissions(rolePermissions)); }, [rolePermissions]);
-
   const openCatalogBackups = async () => {
     const bRaw = await storage.get(CATALOG_BACKUPS_KEY);
     let bkps = []; try { if (bRaw?.value) bkps = JSON.parse(bRaw.value); } catch {}
@@ -2320,89 +2493,10 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, rolePerm
           <div style={{fontSize:24,marginBottom:8}}>⏳</div>Загрузка...
         </div>
       ) : tab === "permissions" ? (
-        <div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
-            {ROLE_DEFINITIONS.map(role => (
-              <button key={role.key} onClick={()=>setPermissionRole(role.key)} className="btn"
-                style={{padding:"8px 12px",background:permissionRole===role.key?"#eff6ff":"#fff",color:permissionRole===role.key?"#2563eb":"#64748b",border:`1px solid ${permissionRole===role.key?"#93c5fd":"#e2e8f0"}`}}>
-                {role.icon} {role.label}
-              </button>
-            ))}
-          </div>
-          {(()=>{
-            const p = permissionDraft[permissionRole] || DEFAULT_ROLE_PERMISSIONS[permissionRole];
-            const locked = permissionRole === "admin";
-            const setPermission = (key, value) => {
-              if (locked) return;
-              setPermissionDraft(prev => ({...prev,[permissionRole]:{...prev[permissionRole],[key]:value}}));
-              setPermissionMsg("");
-            };
-            const scopeRows = [
-              ["dashboard","Главная","Какие объекты входят в показатели главной"],
-              ["objects","Объекты","Какие карточки объектов доступны"],
-              ["calendar","Календарь","Какие объекты видны в календаре"],
-              ["documents","Прочие документы","Доступ к договорам и документам"],
-              ["analytics","Аналитика","По каким объектам строится аналитика"],
-            ];
-            const editRows = [
-              ["objectEdit","Карточки объектов"],
-              ["estimateEdit","Сметы и КП"],
-              ["productionEdit","Производство"],
-              ["documentEdit","Документы"],
-            ];
-            const Select = ({value,onChange,children}) => (
-              <select className="fi" value={value} onChange={e=>onChange(e.target.value)} disabled={locked} style={{width:"100%",maxWidth:210}}>{children}</select>
-            );
-            return (
-              <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,overflow:"hidden"}}>
-                <div style={{padding:"16px 18px",borderBottom:"1px solid #e2e8f0",background:"#f8fafc"}}>
-                  <div style={{fontWeight:800,color:"#0f172a"}}>{roleLabel(permissionRole)}</div>
-                  <div style={{fontSize:12,color:"#64748b",marginTop:3}}>{locked?"Администратор всегда имеет полный доступ, чтобы систему нельзя было случайно заблокировать.":"Изменения начнут действовать у сотрудников этой роли после сохранения и обновления страницы."}</div>
-                </div>
-                <div style={{padding:"8px 18px"}}>
-                  {scopeRows.map(([key,label,sub])=>(
-                    <div key={key} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(145px,210px)",gap:16,alignItems:"center",padding:"11px 0",borderBottom:"1px solid #f1f5f9"}}>
-                      <div><div style={{fontSize:13,fontWeight:700,color:"#334155"}}>{label}</div><div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{sub}</div></div>
-                      <Select value={p[key]} onChange={v=>setPermission(key,v)}>
-                        <option value="none">Нет доступа</option><option value="own">Только свои</option><option value="all">Все</option>
-                      </Select>
-                    </div>
-                  ))}
-                  <div style={{fontSize:11,fontWeight:800,color:"#64748b",textTransform:"uppercase",letterSpacing:".06em",marginTop:18,marginBottom:4}}>Редактирование</div>
-                  {editRows.map(([key,label])=>(
-                    <div key={key} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(145px,210px)",gap:16,alignItems:"center",padding:"10px 0",borderBottom:"1px solid #f1f5f9"}}>
-                      <div style={{fontSize:13,fontWeight:700,color:"#334155"}}>{label}</div>
-                      <Select value={p[key]} onChange={v=>setPermission(key,v)}>
-                        <option value="none">Только просмотр</option><option value="own">Редактировать свои</option><option value="all">Редактировать все</option>
-                      </Select>
-                    </div>
-                  ))}
-                  <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(145px,210px)",gap:16,alignItems:"center",padding:"10px 0",borderBottom:"1px solid #f1f5f9"}}>
-                    <div><div style={{fontSize:13,fontWeight:700,color:"#334155"}}>Финансы</div><div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>ДДС, P&L, баланс, проекты и операции</div></div>
-                    <Select value={p.finance} onChange={v=>setPermission("finance",v)}>
-                      <option value="none">Нет доступа</option><option value="view">Только просмотр</option><option value="edit">Просмотр и изменение</option>
-                    </Select>
-                  </div>
-                  <label style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,padding:"12px 0",borderBottom:"1px solid #f1f5f9",cursor:locked?"default":"pointer"}}>
-                    <span><span style={{fontSize:13,fontWeight:700,color:"#334155"}}>Детальные финансовые результаты</span><span style={{display:"block",fontSize:11,color:"#94a3b8",marginTop:2}}>Себестоимость, прибыль, маржа и долги в объектах и аналитике</span></span>
-                    <input type="checkbox" checked={p.financialDetails} disabled={locked} onChange={e=>setPermission("financialDetails",e.target.checked)} style={{width:18,height:18}}/>
-                  </label>
-                  <label style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,padding:"12px 0",cursor:locked?"default":"pointer"}}>
-                    <span><span style={{fontSize:13,fontWeight:700,color:"#334155"}}>Показывать закрытые разделы</span><span style={{display:"block",fontSize:11,color:"#94a3b8",marginTop:2}}>Пункт остаётся в меню и показывает понятное сообщение «Доступ закрыт»</span></span>
-                    <input type="checkbox" checked={p.showLocked} disabled={locked} onChange={e=>setPermission("showLocked",e.target.checked)} style={{width:18,height:18}}/>
-                  </label>
-                </div>
-                {!locked && <div style={{padding:"14px 18px",borderTop:"1px solid #e2e8f0",display:"flex",alignItems:"center",gap:12,justifyContent:"flex-end"}}>
-                  {permissionMsg && <span style={{fontSize:12,color:permissionMsg.startsWith("✓")?"#059669":"#dc2626"}}>{permissionMsg}</span>}
-                  <button className="btn btn-g" onClick={async()=>{
-                    const ok = await onSaveRolePermissions(permissionDraft);
-                    setPermissionMsg(ok ? "✓ Права сохранены" : "Не удалось сохранить в облако");
-                  }}>💾 Сохранить права</button>
-                </div>}
-              </div>
-            );
-          })()}
-        </div>
+        <RolePermissionsEditor
+          rolePermissions={rolePermissions}
+          onSaveRolePermissions={onSaveRolePermissions}
+        />
       ) : tab === "users" ? (
         <div>
           {/* Список сотрудников — карточки богатые (роль, онлайн, кнопки), поэтому шире: 2 колонки */}
