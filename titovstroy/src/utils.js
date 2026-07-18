@@ -6,7 +6,7 @@
 
 // Нормализация номера договора для сопоставления: убираем пробелы, № и # — чтобы
 // «№0919#153» и «0919#153» считались одним и тем же номером. Используется по всему
-// приложению для связки договоров/финпроектов/операций между собой.
+// приложению для связки договоров/финпроектов/операций между собой. 
 export const normCN = (s) => String(s||"").trim().toLowerCase().replace(/[\s№#]/g,"");
 
 export function isStaleApprovalObject(object, now = Date.now(), days = 14) {
@@ -66,7 +66,7 @@ export function isActiveFinanceStatus(value) {
 
 // Дашборд замерщика строится только по его объектам/сметам. Финансовые операции,
 // себестоимость и маржа сюда намеренно не попадают.
-export function buildEstimatorDashboard({ objects = [], estimates = [], productions = [], user = null } = {}) {
+export function buildEstimatorDashboard({ objects = [], estimates = [], productions = [], user = null, now = Date.now() } = {}) {
   const uid = user?.id;
   const name = String(user?.name || "").trim();
   const liveObjects = objects.filter(o => o && !o.deletedAt);
@@ -98,6 +98,21 @@ export function buildEstimatorDashboard({ objects = [], estimates = [], producti
     statusCounts[status] = (statusCounts[status] || 0) + 1;
   }
   const terminal = new Set(["done", "cancel", "archive", "refuse"]);
+  const nowDate = new Date(now);
+  const inCurrentMonth = value => {
+    const d = new Date(Number(value) || 0);
+    return d.getFullYear() === nowDate.getFullYear() && d.getMonth() === nowDate.getMonth();
+  };
+  const objectEstimateTotal = objectId => ownEstimates
+    .filter(e => e.objectId === objectId)
+    .reduce((sum, e) => sum + (Number(e.total) || 0), 0);
+  const monthObjects = ownObjects.filter(o =>
+    o.createdBy !== "migration"
+    && inCurrentMonth(o.createdAt),
+  );
+  const monthEstimateTotal = monthObjects.reduce((sum, o) => sum + objectEstimateTotal(o.id), 0);
+  const approvalObjects = ownObjects.filter(o => statusOf(o) === "approval");
+  const pipelineTotal = approvalObjects.reduce((sum, o) => sum + objectEstimateTotal(o.id), 0);
   return {
     ownObjects,
     ownEstimates,
@@ -108,6 +123,9 @@ export function buildEstimatorDashboard({ objects = [], estimates = [], producti
     signedCount: ["signed", "work", "paused", "done"].reduce((sum, key) => sum + (statusCounts[key] || 0), 0),
     estimateCount: ownEstimates.length,
     estimateTotal: ownEstimates.reduce((sum, e) => sum + (Number(e.total) || 0), 0),
+    monthObjectCount: monthObjects.length,
+    monthEstimateTotal,
+    pipelineTotal,
     recentObjects: [...ownObjects]
       .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))
       .slice(0, 6),
