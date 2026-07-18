@@ -4508,8 +4508,10 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
         // иначе параллельные отметки затирают друг друга (человек, зашедший на минуту,
         // мог вообще пропасть из «был в сети»). Свой ключ никто не перетрёт.
         const now = Date.now();
-        await storage.set(PRESENCE_KEY + "-" + currentUser.id, String(now));
-        if (!stopped) setPresence(p => ({ ...p, [currentUser.id]: now }));
+        // Presence — служебный heartbeat, не бизнес-данные. Его временный отказ не должен
+        // создавать dirty-черновик и включать общий аварийный баннер смет/финансов.
+        const result = await storage.setCloudOnly(PRESENCE_KEY + "-" + currentUser.id, String(now));
+        if (!stopped && result?.fbOk) setPresence(p => ({ ...p, [currentUser.id]: now }));
       } catch {}
     };
     touch();
@@ -4830,9 +4832,28 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [listSort, setListSort] = useState("date"); // "date" | "sum" | "name"
   const debouncedListSearch = useDebounce(listSearch, 200);
 
+  const estimatorDashboard = useMemo(
+    () => buildEstimatorDashboard({ objects, estimates, productions, user: currentUser }),
+    [objects, estimates, productions, currentUser],
+  );
+  const estimatorObjectIds = useMemo(
+    () => new Set(estimatorDashboard.ownObjects.map(o => o.id)),
+    [estimatorDashboard],
+  );
+  const accessibleObjects = useMemo(
+    () => currentUser.role === "user"
+      ? objects.filter(o => estimatorObjectIds.has(o.id))
+      : objects,
+    [objects, currentUser.role, estimatorObjectIds],
+  );
+  const accessibleEstimates = useMemo(
+    () => currentUser.role === "user" ? estimatorDashboard.ownEstimates : estimates,
+    [estimates, currentUser.role, estimatorDashboard],
+  );
+
   const filteredObjects = useMemo(() => {
     const q = debouncedObjectSearch.toLowerCase().trim();
-    return [...objects]
+    return [...accessibleObjects]
       .filter(o=>!o.deletedAt) // скрываем мягко-удалённые из основного списка
       .filter(o=>{
         // фильтр по статусу применяется в рендере через unifiedStatusOf (единый статус)
@@ -4845,10 +4866,10 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
         return true;
       })
       .sort((a,b)=>{ const da=a.createdAt||0, db=b.createdAt||0; return objectDateSort==="old" ? da-db : db-da; });
-  }, [objects, objectFilterStatus, objectFilterType, objectFilterManager, objectAttentionFilter, objectDateSort, objectDateFrom, objectDateTo, debouncedObjectSearch]);
+  }, [accessibleObjects, objectFilterStatus, objectFilterType, objectFilterManager, objectAttentionFilter, objectDateSort, objectDateFrom, objectDateTo, debouncedObjectSearch]);
 
   // Только «живые» (не удалённые) объекты — используется в дашборде, аналитике и всех расчётах
-  const liveObjects = useMemo(() => objects.filter(o=>!o.deletedAt), [objects]);
+  const liveObjects = useMemo(() => accessibleObjects.filter(o=>!o.deletedAt), [accessibleObjects]);
   const openStaleObjects = useCallback(() => {
     setObjectAttentionFilter("stale-approval");
     setObjectFilterStatus("");
@@ -5051,7 +5072,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const filteredEstimates = useMemo(() => {
     const q = debouncedListSearch.toLowerCase().trim();
     const objIds = new Set(objects.map(o=>o.id));
-    return estimates
+    return accessibleEstimates
       // показываем сметы без объекта ИЛИ привязанные к НЕсуществующему объекту (сироты после восстановления)
       .filter(e => !e.objectId || !objIds.has(e.objectId))
       .filter(e => !listFilter || e.proj?.type === listFilter)
@@ -5064,7 +5085,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
         if (listSort==="name") return (a.proj?.name||"").localeCompare(b.proj?.name||"","ru");
         return (b.updatedAt||0)-(a.updatedAt||0);
       });
-  }, [estimates, objects, listFilter, listFilterManager, listFilterStatus, debouncedListSearch, listSort]);
+  }, [accessibleEstimates, objects, listFilter, listFilterManager, listFilterStatus, debouncedListSearch, listSort]);
 
   // Когда каталог меняется — синхронизируем activeCat/activeSub
   useEffect(() => {
@@ -6409,6 +6430,7 @@ ${reqBlock}`;
         console.error("loadEstimates: данные недоступны (Firebase не ответил) — сохранение заблокировано до перезагрузки");
         setLoadError(true);
       }
+      if (ok) setLoadError(false);
       try { if (u) {
         const uList=JSON.parse(u.value); setAllUsers(uList);
         // синхронизируем роль текущего пользователя если она изменилась в Firebase
@@ -6445,6 +6467,7 @@ ${reqBlock}`;
       } catch {}
     } catch(e) {
       console.error("loadEstimates error — данные не тронуты", e);
+      setLoadError(true);
     }
     // Разрешаем запись ТОЛЬКО если успешно подтвердили состояние базы
     _estimatesLoaded.current = ok;
@@ -7365,8 +7388,12 @@ ${reqBlock}`;
 
     // ── ОБЪЕКТ-ЦЕНТРИЧНАЯ МОДЕЛЬ ──
     // Единица учёта — ОБЪЕКТ (сделка). Стоимость объекта = сумма всех его смет (основная + доп. сметы).
+    const accessibleObjectIds = new Set(liveObjects.map(o => o.id));
+    const scopedEstimates = currentUser.role === "user"
+      ? estimates.filter(e => e.objectId && accessibleObjectIds.has(e.objectId))
+      : estimates;
     const estByObj = {}; // objectId -> [сметы]
-    for(const e of estimates){ if(e.objectId){ (estByObj[e.objectId]||(estByObj[e.objectId]=[])).push(e); } }
+    for(const e of scopedEstimates){ if(e.objectId){ (estByObj[e.objectId]||(estByObj[e.objectId]=[])).push(e); } }
     const objVal  = (o) => (estByObj[o.id]||[]).reduce((s,e)=>s+(e.total||0),0);
     const objCost = (o) => (estByObj[o.id]||[]).reduce((s,e)=>s+estCost(e),0);
     const objType = (o) => o.objType || "—";
@@ -7382,6 +7409,7 @@ ${reqBlock}`;
     const baseCon = contracts
       .filter(c => !c.deletedAt)
       .filter(c => c.objectId)
+      .filter(c => currentUser.role !== "user" || accessibleObjectIds.has(c.objectId))
       .filter(c => inRange(new Date(c.date||0).getTime()))
       .filter(c => (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0)
       .filter(c => !statsManager || (c.manager||"")=== statsManager);
@@ -7428,7 +7456,7 @@ ${reqBlock}`;
 
     // ── D. Рентабельность по категориям (по сметам объектов в периоде) ──
     const objIdSet = new Set(baseObjs.map(o=>o.id));
-    const estForCats = estimates.filter(e=>e.objectId && objIdSet.has(e.objectId));
+    const estForCats = scopedEstimates.filter(e=>e.objectId && objIdSet.has(e.objectId));
     const catFin = {};
     for(const e of estForCats){
       for(const [key,r] of Object.entries(e.rows||{})){
@@ -7484,7 +7512,7 @@ ${reqBlock}`;
     // ── F. «Зависшие» объекты в работе (без движения 14+ дней) ──
     const STALE_DAYS = 14;
     const nowMs = Date.now();
-    const staleSent = objects
+    const staleSent = liveObjects
       .filter(o=>o.status==="approval")
       .map(o=>({e:{id:o.id, proj:{name:o.clientName||o.address||"Объект", phone:o.clientPhone}, total:objVal(o), _obj:o}, days: Math.floor((nowMs-(o.updatedAt||0))/864e5)}))
       .filter(x=>x.days>=STALE_DAYS)
@@ -7518,7 +7546,7 @@ ${reqBlock}`;
       wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin,
       funnel, winRateOverall, winRateSent, signedB, refuseB, catProfit, monthly, staleSent,
       avgDealDays, avgApprovalDays, signedObjsCount: signedObjs.length, convByType, topObjects, objVal };
-  }, [estimates, contracts, objects, statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers, catalogVersion]);
+  }, [estimates, contracts, liveObjects, currentUser.role, statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers, catalogVersion]);
 
   // Защита от краша: если activeCat не в Gdyn — берём первый
   const safeCat = Gdyn[activeCat] ? activeCat : (Object.keys(Gdyn)[0]||"");
@@ -9441,7 +9469,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 
       {/* Главная замерщика: только его объекты и сметы, без себестоимости/маржи. */}
       {effScreen === "dashboard" && _isUser && (()=>{
-        const d = buildEstimatorDashboard({ objects, estimates, productions, user:currentUser });
+        const d = estimatorDashboard;
         const statRows = DEAL_STATUSES.map(s => ({ ...s, count:d.statusCounts[s.key] || 0 })).filter(s => s.count > 0);
         return (
         <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40}}>
@@ -9457,6 +9485,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               ["Договор подписан",d.signedCount,"#059669","✓"],
               ["Смет подготовлено",d.estimateCount,"#7c3aed","📋"],
               ["Сумма моих смет",d.estimateTotal ? `${fmt(d.estimateTotal)} ₸` : "—","#0f172a","₸"],
+              ["Объектов за месяц",d.monthObjectCount,"#2563eb","📅"],
+              ["Объём за месяц",d.monthEstimateTotal ? `${fmt(d.monthEstimateTotal)} ₸` : "—","#059669","💰"],
+              ["Пайплайн",d.pipelineTotal ? `${fmt(d.pipelineTotal)} ₸` : "—","#d97706","↻"],
             ].map(([label,value,color,icon])=>(
               <div key={label} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"16px",minHeight:112,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
                 <div style={{display:"flex",justifyContent:"space-between",gap:8,color:"#64748b",fontSize:11,fontWeight:700,marginBottom:12}}><span>{label}</span><span>{icon}</span></div>
@@ -9870,7 +9901,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   )}
                 </div>
                 {/* Поиск и фильтры */}
-                {estimates.length > 0 && (
+                {accessibleEstimates.length > 0 && (
                   <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:2}}>
                     <input
                       style={{background:"#ffffff",border:"1px solid #e2e8f0",color:"#0f172a",borderRadius:8,padding:"9px 14px",fontFamily:"inherit",fontSize:13,outline:"none",width:"100%"}}
@@ -9901,7 +9932,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       ))}
                     </div>
                     {/* Фильтр по сотруднику */}
-                    {nonViewerUsers.length > 1 && (
+                    {currentUser.role !== "user" && nonViewerUsers.length > 1 && (
                       <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
                         <button onClick={()=>setListFilterManager("")}
                           style={{background:!listFilterManager?"#eff6ff":"rgba(0,0,0,.03)",color:!listFilterManager?"#2563eb":"#94a3b8",border:`1px solid ${!listFilterManager?"rgba(136,136,204,.4)":"#e2e8f0"}`,borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
@@ -9928,7 +9959,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   </div>
                 )}
 
-                {estimates.length === 0 ? (
+                {accessibleEstimates.length === 0 ? (
                   <div style={{textAlign:"center",padding:"80px 0"}}>
                     <div style={{fontSize:40,marginBottom:16}}>📋</div>
                     <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>Смет пока нет</div>
@@ -9943,7 +9974,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   const filteredIds = new Set(filtered.map(e=>e.id));
                   const dsMap = {}; // parentId -> [child, ...]
                   const estById = {};
-                  estimates.forEach(e=>{ estById[e.id]=e; if(e.parentId){ (dsMap[e.parentId]||(dsMap[e.parentId]=[])).push(e); } });
+                  accessibleEstimates.forEach(e=>{ estById[e.id]=e; if(e.parentId){ (dsMap[e.parentId]||(dsMap[e.parentId]=[])).push(e); } });
                   // Корневые сметы из filtered (без parentId)
                   const roots = filtered.filter(e=>!e.parentId);
                   // ДС из filtered у которых родитель НЕ в filtered — показываем как корень
@@ -10054,7 +10085,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     <>
                       <div style={{fontSize:11,color:"#94a3b8",marginBottom:2}}>
                         {(() => {
-                          const totalRoots = estimates.filter(e=>!e.parentId).length;
+                          const totalRoots = accessibleEstimates.filter(e=>!e.parentId).length;
                           const foundRoots = filtered.filter(e=>!e.parentId).length;
                           return foundRoots !== totalRoots ? `Найдено: ${foundRoots}` : `Всего смет: ${totalRoots}`;
                         })()}
@@ -13176,9 +13207,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               {/* Фильтр по статусу */}
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 <button onClick={()=>setObjectFilterStatus("")}
-                  style={{background:!objectFilterStatus?"#2563eb":"rgba(0,0,0,.03)",color:!objectFilterStatus?"#fff":"#94a3b8",border:`1px solid ${!objectFilterStatus?"#2563eb":"#e2e8f0"}`,borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Все ({objects.filter(o=>!o.deletedAt).length})</button>
+                  style={{background:!objectFilterStatus?"#2563eb":"rgba(0,0,0,.03)",color:!objectFilterStatus?"#fff":"#94a3b8",border:`1px solid ${!objectFilterStatus?"#2563eb":"#e2e8f0"}`,borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Все ({liveObjects.length})</button>
                 {DEAL_STATUSES.map(s=>{
-                  const cnt = objects.filter(o=>!o.deletedAt && unifiedStatusOf(o)===s.key).length;
+                  const cnt = liveObjects.filter(o=>unifiedStatusOf(o)===s.key).length;
                   if(!cnt && objectFilterStatus!==s.key) return null;
                   return (
                     <button key={s.key} onClick={()=>setObjectFilterStatus(v=>v===s.key?"":s.key)}
@@ -13198,7 +13229,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 ))}
               </div>
               {/* Фильтр по сотруднику */}
-              {nonViewerUsers.length>1 && (
+              {currentUser.role !== "user" && nonViewerUsers.length>1 && (
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   <button onClick={()=>setObjectFilterManager("")}
                     style={{background:!objectFilterManager?"#eff6ff":"rgba(0,0,0,.03)",color:!objectFilterManager?"#2563eb":"#94a3b8",border:`1px solid ${!objectFilterManager?"rgba(37,99,235,.4)":"#e2e8f0"}`,borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Все сотрудники</button>
@@ -13211,7 +13242,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 </div>
               )}
 
-              {objects.length===0 && (
+              {liveObjects.length===0 && (
                 <div style={{textAlign:"center",padding:"60px 0",color:"#94a3b8"}}>
                   <div style={{fontSize:48,marginBottom:12}}>📦</div>
                   <div style={{fontWeight:700,marginBottom:6}}>Объектов пока нет</div>
