@@ -496,7 +496,7 @@ export default function ProductionModule({
   // try/catch: журнал не должен мешать сохранению производственных данных
   const audit = (ev) => { try { if (onAudit) onAudit({ objectId: openObj.id, label: _objLbl, source: "manual", ...ev }); } catch (e) { console.warn("audit failed", e); } };
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+    <div style={{ maxWidth: 1600, margin: "0 auto" }}>
       {readOnly && <div style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 14px", fontSize: 12.5, color: "#64748b", marginBottom: 12 }}>👁 Режим просмотра — редактирование недоступно для вашей роли.</div>}
       {/* fieldset disabled нативно глушит все input/button внутри; сам запрет записи — в patchProd */}
       <fieldset disabled={readOnly} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
