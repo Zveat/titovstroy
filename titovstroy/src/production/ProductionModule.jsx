@@ -300,7 +300,6 @@ export default function ProductionModule({
   onDeleteProduction, onToggleClientShare, onSetClientVis, buildStagesFromEstimate,
   finProjects, financeTx,
   fmt, genId, currentUser, readOnly: externallyReadOnly = false, onAudit,
-  actionPermissions = {},
   embedObjectId, embedTab, clientInfoCard, // встроенный режим: карточка одного объекта внутри раздела «Объекты»
 }) {
   // карта запись производства по ключу записи (objectId реального объекта или "fp:<id>")
@@ -432,18 +431,9 @@ export default function ProductionModule({
 
   // Роль viewer — ТОЛЬКО чтение: жёсткий запрет на уровне данных (не только визуальный) —
   // без него наблюдатель мог бы менять карточку или создать её первым же редактированием.
-  const baseReadOnly = externallyReadOnly || currentUser?.role === "viewer";
-  const mainReadOnly = baseReadOnly || actionPermissions.edit === false;
-  const stagesReadOnly = baseReadOnly || actionPermissions.stages === false;
-  const qualityReadOnly = baseReadOnly || actionPermissions.quality === false;
-  const clientAccessReadOnly = baseReadOnly || actionPermissions.clientAccess === false;
-  const tabReadOnly = embedTab === "stages"
-    ? stagesReadOnly
-    : ["launch", "handover", "journal", "defects"].includes(embedTab)
-      ? qualityReadOnly
-      : mainReadOnly;
-  const patchProd = (patch, allowed = true) => {
-    if (baseReadOnly || !allowed) return; // запрет записи обязателен именно на уровне данных
+  const readOnly = externallyReadOnly || currentUser?.role === "viewer";
+  const patchProd = (patch) => {
+    if (readOnly) return; // запрет записи для viewer — обязателен именно здесь
     const objId = openObj && openObj.id;
     if (objId == null) return;
     const next = { ...localProdRef.current, ...patch, updatedAt: Date.now() };
@@ -462,10 +452,6 @@ export default function ProductionModule({
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => _flushObj(objId), 600);
   };
-  const mainPatch = (patch) => patchProd(patch, !mainReadOnly);
-  const stagesPatch = (patch) => patchProd(patch, !stagesReadOnly);
-  const qualityPatch = (patch) => patchProd(patch, !qualityReadOnly);
-  const clientAccessPatch = (patch) => patchProd(patch, !clientAccessReadOnly);
 
   // Данные из Финансов для текущего объекта — ДОЛЖНЫ быть до if(!openObj), иначе нарушение Rules of Hooks
   const finProj = useMemo(() => {
@@ -511,16 +497,17 @@ export default function ProductionModule({
   const audit = (ev) => { try { if (onAudit) onAudit({ objectId: openObj.id, label: _objLbl, source: "manual", ...ev }); } catch (e) { console.warn("audit failed", e); } };
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-      {(tabReadOnly || (embedTab === "info" && clientAccessReadOnly)) && <div style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 14px", fontSize: 12.5, color: "#64748b", marginBottom: 12 }}>👁 Режим просмотра — часть действий недоступна для вашей роли.</div>}
-      {embedTab === "info" && <InfoTab prod={localProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={mainPatch} clientAccessPatch={clientAccessPatch} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} clientInfoCard={clientInfoCard} audit={audit} readOnly={mainReadOnly} clientAccessReadOnly={clientAccessReadOnly} />}
-      {embedTab !== "info" && <fieldset disabled={tabReadOnly} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
-      {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист запуска объекта" />}
-      {embedTab === "handover" && <ChecklistTab kind="checklistHandover" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист сдачи объекта" />}
-      {embedTab === "stages" && <StagesTab prod={localProd} patch={stagesPatch} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} audit={audit} />}
-      {embedTab === "finance" && <FinanceTab prod={localProd} patch={mainPatch} fmt={fmt} finSummary={finSummary} />}
-      {embedTab === "journal" && <JournalTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} />}
-      {embedTab === "defects" && <DefectsTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} />}
-      </fieldset>}
+      {readOnly && <div style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 14px", fontSize: 12.5, color: "#64748b", marginBottom: 12 }}>👁 Режим просмотра — редактирование недоступно для вашей роли.</div>}
+      {/* fieldset disabled нативно глушит все input/button внутри; сам запрет записи — в patchProd */}
+      <fieldset disabled={readOnly} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
+      {embedTab === "info" && <InfoTab prod={localProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={patchProd} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} clientInfoCard={clientInfoCard} audit={audit} />}
+      {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={localProd} patch={patchProd} genId={genId} title="Чек-лист запуска объекта" />}
+      {embedTab === "handover" && <ChecklistTab kind="checklistHandover" prod={localProd} patch={patchProd} genId={genId} title="Чек-лист сдачи объекта" />}
+      {embedTab === "stages" && <StagesTab prod={localProd} patch={patchProd} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} audit={audit} />}
+      {embedTab === "finance" && <FinanceTab prod={localProd} patch={patchProd} fmt={fmt} finSummary={finSummary} />}
+      {embedTab === "journal" && <JournalTab prod={localProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
+      {embedTab === "defects" && <DefectsTab prod={localProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
+      </fieldset>
     </div>
   );
 }
@@ -529,7 +516,7 @@ export default function ProductionModule({
 const _dayStart = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); };
 // Телефон → формат для wa.me (КЗ: 8XXXXXXXXXX → 7XXXXXXXXXX)
 const _waPhone = (p) => { let d = (p || "").replace(/\D/g, ""); if (d.length === 11 && d[0] === "8") d = "7" + d.slice(1); else if (d.length === 10) d = "7" + d; return d; };
-function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatch, onToggleClientShare, onSetClientVis, currentUser, clientInfoCard, audit, readOnly=false, clientAccessReadOnly=false }) {
+function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientShare, onSetClientVis, currentUser, clientInfoCard, audit }) {
   const objEstimates = estimates.filter(e => e.objectId === obj.id);
   // Только клиентские договоры: подряд (с рабочим) — это себестоимость, в метрику «Договоры» не входит
   const objContracts = contracts.filter(c => c.objectId === obj.id && !c.deletedAt && c.type !== "podryad" && c.type !== "podryad_annex");
@@ -612,7 +599,6 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatc
       )}
       {/* Клиент и объект — статус уже выбирается тут, поэтому в «Производственной информации» ниже статус-кнопки не дублируются */}
       {clientInfoCard}
-      <fieldset disabled={readOnly} style={{border:"none",margin:0,padding:0,minWidth:0,display:"contents"}}>
       {/* Производственные поля */}
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px" }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 14 }}>Производственная информация</div>
@@ -647,16 +633,15 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatc
             style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
         </div>
       </div>
-      </fieldset>
 
       {/* Клиент: доступ к прогрессу + сообщение */}
-      <ClientAccessBlock obj={obj} prod={prod} patch={clientAccessPatch} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} readOnly={clientAccessReadOnly} />
+      <ClientAccessBlock obj={obj} prod={prod} patch={patch} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} />
     </div>
   );
 }
 
 // ─── Блок «Клиент»: доступ к прогрессу + сообщение (внизу вкладки «Информация») ───
-function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, onSetClientVis, currentUser, readOnly=false }) {
+function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, onSetClientVis, currentUser }) {
   const [shareLink, setShareLink] = useState(null); // ссылка для клиента после включения доступа
   const [shareBusy, setShareBusy] = useState(false);
   if (currentUser?.role === "viewer") return null;
@@ -666,7 +651,7 @@ function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, onSetClientV
   const cv = obj.clientVis || {};
   const visRows = [["stages","Этапы работ"],["payments","Оплата по договору"],["docs","Документы"],["remarks","Замечания клиента"]];
   return (
-    <fieldset disabled={readOnly} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 11, margin:0, minWidth:0 }}>
+    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 11 }}>
       {onToggleClientShare && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
@@ -705,7 +690,7 @@ function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, onSetClientV
       {onToggleClientShare && <div style={{ borderTop: "1px solid #f1f5f9" }} />}
       {/* Сообщение клиенту — общий комментарий от компании на странице прогресса */}
       <ClientMessageCard prod={prod} patch={patch} embedded />
-    </fieldset>
+    </div>
   );
 }
 
@@ -852,7 +837,23 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
     const s = new Date(start).getTime(), e = new Date(end).getTime();
     return <div title={`${fmtD(s)} – ${fmtD(e)}`} style={{ position: "absolute", left: `${pctOf(s)}%`, width: `${Math.max(1.5, ((e - s) / span) * 100)}%`, height: h, borderRadius: 4, background: color, top }} />;
   };
-  const grouped = groupByCat(stages);
+  // ПОРЯДОК ЭТАПОВ: порядок массива дифф НЕ отслеживает (сравнение по id), поэтому храним явное
+  // числовое поле order на этапе — его изменение дифф ловит как обычную правку поля (patch-item)
+  // и сохраняет в облако. Сортируем по order (у кого нет — по текущей позиции в массиве, стабильно).
+  const _effOrder = (s, i) => (s.order != null ? s.order : 1e6 + i); // без order — всегда в конце (по позиции)
+  const sortedStages = stages.map((s, i) => ({ s, i })).sort((a, b) => _effOrder(a.s, a.i) - _effOrder(b.s, b.i) || a.i - b.i).map(x => x.s);
+  // Переставить этап местами с соседом (той же категории). Если порядок ещё не проставлен —
+  // проставляем последовательный один раз для всех (в текущем порядке), затем меняем два значения.
+  const moveStage = (id, neighborId) => {
+    if (!neighborId) return;
+    const anyMissing = stages.some(s => s.order == null);
+    const arr = anyMissing ? sortedStages.map((s, idx) => ({ ...s, order: idx })) : stages.map(s => ({ ...s }));
+    const A = arr.find(s => s.id === id), B = arr.find(s => s.id === neighborId);
+    if (!A || !B) return;
+    const t = A.order; A.order = B.order; B.order = t;
+    patch({ stages: arr });
+  };
+  const grouped = groupByCat(sortedStages);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -869,11 +870,19 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
             {grouped.map(([cat, list]) => (
               <Fragment key={cat}>
                 <div style={{ fontSize: 11, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em", padding: "10px 0 5px", borderBottom: "1px solid #fdf3e3" }}>{cat}</div>
-                {list.map(s => {
+                {list.map((s, li) => {
                   const st = stByKey(s.status);
                   const iw = inWorkDays(s);
+                  const upId = li > 0 ? list[li - 1].id : null;
+                  const downId = li < list.length - 1 ? list[li + 1].id : null;
+                  const arrBtn = (on) => ({ background: "none", border: "none", color: on ? "#94a3b8" : "#e2e8f0", cursor: on ? "pointer" : "default", fontSize: 12, lineHeight: 1, padding: 0, height: 15 });
                   return (
                     <div key={s.id} style={{ display: "flex", gap: 10, padding: "10px 0", borderBottom: "1px solid #f1f5f9" }}>
+                      {/* Перестановка порядка в пределах категории */}
+                      <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", flexShrink: 0, gap: 2 }}>
+                        <button title="Выше" disabled={!upId} onClick={() => moveStage(s.id, upId)} style={arrBtn(!!upId)}>▲</button>
+                        <button title="Ниже" disabled={!downId} onClick={() => moveStage(s.id, downId)} style={arrBtn(!!downId)}>▼</button>
+                      </div>
                       <div style={{ width: 3, borderRadius: 3, background: st.color, flexShrink: 0, minHeight: 36 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <input value={s.name} onChange={e => upd(s.id, { name: e.target.value })} placeholder="Наименование работы"
