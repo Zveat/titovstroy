@@ -8235,9 +8235,13 @@ ${reqBlock}`;
     // печати/сохранении в PDF браузер подставляет в имя файла голый «Договор №123» без клиента.
     const docLabelT = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Соглашение о дизайн-проекте",design_add:"Доп соглашение к дизайн-проекту",reservation:"Соглашение о резервировании"}[type] || "Договор";
     const dateStrT = c.date ? c.date.split("-").reverse().join(".") : "";
+    // Имя файла (номер + клиент + дата ВПЕРЕДИ, ссылка на договор в конце) — иначе браузер при
+    // сохранении PDF обрезает длинную прописную фразу и остаётся «Приложение №3 Перечень доп ра».
+    // Тело документа не меняется (там свой полный заголовок «Перечень дополнительных работ»).
+    const _clientT = client?.name ? " " + client.name : (c.estClient ? " " + c.estClient : "");
     const docTitle = (type === "annex"
-      ? "Приложение №" + (c.appendix || 2) + " Перечень доп работ к Договору №" + (c.mainNumber || c.number || "") + (dateStrT ? " от " + dateStrT : "")
-      : docLabelT + " №" + (c.number || "") + (client?.name ? " " + client.name : (c.estClient ? " " + c.estClient : "")) + (dateStrT ? " от " + dateStrT : "")
+      ? "Приложение №" + (c.appendix || 2) + _clientT + (dateStrT ? " от " + dateStrT : "") + " к дог. №" + (c.mainNumber || c.number || "")
+      : docLabelT + " №" + (c.number || "") + _clientT + (dateStrT ? " от " + dateStrT : "")
     ).replace(/[<>:"/\\|?*]/g, "_");
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(docTitle)}</title><style>${CSS}</style></head>
   <body>${body}${printBtn}
@@ -8465,7 +8469,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     const isAnnexD = (c.type||"repair_fiz") === "annex";
     const docLabel = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Соглашение о дизайн-проекте",design_add:"Доп соглашение к дизайн-проекту",reservation:"Соглашение о резервировании"}[c.type||"repair_fiz"] || "Договор";
     const filename = isAnnexD
-      ? ("Приложение №"+(c.appendix||2)+" Перечень доп работ к Договору №"+(c.mainNumber||num)+(dateStr?" от "+dateStr:"")+".docx").replace(/[<>:"/\\|?*]/g,"_")
+      ? ("Приложение №"+(c.appendix||2)+" "+clientName+(dateStr?" от "+dateStr:"")+" к дог. №"+(c.mainNumber||num)+".docx").replace(/[<>:"/\\|?*]/g,"_")
       : (docLabel+" №"+num+" "+clientName+(dateStr?" от "+dateStr:"")+".docx").replace(/[<>:"/\\|?*]/g,"_");
 
     try {
@@ -12315,7 +12319,21 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 if (t.type==="income") projStats[cn].income += Number(t.amount)||0;
                 else if (t.type==="expense") projStats[cn].expense += Number(t.amount)||0;
               }
-              const sorted = [...finProjects].sort((a,b)=>(a.createdAt||"").localeCompare(b.createdAt||""));
+              // ВИРТУАЛЬНЫЕ ПРОЕКТЫ: объект в активном/сделочном статусе (подписан/в работе/
+              // приостановлен/выполнен) может не иметь сохранённого финпроекта — например, когда
+              // статус выставили напрямую, минуя «Договор подписан» (только он авто-создаёт
+              // финпроект). Раньше такой объект в «Проекты» не попадал. Теперь показываем для него
+              // строку из самого объекта (objects как источник финпроекта). Ничего не пишем в базу:
+              // при открытии и сохранении такой строки создаётся реальный финпроект (id пустой →
+              // savep создаёт новый). Дедуп по объекту (financeObjectOf покрывает связь и по
+              // objectId, и по номеру договора).
+              const _coveredObjIds = new Set();
+              for (const p of finProjects) { const o = financeObjectOf(p); if (o) _coveredObjIds.add(o.id); }
+              const _projectStatuses = new Set(["signed","work","paused","done"]);
+              const virtualProjects = liveObjects
+                .filter(o => !_coveredObjIds.has(o.id) && _projectStatuses.has(unifiedStatusOf(o)))
+                .map(o => { const c = financeContractOf({}, o); return { id:"", _virtual:true, objectId:o.id, contractNo:c?.number||"", budget: finBudgetOfContract(c)||0, createdAt: String(o.createdAt||"") }; });
+              const sorted = [...finProjects, ...virtualProjects].sort((a,b)=>String(a.createdAt||"").localeCompare(String(b.createdAt||"")));
               const allStatuses = [...new Map(sorted.map(p=>financeProjectViewOf(p)).filter(v=>v.statusKey).map(v=>[v.statusKey,{key:v.statusKey,label:v.statusLabel,color:v.statusColor}])).values()];
               const allCats = [...new Set(sorted.map(p=>financeProjectViewOf(p).category).filter(v=>v&&v!=="—"))];
               const q = finProjSearch.toLowerCase();
@@ -12395,7 +12413,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       const mCol = marginPct===null?"#94a3b8":marginPct>=30?"#059669":marginPct>=0?"#f59e0b":"#dc2626";
                       const mBg  = marginPct===null?"#f8fafc":marginPct>=30?"#f0fdf4":marginPct>=0?"#fffbeb":"#fef2f2";
                       return (
-                        <div key={p.id||p.contractNo} onClick={()=>{ if(!finReadonly) setFinProjModal({...p}); }}
+                        <div key={p.id||("vp:"+p.objectId)||p.contractNo} onClick={()=>{ if(!finReadonly) setFinProjModal({...p}); }}
                           style={{background:"#fff",border:"1px solid #eef2f7",borderRadius:16,cursor:finReadonly?"default":"pointer",boxShadow:"0 1px 3px rgba(15,23,42,.07)",transition:"box-shadow .15s,transform .15s",overflow:"hidden",display:"flex",flexDirection:"column"}}
                           className="fin-row">
                           {/* Цветная полоса статуса */}
@@ -12476,7 +12494,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     const setp = (k,v) => setFinProjModal(p=>({...p,[k]:v}));
                     const savep = async () => {
                       if (!mp.id && !mp.objectId) { window.alert("Сначала выберите объект. Новый финансовый проект без объекта создавать нельзя."); return; }
-                      const proj = {...mp, id: mp.id||genId(), budget:Number(mp.budget)||0, paidFact:Number(mp.paidFact)||0, expenses:Number(mp.expenses)||0, updatedAt:Date.now()};
+                      const { _virtual, ...mpClean } = mp; // служебный флаг виртуальной строки в базу не пишем
+                      const proj = {...mpClean, id: mp.id||genId(), budget:Number(mp.budget)||0, paidFact:Number(mp.paidFact)||0, expenses:Number(mp.expenses)||0, updatedAt:Date.now()};
                       const cur = finProjectsRef.current;
                       const list = mp.id ? cur.map(x=>x.id===mp.id?proj:x) : [proj,...cur];
                       await saveFinanceProjects(list);
@@ -12527,22 +12546,22 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             const objectOptions = [...liveObjects].sort((a,b)=>String(a.clientName||a.address||"").localeCompare(String(b.clientName||b.address||""),"ru"));
                             return <div style={{background:view.linked?"#eff6ff":"#fff7ed",border:"1px solid "+(view.linked?"#bfdbfe":"#fdba74"),borderRadius:10,padding:"11px 14px",marginBottom:11}}>
                               <div style={{fontSize:11,color:view.linked?"#1e40af":"#9a3412",fontWeight:800,marginBottom:6}}>{view.linked?"🔗 Проект связан с объектом":"⚠ Проект не привязан к объекту"}</div>
-                              <select className="fi" style={{marginBottom:view.linked?8:0}} value={view.objectId||""} onChange={e=>{
-                                const object = liveObjects.find(o=>o.id===e.target.value);
-                                if (!object) { setp("objectId",""); return; }
-                                const contract = financeContractOf(mp, object);
-                                setFinProjModal(prev=>({
-                                  ...prev,
-                                  objectId:object.id,
-                                  ...(!prev.id ? { contractNo:contract?.number||"", budget:finBudgetOfContract(contract)||Number(prev.budget)||0 } : {}),
-                                }));
-                              }}>
-                                <option value="">— выбрать объект —</option>
-                                {objectOptions.map(o=>{
-                                  const c=financeContractOf(mp,o);
-                                  return <option key={o.id} value={o.id}>{o.clientName||"Без клиента"} — {o.address||"без адреса"}{c?.number?` · №${c.number}`:""}</option>;
-                                })}
-                              </select>
+                              <SearchSelect
+                                style={{marginBottom:view.linked?8:0}}
+                                value={view.objectId||""}
+                                placeholder="🔍 Найти объект по имени/адресу…"
+                                options={[{value:"",label:"— выбрать объект —"}, ...objectOptions.map(o=>{ const c=financeContractOf(mp,o); return {value:o.id, label:`${o.clientName||"Без клиента"} — ${o.address||"без адреса"}${c?.number?` · №${c.number}`:""}`}; })]}
+                                onChange={v=>{
+                                  const object = liveObjects.find(o=>o.id===v);
+                                  if (!object) { setp("objectId",""); return; }
+                                  const contract = financeContractOf(mp, object);
+                                  setFinProjModal(prev=>({
+                                    ...prev,
+                                    objectId:object.id,
+                                    ...(!prev.id ? { contractNo:contract?.number||"", budget:finBudgetOfContract(contract)||Number(prev.budget)||0 } : {}),
+                                  }));
+                                }}
+                              />
                               {view.object && <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                                 <div style={{fontSize:12,color:"#1e40af"}}>📍 {view.address||view.customerName}</div>
                                 <button onClick={()=>{ setFinProjModal(null); openObjectFromFinance(view.object); }} style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:7,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↗ Открыть объект</button>
@@ -13506,12 +13525,30 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       другой реальный статус, кнопка подсвечивала одно, а везде снаружи было видно
                       другое — визуально «два разных статуса у одного объекта». */}
                   <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                    {(()=>{ const curStatus = unifiedStatusOf(obj); return DEAL_STATUSES.map(s=>(
-                      <button key={s.key} disabled={!canEdit} onClick={()=>saveObjField(obj,{status:s.key})}
-                        style={{background:curStatus===s.key?s.bg:"rgba(0,0,0,.03)",color:curStatus===s.key?s.color:"#94a3b8",border:`1px solid ${curStatus===s.key?s.color:"#e2e8f0"}`,borderRadius:8,padding:"3px 9px",fontSize:11,fontWeight:600,cursor:canEdit?"pointer":"default",fontFamily:"inherit",transition:"all .12s"}}>
-                        {s.label}
+                    {(()=>{ const curStatus = unifiedStatusOf(obj); return DEAL_STATUSES.map(s=>{
+                      const isCur = curStatus===s.key;
+                      // «Договор подписан» — важный статус: авто-создаёт финпроект + карточку
+                      // производства. Выделяем его визуально (сплошная зелёная рамка/иконка ✍️)
+                      // и требуем подтверждение, чтобы не нажать случайно как обычный статус.
+                      const isSigned = s.key==="signed";
+                      const onClickStatus = () => {
+                        if (isSigned && !isCur) {
+                          const hasFp = finProjectsRef.current.some(p=>p.objectId===obj.id) || productionsRef.current.some(p=>p.objectId===obj.id);
+                          const msg = hasFp
+                            ? "Перевести объект в статус «Договор подписан»?"
+                            : "Перевести объект в статус «Договор подписан»?\n\nБудут созданы финансовый проект (раздел «Финансы») и карточка производства для этого объекта.";
+                          if (!window.confirm(msg)) return;
+                        }
+                        saveObjField(obj,{status:s.key});
+                      };
+                      return (
+                      <button key={s.key} disabled={!canEdit} onClick={onClickStatus}
+                        title={isSigned?"Важный статус: создаёт финансовый проект и карточку производства":undefined}
+                        style={{background:isCur?s.bg:(isSigned?"rgba(5,150,105,.06)":"rgba(0,0,0,.03)"),color:isCur?s.color:(isSigned?"#059669":"#94a3b8"),border:`${isSigned?2:1}px solid ${isCur?s.color:(isSigned?"#34d399":"#e2e8f0")}`,borderRadius:8,padding:isSigned?"3px 10px":"3px 9px",fontSize:11,fontWeight:isSigned?800:600,cursor:canEdit?"pointer":"default",fontFamily:"inherit",transition:"all .12s"}}>
+                        {isSigned?"✍️ ":""}{s.label}
                       </button>
-                    )); })()}
+                      );
+                    }); })()}
                   </div>
 
                   {/* Сводка клиента/объекта + сворачивание */}
