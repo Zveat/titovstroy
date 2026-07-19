@@ -2653,9 +2653,9 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
               ＋ Добавить позицию
             </button>
             {((localCatalog?.hiddenCats||[]).length > 0 || (localCatalog?.hiddenSubs||[]).length > 0) && (
-              <button onClick={async ()=>{
+              <button onClick={()=>{
                 if (!window.confirm(`Показать все скрытые категории и подкатегории?\nСкрыто категорий: ${(localCatalog?.hiddenCats||[]).length}, подкатегорий: ${(localCatalog?.hiddenSubs||[]).length}`)) return;
-                await saveCatalog({...(localCatalog||{}), hiddenCats:[], hiddenSubs:[]});
+                saveCatalog({...(localCatalog||{}), hiddenCats:[], hiddenSubs:[]}); // в фон, без подвисания
               }} className="btn btn-o" style={{whiteSpace:"nowrap",color:"#dc2626",borderColor:"#fca5a5"}}>
                 👁 Показать скрытые ({(localCatalog?.hiddenCats||[]).length + (localCatalog?.hiddenSubs||[]).length})
               </button>
@@ -4658,7 +4658,6 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const reportsRef = useRef([]);
   useEffect(() => { reportsRef.current = reports; }, [reports]);
   const [avrModal, setAvrModal] = useState(null); // черновик акта в построителе
-  const [avrSaving, setAvrSaving] = useState(false); // идёт сохранение — блокируем повторные клики (иначе дубли акта)
 
   // Подрядчики (рабочие) и договоры подряда с ними
   const [workers, setWorkers] = useState([]);
@@ -5615,8 +5614,7 @@ tfoot td{font-weight:700}
 </body></html>`;
   };
   // Сохранить акт в список отчётов объекта и распечатать
-  const saveAndPrintAvr = async (m) => {
-    if (avrSaving) return; // сохранение уже идёт — повторный клик не плодит второй акт
+  const saveAndPrintAvr = (m) => {
     const items = (m.lines || []).filter(l => l.included && Number(l.doneQty) > 0);
     if (items.length === 0) { alert("Отметьте хотя бы одну позицию с количеством."); return; }
     const total = items.reduce((s, l) => s + Math.round((Number(l.price) || 0) * (Number(l.doneQty) || 0)), 0);
@@ -5630,13 +5628,14 @@ tfoot td{font-weight:700}
       lines: items.map(l => ({ name: l.name, unit: l.unit, price: Number(l.price) || 0, doneQty: Number(l.doneQty) || 0 })),
       total, createdAt: m.createdAt || Date.now(), updatedAt: Date.now(), createdBy: currentUser?.name || "",
     };
-    setAvrSaving(true);
-    try {
-      // merge (replace:false) — акт не перезатирает облако, акты с других устройств сохраняются
-      await saveReports([record], { replace: false });
-      setAvrModal(null);
-      openOrPrintHtml(buildAvrHtml({ ...m, lines: items }));
-    } finally { setAvrSaving(false); }
+    // Печать и закрытие — МГНОВЕННО (HTML акта не зависит от факта записи в облако). Сохранение
+    // уходит в ФОН: раньше здесь был await полного цикла saveReports (чтение→бэкап→запись, до
+    // 6-10 сек на медленном облаке) ПЕРЕД печатью — отсюда «Сохраняю… 6-10 сек». Запись
+    // устойчива (localStorage-first + dirty-флаг + фоновый повтор), merge (replace:false) не
+    // затирает акты с других устройств.
+    saveReports([record], { replace: false }).catch(e => console.warn("bg save avr err", e));
+    setAvrModal(null);
+    openOrPrintHtml(buildAvrHtml({ ...m, lines: items }));
   };
 
   // ── ВОССТАНОВЛЕНИЕ СМЕТЫ ИЗ АКТА (АВР) ──
@@ -12712,9 +12711,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                           <div style={{fontSize:11,color:"#94a3b8"}}>{t.category||""}{t.note?" · "+t.note:""} · {new Date(t.date||t.createdAt||0).toLocaleDateString("ru-RU")}</div>
                           <div style={{fontSize:11,color:daysLeft<=3?"#dc2626":"#f59e0b",fontWeight:600}}>осталось {daysLeft} дн.</div>
                         </div>
-                        <button onClick={async()=>{await saveFinanceTx([{...t,deletedAt:undefined,updatedAt:Date.now()}],{replace:false}); }}
+                        <button onClick={()=>{ saveFinanceTx([{...t,deletedAt:undefined,updatedAt:Date.now()}],{replace:false}).catch(e=>console.warn("bg tx restore err", e)); }}
                           style={{background:"#f0fdf4",color:"#059669",border:"1px solid #bbf7d0",borderRadius:7,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↩</button>
-                        <button onClick={async()=>{if(await confirmTyped("Удалить операцию безвозвратно?")) await saveFinanceTx([],{replace:false,removedIds:[t.id],allowEmpty:true}); }}
+                        <button onClick={async()=>{if(await confirmTyped("Удалить операцию безвозвратно?")) saveFinanceTx([],{replace:false,removedIds:[t.id],allowEmpty:true}).catch(e=>console.warn("bg tx delete err", e)); }}
                           style={{background:"rgba(220,38,38,.1)",color:"#dc2626",border:"1px solid rgba(220,38,38,.2)",borderRadius:7,padding:"5px 10px",fontSize:12,cursor:"pointer"}}>✕</button>
                       </div>
                     );
@@ -13145,12 +13144,16 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               <div style={{flex:1}}/>
               {objectTab==="list" && currentUser.role!=="viewer" && (<>
                 {(()=>{const trashed=objectsRef.current.filter(o=>o.deletedAt); return trashed.length>0&&(<button onClick={()=>setObjectTab("trash")} style={{background:"rgba(220,38,38,.12)",color:"#dc2626",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"7px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginRight:4}}>🗑 Корзина ({trashed.length})</button>);})()}
-                <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={async ()=>{
+                <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>{
                   const newObj = {id:genId(),clientId:"",clientName:"",clientPhone:"",clientType:"физ",clientIin:"",clientDoc:"",address:"",objType:"Вторичка",area:"",status:"new",note:"",manager:currentUser.name,createdBy:currentUser.name,createdById:currentUser.id,createdAt:Date.now(),updatedAt:Date.now()};
-                  await saveObjects([newObj, ...objectsRef.current]);
-                  writeAudit(currentUser,"создал объект","object",newObj.id,"Новый объект");
+                  // Оптимистично: сразу открываем карточку нового объекта, запись — в фон (раньше был
+                  // await saveObjects перед открытием → кнопка подвисала на медленном облаке).
+                  const nextList = [newObj, ...objectsRef.current];
+                  objectsRef.current = nextList; setObjects(nextList);
                   setCurrentObject(newObj);
                   setObjectTab("workspace");
+                  saveObjects(nextList).catch(e=>console.warn("bg save object err", e));
+                  writeAudit(currentUser,"создал объект","object",newObj.id,"Новый объект");
                 }}>+ Новый объект</button>
               </>)}
             </div>
@@ -13429,7 +13432,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       <div style={{display:"flex",gap:8}}>
                         <button onClick={()=>saveObjects(objectsRef.current.map(x=>x.id===obj.id?{...x,deletedAt:undefined}:x))}
                           style={{background:"#f0fdf4",color:"#059669",border:"1px solid #bbf7d0",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↩ Восстановить</button>
-                        {currentUser.role==="admin" && <button onClick={async ()=>{if(await confirmTyped("Удалить объект безвозвратно?")) saveObjects(objectsRef.current.filter(x=>x.id!==obj.id),{removedIds:[obj.id],allowEmpty:true});}}
+                        {currentUser.role==="admin" && <button onClick={async ()=>{if(await confirmTyped("Удалить объект безвозвратно?")){ const nl=objectsRef.current.filter(x=>x.id!==obj.id); objectsRef.current=nl; setObjects(nl); saveObjects(nl,{removedIds:[obj.id],allowEmpty:true}).catch(e=>console.warn("bg obj del",e)); }}}
                           style={{background:"rgba(220,38,38,.1)",color:"#dc2626",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"7px 12px",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>✕ Удалить</button>}
                       </div>
                     </div>
@@ -13777,7 +13780,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                     style={{background:exists?"#f0fdf4":"rgba(5,150,105,.1)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 {isAnx ? (exists?"В проект ✓":"В проект") : (exists?"В финансах ✓":"В финансы")}</button>;
                                 })()}
                                 {(currentUser.role==="admin"||(currentUser.role==="user"&&c.createdBy===currentUser.name)) && (
-                                  <button onClick={async ()=>{ if(await confirmTyped("Удалить договор?\nЭто действие нельзя отменить через интерфейс.")) saveContracts(contractsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
+                                  <button onClick={async ()=>{ if(await confirmTyped("Удалить договор?\nЭто действие нельзя отменить через интерфейс.")){ const nl=contractsRef.current.filter(x=>x.id!==c.id); contractsRef.current=nl; setContracts(nl); saveContracts(nl,{removedIds:[c.id],allowEmpty:true}).catch(e=>console.warn("bg contract del",e)); } }}
                                     style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                                 )}
                               </div>
@@ -13839,7 +13842,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                       style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
                                   )}
                                   {(currentUser.role==="admin"||(currentUser.role==="user"&&r.createdBy===currentUser.name)) && (
-                                    <button title="Удалить акт" onClick={async ()=>{ if(await confirmTyped("Удалить акт?\nЭто действие нельзя отменить через интерфейс.")) saveReports(reportsRef.current.filter(x=>x.id!==r.id),{removedIds:[r.id],allowEmpty:true}); }}
+                                    <button title="Удалить акт" onClick={async ()=>{ if(await confirmTyped("Удалить акт?\nЭто действие нельзя отменить через интерфейс.")){ const nl=reportsRef.current.filter(x=>x.id!==r.id); reportsRef.current=nl; setReports(nl); saveReports(nl,{removedIds:[r.id],allowEmpty:true}).catch(e=>console.warn("bg act del",e)); } }}
                                       style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                                   )}
                                 </div>
@@ -14134,7 +14137,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                           <span style={{fontWeight:700,fontSize:14,color:"#64748b"}}>{fmt(total)} ₸</span>
                           <button onClick={()=>saveContracts(contractsRef.current.map(x=>x.id===c.id?{...x,deletedAt:undefined}:x))}
                             style={{background:"rgba(5,150,105,.08)",color:"#059669",border:"1px solid rgba(5,150,105,.2)",borderRadius:5,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>↩ Восстановить</button>
-                          {currentUser.role==="admin" && <button onClick={async ()=>{ if(await confirmTyped("Удалить договор навсегда?")) saveContracts(contractsRef.current.filter(x=>x.id!==c.id),{removedIds:[c.id],allowEmpty:true}); }}
+                          {currentUser.role==="admin" && <button onClick={async ()=>{ if(await confirmTyped("Удалить договор навсегда?")){ const nl=contractsRef.current.filter(x=>x.id!==c.id); contractsRef.current=nl; setContracts(nl); saveContracts(nl,{removedIds:[c.id],allowEmpty:true}).catch(e=>console.warn("bg contract del",e)); } }}
                             style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✕ Удалить</button>}
                         </div>
                       </div>
@@ -14152,10 +14155,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 clients={contractClients}
                 contragents={contragents}
                 onUpdate={setCurrentContract}
-                onBack={async ()=>{
-                  // Принудительно сохраняем перед выходом (не ждём дебаунс), чтобы ничего не терялось
+                onBack={()=>{
+                  // Сохраняем перед выходом (страховка к дебаунс-автосейву), но НЕ ждём облако:
+                  // раньше здесь был await полного цикла записи в Firebase (чтение→бэкап→запись,
+                  // каждый с таймаутом до 12с) ПЕРЕД навигацией — кнопка «Назад» подвисала на
+                  // 10-15 сек при медленном облаке/переполненном localStorage. Запись устойчива
+                  // (localStorage-first + dirty-флаг + фоновый повтор), поэтому уходим сразу, а
+                  // сейв дожимается в фоне.
                   const c = currentContract;
-                  if (c && !c._mode) { await saveContracts([...contractsRef.current.filter(x=>x.id!==c.id), {...c, updatedAt: Date.now()}]); }
+                  if (c && !c._mode) { saveContracts([...contractsRef.current.filter(x=>x.id!==c.id), {...c, updatedAt: Date.now()}]).catch(e=>console.warn("bg save contract err", e)); }
                   if (objectReturnId) {
                     const obj = objectsRef.current.find(x=>x.id===objectReturnId);
                     setObjectReturnId(null);
@@ -14185,25 +14193,32 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   const ca = contragents.find(x=>x.id===currentContract.contragentId);
                   generateContractGDoc(currentContract, cl, ca);
                 }}
-                onAddClientFromEstimate={async ()=>{
+                onAddClientFromEstimate={()=>{
                   const newClient = {id:Date.now().toString(),name:currentContract.estClient||"",phone:currentContract.estPhone||"",address:currentContract.estAddress||"",iin:"",doc:"",type:"физ",createdAt:Date.now()};
                   const list=[...contractClients,newClient];
-                  await saveContractClients(list);
+                  // Оптимистично: клиент сразу в списке и выбран, запись — в фон (без подвисания)
+                  clientsRef.current = list; setContractClients(list);
                   setCurrentContract(prev=>({...prev,clientId:newClient.id}));
+                  saveContractClients(list).catch(e=>console.warn("bg client save err", e));
                 }}
                 onUpdateClient={(updated)=>{
                   saveContractClients(contractClients.map(x=>x.id===updated.id?updated:x));
                 }}
-                onCreateClient={async (newClient)=>{
-                  await saveContractClients([...contractClients, newClient]);
+                onCreateClient={(newClient)=>{
+                  // Оптимистично добавляем клиента в список, запись — в фон (без подвисания кнопки)
+                  const next = [...contractClients, newClient];
+                  clientsRef.current = next; setContractClients(next);
+                  saveContractClients(next).catch(e=>console.warn("bg client save err", e));
                 }}
                 workers={workers}
-                onCreateWorker={async (w)=>{
+                onCreateWorker={(w)=>{
                   const rec = { id:w.id||genId(), ...w };
                   const cur = workersRef.current;
                   const next = cur.some(x=>x.id===rec.id) ? cur.map(x=>x.id===rec.id?rec:x) : [rec,...cur];
-                  await saveWorkers(next,{replace:false});
-                  return rec.id;
+                  // Оптимистично: подрядчик сразу доступен для выбора, запись — в фон
+                  workersRef.current = next; setWorkers(next);
+                  saveWorkers(next,{replace:false}).catch(e=>console.warn("bg worker save err", e));
+                  return rec.id; // id известен сразу (сгенерирован здесь) — await не нужен
                 }}
                 importObjects={objects.filter(o=>!o.deletedAt).map(o=>({id:o.id,label:o.clientName||o.address||o.id,address:o.address||""}))}
                 getObjectWorks={(objId)=>{ const ests=estimates.filter(e=>e.objectId===objId); const main=ests.find(e=>!e.parentId||e.parentId===e.id)||ests[0]; return main?estimateToWorks(main):[]; }}
@@ -14338,9 +14353,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               </div>
               <div style={{display:"flex",gap:10}}>
                 <button onClick={()=>setAvrModal(null)} style={{padding:"11px 18px",borderRadius:10,border:"1px solid #e2e8f0",background:"#f8fafc",color:"#475569",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Отмена</button>
-                <button disabled={selected.length===0 || avrSaving} onClick={()=>saveAndPrintAvr(m)}
-                  style={{padding:"11px 20px",borderRadius:10,border:"none",background:(selected.length===0||avrSaving)?"#cbd5e1":"#7c3aed",color:"#fff",fontSize:14,fontWeight:700,cursor:(selected.length===0||avrSaving)?"default":"pointer",fontFamily:"inherit"}}>
-                  {avrSaving ? "Сохраняю…" : "🖨 Сохранить и печать"}
+                <button disabled={selected.length===0} onClick={()=>saveAndPrintAvr(m)}
+                  style={{padding:"11px 20px",borderRadius:10,border:"none",background:selected.length===0?"#cbd5e1":"#7c3aed",color:"#fff",fontSize:14,fontWeight:700,cursor:selected.length===0?"default":"pointer",fontFamily:"inherit"}}>
+                  🖨 Сохранить и печать
                 </button>
               </div>
             </div>
