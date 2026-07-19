@@ -6,8 +6,414 @@
 
 // Нормализация номера договора для сопоставления: убираем пробелы, № и # — чтобы
 // «№0919#153» и «0919#153» считались одним и тем же номером. Используется по всему
-// приложению для связки договоров/финпроектов/операций между собой.
+// приложению для связки договоров/финпроектов/операций между собой. 
 export const normCN = (s) => String(s||"").trim().toLowerCase().replace(/[\s№#]/g,"");
+
+export function isStaleApprovalObject(object, now = Date.now(), days = 14) {
+  if (!object || object.deletedAt || object.status !== "approval") return false;
+  const lastMovement = Number(object.updatedAt || object.createdAt || 0);
+  return lastMovement > 0 && (now - lastMovement) >= days * 24 * 60 * 60 * 1000;
+}
+
+const FINANCE_STATUS_META = {
+  new:      { key:"new",      label:"Новый",              color:"#64748b", bg:"#f3f4f6" },
+  approval: { key:"approval", label:"Согласование сметы", color:"#d97706", bg:"rgba(217,119,6,.12)" },
+  signed:   { key:"signed",   label:"Договор подписан",   color:"#059669", bg:"rgba(5,150,105,.1)" },
+  refuse:   { key:"refuse",   label:"Потерян",            color:"#dc2626", bg:"rgba(220,38,38,.1)" },
+  work:     { key:"work",     label:"В работе",           color:"#2563eb", bg:"#eff6ff" },
+  paused:   { key:"paused",   label:"Приостановлен",      color:"#d97706", bg:"rgba(217,119,6,.1)" },
+  done:     { key:"done",     label:"Выполнен",           color:"#059669", bg:"#ecfdf5" },
+  cancel:   { key:"cancel",   label:"Расторгнут",         color:"#dc2626", bg:"rgba(220,38,38,.12)" },
+  archive:  { key:"archive",  label:"Архив",              color:"#64748b", bg:"rgba(107,114,128,.12)" },
+};
+const FINANCE_STATUS_ALIASES = {
+  "": "new",
+  "новый": "new",
+  "новая": "new",
+  "согласование": "approval",
+  "согласование сметы": "approval",
+  "договор подписан": "signed",
+  "активен": "work",
+  "active": "work",
+  "progress": "work",
+  "в работе": "work",
+  "приостановлен": "paused",
+  "выполнен": "done",
+  "отменен": "cancel",
+  "отменён": "cancel",
+  "расторгнут": "cancel",
+  "отказ": "refuse",
+  "потерян": "refuse",
+  "архив": "archive",
+};
+
+// Старые финпроекты хранят русские статусы, связанные объекты — системные ключи.
+// Нормализация нужна только для отображения/расчётов: данные в базе не меняются.
+export function financeStatusMeta(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  const key = FINANCE_STATUS_ALIASES[raw] || raw || "new";
+  return FINANCE_STATUS_META[key] || {
+    key,
+    label: String(value || "Новый"),
+    color: "#64748b",
+    bg: "#f1f5f9",
+  };
+}
+
+export function isActiveFinanceStatus(value) {
+  return !["done", "cancel", "refuse", "archive"].includes(financeStatusMeta(value).key);
+}
+
+const OBJECT_EDIT_FIELDS = Object.freeze([
+  "clientName","clientPhone","clientType","clientIin","clientDoc","clientDirector",
+  "clientDirectorShort","clientEmail","clientBank","clientBik","clientAccount",
+  "address","objType","area","note",
+]);
+
+// Возвращает только действительно изменённые и разрешённые поля карточки объекта.
+// Обычный focus/blur, просмотр read-only карточки и изменение запрещённого поля
+// не должны создавать запись в Firebase и ложную dirty-метку.
+export function buildAuthorizedObjectPatch(saved, draft, { canEdit = false, canAssign = false } = {}) {
+  if (!saved || !draft || saved.id !== draft.id) return {};
+  const patch = {};
+  if (canEdit) {
+    for (const key of OBJECT_EDIT_FIELDS) {
+      if (!Object.is(saved[key] ?? "", draft[key] ?? "")) patch[key] = draft[key] ?? "";
+    }
+  }
+  if (canAssign && !Object.is(saved.manager ?? "", draft.manager ?? "")) {
+    patch.manager = draft.manager ?? "";
+  }
+  return patch;
+}
+
+export const ROLE_DEFINITIONS = Object.freeze([
+  { key:"admin", label:"Администратор", icon:"👑" },
+  { key:"manager", label:"Руководитель", icon:"🧑‍💼" },
+  { key:"sales_head", label:"Руководитель отдела продаж", icon:"📈" },
+  { key:"foreman", label:"Прораб", icon:"🔨" },
+  { key:"user", label:"Замерщик", icon:"👤" },
+  { key:"viewer", label:"Наблюдатель", icon:"👁" },
+]);
+
+const FULL_ADMIN_ACCESS = Object.freeze({
+  dashboard:"all", objects:"all", calendar:"all", estimates:"all", production:"all",
+  documents:"all", analytics:"all", finance:"edit", admin:"full",
+  objectCreate:"all", objectEdit:"all", objectDelete:"all", objectStatus:"all",
+  objectAssign:"all", objectExport:"all", calendarEdit:"all",
+  estimateCreate:"all", estimateEdit:"all", estimateDelete:"all", estimateStatus:"all",
+  estimatePublish:"all", estimateExport:"all",
+  productionEdit:"all", productionStages:"all", productionQuality:"all",
+  productionClientAccess:"all",
+  documentCreate:"all", documentEdit:"all", documentDelete:"all", documentExport:"all",
+  analyticsExport:"all",
+  financeCreate:"all", financeEdit:"all", financeDelete:"all", financeExport:"all",
+  financeDirectories:"all",
+  adminUsers:"all", adminRoles:"all", adminClients:"all", adminContractors:"all",
+  adminCatalog:"all", adminPrices:"all", adminBackups:"all", adminRestore:"all",
+  adminAudit:"all", adminDbCheck:"all",
+  financialDetails:true, showLocked:false,
+});
+
+// Централизованные пресеты ролей. Сохранённая в базе матрица накладывается поверх
+// них, поэтому новые права получают безопасные значения без миграции данных.
+export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
+  admin: FULL_ADMIN_ACCESS,
+  manager: {
+    dashboard:"all", objects:"all", calendar:"all", estimates:"all", production:"all",
+    documents:"all", analytics:"all",
+    finance:"view", admin:"none", financialDetails:true,
+    objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
+    objectAssign:"none", objectExport:"all", calendarEdit:"none",
+    estimateCreate:"all", estimateEdit:"all", estimateDelete:"all", estimateStatus:"all",
+    estimatePublish:"all", estimateExport:"all",
+    productionEdit:"all", productionStages:"all", productionQuality:"all", productionClientAccess:"all",
+    documentCreate:"all", documentEdit:"all", documentDelete:"all", documentExport:"all",
+    analyticsExport:"all",
+    financeCreate:"none", financeEdit:"none", financeDelete:"none", financeExport:"all",
+    financeDirectories:"none",
+    adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
+    adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
+    adminAudit:"none", adminDbCheck:"none",
+    showLocked:false,
+  },
+  sales_head: {
+    dashboard:"all", objects:"all", calendar:"all", estimates:"all", production:"all",
+    documents:"all", analytics:"all",
+    finance:"none", admin:"none", financialDetails:false,
+    objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
+    objectAssign:"none", objectExport:"all", calendarEdit:"none",
+    estimateCreate:"none", estimateEdit:"none", estimateDelete:"none", estimateStatus:"none",
+    estimatePublish:"none", estimateExport:"all",
+    productionEdit:"none", productionStages:"none", productionQuality:"none", productionClientAccess:"none",
+    documentCreate:"none", documentEdit:"none", documentDelete:"none", documentExport:"all",
+    analyticsExport:"all",
+    financeCreate:"none", financeEdit:"none", financeDelete:"none", financeExport:"none",
+    financeDirectories:"none",
+    adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
+    adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
+    adminAudit:"none", adminDbCheck:"none",
+    showLocked:true,
+  },
+  foreman: {
+    dashboard:"own", objects:"all", calendar:"all", estimates:"none", production:"all",
+    documents:"none", analytics:"none",
+    finance:"none", admin:"none", financialDetails:true,
+    objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
+    objectAssign:"none", objectExport:"none", calendarEdit:"own",
+    estimateCreate:"none", estimateEdit:"none", estimateDelete:"none", estimateStatus:"none",
+    estimatePublish:"none", estimateExport:"none",
+    productionEdit:"all", productionStages:"all", productionQuality:"all", productionClientAccess:"all",
+    documentCreate:"none", documentEdit:"none", documentDelete:"none", documentExport:"none",
+    analyticsExport:"none",
+    financeCreate:"none", financeEdit:"none", financeDelete:"none", financeExport:"none",
+    financeDirectories:"none",
+    adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
+    adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
+    adminAudit:"none", adminDbCheck:"none",
+    showLocked:false,
+  },
+  user: {
+    dashboard:"own", objects:"own", calendar:"own", estimates:"own", production:"own",
+    documents:"own", analytics:"own",
+    finance:"none", admin:"none", financialDetails:false,
+    objectCreate:"all", objectEdit:"own", objectDelete:"own", objectStatus:"own",
+    objectAssign:"none", objectExport:"own", calendarEdit:"own",
+    estimateCreate:"all", estimateEdit:"own", estimateDelete:"own", estimateStatus:"own",
+    estimatePublish:"own", estimateExport:"own",
+    productionEdit:"own", productionStages:"own", productionQuality:"own", productionClientAccess:"none",
+    documentCreate:"all", documentEdit:"own", documentDelete:"own", documentExport:"own",
+    analyticsExport:"own",
+    financeCreate:"none", financeEdit:"none", financeDelete:"none", financeExport:"none",
+    financeDirectories:"none",
+    adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
+    adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
+    adminAudit:"none", adminDbCheck:"none",
+    showLocked:true,
+  },
+  viewer: {
+    dashboard:"none", objects:"all", calendar:"none", estimates:"none", production:"none",
+    documents:"none", analytics:"none",
+    finance:"none", admin:"none", financialDetails:false,
+    objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
+    objectAssign:"none", objectExport:"none", calendarEdit:"none",
+    estimateCreate:"none", estimateEdit:"none", estimateDelete:"none", estimateStatus:"none",
+    estimatePublish:"none", estimateExport:"none",
+    productionEdit:"none", productionStages:"none", productionQuality:"none", productionClientAccess:"none",
+    documentCreate:"none", documentEdit:"none", documentDelete:"none", documentExport:"none",
+    analyticsExport:"none",
+    financeCreate:"none", financeEdit:"none", financeDelete:"none", financeExport:"none",
+    financeDirectories:"none",
+    adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
+    adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
+    adminAudit:"none", adminDbCheck:"none",
+    showLocked:false,
+  },
+});
+
+const SCOPE_VALUES = new Set(["none", "own", "all"]);
+const SCOPE_KEYS = [
+  "dashboard","objects","calendar","estimates","production","documents","analytics",
+  "objectCreate","objectEdit","objectDelete","objectStatus","objectAssign","objectExport",
+  "calendarEdit",
+  "estimateCreate","estimateEdit","estimateDelete","estimateStatus","estimatePublish","estimateExport",
+  "productionEdit","productionStages","productionQuality","productionClientAccess",
+  "documentCreate","documentEdit","documentDelete","documentExport","analyticsExport",
+  "financeCreate","financeEdit","financeDelete","financeExport","financeDirectories",
+  "adminUsers","adminRoles","adminClients","adminContractors","adminCatalog","adminPrices",
+  "adminBackups","adminRestore","adminAudit","adminDbCheck",
+];
+
+const LEGACY_DERIVED_KEYS = Object.freeze({
+  estimates:"objects",
+  production:"objects",
+  objectCreate:"objectEdit",
+  objectDelete:"objectEdit",
+  objectStatus:"objectEdit",
+  objectAssign:"objectEdit",
+  objectExport:"objects",
+  calendarEdit:"calendar",
+  estimateCreate:"estimateEdit",
+  estimateDelete:"estimateEdit",
+  estimateStatus:"estimateEdit",
+  estimatePublish:"estimateEdit",
+  estimateExport:"estimates",
+  productionStages:"productionEdit",
+  productionQuality:"productionEdit",
+  productionClientAccess:"productionEdit",
+  documentCreate:"documentEdit",
+  documentDelete:"documentEdit",
+  documentExport:"documents",
+  analyticsExport:"analytics",
+});
+
+const FINANCE_ACTION_KEYS = ["financeCreate","financeEdit","financeDelete","financeExport","financeDirectories"];
+const ADMIN_ACTION_KEYS = [
+  "adminUsers","adminRoles","adminClients","adminContractors","adminCatalog","adminPrices",
+  "adminBackups","adminRestore","adminAudit","adminDbCheck",
+];
+
+export function normalizeRolePermissions(saved = {}) {
+  const src = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+  const result = {};
+  for (const role of ROLE_DEFINITIONS) {
+    const base = DEFAULT_ROLE_PERMISSIONS[role.key];
+    const patch = src[role.key] && typeof src[role.key] === "object" ? src[role.key] : {};
+    const merged = { ...base, ...patch };
+    // Старые матрицы знали только права уровня раздела и одно право "изменение".
+    // Новые действия наследуем из старого поля лишь когда в сохранённой матрице
+    // собственного значения ещё нет. Бизнес-данные при этом не затрагиваются.
+    for (const [key, legacyKey] of Object.entries(LEGACY_DERIVED_KEYS)) {
+      if (!(key in patch) && legacyKey in patch && SCOPE_VALUES.has(patch[legacyKey])) {
+        merged[key] = patch[legacyKey];
+      }
+    }
+    if (!("productionEdit" in patch) && SCOPE_VALUES.has(patch.production)) {
+      merged.productionEdit = patch.production;
+    }
+    for (const key of FINANCE_ACTION_KEYS) {
+      if (!(key in patch) && "finance" in patch) {
+        merged[key] = patch.finance === "edit" ? "all" : "none";
+      }
+    }
+    for (const key of ADMIN_ACTION_KEYS) {
+      if (!(key in patch) && "admin" in patch) {
+        merged[key] = patch.admin === "full" ? "all" : "none";
+      }
+    }
+    for (const key of SCOPE_KEYS) {
+      if (!SCOPE_VALUES.has(merged[key])) merged[key] = base[key];
+    }
+    if (!["none","view","edit"].includes(merged.finance)) merged.finance = base.finance;
+    if (!["none","full"].includes(merged.admin)) merged.admin = base.admin;
+    merged.financialDetails = merged.financialDetails === true;
+    merged.showLocked = merged.showLocked === true;
+    result[role.key] = merged;
+  }
+  // Главного администратора нельзя случайно лишить доступа к матрице и данным.
+  result.admin = { ...FULL_ADMIN_ACCESS };
+  return result;
+}
+
+export function permissionsForRole(matrix, role) {
+  const normalized = normalizeRolePermissions(matrix);
+  return normalized[role] || normalized.viewer;
+}
+
+export function accessAllows(access, ownerMatches = false) {
+  return access === "all" || (access === "own" && ownerMatches);
+}
+
+// Дашборд замерщика строится только по его объектам/сметам. Финансовые операции,
+// себестоимость и маржа сюда намеренно не попадают.
+export function buildEstimatorDashboard({ objects = [], estimates = [], productions = [], user = null, now = Date.now() } = {}) {
+  const uid = user?.id;
+  const name = String(user?.name || "").trim();
+  const liveObjects = objects.filter(o => o && !o.deletedAt);
+  const ownEstimateObjectIds = new Set(
+    estimates
+      .filter(e => e && !e.deletedAt && ((uid && e.createdById === uid) || (name && e.createdBy === name)))
+      .map(e => e.objectId)
+      .filter(Boolean),
+  );
+  const ownObjects = liveObjects.filter(o =>
+    (uid && o.createdById === uid)
+    || (name && (o.manager === name || o.createdBy === name))
+    || ownEstimateObjectIds.has(o.id),
+  );
+  const ownObjectIds = new Set(ownObjects.map(o => o.id));
+  const ownEstimates = estimates.filter(e =>
+    e && !e.deletedAt && (
+      ownObjectIds.has(e.objectId)
+      || (uid && e.createdById === uid)
+      || (name && e.createdBy === name)
+    ),
+  );
+  const prodByObject = new Map(productions.filter(Boolean).map(p => [p.objectId, p]));
+  const prodStatus = { active:"work", paused:"paused", done:"done", cancel:"cancel" };
+  const statusOf = o => prodStatus[prodByObject.get(o.id)?.prodStatus] || o.status || "new";
+  const statusCounts = {};
+  for (const o of ownObjects) {
+    const status = statusOf(o);
+    statusCounts[status] = (statusCounts[status] || 0) + 1;
+  }
+  const terminal = new Set(["done", "cancel", "archive", "refuse"]);
+  const nowDate = new Date(now);
+  const inCurrentMonth = value => {
+    const d = new Date(Number(value) || 0);
+    return d.getFullYear() === nowDate.getFullYear() && d.getMonth() === nowDate.getMonth();
+  };
+  const objectEstimateTotal = objectId => ownEstimates
+    .filter(e => e.objectId === objectId)
+    .reduce((sum, e) => sum + (Number(e.total) || 0), 0);
+  const monthObjects = ownObjects.filter(o =>
+    o.createdBy !== "migration"
+    && inCurrentMonth(o.createdAt),
+  );
+  const monthEstimateTotal = monthObjects.reduce((sum, o) => sum + objectEstimateTotal(o.id), 0);
+  const approvalObjects = ownObjects.filter(o => statusOf(o) === "approval");
+  const pipelineTotal = approvalObjects.reduce((sum, o) => sum + objectEstimateTotal(o.id), 0);
+  return {
+    ownObjects,
+    ownEstimates,
+    statusCounts,
+    objectCount: ownObjects.length,
+    activeCount: ownObjects.filter(o => !terminal.has(statusOf(o))).length,
+    approvalCount: statusCounts.approval || 0,
+    signedCount: ["signed", "work", "paused", "done"].reduce((sum, key) => sum + (statusCounts[key] || 0), 0),
+    estimateCount: ownEstimates.length,
+    estimateTotal: ownEstimates.reduce((sum, e) => sum + (Number(e.total) || 0), 0),
+    monthObjectCount: monthObjects.length,
+    monthEstimateTotal,
+    pipelineTotal,
+    recentObjects: [...ownObjects]
+      .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))
+      .slice(0, 6),
+    statusOf,
+  };
+}
+
+// Финансовый проект хранит деньги и ссылку objectId. Описательные поля всегда
+// вычисляются из объекта, производства, договора и актов, чтобы их нельзя было
+// независимо изменить в двух разделах.
+export function buildFinanceProjectView({ project = {}, object = null, production = null, contract = null, reports = [], status = null } = {}) {
+  const linked = !!object;
+  const clientType = object?.clientType === "юр" ? "Юр лицо" : object ? "Физ лицо" : (project.client || "—");
+  const legacyStatus = financeStatusMeta(linked ? (object.status || "new") : (project.rawStatus || project.status || ""));
+  const statusKey = status?.key || legacyStatus.key;
+  const statusLabel = status?.label || legacyStatus.label;
+  const hasAvr = linked
+    ? reports.some(r => r && r.objectId === object.id && r.type === "avr")
+    : project.avr === "да";
+  const contractSigned = linked
+    ? !!(contract && contract.contractStatus === "signed")
+    : project.contractSigned === "да";
+  return {
+    linked,
+    object,
+    production,
+    contract,
+    objectId: object?.id || project.objectId || "",
+    customerName: object?.clientName || (linked ? "Без клиента" : project.description || project.client || "Проект без объекта"),
+    customerPhone: object?.clientPhone || "",
+    customerType: clientType,
+    address: object?.address || "",
+    area: object?.area || "",
+    category: object?.objType || (linked ? "—" : project.category || "—"),
+    manager: object?.manager || production?.responsible || "",
+    contractNo: contract?.number || project.contractNo || "",
+    statusKey,
+    statusLabel,
+    statusColor: status?.color || legacyStatus.color,
+    statusBg: status?.bg || legacyStatus.bg,
+    saleDate: production?.saleDate || "",
+    startDate: production?.startDate || "",
+    planEndDate: production?.planEndDate || "",
+    factEndDate: production?.factEndDate || "",
+    contractSigned,
+    hasAvr,
+  };
+}
 
 export const CATALOG_DEFAULTS = Object.freeze({ renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[] });
 // Дефолты + текущее состояние + патч, одним местом.
@@ -371,6 +777,21 @@ export function classifyCloudObj(r) {
   }
   return { value: null, ok: false };
 }
+
+// Firebase RTDB SDK при потере сети может вернуть ЛОКАЛЬНЫЙ кеш, причём runTransaction способен
+// временно положить туда "[]". Поэтому ни empty, ни found от SDK нельзя использовать там, где
+// требуется АВТОРИТЕТНОЕ состояние сервера (конфликты, полный бэкап, восстановление).
+// Подтверждённым считается только прямой успешный REST-ответ Firebase.
+export function resolveVerifiedCloudRead(restResult) {
+  if (restResult && restResult.ok) {
+    return {
+      status: restResult.value === null ? "empty" : "found",
+      value: restResult.value ?? null,
+      source: "firebase",
+    };
+  }
+  return { status: "unavailable", value: null, source: "firebase" };
+}
 // Решение по ПРЕД-БЭКАПУ раздела перед восстановлением (чистая логика для тестов).
 // Возвращает { action:"skip"|"proceed", backups }:
 //  - текущее значение раздела недоступно (unavailable) → skip (не знаем, что затираем);
@@ -431,7 +852,7 @@ export function validateBackupSchema(snap, arraySpecs = []) {
       if (it[idKey] == null || it[idKey] === "") return { ok: false, error: `раздел «${key}»: элемент #${i} без «${idKey}»` };
     }
   }
-  for (const k of ["financeMeta", "catalog", "prices"]) {
+  for (const k of ["financeMeta", "catalog", "prices", "rolePermissions"]) {
     if (has(d, k) && !(d[k] === null || isPlain(d[k]))) return { ok: false, error: `«${k}» должен быть объектом или пустым` };
   }
   if (has(d, "publicNodes")) {
@@ -482,4 +903,175 @@ export function isBackupRestorable(snap) {
   if (snap.verifiedFromFirebase !== true) return { ok: false, reason: "полнота файла не подтверждена (verifiedFromFirebase ≠ true) — возможно, часть разделов не читалась из Firebase" };
   if (Array.isArray(snap._incomplete) && snap._incomplete.length) return { ok: false, reason: "файл помечен как НЕПОЛНЫЙ: " + snap._incomplete.join(", ") };
   return { ok: true };
+}
+
+// ── ВЛАДЕНИЕ DIRTY-ЗАПИСЯМИ (несинхронизированные локальные правки) ──
+// Маркер __dirty хранит владельца: { ts, uid, tab }. Раньше это был просто timestamp — при
+// выходе «с потерей» нельзя было отличить свою правку от правки ДРУГОЙ ВКЛАДКИ, а снятая метка
+// оставляла само значение в localStorage/_mem, и следующий пользователь получал чужую смету
+// (свежая локальная копия выигрывает в getResult). Теперь: выход трогает ТОЛЬКО свои записи
+// (uid+tab) и удаляет их ПОЛНОСТЬЮ (значение + __wts + __dirty + _mem).
+export function makeDirtyMarker(uid, tab) {
+  return JSON.stringify({ ts: Date.now(), uid: uid == null ? null : uid, tab: tab || "" });
+}
+// Своя ли dirty-запись — СТРОГО по маркеру {uid, tab}. Legacy-маркер (голый timestamp старых
+// версий) — владелец НЕИЗВЕСТЕН → НЕ своя: его нельзя ни авто-отправить под первым вошедшим,
+// ни удалить по чужому «выйти с потерей». Legacy остаётся в карантине до ручной выгрузки.
+export function isOwnDirtyMarker(raw, uid, tab) {
+  if (!raw) return false;
+  try {
+    const m = JSON.parse(raw);
+    if (!m || typeof m !== "object") return false; // legacy: число-timestamp — владелец неизвестен
+    if (m.tab !== tab) return false;               // правка другой вкладки — не наша
+    return m.uid == null || m.uid === uid;         // без uid (запись до логина) — вкладка решает
+  } catch { return false; } // legacy: не-JSON — владелец неизвестен
+}
+// Список БАЗОВЫХ ключей dirty-записей, принадлежащих (uid, tab). store — localStorage-совместимый.
+export function listOwnedDirty(store, uid, tab, dirtySuffix = "__dirty") {
+  const out = [];
+  try {
+    for (let i = 0; i < store.length; i++) {
+      const k = store.key(i);
+      if (!k || !k.endsWith(dirtySuffix)) continue;
+      if (isOwnDirtyMarker(store.getItem(k), uid, tab)) out.push(k.slice(0, -dirtySuffix.length));
+    }
+  } catch { /* хранилище недоступно — нечего перечислять */ }
+  return out;
+}
+// После аварийного закрытия вкладки её structured dirty-маркеры остаются с прежним tab.
+// Новая вкладка может принять их ТОЛЬКО после получения эксклюзивного editor-lock и только для
+// ТОГО ЖЕ uid. Чужой uid, uid:null и legacy не трогаются.
+export function adoptUserDirty(store, uid, newTab, dirtySuffix = "__dirty", adoptedAt = Date.now()) {
+  const adopted = [];
+  if (uid == null || !newTab) return adopted;
+  try {
+    for (let i = 0; i < store.length; i++) {
+      const key = store.key(i);
+      if (!key || !key.endsWith(dirtySuffix)) continue;
+      let marker;
+      try { marker = JSON.parse(store.getItem(key)); } catch { continue; }
+      if (!marker || typeof marker !== "object" || marker.uid !== uid || !marker.tab || marker.tab === newTab) continue;
+      store.setItem(key, JSON.stringify({ ...marker, tab: newTab, adoptedAt }));
+      adopted.push(key.slice(0, -dirtySuffix.length));
+    }
+  } catch {
+    return adopted;
+  }
+  return adopted;
+}
+// ПОДТВЕРЖДЁННАЯ потеря при выходе: удалить свои dirty-записи ЦЕЛИКОМ — метку, значение,
+// таймстемп записи (__wts) и копию в памяти (mem). Чужие вкладки/пользователи не затрагиваются.
+// Возвращает список удалённых базовых ключей.
+export function discardOwnedDirty(store, uid, tab, mem, suffixes = { dirty: "__dirty", ts: "__wts" }) {
+  const owned = listOwnedDirty(store, uid, tab, suffixes.dirty);
+  for (const base of owned) {
+    try {
+      store.removeItem(base + suffixes.dirty);
+      store.removeItem(base);
+      store.removeItem(base + suffixes.ts);
+    } catch { /* удаляем сколько можем */ }
+    if (mem) delete mem[base];
+  }
+  return owned;
+}
+
+// Legacy-маркер (голый timestamp/не-JSON из версий до владения) — владелец НЕИЗВЕСТЕН.
+export function isLegacyDirtyMarker(raw) {
+  if (!raw) return false;
+  try { const m = JSON.parse(raw); return !(m && typeof m === "object"); } catch { return true; }
+}
+// Ключи к АВТООТПРАВКЕ (flushDirty/«Повторить сейчас»): ТОЛЬКО свои (uid+tab) и НЕ legacy.
+// Legacy — в карантине: неизвестно чью правку нельзя автоматически отправлять под первым
+// вошедшим пользователем (владелец удалит её явно через «выход с потерей» или разберёт вручную).
+export function listFlushableDirty(store, uid, tab, dirtySuffix = "__dirty") {
+  return listOwnedDirty(store, uid, tab, dirtySuffix)
+    .filter(base => !isLegacyDirtyMarker(store.getItem(base + dirtySuffix)));
+}
+// Для UI ошибки показываем только ЗАВЕРШИВШИЕСЯ неудачей записи. storage.set сначала
+// сохраняет durable-копию и ставит dirty-маркер, затем ждёт Firebase/REST. Пока запрос
+// действительно выполняется, такой marker означает "в процессе", а не "облако упало".
+// Иначе минутный heartbeat присутствия давал мигающий аварийный баннер при нормальной сети.
+export function visibleDirtyKeys(keys, inFlight) {
+  const list = Array.isArray(keys) ? keys : [];
+  const has = inFlight && typeof inFlight.has === "function"
+    ? key => inFlight.has(key)
+    : () => false;
+  return list.filter(key => !has(key));
+}
+// Можно ли УСПЕШНОЙ облачной записи этой вкладки снять dirty-метку ключа: свою или
+// отсутствующую — да. Legacy НЕ снимаем: обычное чтение намеренно не примешивает его локальную
+// копию, поэтому новая облачная запись не доказывает, что неизвестная старая правка сохранена.
+// Метку ДРУГОЙ вкладки/пользователя НЕ снимаем: её правка ещё НЕ в облаке — поздний успешный
+// ответ одной вкладки не должен гасить несинхронизированность другой.
+export function mayClearDirtyOnSuccess(raw, uid, tab) {
+  return !raw || isOwnDirtyMarker(raw, uid, tab);
+}
+
+// ── LEASE-LOCK «ОДНА ВКЛАДКА РЕДАКТИРУЕТ» ──
+// Общий localStorage[key] на раздел не позволяет двум вкладкам безопасно редактировать
+// одновременно (вторая затирает черновик первой). Вместо переделки всего storage на per-tab
+// черновики: редактирует ТОЛЬКО вкладка-владелец lease ({uid, tab, token, heartbeatAt} в
+// localStorage), остальные — строго read-only. Heartbeat каждые 5с, протухание 30с.
+export const EDIT_LEASE_KEY = "titovstroy-edit-lease";
+export const LEASE_TTL_MS = 30000;
+export const LEASE_HEARTBEAT_MS = 5000;
+export function makeLease(uid, tab, now, token = "") {
+  return JSON.stringify({ uid: uid == null ? null : uid, tab: tab || "", token: token || "", heartbeatAt: now });
+}
+export function parseLease(raw) {
+  if (!raw) return null;
+  try {
+    const l = JSON.parse(raw);
+    if (!l || typeof l !== "object" || !l.tab || !Number(l.heartbeatAt)) return null;
+    return l;
+  } catch { return null; }
+}
+export function leaseAlive(lease, now) {
+  return !!(lease && Number(lease.heartbeatAt) > 0 && (now - Number(lease.heartbeatAt)) < LEASE_TTL_MS);
+}
+// Свободный lease означает только «можно ПОПРОБОВАТЬ захватить», но не право записи.
+export function canAcquireLease(raw, now) {
+  const l = parseLease(raw);
+  return !l || !leaseAlive(l, now);
+}
+// Право записи есть ТОЛЬКО у владельца живого lease с тем же fencing-token.
+export function ownsActiveLease(raw, uid, tab, token, now) {
+  const l = parseLease(raw);
+  return !!(l && leaseAlive(l, now) && l.uid === (uid == null ? null : uid) && l.tab === tab && l.token === token);
+}
+export function canWriteLease(raw, uid, tab, token, now) {
+  const l = parseLease(raw);
+  if (ownsActiveLease(raw, uid, tab, token, now)) return { ok: true, reason: "own" };
+  return {
+    ok: false,
+    reason: l && leaseAlive(l, now) ? "read-only-tab" : "lease-required",
+    holder: l ? { uid: l.uid, tab: l.tab } : null,
+  };
+}
+// Разрешён ли ЯВНЫЙ перехват: только если lease отсутствует или ПРОТУХ (владелец действительно
+// недоступен). Живой lease перехватывать нельзя — сначала закрыть ту вкладку (или дождаться TTL).
+export function mayTakeoverLease(raw, now) {
+  return canAcquireLease(raw, now);
+}
+export async function claimFallbackLease(store, uid, tab, token, opts = {}) {
+  const now = opts.now || (() => Date.now());
+  const wait = opts.wait || (ms => new Promise(r => setTimeout(r, ms)));
+  const raw = store.getItem(EDIT_LEASE_KEY);
+  if (!canAcquireLease(raw, now())) return false;
+  store.setItem(EDIT_LEASE_KEY, makeLease(uid, tab, now(), token));
+  await wait(opts.verifyDelayMs == null ? 100 : opts.verifyDelayMs);
+  return ownsActiveLease(store.getItem(EDIT_LEASE_KEY), uid, tab, token, now());
+}
+
+// Можно ли ИСПОЛЬЗОВАТЬ локальную копию раздела при чтении (getResult): НЕЛЬЗЯ, если на ключе
+// dirty-маркер ДРУГОГО пользователя/вкладки — иначе несохранённая смета пользователя A (аварийно
+// закрывшего вкладку) читалась бы пользователем B, становилась базой его сохранений и уезжала в
+// облако. Действует на ВСЕ локальные источники: свежий кеш 30с, dirty-ветку, старый фоллбек, _mem.
+// Legacy-маркер (владелец неизвестен) тоже запрещает обычное чтение. Его можно только выгрузить
+// отдельным recovery-файлом и разобрать вручную; автоматически примешивать неизвестные данные
+// к сессии первого вошедшего пользователя нельзя.
+export function mayUseLocalCopy(dirtyRaw, uid, tab) {
+  if (!dirtyRaw) return true;
+  if (isLegacyDirtyMarker(dirtyRaw)) return false;
+  return isOwnDirtyMarker(dirtyRaw, uid, tab);
 }
