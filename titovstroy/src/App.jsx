@@ -2280,7 +2280,7 @@ function AdminPageContent({ currentUser, presence = {}, onUsersChanged, clients=
   };
 
   return (
-    <div className="page" style={{maxWidth:1320}}>
+    <div className="page" style={{maxWidth:1600}}>
       <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"24px 28px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
         <div style={{position:"absolute",top:-30,right:-30,width:160,height:160,borderRadius:"50%",background:"rgba(59,130,246,.08)"}}/>
         <div style={{position:"relative",zIndex:1}}>
@@ -9256,7 +9256,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         .badge{background:#eff6ff;color:#2563eb;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:600;border:1px solid rgba(37,99,235,.15)}
         @keyframes up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
         .up{animation:up .2s ease forwards}
-        .page{max-width:960px;margin:0 auto;padding:32px 36px 80px}
+        .page{max-width:1600px;margin:0 auto;padding:32px 36px 80px}
         @media(min-width:900px){.main-grid{grid-template-columns:minmax(0,1fr) 295px!important}}
         @media(max-width:700px){
           .editor-header{gap:6px!important;padding:8px 12px!important;top:env(safe-area-inset-top,0px)!important;flex-wrap:wrap!important;row-gap:6px!important}
@@ -9839,7 +9839,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           ЭКРАН 1: СПИСОК СМЕТ
       ═══════════════════════════════════════════════════════════════════ */}
       {effScreen === "list" && (
-        <div style={{maxWidth:960,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
+        <div style={{maxWidth:1600,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
           {/* Шапка */}
           <div className="list-header" style={{background:"linear-gradient(135deg,#0f172a,#1e293b)",borderBottom:"1px solid #0f172a",padding:"14px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10,boxShadow:"0 2px 12px rgba(15,23,42,.2)"}}>
             <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
@@ -10137,7 +10137,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             </div>
           </div>
 
-          <div style={{maxWidth:1160,margin:"0 auto",padding:"18px 18px"}}>
+          <div style={{maxWidth:1600,margin:"0 auto",padding:"18px 18px"}}>
             {/* ОБЪЕКТ — скрываем, если смета привязана к объекту (поля ведутся в объекте) */}
             {!currentObjectId && (
             <div className="card up" style={{padding:"16px 20px",marginBottom:16}}>
@@ -12903,19 +12903,30 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           manager: obj.manager || currentUser.name,
         });
         // Авто-синхронизация скрытой записи клиента (нужна договорам/PDF). Возвращает clientId.
-        const ensureObjClient = async (obj) => {
+        // Синхронно возвращает clientId и ОПТИМИСТИЧНО обновляет клиента/объект; записи в облако —
+        // в фон. Раньше здесь был await двух сохранений (клиент + объект) ДО возврата, а вызывающий
+        // openObjectContract await'ил его ПЕРЕД открытием редактора — при медленном/сбойном облаке
+        // редактор не открывался вовсе («кнопка Договор не работает»). Данные устойчивы
+        // (localStorage-first + dirty + повтор), поэтому не ждём сеть.
+        const ensureObjClient = (obj) => {
           const isYur = obj.clientType==="юр";
           const cdata = { name: obj.clientName||"", phone: obj.clientPhone||"", address: obj.address||"", iin: obj.clientIin||"", doc: obj.clientDoc||"", type: obj.clientType||"физ",
             ...(isYur ? { director: obj.clientDirector||"", directorShort: obj.clientDirectorShort||"", bank: obj.clientBank||"", bik: obj.clientBik||"", account: obj.clientAccount||"", email: obj.clientEmail||"" } : {}) };
           let clientId = obj.clientId;
           const list = clientsRef.current;
           if (clientId && list.find(c=>c.id===clientId)) {
-            await saveContractClients(list.map(c=>c.id===clientId?{...c,...cdata}:c));
+            const next = list.map(c=>c.id===clientId?{...c,...cdata}:c);
+            clientsRef.current = next; setContractClients(next);
+            saveContractClients(next).catch(e=>console.warn("bg client sync err", e));
           } else {
             clientId = Date.now().toString();
-            await saveContractClients([...list, { id:clientId, ...cdata, createdAt:Date.now(), createdById:currentUser.id, _fromObject:obj.id }]);
+            const next = [...list, { id:clientId, ...cdata, createdAt:Date.now(), createdById:currentUser.id, _fromObject:obj.id }];
+            clientsRef.current = next; setContractClients(next);
+            saveContractClients(next).catch(e=>console.warn("bg client sync err", e));
             const updObj = {...obj, clientId, updatedAt:Date.now()};
-            await saveObjects(objectsRef.current.map(x=>x.id===obj.id?updObj:x));
+            const nextObjs = objectsRef.current.map(x=>x.id===obj.id?updObj:x);
+            objectsRef.current = nextObjs; setObjects(nextObjs);
+            saveObjects(nextObjs).catch(e=>console.warn("bg obj sync err", e));
             setCurrentObject(updObj);
           }
           return clientId;
@@ -12996,8 +13007,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           setScreen("editor");
         };
 
-        const openObjectContract = async (obj, fromEst=null) => {
-          const clientId = await ensureObjClient(obj);
+        const openObjectContract = (obj, fromEst=null) => {
+          const clientId = ensureObjClient(obj); // синхронно (записи в фон) — редактор открывается сразу
           const works = fromEst ? estToContractWorks(fromEst) : [];
           const isDs = !!(fromEst && fromEst.parentId && fromEst.parentId!==fromEst.id);
           const siblings = fromEst ? estimatesRef.current.filter(e=>e.parentId===fromEst.parentId) : [];
