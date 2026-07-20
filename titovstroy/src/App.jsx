@@ -6,7 +6,7 @@ import { emptyProduction } from "./production/constants.js";
 import { applyProductionCommand, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, isDashboardActiveObject, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
 function useDebounce(value, ms) {
@@ -94,103 +94,70 @@ function DangerConfirmModal() {
 // скрыть до завтра (если dismissable и передан onDismiss).
 const _ISSUE_GROUPS = ["Производство", "Финансы", "Клиенты", "Данные"];
 const _GRP_ICON = { "Производство":"🔨", "Финансы":"💰", "Клиенты":"👤", "Данные":"🗂" };
-const _ISSUE_CAP = 6; // сколько показывать в группе до «показать все»
+const _ISSUE_CAP = 6;
 function IssuePanel({ issues, onNav, onDismiss, emptyText = "✓ Всё чисто — проблем не найдено" }) {
-  const [openGroups, setOpenGroups] = useState({}); // переопределения; по умолчанию раскрыты группы с критичными
-  const [showAll, setShowAll] = useState({});       // группа показывает все карточки
+  const [openGroups, setOpenGroups] = useState({});
+  const [showAll, setShowAll] = useState({});
   const reds = issues.filter(i => i.sev === "red").length;
   const yellows = issues.length - reds;
   if (!issues.length) {
     return (
-      <div style={{ background:"linear-gradient(135deg,#f0fdf4,#ecfdf5)", border:"1px solid #bbf7d0", borderRadius:16, padding:"20px 22px", display:"flex", alignItems:"center", gap:12 }}>
-        <span style={{ width:38, height:38, borderRadius:12, background:"#dcfce7", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>✅</span>
-        <span style={{ fontSize:14, fontWeight:700, color:"#059669" }}>{emptyText}</span>
+      <div style={{ background:"#fff", border:"1px solid #dbe7df", borderLeft:"4px solid #10b981", borderRadius:8, padding:"14px 16px", display:"flex", alignItems:"center", gap:10 }}>
+        <span style={{ color:"#059669", fontSize:18, lineHeight:1 }}>✓</span>
+        <span style={{ fontSize:13.5, fontWeight:700, color:"#166534" }}>{emptyText}</span>
       </div>
     );
   }
   const byGroup = {};
-  for (const i of issues) (byGroup[i.group] || (byGroup[i.group] = [])).push(i);
-  const SEV = { red:{ dot:"#ef4444", text:"#b91c1c", soft:"#fef2f2", ring:"#fecaca" }, yellow:{ dot:"#f59e0b", text:"#b45309", soft:"#fffbeb", ring:"#fde68a" } };
+  for (const issue of issues) (byGroup[issue.group] || (byGroup[issue.group] = [])).push(issue);
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-      {/* Сводка */}
-      <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap", padding:"2px 2px 4px" }}>
-        {reds>0 && (
-          <span style={{ display:"inline-flex", alignItems:"center", gap:7, fontSize:12.5, fontWeight:700, color:"#b91c1c" }}>
-            <span style={{ width:9, height:9, borderRadius:"50%", background:"#ef4444", boxShadow:"0 0 0 3px #fee2e2" }}/>
-            {reds} требуют решения
-          </span>
-        )}
-        {reds>0 && yellows>0 && <span style={{ width:1, height:13, background:"#e2e8f0" }}/>}
-        {yellows>0 && (
-          <span style={{ display:"inline-flex", alignItems:"center", gap:7, fontSize:12.5, fontWeight:700, color:"#b45309" }}>
-            <span style={{ width:9, height:9, borderRadius:"50%", background:"#f59e0b", boxShadow:"0 0 0 3px #fef3c7" }}/>
-            {yellows} на заметку
-          </span>
-        )}
+      <div style={{ display:"flex", alignItems:"center", gap:18, flexWrap:"wrap", color:"#64748b", fontSize:12.5 }}>
+        {reds>0 && <span><b style={{ color:"#dc2626", fontSize:16 }}>{reds}</b> требуют решения</span>}
+        {yellows>0 && <span><b style={{ color:"#d97706", fontSize:16 }}>{yellows}</b> проверить</span>}
       </div>
-
-      {_ISSUE_GROUPS.filter(g => byGroup[g]).map(g => {
-        const list = byGroup[g];
-        const gReds = list.filter(i=>i.sev==="red").length;
-        const gYellows = list.length - gReds;
-        const isOpen = (g in openGroups) ? openGroups[g] : gReds>0; // критичные группы раскрыты сразу
-        const shown = (showAll[g] || list.length<=_ISSUE_CAP) ? list : list.slice(0, _ISSUE_CAP);
+      {_ISSUE_GROUPS.filter(group => byGroup[group]).map(group => {
+        const list = byGroup[group];
+        const critical = list.filter(i=>i.sev==="red").length;
+        const isOpen = (group in openGroups) ? openGroups[group] : critical>0;
+        const shown = (showAll[group] || list.length<=_ISSUE_CAP) ? list : list.slice(0,_ISSUE_CAP);
         return (
-        <div key={g} style={{ background:"#fff", border:"1px solid #e9eef5", borderRadius:16, overflow:"hidden", boxShadow:"0 1px 2px rgba(15,23,42,.04)" }}>
-          <div onClick={()=>setOpenGroups(p=>({...p,[g]: !isOpen }))}
-            style={{ display:"flex", alignItems:"center", gap:11, padding:"13px 16px", cursor:"pointer", userSelect:"none", background:isOpen?"#fbfcfe":"#fff", transition:"background .15s" }}>
-            <span style={{ width:34, height:34, borderRadius:10, background:"#f1f5f9", display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, flexShrink:0 }}>{_GRP_ICON[g]}</span>
-            <div style={{ minWidth:0, flex:1 }}>
-              <div style={{ fontSize:13.5, fontWeight:800, color:"#0f172a" }}>{g}</div>
-              <div style={{ fontSize:11, color:"#94a3b8", marginTop:1 }}>{list.length} {list.length===1?"пункт":list.length<5?"пункта":"пунктов"}</div>
-            </div>
-            {gReds>0 && (
-              <span style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:12, fontWeight:800, color:"#b91c1c", background:"#fef2f2", border:"1px solid #fecaca", borderRadius:20, padding:"3px 10px" }}>
-                <span style={{ width:7, height:7, borderRadius:"50%", background:"#ef4444" }}/>{gReds}
-              </span>
-            )}
-            {gYellows>0 && (
-              <span style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:12, fontWeight:800, color:"#b45309", background:"#fffbeb", border:"1px solid #fde68a", borderRadius:20, padding:"3px 10px" }}>
-                <span style={{ width:7, height:7, borderRadius:"50%", background:"#f59e0b" }}/>{gYellows}
-              </span>
-            )}
-            <span style={{ color:"#cbd5e1", fontSize:12, marginLeft:2, transform:isOpen?"rotate(0deg)":"rotate(-90deg)", transition:"transform .18s", flexShrink:0 }}>▾</span>
-          </div>
-          {isOpen && (
-            <div style={{ padding:"4px 12px 12px", borderTop:"1px solid #f1f5f9", display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:9 }}>
-              {shown.map(i => {
-                const sv = SEV[i.sev] || SEV.yellow;
-                return (
-                <div key={i.id} onClick={() => onNav && onNav(i.nav)}
-                  style={{ position:"relative", border:`1px solid ${sv.ring}`, borderRadius:12, padding:"11px 12px 11px 13px", paddingRight:(onDismiss&&i.dismissable)?30:12, cursor: onNav?"pointer":"default", transition:"box-shadow .14s,transform .14s", background:sv.soft, marginTop:8 }}
-                  onMouseEnter={e=>{ if(onNav){ e.currentTarget.style.boxShadow="0 8px 22px -8px rgba(15,23,42,.22)"; e.currentTarget.style.transform="translateY(-1px)"; } }}
-                  onMouseLeave={e=>{ e.currentTarget.style.boxShadow="none"; e.currentTarget.style.transform="none"; }}>
-                  <div style={{ display:"flex", alignItems:"flex-start", gap:9 }}>
-                    <span style={{ width:9, height:9, borderRadius:"50%", background:sv.dot, flexShrink:0, marginTop:4 }}/>
-                    <div style={{ minWidth:0, flex:1 }}>
-                      <div style={{ fontSize:13, fontWeight:800, color:"#0f172a", lineHeight:1.3 }}>{i.title}</div>
-                      {i.detail && <div style={{ fontSize:11.5, color:"#64748b", marginTop:3, lineHeight:1.4, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{i.detail}</div>}
+          <section key={group} style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:8, overflow:"hidden" }}>
+            <button type="button" onClick={()=>setOpenGroups(prev=>({...prev,[group]:!isOpen}))}
+              style={{ width:"100%", display:"flex", alignItems:"center", gap:10, border:0, background:"#fff", padding:"11px 14px", cursor:"pointer", fontFamily:"inherit", textAlign:"left" }}>
+              <span style={{ width:28, height:28, borderRadius:6, background:"#f1f5f9", display:"grid", placeItems:"center", fontSize:14 }}>{_GRP_ICON[group]}</span>
+              <span style={{ flex:1, fontSize:13.5, fontWeight:800, color:"#0f172a" }}>{group}</span>
+              <span style={{ fontSize:12, color:"#64748b" }}>{list.length}</span>
+              {critical>0 && <span style={{ width:8, height:8, borderRadius:"50%", background:"#ef4444" }}/>}
+              <span style={{ color:"#94a3b8", transform:isOpen?"rotate(180deg)":"none", transition:"transform .15s" }}>⌄</span>
+            </button>
+            {isOpen && (
+              <div style={{ borderTop:"1px solid #eef2f7" }}>
+                {shown.map((issue,index) => {
+                  const red = issue.sev==="red";
+                  return (
+                    <div key={issue.id} onClick={()=>onNav&&onNav(issue.nav)}
+                      style={{ display:"grid", gridTemplateColumns:"4px minmax(0,1fr) auto", gap:12, alignItems:"center", minHeight:58, padding:"9px 12px 9px 0", marginLeft:14, borderBottom:index===shown.length-1?"none":"1px solid #f1f5f9", cursor:onNav?"pointer":"default" }}>
+                      <span style={{ width:4, height:32, borderRadius:2, background:red?"#ef4444":"#f59e0b" }}/>
+                      <span style={{ minWidth:0 }}>
+                        <span style={{ display:"block", fontSize:13, fontWeight:750, color:"#0f172a", lineHeight:1.35 }}>{issue.title}</span>
+                        {issue.detail && <span style={{ display:"block", fontSize:11.5, color:"#64748b", lineHeight:1.4, marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{issue.detail}</span>}
+                      </span>
+                      <span style={{ display:"flex", alignItems:"center", gap:5 }}>
+                        {onDismiss && issue.dismissable && <button type="button" title="Скрыть до завтра" onClick={e=>{e.stopPropagation();onDismiss(issue.id);}}
+                          style={{ width:28, height:28, border:"1px solid #e2e8f0", borderRadius:6, background:"#fff", color:"#94a3b8", cursor:"pointer", fontFamily:"inherit" }}>×</button>}
+                        <span style={{ color:"#cbd5e1", fontSize:16 }}>›</span>
+                      </span>
                     </div>
-                  </div>
-                  {onDismiss && i.dismissable && (
-                    <button onClick={e=>{ e.stopPropagation(); onDismiss(i.id); }} title="Скрыть до завтра"
-                      style={{ position:"absolute", top:8, right:8, background:"rgba(255,255,255,.7)", border:"none", color:"#94a3b8", borderRadius:7, width:22, height:22, fontSize:15, lineHeight:1, cursor:"pointer", fontFamily:"inherit", padding:0, display:"flex", alignItems:"center", justifyContent:"center" }}
-                      onMouseEnter={e=>{ e.currentTarget.style.color="#dc2626"; e.currentTarget.style.background="#fff"; }}
-                      onMouseLeave={e=>{ e.currentTarget.style.color="#94a3b8"; e.currentTarget.style.background="rgba(255,255,255,.7)"; }}>×</button>
-                  )}
-                </div>
-                );
-              })}
-              {list.length > _ISSUE_CAP && (
-                <button onClick={()=>setShowAll(p=>({...p,[g]:!p[g]}))}
-                  style={{ gridColumn:"1/-1", justifySelf:"start", background:"none", border:"none", color:"#2563eb", fontSize:12.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit", padding:"4px 0 2px", marginTop:8 }}>
-                  {showAll[g] ? "Свернуть список" : `Показать все ${list.length} →`}
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+                  );
+                })}
+                {list.length>_ISSUE_CAP && <button type="button" onClick={()=>setShowAll(prev=>({...prev,[group]:!prev[group]}))}
+                  style={{ border:0, borderTop:"1px solid #f1f5f9", width:"100%", background:"#fafcff", color:"#2563eb", padding:"8px 14px", textAlign:"left", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+                  {showAll[group]?"Свернуть":`Показать все ${list.length}`}
+                </button>}
+              </div>
+            )}
+          </section>
         );
       })}
     </div>
@@ -5181,9 +5148,18 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       for (const [key,r] of Object.entries(e.rows||{})) { const qty=Number(r?.qty||0); if(!qty) continue; const w=wl.get(key); if(w) cost+=rowCostPerUnit(r,w)*qty; }
       return cost;
     };
-    // агрегаты смет по объекту (план: выручка + себестоимость)
-    const estAgg = {}; // objectId -> {total, cost}
-    for (const e of estimates) { if(!e.objectId) continue; const a=estAgg[e.objectId]||(estAgg[e.objectId]={total:0,cost:0}); a.total+=Number(e.total)||0; a.cost+=estCostOf(e); }
+    // Агрегаты смет по объекту: основная + дополнительные, включая старые ДС,
+    // у которых связь с объектом хранится только через parentId.
+    const estAgg = {};
+    for (const object of objects) {
+      const linked = estimatesForObject(estimates, object.id);
+      if (!linked.length) continue;
+      estAgg[object.id] = linked.reduce((a,e) => {
+        a.total += Number(e.total) || 0;
+        a.cost += estCostOf(e);
+        return a;
+      }, { total:0, cost:0 });
+    }
     for (const c of contracts) {
       const num = normCN(c.number);
       if (!num) continue;
@@ -6644,12 +6620,10 @@ ${reqBlock}`;
 
   // Построить этапы из привязанной к объекту сметы: группировка по категориям сметы
   const buildStagesFromEstimate = useCallback((objectId) => {
-    const objEsts = estimates.filter(e => e.objectId === objectId);
+    const objEsts = estimatesForObject(estimates, objectId);
     if (!objEsts.length) return [];
     const catalog = getEffectiveCatalog();
-    // Одна строка = одно НАИМЕНОВАНИЕ работы. Заголовок (cat: Черновые/Чистовые) —
-    // это блок для группировки. Одинаковые работы (cat+name) суммируем по qty/сумме.
-    const map = {}; // "cat|name" -> { cat, name, unit, qty, priceClient, costPlan }
+    const map = {};
     const order = [];
     for (const est of objEsts) {
       const mk = 1 + (Number(est.markup) || 0) / 100;
@@ -6657,23 +6631,32 @@ ${reqBlock}`;
       for (const [key, r] of Object.entries(est.rows || {})) {
         const qty = Number(r?.qty || 0);
         if (qty <= 0) continue;
-        const w = catalog.find(x => x.code === key) || catalog.find(x => x.name === key);
-        if (!w) continue;
-        const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
-        const raw = (r.manualPrice !== undefined && r.manualPrice !== "") ? Number(r.manualPrice) : getPrice(w, qty, r.complexity || "std", cpxPct);
+        const w = catalog.find(x => x.code === key) || catalog.find(x => x.name === key)
+          || catalog.find(x => r?.manualName && x.name === r.manualName);
+        const name = String(r?.manualName ?? r?.name ?? w?.name ?? key).trim();
+        if (!name) continue;
+        const unit = String(r?.manualUnit ?? r?.unit ?? w?.unit ?? "").trim();
+        const cat = String(r?.cat ?? w?.cat ?? "Дополнительные работы").trim() || "Дополнительные работы";
+        const cpxPct = r?.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
+        const raw = (r?.manualPrice !== undefined && r.manualPrice !== "")
+          ? Number(r.manualPrice)
+          : w ? getPrice(w, qty, r?.complexity || "std", cpxPct) : Number(r?.price || 0);
         const priceClient = (Number(raw) || 0) * mk * disc * qty;
-        const costPlan = rowCostPerUnit(r, w) * qty;
-        const cat = w.cat || "Прочее";
-        const name = w.name || "";
+        const fallbackCost = Number(r?.costPrice ?? r?.manualCost ?? 0) * qty;
+        const costPlan = w ? rowCostPerUnit(r, w) * qty : fallbackCost;
         const k = (cat + "|" + name).toLowerCase();
-        if (!map[k]) { map[k] = { cat, name, unit: w.unit || "", qty: 0, priceClient: 0, costPlan: 0 }; order.push(k); }
+        if (!map[k]) { map[k] = { cat, name, unit, qty:0, priceClient:0, costPlan:0 }; order.push(k); }
         map[k].qty += qty;
         map[k].priceClient += priceClient;
         map[k].costPlan += costPlan;
       }
     }
-    // Каждая строка = конкретная работа (наименование), cat = блок-заголовок
-    return order.map(k => ({ cat: map[k].cat, name: map[k].name, unit: map[k].unit, qty: Math.round(map[k].qty * 100) / 100, priceClient: Math.round(map[k].priceClient), costPlan: Math.round(map[k].costPlan) }));
+    return order.map(k => ({
+      cat:map[k].cat, name:map[k].name, unit:map[k].unit,
+      qty:Math.round(map[k].qty*100)/100,
+      priceClient:Math.round(map[k].priceClient),
+      costPlan:Math.round(map[k].costPlan),
+    }));
   }, [estimates]);
 
   // МИГРАЦИЯ ID (одноразово): гранулярные команды адресуют элементы массивов (этапы/журнал/
@@ -6703,10 +6686,9 @@ ${reqBlock}`;
   // вручную ценой, если имени нет в каталоге) и импортные карточки без объекта (fp:).
   const _stageSyncTimer = useRef(null);
   useEffect(() => {
-    // ТАБУ владельца: авто-синк ПИШЕТ в производство при загрузке — на боевой базе выключен до
-    // отдельной приёмки (как и normalize-ids). На dev-базе работает как раньше. После приёмки
-    // 2А владелец решает: снять гейт или оставить синк по явной кнопке.
-    if (!IS_DEV_ENV) return;
+    // Автосинхронизация разрешена владельцем: основная и дополнительные сметы обновляют
+    // только сметные этапы через транзакционную команду. Ручные этапы, статусы, сроки,
+    // ответственные и заметки сохраняются.
     if (!_estimatesLoaded.current || !_contractsLoaded.current || !_productionsLoaded.current) return;
     if (_stageSyncTimer.current) clearTimeout(_stageSyncTimer.current);
     _stageSyncTimer.current = setTimeout(() => {
@@ -6723,7 +6705,9 @@ ${reqBlock}`;
         // (без estimateKey) не будет ни обновлён, ни удалён.
         const built = buildStagesFromEstimate(p.objectId).map(b => ({ id: genId(), estimateKey: _stageKey(b), ...b }));
         const hasEstStages = (p.stages || []).some(s => s.fromEst === true && s.estimateKey != null);
-        if (built.length === 0 && !hasEstStages) continue;
+        // Никогда не очищаем существующие этапы автоматически, если связанная смета
+        // временно не прочиталась или действительно пуста. Удаление всех этапов — только явно.
+        if (built.length === 0) continue;
         mutateProductions({ type: "sync-estimate-stages", objectId: p.objectId, estimateStages: built, changeId: "bg_sync_" + p.objectId });
       }
     }, 1200);
@@ -10153,7 +10137,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             {/* Мини-метрики в баннере */}
             <div style={{display:"flex",gap:24,marginTop:20,flexWrap:"wrap"}}>
               {[
-                {label:"Активных объектов",  val:liveObjects.filter(o=>{ const us=unifiedStatusOf(o); return us==="work"||us==="signed"; }).length},
+                {label:"Активных объектов",  val:liveObjects.filter(isDashboardActiveObject).length},
                 {label:"В согласовании", val:approvalObjs.length},
                 {label:"Договоров",       val:signedObjs.length},
               ].map((m,i)=>(
@@ -13641,7 +13625,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               const dependencyWrites = [];
               if (!exists) {
                 const contract = contractsRef.current.find(c => c.objectId === obj.id) || null;
-                const estTotal = estimates.filter(e => e.objectId === obj.id).reduce((s, e) => s + (Number(e.total) || 0), 0);
+                const estTotal = estimatesForObject(estimates, obj.id).reduce((s, e) => s + (Number(e.total) || 0), 0);
                 const draft = finProjDraftFromObject(obj, contract);
                 const proj = { ...draft, id: genId(), budget: draft.budget || estTotal || 0 };
                 // saveListProtected при блокировке (loadedRef/база недоступна/"пусто поверх")
@@ -15051,3 +15035,4 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 // Принимает начальные данные ОДИН РАЗ, дальше живёт сама
 // При размонтировании сохраняет данные в priceCardCache
 const priceCardCache = {};
+
