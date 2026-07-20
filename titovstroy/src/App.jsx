@@ -3,7 +3,7 @@ import { initializeApp } from "firebase/app";
 import { getDatabase, ref, get, set, runTransaction } from "firebase/database";
 import ProductionModule, { flushPendingProduction, stopProductionSession, hasPendingProduction, productionDraftsAreDurable, startProductionSession, setProductionCommandHandler } from "./production/ProductionModule.jsx";
 import { emptyProduction } from "./production/constants.js";
-import { applyProductionCommand, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, _stageKey, normalizeProductionIds } from "./production/commands.js";
+import { applyProductionCommand, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, isRegenerableProductionCommand, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
@@ -5898,7 +5898,12 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       return Promise.resolve({ committed: false, reason: "session-ending" });
     }
     const durableChangeId = command.changeId != null ? String(command.changeId) : "";
-    const durableBg = durableChangeId.startsWith("bg_");
+    // Автосинк этапов полностью воспроизводим из уже сохранённых смет, поэтому его нет смысла
+    // дублировать тяжёлой командой в localStorage. При текущем сетевом сбое он остаётся в памяти,
+    // а после перезагрузки безопасно пересоберётся из смет заново.
+    const durableBg = durableChangeId.startsWith("bg_")
+      && command.__ephemeral !== true
+      && !isRegenerableProductionCommand(command);
     if (durableBg && !command.__draftRevision) {
       command = {
         ...command,
@@ -5908,11 +5913,10 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     // 2Б: bg-команда сначала попадает в per-user localStorage, и только потом — в очередь.
     // Crash после клика, но до ответа Firebase, не теряет зеркало статуса/синк/удаление.
     if (durableBg && !saveProductionRetry(localStorage, currentUser?.id, command)) {
-      setCloudError(true);
       // Резерв команды не влез в localStorage (переполнено старыми авто-бэкапами) — раньше
-      // здесь был блокирующий window.alert на каждый такой случай. Основной канал (Firebase)
-      // это не останавливает, баннер синхронизации свою роль уже выполняет — всплывающее окно
-      // было лишним шумом. Не выводим повторно, только один раз в консоль для диагностики.
+      // здесь включался cloudError, хотя Firebase ещё даже не вызывался. Из-за этого оранжевый
+      // баннер мигал «облако недоступно» при полностью рабочей базе. Основной канал продолжаем;
+      // если он реально упадёт, _fail ниже добавит команду в pending и покажет честный баннер.
       if (!_prodDraftWarningShown.current) {
         _prodDraftWarningShown.current = true;
         console.warn("Резерв команды производства не сохранён в localStorage (переполнено?) — синхронизация продолжается в фоне.");
@@ -6017,7 +6021,15 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   useEffect(() => {
     if (!editorTab) return;
     setProductionCommandHandler(mutateProductions);
-    const recovered = listProductionRetries(localStorage, currentUser?.id);
+    // До этого исправления автосинк сохранял полные массивы этапов в retry. Они могли заполнить
+    // localStorage и на каждом входе давали ложный баннер, хотя Firebase работал. Автосинк всегда
+    // заново строится из облачных смет, поэтому удаляем только эти старые воспроизводимые команды.
+    const recovered = [];
+    for (const cmd of listProductionRetries(localStorage, currentUser?.id)) {
+      if (isRegenerableProductionCommand(cmd)) {
+        removeProductionRetry(localStorage, currentUser?.id, cmd.changeId, cmd.__draftRevision);
+      } else recovered.push(cmd);
+    }
     for (const cmd of recovered) {
       _prodRetryCmds.current.set(cmd.changeId, cmd);
       _prodUnsyncedIds.current.add(cmd.changeId);
@@ -6801,15 +6813,25 @@ ${reqBlock}`;
       // Каждому сметному этапу заранее даём стабильный id, чтобы повтор транзакции не плодил дубль.
       for (const p of prods) {
         if (!p.objectId || String(p.objectId).startsWith("fp:")) continue;
+        const obj = objectsRef.current.find(o => o?.id === p.objectId && !o.deletedAt);
+        // Автоматически приводим к актуальным сметам только действующие объекты. Закрытые,
+        // потерянные и архивные карточки являются историей и без явного действия не меняются.
+        if (!obj || !["signed", "work", "paused"].includes(obj.status)) continue;
         // Каждой сметной позиции даём стабильный estimateKey (cat|name) и заранее — id. Синк
         // сопоставляет этапы по estimateKey, а НЕ по названию: ручной этап с именем как в смете
         // (без estimateKey) не будет ни обновлён, ни удалён.
         const built = buildStagesFromEstimate(p.objectId).map(b => ({ id: genId(), estimateKey: _stageKey(b), ...b }));
-        const hasEstStages = (p.stages || []).some(s => s.fromEst === true && s.estimateKey != null);
         // Никогда не очищаем существующие этапы автоматически, если связанная смета
         // временно не прочиталась или действительно пуста. Удаление всех этапов — только явно.
         if (built.length === 0) continue;
-        mutateProductions({ type: "sync-estimate-stages", objectId: p.objectId, estimateStages: built, changeId: "bg_sync_" + p.objectId });
+        const command = { type: "sync-estimate-stages", objectId: p.objectId, estimateStages: built, changeId: "bg_sync_" + p.objectId, __ephemeral: true };
+        // Главное исправление скорости/мигающего баннера: раньше при каждом входе отправляли
+        // транзакцию для КАЖДОЙ карточки, даже когда менять нечего. Команды копились в локальном
+        // резерве и очереди, переполняли localStorage и создавали ложное «облако недоступно».
+        // Локальный снимок уже загружен из Firebase: если команда no-op, сетевой записи не будет.
+        const preview = applyProductionCommand([p], command);
+        if (!preview.ok || !preview.changed) continue;
+        mutateProductions(command);
       }
     }, 1200);
     return () => { if (_stageSyncTimer.current) clearTimeout(_stageSyncTimer.current); };

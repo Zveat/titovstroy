@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { applyProductionCommand, syncEstimateStages, _stageKey, diffProductionToCommands, buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled } from "./commands.js";
+import { applyProductionCommand, syncEstimateStages, isUntouchedLegacyEstimateStage, isRegenerableProductionCommand, _stageKey, diffProductionToCommands, buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled } from "./commands.js";
 import { flushPendingProduction, stopProductionSession, hasPendingProduction, productionDraftsAreDurable, startProductionSession, __prodQueueTesting } from "./ProductionModule.jsx";
 import { countAllProductionRecovery, listProductionDrafts, listProductionRetries, productionDraftKey, saveProductionDraft, saveProductionRetry, removeProductionDraft, removeProductionRetry } from "./drafts.js";
 
@@ -111,6 +111,11 @@ describe("batch — атомарный набор команд (одно пол�
 });
 
 describe("syncEstimateStages — ручной этап с именем как в смете НЕ трогается (блокер автосинка)", () => {
+  it("только автосинк сметы можно заново воспроизвести после перезагрузки", () => {
+    expect(isRegenerableProductionCommand({ type: "sync-estimate-stages" })).toBe(true);
+    expect(isRegenerableProductionCommand({ type: "set-status" })).toBe(false);
+    expect(isRegenerableProductionCommand({ type: "patch-card" })).toBe(false);
+  });
   it("ручная «Стяжка» без estimateKey: не адоптируется, не обновляется, не удаляется, дубль не добавляется", () => {
     const cardWith = { stages: [{ id: "m1", cat: "Черновые", name: "Стяжка", qty: 10, priceClient: 5, costPlan: 3 }] }; // ручной, нет fromEst/estimateKey
     const built = [{ id: "e1", estimateKey: "черновые|стяжка", cat: "Черновые", name: "Стяжка", qty: 40, priceClient: 100, costPlan: 60, unit: "м²" }];
@@ -131,16 +136,27 @@ describe("syncEstimateStages — ручной этап с именем как в
     expect(r.stages.some(s => s.id === "m1")).toBe(true);  // ручной цел
     expect(r.stages.some(s => s.id === "e1")).toBe(false); // сметный убран
   });
-  // Блокер 2: старый сметный этап (fromEst:true, но БЕЗ estimateKey) не дублируется и не «усыновляется»
-  it("легаси fromEst без estimateKey: не дублируется рядом и не удаляется", () => {
+  it("старый сметный этап без estimateKey мигрируется без дубля и сохраняет пользовательские поля", () => {
     const cardWith = { stages: [{ id: "old1", cat: "Черновые", name: "Стяжка", fromEst: true, qty: 40 }] }; // легаси: fromEst без estimateKey
     const built = [{ id: "e1", estimateKey: "черновые|стяжка", cat: "Черновые", name: "Стяжка", qty: 45, priceClient: 100, costPlan: 60, unit: "м²" }];
     const r = syncEstimateStages(cardWith, built);
-    expect(r.stages.filter(s => _stageKey(s) === "черновые|стяжка").length).toBe(1); // НЕ два
+    expect(r.stages.filter(s => _stageKey(s) === "черновые|стяжка").length).toBe(1);
     const old = r.stages.find(s => s.id === "old1");
-    expect(old).toBeTruthy();               // легаси сохранён
-    expect(old.estimateKey).toBeUndefined(); // НЕ усыновлён (estimateKey не проставлен)
-    expect(old.qty).toBe(40);               // цифры не перезаписаны
+    expect(old.estimateKey).toBe("черновые|стяжка");
+    expect(old.qty).toBe(45);
+  });
+  it("нетронутый старый сметный этап, которого уже нет в смете, удаляется", () => {
+    const stale = { id: "old1", cat: "Черновые", name: "Старая работа", fromEst: true, qty: 40, status: "todo", planStart: "", note: "", paid: false, order: 17 };
+    expect(isUntouchedLegacyEstimateStage(stale)).toBe(true);
+    const r = syncEstimateStages({ stages: [stale] }, [{ id: "e1", estimateKey: "черновые|новая работа", cat: "Черновые", name: "Новая работа", qty: 1 }]);
+    expect(r.stages.some(s => s.id === "old1")).toBe(false);
+    expect(r.stages.some(s => s.estimateKey === "черновые|новая работа")).toBe(true);
+  });
+  it("старый этап с фактической работой не удаляется, даже если строки больше нет в смете", () => {
+    const used = { id: "old1", cat: "Черновые", name: "История", fromEst: true, qty: 1, status: "progress", responsible: "Прораб" };
+    expect(isUntouchedLegacyEstimateStage(used)).toBe(false);
+    const r = syncEstimateStages({ stages: [used] }, []);
+    expect(r.stages).toEqual([used]);
   });
   it("сметный этап обновляет цифры, сохраняет сроки/статус/ответственного", () => {
     const cardWith = { stages: [{ id: "e1", estimateKey: "a|b", fromEst: true, cat: "A", name: "B", qty: 1, priceClient: 1, costPlan: 1, planEnd: "2026-08-01", status: "progress", responsible: "П" }] };

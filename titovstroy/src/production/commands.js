@@ -23,38 +23,80 @@ const _ok = (list, changed) => ({ list, ok: true, changed, reason: null });
 const _err = (list, reason) => ({ list, ok: false, changed: false, reason });
 const _eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-// Синхронизация сметных этапов. КЛЮЧЕВОЕ: авто-обновляем/удаляем ТОЛЬКО этапы с явным
-// происхождением (fromEst===true И заданным estimateKey). Ручной этап (даже если названием
-// совпал со сметой) НЕ имеет estimateKey → его не трогаем и НЕ «усыновляем». Старые этапы без
-// происхождения (fromEst без estimateKey) тоже считаем ручными и не удаляем.
+// Эти фоновые команды не являются пользовательским вводом: они целиком пересобираются из
+// сохранённых смет при каждом запуске. Их можно не хранить и безопасно удалить из старого retry.
+export function isRegenerableProductionCommand(command) {
+  return command?.type === "sync-estimate-stages";
+}
+
+// Старый формат сметного этапа не имел estimateKey, но уже имел fromEst:true. Такой этап можно
+// безопасно убрать, если соответствующей работы больше нет в актуальных сметах И пользователь
+// ни разу не начал с ним работать. Любой срок, статус, ответственный, примечание или оплата
+// делают этап неприкосновенным. Поле order не учитываем: старый автосинк заполнял его сам,
+// поэтому оно не доказывает, что пользователь редактировал этап.
+export function isUntouchedLegacyEstimateStage(stage) {
+  if (!stage || stage.fromEst !== true || stage.estimateKey != null) return false;
+  const status = stage.status == null || stage.status === "" ? "todo" : stage.status;
+  return status === "todo"
+    && !stage.planStart && !stage.planEnd && !stage.factStart && !stage.factEnd
+    && !String(stage.responsible || "").trim()
+    && !String(stage.note || "").trim()
+    && stage.paid !== true;
+}
+
+// Синхронизация сметных этапов. Ручной этап (fromEst !== true), даже если названием совпал со
+// сметой, не меняется. Старые сметные этапы fromEst:true без estimateKey мигрируются на новый
+// ключ с сохранением сроков/статуса; нетронутые строки, которых уже нет в смете, удаляются.
 export function syncEstimateStages(card, built) {
   const cur = (card && card.stages) || [];
   const builtArr = Array.isArray(built) ? built : [];
   const keyOfBuilt = (b) => (b.estimateKey != null ? b.estimateKey : _stageKey(b));
   const builtByKey = new Map();
   for (const b of builtArr) builtByKey.set(keyOfBuilt(b), b);
-  const isEst = (s) => s && s.fromEst === true && s.estimateKey != null; // «настоящий» сметный (с ключом)
+  const isEst = (s) => s && s.fromEst === true && s.estimateKey != null;
+  const isLegacyEst = (s) => s && s.fromEst === true && s.estimateKey == null;
   let changed = false;
-  // 1) Удаляем только НАСТОЯЩИЕ сметные (fromEst+estimateKey), чей ключ ушёл из сметы.
-  const kept = cur.filter(s => !isEst(s) || builtByKey.has(s.estimateKey));
-  if (kept.length !== cur.length) changed = true;
-  // 2) Какие ключи сметы уже ЗАНЯТЫ существующими этапами (по имени cat|name ИЛИ по estimateKey).
-  // Легаси-этап (fromEst:true БЕЗ estimateKey) и ручной этап с именем как в смете сюда попадают —
-  // поэтому рядом НЕ добавится дубль, и «усыновления» (проставления estimateKey) не происходит.
+  const claimed = new Set(cur.filter(isEst).map(s => s.estimateKey).filter(k => builtByKey.has(k)));
+  const kept = [];
+
+  for (const s of cur) {
+    if (isEst(s)) {
+      const b = builtByKey.get(s.estimateKey);
+      if (!b) { changed = true; continue; }
+      if (s.qty !== b.qty || s.priceClient !== b.priceClient || s.costPlan !== b.costPlan || (b.unit && s.unit !== b.unit)) {
+        changed = true;
+        kept.push({ ...s, unit: b.unit || s.unit, qty: b.qty, priceClient: b.priceClient, costPlan: b.costPlan });
+      } else kept.push(s);
+      continue;
+    }
+
+    if (isLegacyEst(s)) {
+      const k = _stageKey(s);
+      const b = builtByKey.get(k);
+      if (b && !claimed.has(k)) {
+        // Одноразовая миграция старого сметного этапа: сохраняем пользовательские поля,
+        // добавляем происхождение и обновляем только расчётные значения из актуальной сметы.
+        changed = true;
+        claimed.add(k);
+        kept.push({ ...s, estimateKey: k, unit: b.unit || s.unit, qty: b.qty, priceClient: b.priceClient, costPlan: b.costPlan });
+        continue;
+      }
+      if (isUntouchedLegacyEstimateStage(s)) {
+        // Либо работа удалена из сметы, либо это нетронутый старый дубль уже мигрированного этапа.
+        changed = true;
+        continue;
+      }
+    }
+
+    kept.push(s); // ручной или реально использованный старый этап — не трогаем
+  }
+
+  // Какие ключи уже заняты после миграции. Ручной этап с тем же названием продолжает блокировать
+  // создание дубля, но сам не становится сметным и его цифры не перезаписываются.
   const occupied = new Set();
   for (const s of kept) { occupied.add(_stageKey(s)); if (s.estimateKey != null) occupied.add(s.estimateKey); }
-  // 3) Обновляем цифры только настоящих сметных (по estimateKey). Ручные/легаси не трогаем.
-  const next = kept.map(s => {
-    if (!isEst(s)) return s;
-    const b = builtByKey.get(s.estimateKey);
-    if (!b) return s;
-    if (s.qty !== b.qty || s.priceClient !== b.priceClient || s.costPlan !== b.costPlan || (b.unit && s.unit !== b.unit)) {
-      changed = true;
-      return { ...s, unit: b.unit || s.unit, qty: b.qty, priceClient: b.priceClient, costPlan: b.costPlan };
-    }
-    return s;
-  });
-  // 4) Добавляем сметные позиции, чей ключ НЕ занят ни одним существующим этапом.
+  const next = kept.slice();
+  // Добавляем сметные позиции, чей ключ не занят ни одним существующим этапом.
   for (const b of builtArr) {
     const k = keyOfBuilt(b);
     if (occupied.has(k)) continue; // уже есть этап с этим именем/ключом — не дублируем
