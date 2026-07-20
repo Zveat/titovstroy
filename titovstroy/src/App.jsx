@@ -6,7 +6,7 @@ import { emptyProduction } from "./production/constants.js";
 import { applyProductionCommand, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
 function useDebounce(value, ms) {
@@ -2086,7 +2086,7 @@ const ROLE_PERMISSION_GROUPS = [
       { key:"objectAssign", label:"Назначение ответственного", hint:"Менеджер и прораб", type:"scope" },
       { key:"objectDelete", label:"Удаление и восстановление", hint:"Корзина объектов", type:"scope" },
       { key:"objectExport", label:"Экспорт", hint:"Выгрузка списка в Excel", type:"scope" },
-      { key:"financialDetails", label:"Финансовые результаты", hint:"Себестоимость, прибыль, маржа и долги", type:"boolean" },
+      { key:"financialDetails", label:"Финансовые показатели", hint:"Деньги в объектах, на Главной и в Аналитике: себестоимость, прибыль, маржа, долги", type:"boolean" },
     ],
   },
   {
@@ -2114,7 +2114,11 @@ const ROLE_PERMISSION_GROUPS = [
   {
     id:"documents", icon:"📄", label:"Документы",
     actions:[
-      { key:"documents", label:"Просмотр", hint:"Договоры, приложения, акты и подряд", type:"scope" },
+      { key:"documents", label:"Просмотр раздела", hint:"Доступ к документам объекта и «Прочим документам»", type:"scope" },
+      { key:"docRepair", label:"Договоры ремонта", hint:"Договор ремонта, приложения и брони", type:"scope" },
+      { key:"docDesign", label:"Дизайн-проект", hint:"Соглашение о дизайне и доп. соглашения", type:"scope" },
+      { key:"docPodryad", label:"Договоры подряда", hint:"Подряд с рабочими и приложения (себестоимость)", type:"scope" },
+      { key:"docAvr", label:"АВР (акты)", hint:"Акты выполненных работ по форме Р-1", type:"scope" },
       { key:"documentCreate", label:"Создание", hint:"Новые документы", type:"scope" },
       { key:"documentEdit", label:"Изменение", hint:"Реквизиты, работы и статус", type:"scope" },
       { key:"documentDelete", label:"Удаление", hint:"Корзина и безвозвратное удаление", type:"scope" },
@@ -2229,7 +2233,9 @@ function RolePermissionsEditor({ rolePermissions, onSaveRolePermissions }) {
   const applyPreset = (kind) => {
     if (locked) return;
     if (kind === "default") {
-      setPermissionDraft(prev => ({ ...prev, [permissionRole]: { ...DEFAULT_ROLE_PERMISSIONS[permissionRole] } }));
+      // Через нормализацию — иначе новые права (категории документов) выпадут из черновика.
+      const norm = normalizeRolePermissions();
+      setPermissionDraft(prev => ({ ...prev, [permissionRole]: { ...norm[permissionRole] } }));
       setPermissionMsg("");
       return;
     }
@@ -5327,6 +5333,16 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     || (currentUser.name && doc.createdBy === currentUser.name)
     || (doc.objectId && estimatorObjectIds.has(doc.objectId))
   ), [currentUser.id, currentUser.name, estimatorObjectIds]);
+  // Видимость документа по категории (ремонт/дизайн/подряд/АВР) для текущей роли.
+  // Раздел уже открыт правом `documents`; здесь — фильтр внутри по типу с учётом «свои/все».
+  const canSeeDoc = useCallback(
+    (doc) => docTypeAllows(currentPermissions, doc?.type || "repair_fiz", isOwnDocument(doc)),
+    [currentPermissions, isOwnDocument],
+  );
+  const canSeeReport = useCallback(
+    (r) => docTypeAllows(currentPermissions, "avr", isOwnDocument(r)),
+    [currentPermissions, isOwnDocument],
+  );
   const currentDocumentExists = !!currentContract && contracts.some(c => c.id === currentContract.id);
   const canEditCurrentDocument = accessAllows(
     currentDocumentExists ? currentPermissions.documentEdit : currentPermissions.documentCreate,
@@ -13801,7 +13817,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               {usRows.map(obj=>{
                 const st = DEAL_STATUSES.find(s=>s.key===unifiedStatusOf(obj))||DEAL_STATUSES[0];
                 const objEsts = estimates.filter(e=>e.objectId===obj.id);
-                const objCons = contracts.filter(c=>c.objectId===obj.id && !c.deletedAt);
+                const objCons = contracts.filter(c=>c.objectId===obj.id && !c.deletedAt && canSeeDoc(c));
                 const objConsClient = objCons.filter(c=>c.type!=="podryad"&&c.type!=="podryad_annex"); // без договоров подряда
                 // сумма объекта = все сметы (основная + доп. сметы)
                 const total = objEsts.reduce((s,e)=>s+(e.total||0),0);
@@ -13980,7 +13996,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           {objectTab==="workspace" && currentObject && (()=>{
             const obj = currentObject;
             const _allEsts = estimates.filter(e=>e.objectId===obj.id);
-            const _allCons = contracts.filter(c=>c.objectId===obj.id && !c.deletedAt);
+            const _allCons = contracts.filter(c=>c.objectId===obj.id && !c.deletedAt && canSeeDoc(c));
             // Дерево смет: основная смета → под ней доп. сметы (ДС). parentId===id (битая ссылка) трактуем как основную.
             const _estIsMain = (e) => !e.parentId || e.parentId===e.id;
             const _estMains = _allEsts.filter(_estIsMain).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
@@ -14176,7 +14192,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap",borderBottom:"1px solid #e2e8f0"}}>
                   {[
                     ["info","ℹ️ Информация"],
-                    ["documents",`📄 Документы (${objEsts.length+objCons.length+reports.filter(r=>r.objectId===obj.id).length})`],
+                    ["documents",`📄 Документы (${objEsts.length+objCons.length+reports.filter(r=>r.objectId===obj.id && canSeeReport(r)).length})`],
                     ["launch","🚀 Запуск"],
                     ["stages","🔨 Этапы"],
                     ["finance","💰 Финансы"],
@@ -14373,7 +14389,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 
                 {/* Отчёты объекта (АВР, форма Р-1) */}
                 {(()=>{
-                  const objReports = reports.filter(r=>r.objectId===obj.id).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+                  const objReports = reports.filter(r=>r.objectId===obj.id && canSeeReport(r)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
                   return (
                     <div style={{marginTop:24}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -14539,7 +14555,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 </button>
               )}
               {contractTab === "list" && (()=>{
-                const _seeDoc = c => currentPermissions.documents==="all"||c.createdById===currentUser.id||c.createdBy===currentUser.name;
+                const _seeDoc = c => canSeeDoc(c) && (currentPermissions.documents==="all"||c.createdById===currentUser.id||c.createdBy===currentUser.name);
                 const trashedCount = contracts.filter(c=>c.deletedAt && _seeDoc(c)).length;
                 return (<>
                   {trashedCount>0 && <button onClick={()=>setContractTab("trash")} style={{background:"rgba(220,38,38,.12)",color:"#ef4444",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"8px 13px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>🗑 Корзина ({trashedCount})</button>}
@@ -14596,7 +14612,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   const numMap = {}; // нормализованный номер -> контракт
                   contracts.forEach(c=>{ if(!c.deletedAt && c.number && !isChildType(c)){ const k=_norm(c.number); if(k) numMap[k]=c; } });
                   const childMap = {}; // parentId -> [child] (удалённые не показываем — уходят в корзину)
-                  contracts.forEach(c=>{ if(!c.deletedAt && isChildType(c) && c.mainNumber){ const k=_norm(c.mainNumber); if(numMap[k]){ const pid=numMap[k].id; (childMap[pid]||(childMap[pid]=[])).push(c); } } });
+                  contracts.forEach(c=>{ if(!c.deletedAt && isChildType(c) && c.mainNumber && canSeeDoc(c)){ const k=_norm(c.mainNumber); if(numMap[k]){ const pid=numMap[k].id; (childMap[pid]||(childMap[pid]=[])).push(c); } } });
                   const childIds = new Set(Object.values(childMap).flat().map(c=>c.id));
                   const _objIds = new Set(objects.map(o=>o.id));
                   // показываем: договоры подряда — ВСЕГДА; остальные — без объекта или с несуществующим объектом (сироты). Без удалённых.
@@ -14606,7 +14622,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   // Видимость по роли: админ и руководитель видят все договоры, обычный сотрудник — только свои
                   const _canSeeAllDocs = currentPermissions.documents==="all";
                   const _isOwnDoc = c => c.createdById===currentUser.id || (c.createdBy && c.createdBy===currentUser.name);
-                  const roots = contracts.filter(c=>!c.deletedAt && !childIds.has(c.id) && (_canSeeAllDocs || _isOwnDoc(c)) && (_isPodType(c) || !c.objectId || !_objIds.has(c.objectId)) && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus) && _matchType(c));
+                  const roots = contracts.filter(c=>!c.deletedAt && !childIds.has(c.id) && (_canSeeAllDocs || _isOwnDoc(c)) && canSeeDoc(c) && (_isPodType(c) || !c.objectId || !_objIds.has(c.objectId)) && (!contractFilterStatus || (c.contractStatus||"draft")===contractFilterStatus) && _matchType(c));
 
                   const workerNameOf = (c) => (workers.find(w=>w.id===c.workerId)?.name) || c.worker?.name || "";
                   // Создать доп. приложение к договору подряда (приложение №1 встроено в договор, доп идут с №2)
