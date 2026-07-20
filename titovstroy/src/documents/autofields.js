@@ -2,6 +2,7 @@ const field = definition => Object.freeze(definition);
 
 export const AUTOFIELD_DEFINITIONS = Object.freeze([
   field({ id: "client.name", group: "Клиент", label: "ФИО / наименование клиента", kind: "text", requiredFor: ["repair_fiz"] }),
+  field({ id: "client.shortName", group: "Клиент", label: "ФИО клиента, кратко", kind: "text", requiredFor: ["repair_fiz"] }),
   field({ id: "client.iin", group: "Клиент", label: "ИИН / БИН клиента", kind: "text", requiredFor: ["repair_fiz"] }),
   field({ id: "client.document", group: "Клиент", label: "Документ клиента", kind: "text", requiredFor: [] }),
   field({ id: "client.phone", group: "Клиент", label: "Телефон клиента", kind: "text", requiredFor: [] }),
@@ -13,16 +14,20 @@ export const AUTOFIELD_DEFINITIONS = Object.freeze([
   field({ id: "client.account", group: "Клиент", label: "Счёт клиента", kind: "text", requiredFor: [] }),
   field({ id: "client.email", group: "Клиент", label: "Email клиента", kind: "text", requiredFor: [] }),
   field({ id: "client.type", group: "Клиент", label: "Тип клиента", kind: "text", requiredFor: [] }),
-  field({ id: "object.id", group: "Объект", label: "ID объекта", kind: "text", requiredFor: ["repair_fiz"] }),
+  field({ id: "object.id", group: "Объект", label: "ID объекта", kind: "text", requiredFor: [] }),
   field({ id: "object.address", group: "Объект", label: "Адрес объекта", kind: "text", requiredFor: ["repair_fiz"] }),
   field({ id: "object.type", group: "Объект", label: "Тип объекта", kind: "text", requiredFor: [] }),
   field({ id: "object.area", group: "Объект", label: "Площадь объекта", kind: "number", requiredFor: [] }),
   field({ id: "contract.number", group: "Договор", label: "Номер договора", kind: "text", requiredFor: ["repair_fiz"] }),
-  field({ id: "contract.date", group: "Договор", label: "Дата договора", kind: "date", requiredFor: ["repair_fiz"] }),
+  field({ id: "contract.date", group: "Договор", label: "Дата договора", kind: "date", requiredFor: [] }),
+  field({ id: "contract.dateFull", group: "Договор", label: "Дата договора, цифрами", kind: "text", requiredFor: ["repair_fiz"] }),
+  field({ id: "contract.dateLong", group: "Договор", label: "Дата договора, прописью", kind: "text", requiredFor: ["repair_fiz"] }),
   field({ id: "contract.total", group: "Договор", label: "Сумма договора", kind: "money", requiredFor: ["repair_fiz"] }),
   field({ id: "contract.discount", group: "Договор", label: "Скидка, %", kind: "number", requiredFor: [] }),
   field({ id: "contract.advancePercent", group: "Договор", label: "Предоплата, %", kind: "number", requiredFor: [] }),
   field({ id: "contract.advanceAmount", group: "Договор", label: "Сумма предоплаты", kind: "money", requiredFor: [] }),
+  field({ id: "contract.advancePercentText", group: "Договор", label: "Предоплата с символом %", kind: "text", requiredFor: ["repair_fiz"] }),
+  field({ id: "contract.advanceAmountText", group: "Договор", label: "Предоплата в тенге", kind: "text", requiredFor: ["repair_fiz"] }),
   field({ id: "estimate.worksTable", group: "Смета", label: "Таблица работ", kind: "table", requiredFor: ["repair_fiz"] }),
   field({ id: "company.name", group: "Компания", label: "Наименование подрядчика", kind: "text", requiredFor: ["repair_fiz"] }),
   field({ id: "company.bin", group: "Компания", label: "БИН подрядчика", kind: "text", requiredFor: ["repair_fiz"] }),
@@ -111,6 +116,20 @@ const finiteNumber = value => {
   return Number.isFinite(number) ? number : 0;
 };
 
+const formatDateParts = value => {
+  const date = new Date(`${value || ""}T00:00:00`);
+  if (!value || Number.isNaN(date.getTime())) return { full: String(value || ""), long: String(value || "") };
+  const months = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+  const day = String(date.getDate()).padStart(2, "0");
+  return { full: date.toLocaleDateString("ru-RU"), long: `«${day}» ${months[date.getMonth()]} ${date.getFullYear()}` };
+};
+
+const shortClientName = client => {
+  if (client?.clientType === "yur" || client?.type === "юр") return String(client?.name || "");
+  const parts = String(client?.name || "").trim().split(/\s+/).filter(Boolean);
+  return `${parts[0] || ""}${parts[1] ? ` ${parts[1][0]}.` : ""}${parts[2] ? `${parts[2][0]}.` : ""}`;
+};
+
 const normalizeWorks = works => {
   if (Array.isArray(works)) return works;
   if (!works || typeof works !== "object") return [];
@@ -164,8 +183,11 @@ export function resolveRepairContractVariables(context = {}) {
   const discount = contract.discount ?? estimate.discount ?? 0;
   const worksTable = formatRepairWorksTable(sourceWorks, discount);
   const advancePercent = finiteNumber(contract.advancePercent ?? 30);
+  const contractDate = formatDateParts(contract.date || contract.contractDate);
+  const contractTotal = worksTable.subtotal;
   const values = {
     "client.name": String(client.name || ""),
+    "client.shortName": shortClientName(client),
     "client.iin": String(client.iin || client.bin || ""),
     "client.document": String(client.doc || client.document || ""),
     "client.phone": String(client.phone || ""),
@@ -178,15 +200,22 @@ export function resolveRepairContractVariables(context = {}) {
     "client.email": String(client.email || ""),
     "client.type": String(client.clientType || client.type || ""),
     "object.id": String(object.id || ""),
-    "object.address": String(object.address || contract.objectAddress || ""),
-    "object.type": String(object.objType || object.type || ""),
+    // The active legacy renderer currently receives these values through the
+    // client argument. Keep that precedence for byte-for-byte parity, while
+    // allowing new records to use the canonical object fields.
+    "object.address": String(client.address || object.address || contract.objectAddress || ""),
+    "object.type": String(client.objectType || object.objType || object.type || ""),
     "object.area": finiteNumber(object.area),
     "contract.number": String(contract.number || contract.contractNumber || ""),
     "contract.date": String(contract.date || contract.contractDate || ""),
-    "contract.total": worksTable.total,
+    "contract.dateFull": contractDate.full,
+    "contract.dateLong": contractDate.long,
+    "contract.total": contractTotal,
     "contract.discount": worksTable.discountPercent,
     "contract.advancePercent": advancePercent,
-    "contract.advanceAmount": Math.round(worksTable.total * advancePercent / 100),
+    "contract.advanceAmount": Math.round(contractTotal * advancePercent / 100),
+    "contract.advancePercentText": `${advancePercent}%`,
+    "contract.advanceAmountText": `${Math.round(contractTotal * advancePercent / 100).toLocaleString("ru-RU")} тенге`,
     "estimate.worksTable": worksTable,
     "company.name": String(contragent.name || ""),
     "company.bin": String(contragent.bin || ""),
