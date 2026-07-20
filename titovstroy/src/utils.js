@@ -43,7 +43,7 @@ export function findFinanceProjectForObject(object, contracts = [], finProjects 
     if (value) numbers.add(value);
   }
   for (const c of contracts) {
-    if (!c || c.deletedAt || c.objectId !== object.id) continue;
+    if (!c || c.deletedAt || c.objectId !== object.id || c.type === "podryad" || c.type === "podryad_annex") continue;
     const number = normCN(c.number);
     const mainNumber = normCN(c.mainNumber);
     if (number) numbers.add(number);
@@ -52,15 +52,9 @@ export function findFinanceProjectForObject(object, contracts = [], finProjects 
   const byNumber = finProjects.find(fp => fp?.contractNo && numbers.has(normCN(fp.contractNo)));
   if (byNumber) return byNumber;
 
-  const name = String(object.clientName || "").toLowerCase().replace(/\s+/g, " ").trim();
-  const phone = String(object.clientPhone || "").replace(/\D/g, "");
-  const identityMatches = finProjects.filter(fp => {
-    const hay = String((fp?.description || "") + " " + (fp?.client || "") + " " + (fp?.comment || ""))
-      .toLowerCase().replace(/\s+/g, " ").trim();
-    const digits = hay.replace(/\D/g, "");
-    return (name.length >= 4 && hay.includes(name)) || (phone.length >= 6 && digits.includes(phone));
-  });
-  return identityMatches.length === 1 ? identityMatches[0] : null;
+  // Имя, адрес и телефон не являются ключами связи. Старые записи разрешено
+  // сопоставлять только по точному номеру договора; новые всегда несут objectId.
+  return null;
 }
 
 export function isStaleApprovalObject(object, now = Date.now(), days = 14) {
@@ -1143,4 +1137,3 @@ export function mayUseLocalCopy(dirtyRaw, uid, tab) {
   if (isLegacyDirtyMarker(dirtyRaw)) return false;
   return isOwnDirtyMarker(dirtyRaw, uid, tab);
 }
-

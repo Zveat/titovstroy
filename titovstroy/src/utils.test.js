@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch } from "./utils.js";
 
 describe("матрица прав ролей", () => {
   it("руководитель продаж видит все объекты и общую аналитику без финансовых деталей", () => {
@@ -595,6 +595,28 @@ describe("mergeFinMeta — дозаполнение дефолтных кате�
   });
 });
 
+describe("findFinanceProjectForObject — строгая связь по ID", () => {
+  const object = { id:"obj-sergey", clientName:"Сергей", clientPhone:"87000000000" };
+  const projects = [
+    { id:"wrong", description:"Сергей, Металлистов", contractNo:"777", budget:310000 },
+    { id:"right", contractNo:"1019", budget:3994954 },
+  ];
+
+  it("не выбирает чужой проект по совпавшему имени", () => {
+    expect(findFinanceProjectForObject(object, [], projects)).toBeNull();
+  });
+
+  it("находит старый проект по точному номеру договора", () => {
+    const contracts = [{ id:"c1", objectId:object.id, number:"№1019", type:"repair_fiz" }];
+    expect(findFinanceProjectForObject(object, contracts, projects)?.id).toBe("right");
+  });
+
+  it("objectId имеет высший приоритет", () => {
+    const linked = [{ id:"direct", objectId:object.id, contractNo:"other" }, ...projects];
+    expect(findFinanceProjectForObject(object, [], linked)?.id).toBe("direct");
+  });
+});
+
 describe("computeIssues — детектор «Что горит» / «Проверка базы»", () => {
   const DAY = 864e5;
   const now = new Date("2026-07-09T12:00:00Z").getTime();
@@ -658,18 +680,17 @@ describe("computeIssues — детектор «Что горит» / «Пров�
     expect(find(ok, "signed-nofin").length).toBe(0); // связался, несмотря на «№»
   });
 
-  it("долг клиента считается как бюджет минус оплаты по договору", () => {
+  it("дебиторка не попадает в оперативную панель «Что горит»", () => {
     const issues = computeIssues({
       objects:[{ id:"o1", status:"work", clientName:"Клиент" }],
       finProjects:[{ id:"fp1", objectId:"o1", contractNo:"1012", budget:1000000 }],
       financeTx:[{ id:"t1", type:"income", amount:400000, contractNo:"1012" }],
     }, { now });
     const debt = find(issues, "debt:fp1");
-    expect(debt.length).toBe(1);
-    expect(debt[0].title).toContain("600"); // 1 000 000 − 400 000 = 600 000
+    expect(debt.length).toBe(0);
   });
 
-  it("исключённые/удалённые операции не уменьшают долг", () => {
+  it("не создаёт предупреждение о дебиторке даже при исключённых операциях", () => {
     const issues = computeIssues({
       finProjects:[{ id:"fp1", contractNo:"1012", budget:1000, rawStatus:"активен" }],
       financeTx:[
@@ -678,7 +699,7 @@ describe("computeIssues — детектор «Что горит» / «Пров�
       ],
     }, { now });
     const debt = find(issues, "debt:fp1");
-    expect(debt.length).toBe(1); // долг остался 1000, обе операции не в счёт
+    expect(debt.length).toBe(0);
   });
 
   it("замечание клиента (source=client, не done) → проблема; закрытое — нет", () => {

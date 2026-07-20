@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, Fragment } from "react";
 import { STAGE_STATUSES, emptyProduction } from "./constants.js";
-import { normCN } from "../utils.js";
+import { normCN, estimatesForObject, findFinanceProjectForObject } from "../utils.js";
 import { buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, _stageKey } from "./commands.js";
 import { listProductionDrafts, removeProductionDraft, saveProductionDraft } from "./drafts.js";
 
@@ -469,34 +469,45 @@ export default function ProductionModule({
 
   // Данные из Финансов для текущего объекта — ДОЛЖНЫ быть до if(!openObj), иначе нарушение Rules of Hooks
   const finProj = useMemo(() => {
-    if (!openObj || !finProjects?.length) return null;
-    let fp = finProjects.find(p => p.objectId === openObj.id);
-    if (fp) return fp;
-    const objContracts = (contracts||[]).filter(c => c.objectId === openObj.id);
-    for (const c of objContracts) {
-      fp = finProjects.find(p => normCN(p.contractNo) === normCN(c.number));
-      if (fp) return fp;
-    }
-    if (openObj.clientName && openObj.clientName.length > 2) {
-      fp = finProjects.find(p => {
-        const d = ((p.description||"")+" "+(p.comment||"")).toLowerCase();
-        return d.includes(openObj.clientName.toLowerCase());
-      });
-    }
-    return fp || null;
+    return findFinanceProjectForObject(openObj, contracts, finProjects);
   }, [openObj, finProjects, contracts]);
 
   const finSummary = useMemo(() => {
-    if (!finProj) return null;
-    const cn = normCN(finProj.contractNo);
-    const txList = (financeTx||[]).filter(t => !t.deletedAt && t.included !== false && normCN(t.contractNo) === cn);
+    if (!openObj) return null;
+    const objectContracts = (contracts || []).filter(c => c && !c.deletedAt && c.objectId === openObj.id
+      && c.type !== "podryad" && c.type !== "podryad_annex");
+    const projectNo = normCN(finProj?.contractNo);
+    const mainContracts = objectContracts.filter(c => c.type !== "annex" && c.type !== "design_add");
+    const main = mainContracts.find(c => projectNo && normCN(c.number) === projectNo)
+      || mainContracts.find(c => c.type === "repair_fiz" || c.type === "repair_yur")
+      || mainContracts[0]
+      || null;
+    const mainNo = normCN(main?.number);
+    const annexes = mainNo
+      ? objectContracts.filter(c => (c.type === "annex" || c.type === "design_add") && normCN(c.mainNumber) === mainNo)
+      : [];
+    const worksTotal = c => (c?.works || []).reduce((sum, work) => sum
+      + (Number(work.quantity) || 0) * (Number(work.price) || 0), 0);
+    const contractBudget = main ? worksTotal(main) + annexes.reduce((sum, c) => sum + worksTotal(c), 0) : 0;
+    const estimatePlan = estimatesForObject(estimates, openObj.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0);
+
+    if (!finProj && !main && estimatePlan <= 0) return null;
+    const txNumbers = new Set([finProj?.contractNo, main?.number, ...annexes.map(c => c.number)].map(normCN).filter(Boolean));
+    const txList = (financeTx||[]).filter(t => !t.deletedAt && t.included !== false && txNumbers.has(normCN(t.contractNo)));
     const income = txList.filter(t => t.type === "income").reduce((s,t) => s+(Number(t.amount)||0), 0);
     const expense = txList.filter(t => t.type === "expense").reduce((s,t) => s+(Number(t.amount)||0), 0);
-    const budget = Number(finProj.budget) || 0;
+    // Для карточки объекта договор и допсоглашения — источник правды. Сохранённый
+    // бюджет финпроекта нужен только как fallback для импортированных проектов без договора.
+    const budget = contractBudget || Number(finProj?.budget) || estimatePlan || 0;
     const debt = Math.max(0, budget - income);
     const margin = income > 0 ? Math.round((income - expense) / income * 100) : null;
-    return { budget, income, expense, debt, margin, contractNo: finProj.contractNo, status: finProj.rawStatus || finProj.status };
-  }, [finProj, financeTx]);
+    return {
+      budget, estimatePlan, income, expense, debt, margin,
+      contractNo: main?.number || finProj?.contractNo,
+      status: finProj?.rawStatus || finProj?.status,
+      hasProject: !!finProj,
+    };
+  }, [openObj, finProj, financeTx, contracts, estimates]);
 
   // Единственный вызов этого компонента (App.jsx) всегда встроенный (embedObjectId задан) —
   // отдельного списка объектов и своей карточки-с-вкладками больше нет. Раньше здесь был
@@ -1230,10 +1241,13 @@ function FinanceTab({ prod, patch, fmt, finSummary }) {
           иначе — по плану из сметы/этапов (объект ещё не в производстве/финансах). */}
       {finSummary ? (
         <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>💰 Финансовый проект{finSummary.contractNo ? ` ${String(finSummary.contractNo).replace(/^№+/, "№")}` : ""}</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>💰 Финансы объекта{finSummary.contractNo ? ` · договор №${String(finSummary.contractNo).replace(/^№+/, "")}` : ""}</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8 }}>
             {[
-              ["Бюджет (договор)", finSummary.budget > 0 ? fmt(finSummary.budget) + " ₸" : "—", "#0f172a", "#f8fafc"],
+              ["Договор + допсоглашения", finSummary.budget > 0 ? fmt(finSummary.budget) + " ₸" : "—", "#0f172a", "#f8fafc"],
+              ...(finSummary.estimatePlan > 0 && Math.round(finSummary.estimatePlan) !== Math.round(finSummary.budget)
+                ? [["Все сметы (план)", fmt(finSummary.estimatePlan) + " ₸", "#2563eb", "#eff6ff"]]
+                : []),
               ["Оплачено", finSummary.income > 0 ? fmt(finSummary.income) + " ₸" : "—", "#059669", "#f0fdf4"],
               ["Долг", finSummary.debt > 0 ? fmt(finSummary.debt) + " ₸" : "—", finSummary.debt > 0 ? "#dc2626" : "#94a3b8", finSummary.debt > 0 ? "#fef2f2" : "#f8fafc"],
               ["Расходы", finSummary.expense > 0 ? fmt(finSummary.expense) + " ₸" : "—", "#dc2626", "#fef2f2"],

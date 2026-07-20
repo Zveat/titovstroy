@@ -6,7 +6,7 @@ import { emptyProduction } from "./production/constants.js";
 import { applyProductionCommand, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, isDashboardActiveObject, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
 function useDebounce(value, ms) {
@@ -161,6 +161,107 @@ function IssuePanel({ issues, onNav, onDismiss, emptyText = "✓ Всё чист
         );
       })}
     </div>
+  );
+}
+
+// Дашборд показывает не россыпь одинаковых карточек, а короткую очередь решений:
+// одна строка = один тип проблемы, внутри раскрывается список конкретных объектов.
+const _OPS_META = {
+  "overdue-stage": { icon:"⏱", title:"Просрочены этапы", hint:"Срок работ уже истёк" },
+  "no-foreman": { icon:"👷", title:"Не назначен ответственный", hint:"Объект запущен без прораба" },
+  "signed-nofin": { icon:"₸", title:"Нет финансового проекта", hint:"Договор подписан, но финансовый контур не связан" },
+  "client-remark": { icon:"!", title:"Новые замечания клиентов", hint:"Нужен ответ или действие по объекту" },
+  "near-handover": { icon:"⚑", title:"Скоро сдача", hint:"До срока меньше недели, остались открытые этапы" },
+};
+const _issueKind = issue => String(issue?.id || "other").split(":")[0];
+function OperationsPanel({ issues, onNav, onDismiss, emptyText = "Всё под контролем — срочных задач нет" }) {
+  const [filter, setFilter] = useState("all");
+  const [expanded, setExpanded] = useState({});
+  const redN = issues.filter(issue => issue.sev === "red").length;
+  const yellowN = issues.length - redN;
+  const filtered = filter === "all" ? issues : issues.filter(issue => issue.sev === filter);
+  const groups = [];
+  const byKind = new Map();
+  for (const issue of filtered) {
+    const kind = _issueKind(issue);
+    if (!byKind.has(kind)) {
+      const group = { kind, issues:[], sev:issue.sev };
+      byKind.set(kind, group); groups.push(group);
+    }
+    const group = byKind.get(kind);
+    group.issues.push(issue);
+    if (issue.sev === "red") group.sev = "red";
+  }
+  groups.sort((a,b) => (a.sev === b.sev ? 0 : a.sev === "red" ? -1 : 1));
+
+  if (!issues.length) return (
+    <div style={{background:"#fff",border:"1px solid #dce7e1",borderRadius:8,padding:"16px 18px",display:"flex",alignItems:"center",gap:12}}>
+      <span style={{width:30,height:30,borderRadius:7,display:"grid",placeItems:"center",background:"#ecfdf5",color:"#059669",fontWeight:900}}>✓</span>
+      <div><div style={{fontSize:13.5,fontWeight:800,color:"#14532d"}}>{emptyText}</div><div style={{fontSize:11.5,color:"#64748b",marginTop:2}}>Новых операционных отклонений нет</div></div>
+    </div>
+  );
+
+  return (
+    <section style={{background:"#fff",border:"1px solid #dfe6ee",borderRadius:8,overflow:"hidden",boxShadow:"0 1px 2px rgba(15,23,42,.03)"}}>
+      <div style={{padding:"14px 16px",borderBottom:"1px solid #e8edf3",display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+        <div style={{minWidth:210,flex:1}}>
+          <div style={{fontSize:14,fontWeight:850,color:"#0f172a"}}>Операционный контроль</div>
+          <div style={{fontSize:11.5,color:"#64748b",marginTop:2}}>Только отклонения, по которым нужно принять решение</div>
+        </div>
+        <div style={{display:"flex",alignItems:"stretch",border:"1px solid #e2e8f0",borderRadius:7,overflow:"hidden",height:34}}>
+          {[["all",`Все ${issues.length}`],["red",`Срочно ${redN}`],["yellow",`Проверить ${yellowN}`]].map(([key,label])=>(
+            <button key={key} type="button" onClick={()=>setFilter(key)} style={{border:0,borderRight:key==="yellow"?0:"1px solid #e2e8f0",background:filter===key?"#0f172a":"#fff",color:filter===key?"#fff":"#475569",padding:"0 12px",fontSize:11.5,fontWeight:750,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{label}</button>
+          ))}
+        </div>
+      </div>
+      {groups.length === 0 ? <div style={{padding:20,color:"#64748b",fontSize:13}}>В этой категории задач нет.</div> : groups.map(group => {
+        const meta = _OPS_META[group.kind] || {icon:"•",title:group.issues[0]?.title || "Требует проверки",hint:"Откройте детали"};
+        const open = !!expanded[group.kind];
+        const color = group.sev === "red" ? "#dc2626" : "#d97706";
+        const sample = group.issues.slice(0,2).map(issue => String(issue.detail || "").split(" · ")[0]).filter(Boolean).join(" · ");
+        return <div key={group.kind} style={{borderBottom:"1px solid #edf1f5"}}>
+          <button type="button" onClick={()=>setExpanded(prev=>({...prev,[group.kind]:!open}))}
+            style={{width:"100%",border:0,background:"#fff",padding:"13px 16px",display:"grid",gridTemplateColumns:"36px minmax(0,1fr) auto 22px",gap:12,alignItems:"center",textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
+            <span style={{width:34,height:34,borderRadius:7,display:"grid",placeItems:"center",background:group.sev==="red"?"#fef2f2":"#fffbeb",color,fontSize:15,fontWeight:900}}>{meta.icon}</span>
+            <span style={{minWidth:0}}>
+              <span style={{display:"block",fontSize:13.5,fontWeight:800,color:"#0f172a"}}>{meta.title}</span>
+              <span style={{display:"block",fontSize:11.5,color:"#64748b",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sample || meta.hint}</span>
+            </span>
+            <span style={{display:"flex",alignItems:"center",gap:8,whiteSpace:"nowrap"}}><b style={{fontSize:16,color}}>{group.issues.length}</b><span style={{fontSize:11,color:"#64748b"}}>объектов</span></span>
+            <span style={{color:"#94a3b8",transform:open?"rotate(180deg)":"none",transition:"transform .15s"}}>⌄</span>
+          </button>
+          {open && <div style={{background:"#f8fafc",borderTop:"1px solid #edf1f5",paddingLeft:64}}>
+            {group.issues.map((issue,index)=><div key={issue.id} onClick={()=>onNav&&onNav(issue.nav)}
+              style={{minHeight:48,padding:"8px 14px 8px 0",borderBottom:index===group.issues.length-1?0:"1px solid #e8edf3",display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,alignItems:"center",cursor:onNav?"pointer":"default"}}>
+              <div style={{minWidth:0}}><div style={{fontSize:12.5,fontWeight:700,color:"#1e293b"}}>{issue.title}</div>{issue.detail&&<div style={{fontSize:11,color:"#64748b",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{issue.detail}</div>}</div>
+              <div style={{display:"flex",alignItems:"center",gap:5}}>{onDismiss&&issue.dismissable&&<button type="button" title="Скрыть до завтра" onClick={event=>{event.stopPropagation();onDismiss(issue.id);}} style={{width:26,height:26,border:"1px solid #dbe3ec",borderRadius:6,background:"#fff",color:"#94a3b8",cursor:"pointer"}}>×</button>}<span style={{color:"#94a3b8",fontSize:16}}>›</span></div>
+            </div>)}
+          </div>}
+        </div>;
+      })}
+    </section>
+  );
+}
+
+function StaleObjectsPanel({ items, onOpen, onShowAll, fmt, title = "Без движения 14+ дней" }) {
+  if (!items?.length) return null;
+  return (
+    <section style={{background:"#fff",border:"1px solid #e2e8f0",borderLeft:"4px solid #f59e0b",borderRadius:8,marginBottom:24,overflow:"hidden",boxShadow:"0 1px 2px rgba(15,23,42,.04)"}}>
+      <div style={{padding:"13px 16px",borderBottom:"1px solid #edf1f5",display:"flex",alignItems:"center",gap:10}}>
+        <span style={{width:30,height:30,borderRadius:7,background:"#fffbeb",color:"#b45309",display:"grid",placeItems:"center",fontSize:15}}>⏱</span>
+        <div style={{flex:1,minWidth:0}}><div style={{fontSize:13.5,fontWeight:800,color:"#0f172a"}}>{title}</div><div style={{fontSize:11.5,color:"#64748b",marginTop:1}}>{items.length} {items.length===1?"объект требует":"объектов требуют"} контакта или смены статуса</div></div>
+        {onShowAll&&<button type="button" onClick={onShowAll} style={{border:0,background:"transparent",color:"#2563eb",fontSize:11.5,fontWeight:750,cursor:"pointer",fontFamily:"inherit",padding:"6px 0"}}>Все объекты →</button>}
+      </div>
+      <div>
+        {items.slice(0,5).map((item,index)=><button type="button" key={item.id} onClick={()=>onOpen&&onOpen(item)}
+          style={{width:"100%",border:0,borderBottom:index===Math.min(items.length,5)-1?0:"1px solid #edf1f5",background:"#fff",padding:"10px 16px",display:"grid",gridTemplateColumns:"minmax(0,1fr) auto auto 18px",gap:14,alignItems:"center",textAlign:"left",cursor:onOpen?"pointer":"default",fontFamily:"inherit"}}>
+          <span style={{minWidth:0}}><b style={{display:"block",fontSize:12.5,color:"#0f172a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.name || "Объект без названия"}</b>{item.address&&<span style={{display:"block",fontSize:11,color:"#64748b",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.address}</span>}</span>
+          <span style={{fontSize:11.5,fontWeight:750,color:item.days>=30?"#dc2626":"#b45309",whiteSpace:"nowrap"}}>{item.days} дн.</span>
+          <span style={{fontSize:12,fontWeight:750,color:"#334155",whiteSpace:"nowrap"}}>{item.total>0?fmt(Math.round(item.total))+" ₸":"—"}</span>
+          <span style={{color:"#94a3b8",fontSize:16}}>›</span>
+        </button>)}
+      </div>
+    </section>
   );
 }
 
@@ -5378,12 +5479,19 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
         if(objectFilterManager && (o.manager||"")!==objectFilterManager) return false;
         if(objectDateFrom && (o.createdAt||0) < new Date(objectDateFrom).getTime()) return false;
         if(objectDateTo && (o.createdAt||0) > new Date(objectDateTo).getTime()+86399999) return false;
-        if(objectAttentionFilter === "stale-approval" && !isStaleApprovalObject(o)) return false;
+        if(objectAttentionFilter === "stale-approval") {
+          const production = productions.find(p => p.objectId === o.id);
+          const status = pendingObjectStatuses[o.id]
+            || (production && PROD_TO_DEAL[production.prodStatus])
+            || o.status
+            || "new";
+          if(!isStaleApprovalObject({ ...o, status })) return false;
+        }
         if(q && !((o.clientName||"").toLowerCase().includes(q)||(o.address||"").toLowerCase().includes(q)||(o.clientPhone||"").toLowerCase().includes(q))) return false;
         return true;
       })
       .sort((a,b)=>{ const da=a.createdAt||0, db=b.createdAt||0; return objectDateSort==="old" ? da-db : db-da; });
-  }, [accessibleObjects, objectFilterStatus, objectFilterType, objectFilterManager, objectAttentionFilter, objectDateSort, objectDateFrom, objectDateTo, debouncedObjectSearch]);
+  }, [accessibleObjects, objectFilterStatus, objectFilterType, objectFilterManager, objectAttentionFilter, objectDateSort, objectDateFrom, objectDateTo, debouncedObjectSearch, productions, pendingObjectStatuses]);
 
   // Только «живые» (не удалённые) объекты — используется в дашборде, аналитике и всех расчётах
   const liveObjects = useMemo(() => accessibleObjects.filter(o=>!o.deletedAt), [accessibleObjects]);
@@ -5443,21 +5551,14 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
 
   // Объекты «в работе» для раздела «Производство»: только те, по которым заведён
   // проект в Финансах (связь по objectId, либо по номеру договора).
-  // Сопоставить финпроект с объектом ТОЛЬКО надёжно: objectId → договор → полное имя клиента в описании → телефон.
-  // По адресу НЕ матчим (одна улица у разных объектов → ложные совпадения).
+  // Сопоставить финпроект с объектом ТОЛЬКО по техническому objectId или точному
+  // номеру договора. Имя/адрес/телефон не ключи: совпадения вроде двух «Сергеев»
+  // показывали чужой бюджет и связывали не тот производственный проект.
   const matchFpToObject = useCallback((p) => {
     if (p.objectId) { const o = liveObjects.find(x => x.id === p.objectId); if (o) return o; }
     const link = p.contractNo ? contractLinkMap[normCN(p.contractNo)] : null;
     if (link?.object) return link.object;
-    const _n = s => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
-    const hay = _n((p.description || "") + " " + (p.client || "") + " " + (p.comment || ""));
-    const hayDigits = hay.replace(/\D/g, "");
-    return liveObjects.find(o => {
-      const nm = _n(o.clientName), ph = String(o.clientPhone || "").replace(/\D/g, "");
-      if (nm && nm.length >= 4 && hay.includes(nm)) return true;       // описание содержит ПОЛНОЕ имя клиента
-      if (ph && ph.length >= 6 && hayDigits.includes(ph)) return true; // телефон
-      return false;
-    }) || null;
+    return null;
   }, [liveObjects, contractLinkMap]);
 
   // Единый статус объекта для всех экранов и расчётов: производственная карточка
@@ -6834,13 +6935,12 @@ ${reqBlock}`;
   // сервисе (импорт из Google-таблиц) не трогаются. Debounce, чтобы не спамить сейвы.
   const _budgetSyncTimer = useRef(null);
   useEffect(() => {
-    if (!_financeLoaded.current || !_contractsLoaded.current) return;
+    if (!_financeLoaded.current || !_contractsLoaded.current || !_productionsLoaded.current) return;
     if (_budgetSyncTimer.current) clearTimeout(_budgetSyncTimer.current);
     _budgetSyncTimer.current = setTimeout(() => {
       const fps = finProjectsRef.current;
-      if (!fps.length) return;
       let changed = false;
-      const updated = fps.map(fp => {
+      let updated = fps.map(fp => {
         if (!fp.contractNo) return fp;
         const main = contractsRef.current.find(c => c.number && !c.deletedAt
           && c.type !== "podryad" && c.type !== "podryad_annex" && c.type !== "annex" && c.type !== "design_add"
@@ -6850,15 +6950,48 @@ ${reqBlock}`;
         // а не признак «данные ещё не загрузились» (это уже отсечено гардом выше по _contractsLoaded).
         // Раньше nb>0 не давал бюджету обнулиться, если из договора убрали все работы.
         const nb = finBudgetOfContract(main);
-        if (nb >= 0 && Math.round(Number(fp.budget) || 0) !== Math.round(nb)) { changed = true; return { ...fp, budget: nb }; }
+        const linkedObjectId = fp.objectId || main.objectId || "";
+        if ((nb >= 0 && Math.round(Number(fp.budget) || 0) !== Math.round(nb)) || linkedObjectId !== (fp.objectId || "")) {
+          changed = true;
+          return { ...fp, budget: nb, objectId: linkedObjectId };
+        }
         return fp;
       });
+
+      // Доводим старые активные объекты до новой схемы связей. Единственный ключ —
+      // objectId; точный номер договора нужен только для безопасной миграции старых
+      // проектов, в которых objectId ещё не был сохранён. Имена/адреса не участвуют.
+      for (const object of objectsRef.current.filter(o => o && !o.deletedAt)) {
+        const production = productionsRef.current.find(p => p.objectId === object.id);
+        const status = (production && PROD_TO_DEAL[production.prodStatus]) || object.status || "new";
+        if (status !== "work" && status !== "signed") continue;
+        const customerContracts = contractsRef.current.filter(c => c && !c.deletedAt && c.objectId === object.id
+          && c.type !== "podryad" && c.type !== "podryad_annex");
+        const main = customerContracts.find(c => c.type !== "annex" && c.type !== "design_add"
+          && (c.type === "repair_fiz" || c.type === "repair_yur"))
+          || customerContracts.find(c => c.type !== "annex" && c.type !== "design_add")
+          || null;
+        const existing = updated.find(fp => fp.objectId === object.id)
+          || (main && updated.find(fp => fp.contractNo && normCN(fp.contractNo) === normCN(main.number)));
+        if (existing) {
+          if (!existing.objectId) {
+            updated = updated.map(fp => fp.id === existing.id ? { ...fp, objectId:object.id, budget:finBudgetOfContract(main) || Number(fp.budget) || 0 } : fp);
+            changed = true;
+          }
+          continue;
+        }
+        const estimateTotal = estimatesForObject(estimatesRef.current, object.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0);
+        const budget = finBudgetOfContract(main) || estimateTotal;
+        if (!main && budget <= 0) continue;
+        updated.push({ ...finProjDraftFromObject(object, main), id:genId(), objectId:object.id, budget });
+        changed = true;
+      }
       if (changed) saveFinanceProjects(updated);
     }, 800);
     return () => { if (_budgetSyncTimer.current) clearTimeout(_budgetSyncTimer.current); };
     // loadedTick — чтобы синк перезапустился, когда финансы/договоры догрузились ПОЗЖЕ contracts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contracts, loadedTick]);
+  }, [contracts, objects, estimates, productions, loadedTick]);
 
   // Бэкапы списков (договоры/клиенты/контрагенты)
   const openListBackups = async (kind) => {
@@ -10045,7 +10178,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>{new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"})} · <span style={{color:"#bfdbfe",fontWeight:600}}>{currentUser.name}</span></div>
           </div>
           <div style={{fontSize:16,fontWeight:900,color:"#0f172a",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>🔥 Что требует внимания по моим объектам</div>
-          <IssuePanel issues={_myIssues} onNav={openIssue} onDismiss={dismissIssueTomorrow} emptyText="✓ По вашим объектам всё в порядке" />
+          <OperationsPanel issues={_myIssues} onNav={openIssue} onDismiss={dismissIssueTomorrow} emptyText="По вашим объектам всё в порядке" />
         </div>
       )}
       {effScreen === "dashboard" && currentPermissions.dashboard !== "none" && !_isForeman && (()=>{
@@ -10067,11 +10200,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         const signedCostMonth = signedMonth.reduce((s,o)=>s+_objCost(o), 0);
         const profitMonth = signedRevMonth - signedCostMonth;
         const marginMonth = signedRevMonth>0 ? Math.round(profitMonth/signedRevMonth*100) : 0;
-        const approvalObjs = liveObjects.filter(o=>o.status==="approval");
-        const signedObjs = liveObjects.filter(o=>o.status==="signed");
+        const approvalObjs = liveObjects.filter(o=>unifiedStatusOf(o)==="approval");
+        const signedObjs = liveObjects.filter(o=>unifiedStatusOf(o)==="signed");
+        const activeObjects = liveObjects.filter(o=>{ const status=unifiedStatusOf(o); return status==="work"||status==="signed"; });
         const pipelineSum = approvalObjs.reduce((s,o)=>s+_objVal(o), 0);
         const now = Date.now();
-        const staleObjs = approvalObjs.filter(o=>isStaleApprovalObject(o, now));
+        const staleObjs = approvalObjs.filter(o=>isStaleApprovalObject({...o,status:"approval"}, now));
         const recentObjects = [...liveObjects].sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0)).slice(0,6);
         const monthName = new Date().toLocaleDateString("ru-RU",{month:"long"});
         // ── Finance KPIs (только для admin/manager) ──
@@ -10137,7 +10271,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             {/* Мини-метрики в баннере */}
             <div style={{display:"flex",gap:24,marginTop:20,flexWrap:"wrap"}}>
               {[
-                {label:"Активных объектов",  val:liveObjects.filter(isDashboardActiveObject).length},
+                {label:"Активных объектов",  val:activeObjects.length},
                 {label:"В согласовании", val:approvalObjs.length},
                 {label:"Договоров",       val:signedObjs.length},
               ].map((m,i)=>(
@@ -10153,11 +10287,11 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           {currentPermissions.dashboard !== "none" && (
             <div style={{marginBottom:24}}>
               <div style={{fontSize:16,fontWeight:900,color:"#0f172a",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>🔥 {(_isUser||_isSalesHead) ? "Что требует внимания" : "Что горит сегодня"}</div>
-              <IssuePanel
+              <OperationsPanel
                 issues={_isUser ? _myIssues : (hasFinancialDetails ? _todayIssues : _todayIssues.filter(i=>i.group!=="Финансы"))}
                 onNav={openIssue}
                 onDismiss={dismissIssueTomorrow}
-                emptyText={_isUser ? "✓ По вашим объектам всё в порядке" : "✓ Всё под контролем — срочных задач нет"}
+                emptyText={_isUser ? "По вашим объектам всё в порядке" : "Всё под контролем — срочных задач нет"}
               />
             </div>
           )}
@@ -10245,38 +10379,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           )}
 
           {/* Требуют внимания */}
-          {staleObjs.length>0&&(
-            <div style={{background:"linear-gradient(135deg,#fffbeb,#fef3c7)",border:"1px solid rgba(217,119,6,.25)",borderRadius:12,padding:"16px 20px",marginBottom:24,boxShadow:"0 1px 4px rgba(217,119,6,.1)"}}>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-                <span style={{fontSize:16}}>⚠️</span>
-                <button onClick={openStaleObjects} style={{background:"none",border:"none",padding:0,fontWeight:700,fontSize:14,color:"#92400e",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
-                  Требуют внимания — {staleObjs.length} объект{staleObjs.length===1?"":"ов"} без движения 14+ дней
-                </button>
-                <button onClick={openStaleObjects} style={{marginLeft:"auto",background:"#fff",border:"1px solid #fcd34d",borderRadius:7,padding:"4px 9px",color:"#92400e",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Показать все</button>
-              </div>
-              <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                {staleObjs.slice(0,4).map(o=>{
-                  const days = Math.floor((now-(o.updatedAt||o.createdAt||0))/864e5);
-                  const val = _objVal(o);
-                  return (
-                    <div key={o.id} onClick={()=>{ setCurrentObject({...o}); setObjectTab("workspace"); setObjWsTab("info"); setScreen("objects"); }}
-                      style={{display:"flex",alignItems:"center",gap:10,background:"rgba(255,255,255,.7)",borderRadius:8,padding:"8px 12px",cursor:"pointer",transition:"background .1s"}}
-                      onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,.95)"}
-                      onMouseLeave={e=>e.currentTarget.style.background="rgba(255,255,255,.7)"}>
-                      <div style={{width:8,height:8,borderRadius:"50%",background:"#f59e0b",flexShrink:0}}/>
-                      <div style={{flex:1,minWidth:0}}>
-                        <span style={{fontWeight:600,fontSize:13,color:"#0f172a"}}>{o.clientName||"Без клиента"}</span>
-                        {o.address&&<span style={{fontSize:12,color:"#64748b",marginLeft:6}}>{o.address}</span>}
-                      </div>
-                      <span style={{fontSize:11,color:"#b45309",fontWeight:600,flexShrink:0}}>{days} дн.</span>
-                      {val>0&&<span style={{fontSize:12,fontWeight:700,color:"#0f172a",flexShrink:0}}>{fmt(Math.round(val))} ₸</span>}
-                    </div>
-                  );
-                })}
-                {staleObjs.length>4&&<div style={{fontSize:12,color:"#b45309",paddingLeft:4}}>+{staleObjs.length-4} ещё</div>}
-              </div>
-            </div>
-          )}
+          <StaleObjectsPanel
+            items={staleObjs.map(o=>({id:o.id,name:o.clientName||"Без клиента",address:o.address,days:Math.floor((now-(o.updatedAt||o.createdAt||0))/864e5),total:_objVal(o),object:o}))}
+            onOpen={item=>{ const o=item.object; setCurrentObject({...o}); setObjectTab("workspace"); setObjWsTab("info"); setScreen("objects"); }}
+            onShowAll={openStaleObjects}
+            fmt={fmt}
+          />
 
           {/* Воронка + Последние объекты */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:16,marginBottom:24}}>
@@ -11679,20 +11787,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             )}
 
             {/* ── F. «Зависшие» объекты в работе ── */}
-            {staleSent.length>0 && (
-              <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:"18px 20px",marginBottom:16}}>
-                <div style={{fontSize:11,color:"#b45309",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>⏰ На согласовании без движения 14+ дней</div>
-                <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                  {staleSent.map(({e,days})=>(
-                    <div key={e.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"rgba(255,255,255,.6)",borderRadius:8,cursor:currentUser.role!=="viewer"?"pointer":"default"}} onClick={()=>{ if(currentUser.role!=="viewer"&&e._obj){ setCurrentObject({...e._obj}); setObjectTab("workspace"); setScreen("objects"); } }}>
-                      <span style={{fontSize:13,color:"#0f172a",flex:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.proj?.name||"Объект"}{e.proj?.phone?` · 📞 ${e.proj.phone}`:""}</span>
-                      {e.total>0&&<span style={{fontSize:12,fontWeight:700,color:"#2563eb"}}>{fmt(e.total)} ₸</span>}
-                      <span style={{fontSize:11,fontWeight:700,color:"#dc2626",whiteSpace:"nowrap"}}>{days} дн.</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            <StaleObjectsPanel
+              items={staleSent.map(({e,days})=>({id:e.id,name:e.proj?.name||"Объект",address:e._obj?.address,days,total:e.total,object:e._obj}))}
+              onOpen={item=>{ if(currentUser.role!=="viewer"&&item.object){ setCurrentObject({...item.object}); setObjectTab("workspace"); setScreen("objects"); } }}
+              fmt={fmt}
+              title="На согласовании без движения 14+ дней"
+            />
 
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(380px,1fr))",gap:16,marginBottom:16}}>
               <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"18px"}}>
@@ -15035,4 +15135,3 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 // Принимает начальные данные ОДИН РАЗ, дальше живёт сама
 // При размонтировании сохраняет данные в priceCardCache
 const priceCardCache = {};
-
