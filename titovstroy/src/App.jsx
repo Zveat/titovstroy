@@ -96,62 +96,96 @@ const _ISSUE_GROUPS = ["Производство", "Финансы", "Клиен
 const _GRP_ICON = { "Производство":"🔨", "Финансы":"💰", "Клиенты":"👤", "Данные":"🗂" };
 const _ISSUE_CAP = 6; // сколько показывать в группе до «показать все»
 function IssuePanel({ issues, onNav, onDismiss, emptyText = "✓ Всё чисто — проблем не найдено" }) {
-  const [openGroups, setOpenGroups] = useState({}); // какие группы РАЗВЁРНУТЫ (по умолчанию все свёрнуты)
+  const [openGroups, setOpenGroups] = useState({}); // переопределения; по умолчанию раскрыты группы с критичными
   const [showAll, setShowAll] = useState({});       // группа показывает все карточки
   const reds = issues.filter(i => i.sev === "red").length;
   const yellows = issues.length - reds;
   if (!issues.length) {
     return (
-      <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:14, padding:"18px 20px", display:"flex", alignItems:"center", gap:10 }}>
-        <span style={{ fontSize:22 }}>✅</span>
+      <div style={{ background:"linear-gradient(135deg,#f0fdf4,#ecfdf5)", border:"1px solid #bbf7d0", borderRadius:16, padding:"20px 22px", display:"flex", alignItems:"center", gap:12 }}>
+        <span style={{ width:38, height:38, borderRadius:12, background:"#dcfce7", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>✅</span>
         <span style={{ fontSize:14, fontWeight:700, color:"#059669" }}>{emptyText}</span>
       </div>
     );
   }
   const byGroup = {};
   for (const i of issues) (byGroup[i.group] || (byGroup[i.group] = [])).push(i);
+  const SEV = { red:{ dot:"#ef4444", text:"#b91c1c", soft:"#fef2f2", ring:"#fecaca" }, yellow:{ dot:"#f59e0b", text:"#b45309", soft:"#fffbeb", ring:"#fde68a" } };
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-      <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
-        {reds>0 && <span style={{ fontSize:12, fontWeight:800, color:"#fff", background:"#dc2626", borderRadius:20, padding:"3px 11px" }}>🔴 {reds} критичных</span>}
-        {yellows>0 && <span style={{ fontSize:12, fontWeight:800, color:"#92610f", background:"#fef3c7", border:"1px solid #fde68a", borderRadius:20, padding:"3px 11px" }}>🟡 {yellows} предупреждений</span>}
+    <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+      {/* Сводка */}
+      <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap", padding:"2px 2px 4px" }}>
+        {reds>0 && (
+          <span style={{ display:"inline-flex", alignItems:"center", gap:7, fontSize:12.5, fontWeight:700, color:"#b91c1c" }}>
+            <span style={{ width:9, height:9, borderRadius:"50%", background:"#ef4444", boxShadow:"0 0 0 3px #fee2e2" }}/>
+            {reds} требуют решения
+          </span>
+        )}
+        {reds>0 && yellows>0 && <span style={{ width:1, height:13, background:"#e2e8f0" }}/>}
+        {yellows>0 && (
+          <span style={{ display:"inline-flex", alignItems:"center", gap:7, fontSize:12.5, fontWeight:700, color:"#b45309" }}>
+            <span style={{ width:9, height:9, borderRadius:"50%", background:"#f59e0b", boxShadow:"0 0 0 3px #fef3c7" }}/>
+            {yellows} на заметку
+          </span>
+        )}
       </div>
+
       {_ISSUE_GROUPS.filter(g => byGroup[g]).map(g => {
         const list = byGroup[g];
         const gReds = list.filter(i=>i.sev==="red").length;
-        const isOpen = !!openGroups[g];
+        const gYellows = list.length - gReds;
+        const isOpen = (g in openGroups) ? openGroups[g] : gReds>0; // критичные группы раскрыты сразу
         const shown = (showAll[g] || list.length<=_ISSUE_CAP) ? list : list.slice(0, _ISSUE_CAP);
         return (
-        <div key={g} style={{ background:"#fff", border:"1px solid #eef2f7", borderRadius:14, overflow:"hidden" }}>
-          <div onClick={()=>setOpenGroups(p=>({...p,[g]:!p[g]}))}
-            style={{ display:"flex", alignItems:"center", gap:8, padding:"11px 16px", borderBottom:isOpen?"1px solid #f1f5f9":"none", background:"#f8fafc", cursor:"pointer", userSelect:"none" }}>
-            <span style={{ fontSize:14 }}>{_GRP_ICON[g]}</span>
-            <span style={{ fontSize:12.5, fontWeight:800, color:"#0f172a" }}>{g}</span>
-            <span style={{ fontSize:11.5, fontWeight:700, color:"#94a3b8" }}>{list.length}</span>
-            {gReds>0 && <span style={{ fontSize:10.5, fontWeight:800, color:"#dc2626", background:"#fef2f2", borderRadius:20, padding:"1px 8px" }}>{gReds} 🔴</span>}
-            <span style={{ marginLeft:"auto", color:"#94a3b8", fontSize:13, transform:isOpen?"none":"rotate(-90deg)", transition:"transform .15s" }}>▾</span>
+        <div key={g} style={{ background:"#fff", border:"1px solid #e9eef5", borderRadius:16, overflow:"hidden", boxShadow:"0 1px 2px rgba(15,23,42,.04)" }}>
+          <div onClick={()=>setOpenGroups(p=>({...p,[g]: !isOpen }))}
+            style={{ display:"flex", alignItems:"center", gap:11, padding:"13px 16px", cursor:"pointer", userSelect:"none", background:isOpen?"#fbfcfe":"#fff", transition:"background .15s" }}>
+            <span style={{ width:34, height:34, borderRadius:10, background:"#f1f5f9", display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, flexShrink:0 }}>{_GRP_ICON[g]}</span>
+            <div style={{ minWidth:0, flex:1 }}>
+              <div style={{ fontSize:13.5, fontWeight:800, color:"#0f172a" }}>{g}</div>
+              <div style={{ fontSize:11, color:"#94a3b8", marginTop:1 }}>{list.length} {list.length===1?"пункт":list.length<5?"пункта":"пунктов"}</div>
+            </div>
+            {gReds>0 && (
+              <span style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:12, fontWeight:800, color:"#b91c1c", background:"#fef2f2", border:"1px solid #fecaca", borderRadius:20, padding:"3px 10px" }}>
+                <span style={{ width:7, height:7, borderRadius:"50%", background:"#ef4444" }}/>{gReds}
+              </span>
+            )}
+            {gYellows>0 && (
+              <span style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:12, fontWeight:800, color:"#b45309", background:"#fffbeb", border:"1px solid #fde68a", borderRadius:20, padding:"3px 10px" }}>
+                <span style={{ width:7, height:7, borderRadius:"50%", background:"#f59e0b" }}/>{gYellows}
+              </span>
+            )}
+            <span style={{ color:"#cbd5e1", fontSize:12, marginLeft:2, transform:isOpen?"rotate(0deg)":"rotate(-90deg)", transition:"transform .18s", flexShrink:0 }}>▾</span>
           </div>
           {isOpen && (
-            <div style={{ padding:12, display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(270px,1fr))", gap:8 }}>
-              {shown.map(i => (
+            <div style={{ padding:"4px 12px 12px", borderTop:"1px solid #f1f5f9", display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:9 }}>
+              {shown.map(i => {
+                const sv = SEV[i.sev] || SEV.yellow;
+                return (
                 <div key={i.id} onClick={() => onNav && onNav(i.nav)}
-                  style={{ position:"relative", border:"1px solid #eef2f7", borderLeft:`3px solid ${i.sev==="red"?"#dc2626":"#f59e0b"}`, borderRadius:10, padding:"9px 11px", paddingRight: (onDismiss&&i.dismissable)?26:11, cursor: onNav?"pointer":"default", transition:"box-shadow .12s,border-color .12s", background:"#fff" }}
-                  onMouseEnter={e=>{ if(onNav){ e.currentTarget.style.boxShadow="0 4px 14px rgba(15,23,42,.08)"; } }}
-                  onMouseLeave={e=>{ e.currentTarget.style.boxShadow="none"; }}>
-                  <div style={{ fontSize:13, fontWeight:700, color:"#0f172a", lineHeight:1.3 }}>{i.title}</div>
-                  {i.detail && <div style={{ fontSize:11, color:"#94a3b8", marginTop:2, lineHeight:1.35, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{i.detail}</div>}
+                  style={{ position:"relative", border:`1px solid ${sv.ring}`, borderRadius:12, padding:"11px 12px 11px 13px", paddingRight:(onDismiss&&i.dismissable)?30:12, cursor: onNav?"pointer":"default", transition:"box-shadow .14s,transform .14s", background:sv.soft, marginTop:8 }}
+                  onMouseEnter={e=>{ if(onNav){ e.currentTarget.style.boxShadow="0 8px 22px -8px rgba(15,23,42,.22)"; e.currentTarget.style.transform="translateY(-1px)"; } }}
+                  onMouseLeave={e=>{ e.currentTarget.style.boxShadow="none"; e.currentTarget.style.transform="none"; }}>
+                  <div style={{ display:"flex", alignItems:"flex-start", gap:9 }}>
+                    <span style={{ width:9, height:9, borderRadius:"50%", background:sv.dot, flexShrink:0, marginTop:4 }}/>
+                    <div style={{ minWidth:0, flex:1 }}>
+                      <div style={{ fontSize:13, fontWeight:800, color:"#0f172a", lineHeight:1.3 }}>{i.title}</div>
+                      {i.detail && <div style={{ fontSize:11.5, color:"#64748b", marginTop:3, lineHeight:1.4, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{i.detail}</div>}
+                    </div>
+                  </div>
                   {onDismiss && i.dismissable && (
                     <button onClick={e=>{ e.stopPropagation(); onDismiss(i.id); }} title="Скрыть до завтра"
-                      style={{ position:"absolute", top:6, right:6, background:"none", border:"none", color:"#cbd5e1", borderRadius:6, width:20, height:20, fontSize:15, lineHeight:1, cursor:"pointer", fontFamily:"inherit", padding:0 }}
-                      onMouseEnter={e=>{ e.currentTarget.style.color="#dc2626"; e.currentTarget.style.background="#fef2f2"; }}
-                      onMouseLeave={e=>{ e.currentTarget.style.color="#cbd5e1"; e.currentTarget.style.background="none"; }}>×</button>
+                      style={{ position:"absolute", top:8, right:8, background:"rgba(255,255,255,.7)", border:"none", color:"#94a3b8", borderRadius:7, width:22, height:22, fontSize:15, lineHeight:1, cursor:"pointer", fontFamily:"inherit", padding:0, display:"flex", alignItems:"center", justifyContent:"center" }}
+                      onMouseEnter={e=>{ e.currentTarget.style.color="#dc2626"; e.currentTarget.style.background="#fff"; }}
+                      onMouseLeave={e=>{ e.currentTarget.style.color="#94a3b8"; e.currentTarget.style.background="rgba(255,255,255,.7)"; }}>×</button>
                   )}
                 </div>
-              ))}
+                );
+              })}
               {list.length > _ISSUE_CAP && (
                 <button onClick={()=>setShowAll(p=>({...p,[g]:!p[g]}))}
-                  style={{ gridColumn:"1/-1", justifySelf:"start", background:"none", border:"none", color:"#2563eb", fontSize:12.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit", padding:"2px 0" }}>
-                  {showAll[g] ? "Свернуть" : `Показать все ${list.length} →`}
+                  style={{ gridColumn:"1/-1", justifySelf:"start", background:"none", border:"none", color:"#2563eb", fontSize:12.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit", padding:"4px 0 2px", marginTop:8 }}>
+                  {showAll[g] ? "Свернуть список" : `Показать все ${list.length} →`}
                 </button>
               )}
             </div>
@@ -10119,7 +10153,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             {/* Мини-метрики в баннере */}
             <div style={{display:"flex",gap:24,marginTop:20,flexWrap:"wrap"}}>
               {[
-                {label:"Активных объектов",  val:liveObjects.filter(o=>{ const us=unifiedStatusOf(o); return us!=="archive"&&us!=="refuse"; }).length},
+                {label:"Активных объектов",  val:liveObjects.filter(o=>{ const us=unifiedStatusOf(o); return us==="work"||us==="signed"; }).length},
                 {label:"В согласовании", val:approvalObjs.length},
                 {label:"Договоров",       val:signedObjs.length},
               ].map((m,i)=>(
@@ -10154,7 +10188,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 {label:"Маржа за "+monthName, value:marginMonth+"%", sub:"рентабельность", icon:"🎯", accent:marginMonth>=35?"#059669":marginMonth>=20?"#d97706":"#ef4444"},
               ] : []),
               {label:"Пайплайн (согласование)", value:fmt(Math.round(pipelineSum))+" ₸", sub:approvalObjs.length+" объектов", icon:"🔄", accent:"#d97706"},
-              {label:"Договоров подписано", value:signedObjs.length, sub:"из "+liveObjects.filter(o=>{ const us=unifiedStatusOf(o); return us!=="archive"&&us!=="refuse"; }).length+" активных", icon:"✅", accent:"#059669"},
+              {label:"Договоров подписано", value:signedObjs.length, sub:"из "+liveObjects.filter(o=>{ const us=unifiedStatusOf(o); return us==="work"||us==="signed"; }).length+" активных", icon:"✅", accent:"#059669"},
             ].map((s,i)=>(
               <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden"}}
                 onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
