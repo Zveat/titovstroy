@@ -155,6 +155,8 @@ const FULL_ADMIN_ACCESS = Object.freeze({
   productionClientAccess:"all",
   documentCreate:"all", documentEdit:"all", documentDelete:"all", documentExport:"all",
   docRepair:"all", docDesign:"all", docPodryad:"all", docAvr:"all",
+  templateView:"all", templateEdit:"all", templatePublish:"all", templateRollback:"all",
+  templateArchive:"all", documentInstanceEdit:"all",
   analyticsExport:"all",
   financeCreate:"all", financeEdit:"all", financeDelete:"all", financeExport:"all",
   financeDirectories:"all",
@@ -164,11 +166,17 @@ const FULL_ADMIN_ACCESS = Object.freeze({
   financialDetails:true, showLocked:false,
 });
 
+const NO_TEMPLATE_ACCESS = Object.freeze({
+  templateView:"none", templateEdit:"none", templatePublish:"none", templateRollback:"none",
+  templateArchive:"none", documentInstanceEdit:"none",
+});
+
 // Централизованные пресеты ролей. Сохранённая в базе матрица накладывается поверх
 // них, поэтому новые права получают безопасные значения без миграции данных.
 export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
   admin: FULL_ADMIN_ACCESS,
   manager: {
+    ...NO_TEMPLATE_ACCESS,
     dashboard:"all", objects:"all", calendar:"all", estimates:"all", production:"all",
     documents:"all", analytics:"all",
     finance:"view", admin:"none", financialDetails:true,
@@ -187,6 +195,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     showLocked:false,
   },
   sales_head: {
+    ...NO_TEMPLATE_ACCESS,
     dashboard:"all", objects:"all", calendar:"all", estimates:"all", production:"all",
     documents:"all", analytics:"all",
     finance:"none", admin:"none", financialDetails:false,
@@ -205,6 +214,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     showLocked:true,
   },
   foreman: {
+    ...NO_TEMPLATE_ACCESS,
     dashboard:"own", objects:"all", calendar:"all", estimates:"none", production:"all",
     documents:"none", analytics:"none",
     finance:"none", admin:"none", financialDetails:true,
@@ -223,6 +233,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     showLocked:false,
   },
   user: {
+    ...NO_TEMPLATE_ACCESS,
     dashboard:"own", objects:"own", calendar:"own", estimates:"own", production:"own",
     documents:"own", analytics:"own",
     finance:"none", admin:"none", financialDetails:false,
@@ -241,6 +252,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     showLocked:true,
   },
   viewer: {
+    ...NO_TEMPLATE_ACCESS,
     dashboard:"none", objects:"all", calendar:"none", estimates:"none", production:"none",
     documents:"none", analytics:"none",
     finance:"none", admin:"none", financialDetails:false,
@@ -268,6 +280,7 @@ const SCOPE_KEYS = [
   "estimateCreate","estimateEdit","estimateDelete","estimateStatus","estimatePublish","estimateExport",
   "productionEdit","productionStages","productionQuality","productionClientAccess",
   "documentCreate","documentEdit","documentDelete","documentExport","analyticsExport",
+  "templateView","templateEdit","templatePublish","templateRollback","templateArchive","documentInstanceEdit",
   "financeCreate","financeEdit","financeDelete","financeExport","financeDirectories",
   "adminUsers","adminRoles","adminClients","adminContractors","adminCatalog","adminPrices",
   "adminBackups","adminRestore","adminAudit","adminDbCheck",
@@ -904,14 +917,16 @@ export function validateBackupSchema(snap, arraySpecs = []) {
   if (!isPlain(d)) return { ok: false, error: "data не является объектом" };
   const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
   for (const spec of arraySpecs) {
-    const key = spec.key, idKey = spec.idKey || "id";
+    const key = spec.key, idKey = spec.idKey === false ? null : (spec.idKey || "id");
     if (!has(d, key)) continue;
     const arr = d[key];
     if (!Array.isArray(arr)) return { ok: false, error: `раздел «${key}» должен быть массивом` };
     for (let i = 0; i < arr.length; i++) {
       const it = arr[i];
       if (!isPlain(it)) return { ok: false, error: `раздел «${key}»: элемент #${i} не является объектом (null/строка/число не допускаются)` };
-      if (it[idKey] == null || it[idKey] === "") return { ok: false, error: `раздел «${key}»: элемент #${i} без «${idKey}»` };
+      if (idKey && (it[idKey] == null || it[idKey] === "")) return { ok: false, error: `раздел «${key}»: элемент #${i} без «${idKey}»` };
+      const itemError = typeof spec.itemValidator === "function" ? spec.itemValidator(it, i) : null;
+      if (itemError) return { ok: false, error: `раздел «${key}»: ${itemError}` };
     }
   }
   for (const k of ["financeMeta", "catalog", "prices", "rolePermissions"]) {
