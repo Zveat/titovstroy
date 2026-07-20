@@ -196,3 +196,28 @@ export function copyTemplate(storeValue, sourceTemplateId, input, actor, now = D
   if (!created.ok) return created;
   return saveTemplateDraft(created.store, created.value.id, sourceContent, actor, now, { copiedFromTemplateId: source.id });
 }
+
+export function filterTemplates(templates, filters = {}) {
+  const query = String(filters.query || "").trim().toLocaleLowerCase("ru");
+  const category = String(filters.category || "all");
+  const status = String(filters.status || "all");
+  return (Array.isArray(templates) ? templates : []).filter(template => {
+    if (!template || typeof template !== "object") return false;
+    if (category !== "all" && template.category !== category) return false;
+    if (status !== "all" && template.status !== status) return false;
+    if (!query) return true;
+    return [template.name, template.type, template.category]
+      .some(value => String(value || "").toLocaleLowerCase("ru").includes(query));
+  });
+}
+
+const permissionAllows = value => value === "all" || value === "own";
+
+export function buildTemplateActions(template, permissions = {}) {
+  if (!template || !permissionAllows(permissions.templateView)) return [];
+  const actions = ["open"];
+  if (permissionAllows(permissions.templateEdit)) actions.push("copy");
+  if (template.status !== "archived" && permissionAllows(permissions.templateArchive)) actions.push("archive");
+  if ((template.versions?.length || 0) > 0 && permissionAllows(permissions.templateRollback)) actions.push("history");
+  return actions;
+}

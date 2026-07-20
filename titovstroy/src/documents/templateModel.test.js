@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   archiveTemplate,
   activateTemplateVersion,
+  buildTemplateActions,
   copyTemplate,
   createTemplate,
   emptyTemplateStore,
   getActiveTemplateVersion,
+  filterTemplates,
   normalizeTemplateStore,
   publishTemplateDraft,
   saveTemplateDraft,
@@ -124,5 +126,32 @@ describe("document template model", () => {
     expect(archived.ok).toBe(true);
     expect(archived.value.status).toBe("archived");
     expect(archived.value.versions).toHaveLength(1);
+  });
+
+  it("filters the template library by query, category, and status", () => {
+    const templates = [
+      { id: "repair", name: "Договор ремонта", category: "contracts", type: "repair_fiz", status: "published" },
+      { id: "custom", name: "Памятка клиенту", category: "custom", type: "custom", status: "draft" },
+    ];
+    expect(filterTemplates(templates, { query: "ремонт" }).map(item => item.id)).toEqual(["repair"]);
+    expect(filterTemplates(templates, { category: "custom", status: "draft" }).map(item => item.id)).toEqual(["custom"]);
+    expect(filterTemplates(templates, { status: "archived" })).toEqual([]);
+  });
+
+  it("builds only actions allowed by the role", () => {
+    const template = { id: "repair", status: "published", versions: [{ id: "repair:v1" }] };
+    expect(buildTemplateActions(template, {
+      templateView: "all",
+      templateEdit: "all",
+      templateArchive: "all",
+      templateRollback: "all",
+    })).toEqual(["open", "copy", "archive", "history"]);
+    expect(buildTemplateActions(template, {
+      templateView: "all",
+      templateEdit: "none",
+      templateArchive: "none",
+      templateRollback: "none",
+    })).toEqual(["open"]);
+    expect(buildTemplateActions(template, { templateView: "none" })).toEqual([]);
   });
 });

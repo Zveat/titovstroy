@@ -8,6 +8,8 @@ import { countAllProductionRecovery, listProductionRetries, saveProductionRetry,
 import { MASTER_CATEGORIES, NAIMI_CITY_FALLBACK, OLX_REPAIR_CATEGORIES } from "./masters/catalog.mjs";
 import { SearchMultiSelect, SearchSelect as MasterSearchSelect } from "./masters/MasterSelects.jsx";
 import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
+import DocumentTemplateAdminRoute from "./documents/DocumentTemplateAdminRoute.jsx";
+import { createDocumentTemplateService } from "./documents/documentTemplateService.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
@@ -3028,7 +3030,7 @@ function RolePermissionsEditor({ rolePermissions, onSaveRolePermissions }) {
 }
 
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
-function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE_PERMISSIONS.admin, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
+function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE_PERMISSIONS.admin, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], documentTemplateService=null, documentTemplateData={}, fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
   const [tab, setTab] = useState("users");
   const hasAdminPermission = (key) => accessAllows(permissions[key], true);
   const adminTabs = [
@@ -3038,6 +3040,7 @@ function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE
     ["contragents","🏢 Реквизиты","adminClients"],
     ["workers","🔨 Подрядчики","adminContractors"],
     ["prices","💰 Прайс-лист", hasAdminPermission("adminCatalog") || hasAdminPermission("adminPrices") ? null : "__none"],
+    ["documentTemplates","📑 Шаблоны документов","templateView"],
     ["backups","🗄 Бэкапы", hasAdminPermission("adminBackups") || hasAdminPermission("adminRestore") ? null : "__none"],
     ["audit","📋 Журнал","adminAudit"],
     ["check","🔍 Проверка базы","adminDbCheck"],
@@ -3319,6 +3322,12 @@ function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE
         <RolePermissionsEditor
           rolePermissions={rolePermissions}
           onSaveRolePermissions={onSaveRolePermissions}
+        />
+      ) : tab === "documentTemplates" ? (
+        <DocumentTemplateAdminRoute
+          service={documentTemplateService}
+          permissions={permissions}
+          data={documentTemplateData}
         />
       ) : tab === "users" ? (
         <div>
@@ -10475,6 +10484,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
+  // Шаблоны документов живут в отдельном модуле. Здесь только связываем его с
+  // текущим storage, пользователем, аудитом и неизменённым legacy-генератором.
+  const documentTemplateService = createDocumentTemplateService({
+    storage,
+    actor: () => currentUser,
+    audit: event => logChange(currentUser, event),
+    legacyRepairRenderer: buildContractHtml,
+  });
   const NAV_ITEMS = useMemo(() => {
     const show = access => access !== "none" || currentPermissions.showLocked;
     return [
@@ -15635,6 +15652,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           saveWorkers={saveWorkers}
           workersRef={workersRef}
           contracts={contracts}
+          documentTemplateService={documentTemplateService}
+          documentTemplateData={{
+            objects,
+            estimates,
+            contracts,
+            clients: contractClients,
+            contragents,
+          }}
           fmt={fmt}
           onBackupWorkspace={openWorkspaceBackups}
           onExportAll={exportAllJSON}
