@@ -1,4 +1,5 @@
 import { REPAIR_TEMPLATE_ENABLED } from "./documentTemplateKeys.js";
+import { appendDocumentRevision, createDocumentSnapshot, getSnapshotForDocument } from "./documentSnapshots.js";
 import { createRepairLegacySeed } from "./repairLegacySeed.js";
 import { createTemplateRepository } from "./templateRepository.js";
 
@@ -41,6 +42,23 @@ export function createDocumentTemplateService({
     loadTemplates: repository.loadTemplates,
     loadSnapshots: repository.loadSnapshots,
     mutateSnapshots: repository.mutateSnapshots,
+    getSnapshot: async documentId => {
+      const loaded = await repository.loadSnapshots();
+      return { ...loaded, snapshot: loaded.status === "found" ? getSnapshotForDocument(loaded.snapshots, documentId) : null };
+    },
+    createSnapshot: input => repository.mutateSnapshots(list => {
+      const documentId = `contract:${input?.contract?.id || ""}`;
+      const existing = list.filter(item => item?.documentId === documentId);
+      if (existing.length > 0) return undefined;
+      return [...list, createDocumentSnapshot({ ...input, actor: currentActor(), now: Date.now() })];
+    }),
+    appendSnapshotRevision: (documentId, contentJson) => repository.mutateSnapshots(list => {
+      const matches = list.map((item, index) => ({ item, index })).filter(entry => entry.item?.documentId === documentId);
+      if (matches.length !== 1) return undefined;
+      const next = [...list];
+      next[matches[0].index] = appendDocumentRevision(matches[0].item, contentJson, currentActor(), Date.now());
+      return next;
+    }),
     createTemplate: input => run("createTemplate", input?.id, (by, now) => repository.createTemplate(input, by, now)),
     copyTemplate: (sourceTemplateId, input) => run("copyTemplate", input?.id, (by, now) => repository.copyTemplate(sourceTemplateId, input, by, now)),
     saveDraft: (templateId, contentJson, metadata) => run("saveDraft", templateId, (by, now) => repository.saveDraft(templateId, contentJson, by, now, metadata)),
