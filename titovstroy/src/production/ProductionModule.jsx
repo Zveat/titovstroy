@@ -300,6 +300,7 @@ export default function ProductionModule({
   onDeleteProduction, onToggleClientShare, onSetClientVis, buildStagesFromEstimate,
   finProjects, financeTx,
   fmt, genId, currentUser, readOnly: externallyReadOnly = false, onAudit,
+  actionPermissions = {},
   embedObjectId, embedTab, clientInfoCard, // встроенный режим: карточка одного объекта внутри раздела «Объекты»
 }) {
   // карта запись производства по ключу записи (objectId реального объекта или "fp:<id>")
@@ -431,9 +432,18 @@ export default function ProductionModule({
 
   // Роль viewer — ТОЛЬКО чтение: жёсткий запрет на уровне данных (не только визуальный) —
   // без него наблюдатель мог бы менять карточку или создать её первым же редактированием.
-  const readOnly = externallyReadOnly || currentUser?.role === "viewer";
-  const patchProd = (patch) => {
-    if (readOnly) return; // запрет записи для viewer — обязателен именно здесь
+  const baseReadOnly = externallyReadOnly || currentUser?.role === "viewer";
+  const mainReadOnly = baseReadOnly || actionPermissions.edit === false;
+  const stagesReadOnly = baseReadOnly || actionPermissions.stages === false;
+  const qualityReadOnly = baseReadOnly || actionPermissions.quality === false;
+  const clientAccessReadOnly = baseReadOnly || actionPermissions.clientAccess === false;
+  const tabReadOnly = embedTab === "stages"
+    ? stagesReadOnly
+    : ["launch", "handover", "journal", "defects"].includes(embedTab)
+      ? qualityReadOnly
+      : mainReadOnly;
+  const patchProd = (patch, allowed = true) => {
+    if (baseReadOnly || !allowed) return; // запрет записи обязателен именно на уровне данных
     const objId = openObj && openObj.id;
     if (objId == null) return;
     const next = { ...localProdRef.current, ...patch, updatedAt: Date.now() };
@@ -452,6 +462,10 @@ export default function ProductionModule({
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => _flushObj(objId), 600);
   };
+  const mainPatch = (patch) => patchProd(patch, !mainReadOnly);
+  const stagesPatch = (patch) => patchProd(patch, !stagesReadOnly);
+  const qualityPatch = (patch) => patchProd(patch, !qualityReadOnly);
+  const clientAccessPatch = (patch) => patchProd(patch, !clientAccessReadOnly);
 
   // Данные из Финансов для текущего объекта — ДОЛЖНЫ быть до if(!openObj), иначе нарушение Rules of Hooks
   const finProj = useMemo(() => {
@@ -497,17 +511,16 @@ export default function ProductionModule({
   const audit = (ev) => { try { if (onAudit) onAudit({ objectId: openObj.id, label: _objLbl, source: "manual", ...ev }); } catch (e) { console.warn("audit failed", e); } };
   return (
     <div style={{ maxWidth: 1600, margin: "0 auto" }}>
-      {readOnly && <div style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 14px", fontSize: 12.5, color: "#64748b", marginBottom: 12 }}>👁 Режим просмотра — редактирование недоступно для вашей роли.</div>}
-      {/* fieldset disabled нативно глушит все input/button внутри; сам запрет записи — в patchProd */}
-      <fieldset disabled={readOnly} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
-      {embedTab === "info" && <InfoTab prod={localProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={patchProd} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} clientInfoCard={clientInfoCard} audit={audit} />}
-      {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={localProd} patch={patchProd} genId={genId} title="Чек-лист запуска объекта" />}
-      {embedTab === "handover" && <ChecklistTab kind="checklistHandover" prod={localProd} patch={patchProd} genId={genId} title="Чек-лист сдачи объекта" />}
-      {embedTab === "stages" && <StagesTab prod={localProd} patch={patchProd} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} audit={audit} />}
-      {embedTab === "finance" && <FinanceTab prod={localProd} patch={patchProd} fmt={fmt} finSummary={finSummary} />}
-      {embedTab === "journal" && <JournalTab prod={localProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
-      {embedTab === "defects" && <DefectsTab prod={localProd} patch={patchProd} genId={genId} currentUser={currentUser} />}
-      </fieldset>
+      {(tabReadOnly || (embedTab === "info" && clientAccessReadOnly)) && <div style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 14px", fontSize: 12.5, color: "#64748b", marginBottom: 12 }}>👁 Режим просмотра — часть действий недоступна для вашей роли.</div>}
+      {embedTab === "info" && <InfoTab prod={localProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={mainPatch} clientAccessPatch={clientAccessPatch} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} clientInfoCard={clientInfoCard} audit={audit} readOnly={mainReadOnly} clientAccessReadOnly={clientAccessReadOnly} />}
+      {embedTab !== "info" && <fieldset disabled={tabReadOnly} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
+      {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист запуска объекта" />}
+      {embedTab === "handover" && <ChecklistTab kind="checklistHandover" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист сдачи объекта" />}
+      {embedTab === "stages" && <StagesTab prod={localProd} patch={stagesPatch} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} audit={audit} />}
+      {embedTab === "finance" && <FinanceTab prod={localProd} patch={mainPatch} fmt={fmt} finSummary={finSummary} />}
+      {embedTab === "journal" && <JournalTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} />}
+      {embedTab === "defects" && <DefectsTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} />}
+      </fieldset>}
     </div>
   );
 }
@@ -516,7 +529,7 @@ export default function ProductionModule({
 const _dayStart = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); };
 // Телефон → формат для wa.me (КЗ: 8XXXXXXXXXX → 7XXXXXXXXXX)
 const _waPhone = (p) => { let d = (p || "").replace(/\D/g, ""); if (d.length === 11 && d[0] === "8") d = "7" + d.slice(1); else if (d.length === 10) d = "7" + d; return d; };
-function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientShare, onSetClientVis, currentUser, clientInfoCard, audit }) {
+function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatch, onToggleClientShare, onSetClientVis, currentUser, clientInfoCard, audit, readOnly=false, clientAccessReadOnly=false }) {
   const objEstimates = estimates.filter(e => e.objectId === obj.id);
   // Только клиентские договоры: подряд (с рабочим) — это себестоимость, в метрику «Договоры» не входит
   const objContracts = contracts.filter(c => c.objectId === obj.id && !c.deletedAt && c.type !== "podryad" && c.type !== "podryad_annex");
@@ -599,6 +612,7 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientSh
       )}
       {/* Клиент и объект — статус уже выбирается тут, поэтому в «Производственной информации» ниже статус-кнопки не дублируются */}
       {clientInfoCard}
+      <fieldset disabled={readOnly} style={{border:"none",margin:0,padding:0,minWidth:0,display:"contents"}}>
       {/* Производственные поля */}
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px" }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 14 }}>Производственная информация</div>
@@ -633,15 +647,16 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, onToggleClientSh
             style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
         </div>
       </div>
+      </fieldset>
 
       {/* Клиент: доступ к прогрессу + сообщение */}
-      <ClientAccessBlock obj={obj} prod={prod} patch={patch} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} />
+      <ClientAccessBlock obj={obj} prod={prod} patch={clientAccessPatch} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} readOnly={clientAccessReadOnly} />
     </div>
   );
 }
 
 // ─── Блок «Клиент»: доступ к прогрессу + сообщение (внизу вкладки «Информация») ───
-function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, onSetClientVis, currentUser }) {
+function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, onSetClientVis, currentUser, readOnly=false }) {
   const [shareLink, setShareLink] = useState(null); // ссылка для клиента после включения доступа
   const [shareBusy, setShareBusy] = useState(false);
   if (currentUser?.role === "viewer") return null;
@@ -651,7 +666,7 @@ function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, onSetClientV
   const cv = obj.clientVis || {};
   const visRows = [["stages","Этапы работ"],["payments","Оплата по договору"],["docs","Документы"],["remarks","Замечания клиента"]];
   return (
-    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 11 }}>
+    <fieldset disabled={readOnly} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 11, margin:0, minWidth:0 }}>
       {onToggleClientShare && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
@@ -690,7 +705,7 @@ function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, onSetClientV
       {onToggleClientShare && <div style={{ borderTop: "1px solid #f1f5f9" }} />}
       {/* Сообщение клиенту — общий комментарий от компании на странице прогресса */}
       <ClientMessageCard prod={prod} patch={patch} embedded />
-    </div>
+    </fieldset>
   );
 }
 
