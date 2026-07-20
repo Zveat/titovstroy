@@ -5,6 +5,7 @@ import ProductionModule, { flushPendingProduction, stopProductionSession, hasPen
 import { emptyProduction } from "./production/constants.js";
 import { applyProductionCommand, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, isRegenerableProductionCommand, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
+import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
@@ -2225,6 +2226,17 @@ const ROLE_PERMISSION_GROUPS = [
       { key:"documentEdit", label:"Изменение", hint:"Реквизиты, работы и статус", type:"scope" },
       { key:"documentDelete", label:"Удаление", hint:"Корзина и безвозвратное удаление", type:"scope" },
       { key:"documentExport", label:"Печать и экспорт", hint:"PDF и печатные формы", type:"scope" },
+    ],
+  },
+  {
+    id:"documentTemplates", icon:"🧩", label:"Шаблоны и экземпляры",
+    actions:[
+      { key:"templateView", label:"Просмотр шаблонов", hint:"Список, версии и предпросмотр", type:"binary" },
+      { key:"templateEdit", label:"Изменение шаблонов", hint:"Текст, форматирование и автополя", type:"binary" },
+      { key:"templatePublish", label:"Публикация версий", hint:"Включение новой версии в работу", type:"binary" },
+      { key:"templateRollback", label:"Откат версии", hint:"Возврат к ранее опубликованной версии", type:"binary" },
+      { key:"templateArchive", label:"Архивирование", hint:"Скрытие шаблона без удаления истории", type:"binary" },
+      { key:"documentInstanceEdit", label:"Изменение экземпляра", hint:"Разовая правка документа конкретного объекта", type:"binary" },
     ],
   },
   {
@@ -7527,6 +7539,7 @@ ${reqBlock}`;
     { k: "financeProjects", label: "Финансы: проекты",  key: FINANCE_PROJECTS_KEY, bkey: FINANCE_PROJECTS_BACKUPS_KEY },
     { k: "reports",         label: "Акты",              key: REPORTS_KEY,          bkey: REPORTS_BACKUPS_KEY },
     { k: "users",           label: "Пользователи",      key: USERS_KEY,            bkey: USERS_BACKUPS_KEY },
+    ...DOCUMENT_TEMPLATE_BACKUP_SECTIONS,
   ];
   // { list, ok } — читаем ТОЛЬКО из облака (getCloudResult, без localStorage-резерва). ok=false =
   // база не ответила ИЛИ значение есть, но это не валидный JSON-массив (битые данные — это ошибка,
@@ -7672,7 +7685,10 @@ ${reqBlock}`;
     // ПРОВЕРКА СТРУКТУРЫ ДО ЛЮБОЙ ЗАПИСИ: валидный JSON может иметь неверную форму (массив
     // вместо цен, строка вместо каталога, кривые публичные ноды/журнал). При любой ошибке —
     // полная отмена, ни одна запись в Firebase не идёт.
-    const _arraySpecs = _backupSections.map(s => ({ key: s.k, idKey: s.k === "productions" ? "objectId" : "id" }));
+    const _arraySpecs = [
+      ..._backupSections.filter(s => !s.managedRestore).map(s => ({ key: s.k, idKey: s.k === "productions" ? "objectId" : "id" })),
+      ...documentTemplateBackupSpecs(),
+    ];
     const schema = validateBackupSchema(snap, _arraySpecs);
     if (!schema.ok) { window.alert("❌ Файл бэкапа повреждён или имеет неверную структуру — восстановление отменено.\n\nПричина: " + schema.error); return; }
     // ЗАПРЕТ МАССОВОГО ВОССТАНОВЛЕНИЯ НЕПОЛНОГО ФАЙЛА: если какой-то раздел не прочитался из
@@ -7777,15 +7793,17 @@ ${reqBlock}`;
         done++;
       } catch (e) { console.warn("restore fail", key, e); fail++; }
     };
+    const has = (k) => Object.prototype.hasOwnProperty.call(d, k);
     for (const s of _backupSections) {
+      if (s.managedRestore) continue;
       const list = Array.isArray(d[s.k]) ? d[s.k] : null;
       if (!list) continue; // нет раздела в файле — не трогаем текущий
       await restoreKey(s.key, s.bkey, list, s.label);
     }
+    await restoreDocumentTemplateSections({ data: d, has, restoreKey });
     // hasOwnProperty, а не истинность: подтверждённое пустое значение тоже нужно восстановить,
     // иначе старые настройки/цены останутся, хотя в бэкапе их уже не было. Пустой объектный
     // раздел восстанавливаем как {} (не null) — загрузчики каталога/цен/настроек ждут объект.
-    const has = (k) => Object.prototype.hasOwnProperty.call(d, k);
     const objVal = (v) => (v == null ? {} : v);
     if (has("financeMeta")) await restoreKey(FINANCE_META_KEY, FINANCE_META_BACKUPS_KEY, objVal(d.financeMeta), "Финансы: настройки");
     if (has("catalog")) await restoreKey(CATALOG_KEY, CATALOG_BACKUPS_KEY, objVal(d.catalog), "Каталог");

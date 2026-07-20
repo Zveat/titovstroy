@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch } from "./utils.js";
+import { documentTemplateBackupSpecs } from "./documents/documentTemplateBackup.js";
 
 describe("матрица прав ролей", () => {
   it("руководитель продаж видит все объекты и общую аналитику без финансовых деталей", () => {
@@ -26,6 +27,28 @@ describe("матрица прав ролей", () => {
     expect(accessAllows(p.objects, false)).toBe(false);
     expect(p.estimateEdit).toBe("own");
     expect(p.analyticsExport).toBe("own");
+  });
+
+  it("шаблоны по умолчанию доступны только администратору", () => {
+    const admin = permissionsForRole({}, "admin");
+    expect(admin).toMatchObject({
+      templateView: "all",
+      templateEdit: "all",
+      templatePublish: "all",
+      templateRollback: "all",
+      templateArchive: "all",
+      documentInstanceEdit: "all",
+    });
+    for (const role of ["manager", "sales_head", "foreman", "user", "viewer"]) {
+      expect(permissionsForRole({}, role)).toMatchObject({
+        templateView: "none",
+        templateEdit: "none",
+        templatePublish: "none",
+        templateRollback: "none",
+        templateArchive: "none",
+        documentInstanceEdit: "none",
+      });
+    }
   });
 
   it("сохранённые настройки накладываются на пресет, но администратора нельзя заблокировать", () => {
@@ -338,6 +361,52 @@ describe("validateBackupSchema — проверка структуры и СОД
   });
   it("отсутствующие необязательные разделы — это ОК (частичный бэкап)", () => {
     expect(validateBackupSchema({ _type: "titovstroy-backup", data: { objects: [{ id: "o1" }] } }, SPECS).ok).toBe(true);
+  });
+
+  const templateStore = templates => ({ schemaVersion: 1, templates });
+  const validTemplate = () => ({
+    id: "repair",
+    type: "repair_fiz",
+    status: "published",
+    activeVersionId: "repair:v1",
+    draft: null,
+    versions: [{
+      id: "repair:v1",
+      templateId: "repair",
+      versionNumber: 1,
+      contentJson: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Текст" }] }] },
+      publishedAt: 1,
+    }],
+  });
+  const validSnapshot = () => ({
+    documentId: "document-1",
+    objectId: "object-1",
+    templateVersionId: "repair:v1",
+    schemaVersion: 1,
+    contentSnapshot: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Текст" }] }] },
+    createdAt: 1,
+  });
+
+  it("глубоко проверяет шаблоны и снимки документов", () => {
+    const specs = [...SPECS, ...documentTemplateBackupSpecs()];
+    const backup = good();
+    backup.data.documentTemplates = [templateStore([validTemplate()])];
+    backup.data.documentSnapshots = [validSnapshot()];
+    expect(validateBackupSchema(backup, specs).ok).toBe(true);
+  });
+
+  it("отклоняет битые версии шаблонов до любой записи", () => {
+    const specs = [...SPECS, ...documentTemplateBackupSpecs()];
+    const backup = good();
+    backup.data.documentTemplates = [templateStore([{ ...validTemplate(), versions: "broken" }])];
+    expect(validateBackupSchema(backup, specs).ok).toBe(false);
+  });
+
+  it("отклоняет снимок без неизменяемого содержимого", () => {
+    const specs = [...SPECS, ...documentTemplateBackupSpecs()];
+    const backup = good();
+    backup.data.documentSnapshots = [{ ...validSnapshot(), contentSnapshot: null }];
+    expect(validateBackupSchema(backup, specs).ok).toBe(false);
   });
 });
 
