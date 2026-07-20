@@ -9,6 +9,60 @@
 // приложению для связки договоров/финпроектов/операций между собой. 
 export const normCN = (s) => String(s||"").trim().toLowerCase().replace(/[\s№#]/g,"");
 
+// Returns every estimate belonging to an object, including legacy additional estimates
+// linked only through parentId. The source array is never mutated.
+export function estimatesForObject(estimates = [], objectId) {
+  const list = (estimates || []).filter(Boolean);
+  if (!objectId) return [];
+  const selected = new Set(list.filter(e => e.objectId === objectId && e.id).map(e => e.id));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const e of list) {
+      if (!e?.id || selected.has(e.id) || !e.parentId || !selected.has(e.parentId)) continue;
+      if (e.objectId && e.objectId !== objectId) continue;
+      selected.add(e.id);
+      changed = true;
+    }
+  }
+  return list.filter(e => e.objectId === objectId || (e.id && selected.has(e.id)));
+}
+
+export function isDashboardActiveObject(object) {
+  return !!object && !object.deletedAt && (object.status === "work" || object.status === "signed");
+}
+
+export function findFinanceProjectForObject(object, contracts = [], finProjects = []) {
+  if (!object) return null;
+  const direct = finProjects.find(fp => fp?.objectId === object.id);
+  if (direct) return direct;
+
+  const numbers = new Set();
+  for (const key of ["contractNo", "contractNumber", "agreementNo", "number"]) {
+    const value = normCN(object[key]);
+    if (value) numbers.add(value);
+  }
+  for (const c of contracts) {
+    if (!c || c.deletedAt || c.objectId !== object.id) continue;
+    const number = normCN(c.number);
+    const mainNumber = normCN(c.mainNumber);
+    if (number) numbers.add(number);
+    if (mainNumber) numbers.add(mainNumber);
+  }
+  const byNumber = finProjects.find(fp => fp?.contractNo && numbers.has(normCN(fp.contractNo)));
+  if (byNumber) return byNumber;
+
+  const name = String(object.clientName || "").toLowerCase().replace(/\s+/g, " ").trim();
+  const phone = String(object.clientPhone || "").replace(/\D/g, "");
+  const identityMatches = finProjects.filter(fp => {
+    const hay = String((fp?.description || "") + " " + (fp?.client || "") + " " + (fp?.comment || ""))
+      .toLowerCase().replace(/\s+/g, " ").trim();
+    const digits = hay.replace(/\D/g, "");
+    return (name.length >= 4 && hay.includes(name)) || (phone.length >= 6 && digits.includes(phone));
+  });
+  return identityMatches.length === 1 ? identityMatches[0] : null;
+}
+
 export function isStaleApprovalObject(object, now = Date.now(), days = 14) {
   if (!object || object.deletedAt || object.status !== "approval") return false;
   const lastMovement = Number(object.updatedAt || object.createdAt || 0);
@@ -566,15 +620,9 @@ export function computeIssues(data = {}, opts = {}) {
   const incByCN = {};
   for (const t of financeTx) { const cn = normCN(t.contractNo); if (!cn) continue; if (t.type==="income") incByCN[cn] = (incByCN[cn]||0) + (Number(t.amount)||0); }
 
-  // Связка финпроект ↔ объект (по objectId или по номеру договора объекта)
-  const contractsByObj = {}; for (const c of contracts) { if (c.objectId) (contractsByObj[c.objectId]||(contractsByObj[c.objectId]=[])).push(c); }
-  const finProjByObj = {}, finProjByCN = {};
-  for (const fp of finProjects) { if (fp.objectId) finProjByObj[fp.objectId] = fp; if (fp.contractNo) finProjByCN[normCN(fp.contractNo)] = fp; }
-  const finProjForObject = (o) => {
-    if (finProjByObj[o.id]) return finProjByObj[o.id];
-    for (const c of (contractsByObj[o.id]||[])) { const fp = finProjByCN[normCN(c.number)]; if (fp) return fp; }
-    return null;
-  };
+  // Связка финпроект ↔ объект: objectId, номера основного/доп. договоров,
+  // затем только однозначное совпадение по полному имени или телефону.
+  const finProjForObject = (o) => findFinanceProjectForObject(o, contracts, finProjects);
   const objIsActive = (o) => !["done","cancel","archive","refuse"].includes(o.status);
 
   // ─────────── TODAY: операционные (что разрулить сегодня) ───────────
@@ -609,17 +657,7 @@ export function computeIssues(data = {}, opts = {}) {
       title:"Договор подписан, но нет финпроекта", detail:_objLabel(o),
       nav:{ object:o.id, tab:"finance" } });
   }
-  // 4. Долг клиента (оплачено меньше бюджета)
-  for (const fp of finProjects) {
-    if ((fp.rawStatus||fp.status||"").toLowerCase() === "отменен") continue;
-    const budget = Number(fp.budget)||0; if (budget<=0) continue;
-    const inc = incByCN[normCN(fp.contractNo)]||0;
-    const debt = budget - inc; if (debt <= 0) continue;
-    const o = fp.objectId ? objById[fp.objectId] : null;
-    out.push({ id:`debt:${fp.id||normCN(fp.contractNo)}`, group:"Финансы", sev: debt>budget*0.5?"red":"yellow", scope:"today", dismissable:true,
-      title:`Долг клиента: ${_fmtT(debt)} ₸`, detail:`${(o&&o.clientName)||fp.description||("№"+(fp.contractNo||"?"))} · оплачено ${_fmtT(inc)} из ${_fmtT(budget)}`,
-      nav: o ? { object:o.id, tab:"finance" } : { screen:"finance", tab:"projects" } });
-  }
+  // Дебиторка не является срочной ошибкой и показывается в Финансах, а не в «Что горит».
   // 5. Замечания клиента (новые/необработанные из клиентского кабинета)
   for (const o of objects) {
     const p = prodByObj[o.id]; if (!p) continue;
@@ -630,7 +668,7 @@ export function computeIssues(data = {}, opts = {}) {
         nav:{ object:o.id, tab:"defects" } });
     }
   }
-  // 6. Близко к сдаче, но есть незакрытые этапы или долг
+  // 6. Близко к сдаче, но есть незакрытые этапы
   for (const o of objects) {
     if (o.status!=="work") continue;
     const p = prodByObj[o.id]; if (!p || !p.planEndDate || p.factEndDate) continue;
@@ -638,11 +676,10 @@ export function computeIssues(data = {}, opts = {}) {
     const left = Math.round((d - today)/864e5);
     if (left < 0 || left > 7) continue;
     const openStages = (p.stages||[]).filter(s => (s.status||"todo")!=="done").length;
-    const fp = finProjForObject(o); const budget = fp?(Number(fp.budget)||0):0; const debt = fp?Math.max(0,budget-(incByCN[normCN(fp.contractNo)]||0)):0;
-    if (openStages===0 && debt<=0) continue;
+    if (openStages===0) continue;
     out.push({ id:`near-handover:${o.id}`, group:"Производство", sev:"yellow", scope:"today", dismissable:true,
       title:`Скоро сдача (${left===0?"сегодня":("через "+left+" дн")})`,
-      detail:`${_objLabel(o)}${openStages?` · ${openStages} незакрытых этапов`:""}${debt>0?` · долг ${_fmtT(debt)} ₸`:""}`,
+      detail:`${_objLabel(o)} · ${openStages} незакрытых этапов`,
       nav:{ object:o.id, tab:"info" } });
   }
 
@@ -689,7 +726,7 @@ export function computeIssues(data = {}, opts = {}) {
   for (const o of objects) {
     const fp = finProjForObject(o); if (!fp) continue;
     const budget = Number(fp.budget)||0; if (budget<=0) continue;
-    const estSum = estimates.filter(e => e && e.objectId===o.id).reduce((s,e)=>s+(Number(e.total)||0),0);
+    const estSum = estimatesForObject(estimates, o.id).reduce((s,e)=>s+(Number(e.total)||0),0);
     if (estSum<=0) continue;
     const diff = Math.abs(budget-estSum);
     if (diff > budget*0.2) out.push({ id:`budget-mismatch:${o.id}`, group:"Финансы", sev:"yellow", scope:"check", dismissable:false,
@@ -1106,3 +1143,4 @@ export function mayUseLocalCopy(dirtyRaw, uid, tab) {
   if (isLegacyDirtyMarker(dirtyRaw)) return false;
   return isOwnDirtyMarker(dirtyRaw, uid, tab);
 }
+
