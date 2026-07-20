@@ -52,19 +52,50 @@ const renderWorksTable = (fieldId, value) => {
   const definition = FIELD_BY_ID.get(fieldId);
   if (!definition || definition.kind !== "table") throw new Error(`Неизвестное табличное автополе: ${fieldId}`);
   const rows = Array.isArray(value?.rows) ? value.rows : [];
-  const body = rows.map((row, index) => `
-    <tr>
-      <td class="tc">${index + 1}</td>
-      <td>${escapeHtml(row.name)}</td>
-      <td class="tc">${escapeHtml(row.unit)}</td>
-      <td class="tc">${escapeHtml(row.quantity)}</td>
-      <td class="tr">${row.isVariablePrice ? `от&nbsp;${moneyHtml(row.priceFrom)}` : moneyHtml(row.price)}</td>
-      <td class="tr b">${row.isVariablePrice ? "уточняется" : moneyHtml(row.sum)}</td>
-    </tr>`).join("");
+  const categories = [];
+  const byCategory = new Map();
+  for (const row of rows) {
+    const category = String(row.category || "Работы");
+    if (!byCategory.has(category)) {
+      byCategory.set(category, { rows: [], total: 0 });
+      categories.push(category);
+    }
+    const group = byCategory.get(category);
+    group.rows.push(row);
+    group.total += row.isVariablePrice ? 0 : Number(row.sum) || 0;
+  }
+  let number = 0;
+  let body = "";
+  for (const category of categories) {
+    const group = byCategory.get(category);
+    body += `<tr><td colspan="6">${escapeHtml(category)} — ${moneyHtml(group.total)}&nbsp;₸</td></tr>`;
+    let subcategory = "";
+    group.rows.forEach((row) => {
+      if (row.subcategory && row.subcategory !== subcategory) {
+        subcategory = row.subcategory;
+        body += `<tr><td colspan="6">${escapeHtml(subcategory)}</td></tr>`;
+      }
+      number += 1;
+      body += `<tr><td class="tc">${number}</td><td>${escapeHtml(row.name)}</td><td class="tc">${escapeHtml(row.unit)}</td><td class="tc">${escapeHtml(row.quantity)}</td><td class="tr">${row.isVariablePrice ? `от&nbsp;${moneyHtml(row.priceFrom)}&nbsp;₸` : `${moneyHtml(row.price)}&nbsp;₸`}</td><td class="tr b">${row.isVariablePrice ? "уточняется" : `${moneyHtml(row.sum)}&nbsp;₸`}</td></tr>`;
+    });
+    body += `<tr><td colspan="5" class="tr">Итого по разделу «${escapeHtml(category)}»:</td><td class="tr b">${moneyHtml(group.total)}&nbsp;₸</td></tr>`;
+  }
+  let output = `<table data-field-id="${escapeHtml(fieldId)}"><thead><tr><th>№</th><th>Наименование работ</th><th>Ед.</th><th>Объём</th><th>Цена за ед.</th><th>Сумма</th></tr></thead><tbody>${body}</tbody></table>`;
   const discount = Number(value?.discountPercent) || 0;
-  const discountRows = discount > 0 ? `
-    <tr><td colspan="5" class="tr">Скидка ${escapeHtml(discount)}%</td><td class="tr">−&nbsp;${moneyHtml(value?.discountAmount)}</td></tr>` : "";
-  return `<table data-field-id="${escapeHtml(fieldId)}"><thead><tr><th>№</th><th>Наименование работ</th><th>Ед.</th><th>Объём</th><th>Цена за ед.</th><th>Сумма</th></tr></thead><tbody>${body}${discountRows}<tr><td colspan="5" class="tr b">ИТОГО:</td><td class="tr b">${moneyHtml(value?.total)}&nbsp;₸</td></tr></tbody></table>`;
+  const contractTotal = Number(value?.subtotal) || 0;
+  const discountedTotal = contractTotal - (Number(value?.discountAmount) || 0);
+  if (categories.length > 1) {
+    const summary = categories.map(category => `<tr><td>${escapeHtml(category)}</td><td class="tr b">${moneyHtml(byCategory.get(category).total)}&nbsp;₸</td></tr>`).join("");
+    const discountRows = discount > 0
+      ? `<tr><td>Скидка ${escapeHtml(discount)}%</td><td class="tr">− ${moneyHtml(value?.discountAmount)}&nbsp;₸</td></tr><tr><td class="b">ИТОГО со скидкой:</td><td class="tr b">${moneyHtml(discountedTotal)}&nbsp;₸</td></tr>`
+      : `<tr><td class="b">ИТОГО:</td><td class="tr b">${moneyHtml(contractTotal)}&nbsp;₸</td></tr>`;
+    output += `<table><tbody><tr><td colspan="2" class="b">Сводка по разделам</td></tr>${summary}${discountRows}</tbody></table>`;
+  } else if (discount > 0) {
+    output += `<p class="tr">Скидка ${escapeHtml(discount)}%: − ${moneyHtml(value?.discountAmount)}&nbsp;₸</p><p class="tr b">ИТОГО со скидкой: ${moneyHtml(discountedTotal)}&nbsp;₸</p>`;
+  } else {
+    output += `<p class="tr b">ИТОГО: ${moneyHtml(contractTotal)}&nbsp;₸</p>`;
+  }
+  return output;
 };
 
 const renderMarks = (html, marks) => {
@@ -167,6 +198,8 @@ const extractTagTexts = (html, tag) => {
   return [...String(html || "").matchAll(expression)].map(match => normalizedPlain(match[1]));
 };
 
+const withoutTables = html => String(html || "").replace(/<table\b[^>]*>[\s\S]*?<\/table>/gi, "");
+
 const extractTableStructures = html => extractTagTexts(html, "table").map(tableText => tableText);
 
 const equalArrays = (left, right) => left.length === right.length && left.every((value, index) => value === right[index]);
@@ -182,8 +215,11 @@ const firstArrayDifference = (kind, left, right) => {
 export function compareCanonicalDocuments(legacyHtml, templateHtml) {
   const legacyText = normalizeLegalText(legacyHtml);
   const candidateText = normalizeLegalText(templateHtml);
-  const legacyParagraphs = extractTagTexts(legacyHtml, "p");
-  const candidateParagraphs = extractTagTexts(templateHtml, "p");
+  // TipTap requires paragraphs inside table cells while the legacy HTML does
+  // not. Table contents are compared separately, so paragraph order is
+  // compared only outside tables.
+  const legacyParagraphs = extractTagTexts(withoutTables(legacyHtml), "p");
+  const candidateParagraphs = extractTagTexts(withoutTables(templateHtml), "p");
   const legacyTables = extractTableStructures(legacyHtml);
   const candidateTables = extractTableStructures(templateHtml);
   const textEqual = legacyText === candidateText;

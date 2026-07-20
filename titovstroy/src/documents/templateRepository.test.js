@@ -120,4 +120,22 @@ describe("transactional document template repository", () => {
     expect(loaded.store.templates[0].draft).toMatchObject({ savedById: "admin-1", note: "draft" });
     expect(events.map(event => event.action)).toEqual(["создал шаблон", "изменил черновик"]);
   });
+
+  it("seeds the unchanged repair renderer and its draft in one committed operation", async () => {
+    const storage = fakeStorage();
+    const service = createDocumentTemplateService({
+      storage,
+      actor: ACTOR,
+      repairTemplateEnabled: true,
+      legacyRepairRenderer: (contract, client, company) => `<html><body><p>Договор №${contract.number}</p><p>${client.name} ${client.iin}</p><p>${company.name} ${company.bin}</p><table><tr><td>${contract.works[0].name}</td></tr></table></body></html>`,
+    });
+    const result = await service.seedLegacyRepair({
+      requiredFieldIds: ["contract.number", "client.name", "client.iin", "company.name", "company.bin", "estimate.worksTable"],
+    });
+    expect(result).toMatchObject({ ok: true, committed: true });
+    const loaded = await service.loadTemplates();
+    expect(loaded.store.templates).toHaveLength(1);
+    expect(loaded.store.templates[0]).toMatchObject({ id: "repair-fiz-legacy", source: "legacy-repair", status: "draft" });
+    expect(loaded.store.templates[0].draft.contentJson.type).toBe("doc");
+  });
 });

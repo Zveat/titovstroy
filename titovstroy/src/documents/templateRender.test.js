@@ -76,6 +76,8 @@ describe("safe document template renderer", () => {
     expect(html).toContain("Штукатурка &lt;стен&gt;");
     expect(html).toContain("50&nbsp;000");
     expect(html).toContain("<table");
+    expect(html).toContain("Итого по разделу «Работы»");
+    expect(html).toContain("ИТОГО: 50&nbsp;000&nbsp;₸");
   });
 
   it("compares legal text without changing punctuation, spelling, or paragraph order", () => {
@@ -97,6 +99,14 @@ describe("safe document template renderer", () => {
     expect(report.ok).toBe(false);
     expect(report.tablesEqual).toBe(false);
     expect(report.firstDifference).not.toBe(null);
+  });
+
+  it("does not invent paragraph differences for TipTap paragraphs inside table cells", () => {
+    const report = compareCanonicalDocuments(
+      "<p>До</p><table><tr><td>Ячейка</td></tr></table><p>После</p>",
+      "<p>До</p><table><tr><td><p>Ячейка</p></td></tr></table><p>После</p>",
+    );
+    expect(report.paragraphsEqual).toBe(true);
   });
 
   it("builds a locked editor extension set", () => {

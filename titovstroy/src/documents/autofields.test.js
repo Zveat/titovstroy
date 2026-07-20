@@ -68,7 +68,7 @@ describe("document autofields", () => {
     expect(requiredFieldIdsForType("repair_fiz")).toEqual(expect.arrayContaining([
       "client.name",
       "client.iin",
-      "object.id",
+      "object.address",
       "contract.number",
       "estimate.worksTable",
       "company.bin",
@@ -82,7 +82,8 @@ describe("document autofields", () => {
     expect(result.values["contract.number"]).toBe("1019");
     expect(result.values["client.iin"]).toBe("900101300000");
     expect(result.values["company.bin"]).toBe("231040002769");
-    expect(result.values["contract.total"]).toBe(45000);
+    // The active legal generator states the contract price before discount.
+    expect(result.values["contract.total"]).toBe(50000);
     expect(result.values["estimate.worksTable"].rows[0]).toMatchObject({
       name: "Штукатурка стен",
       unit: "м²",

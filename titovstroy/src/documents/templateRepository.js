@@ -83,6 +83,11 @@ export function createTemplateRepository({
     loadSnapshots,
     mutateSnapshots,
     createTemplate: (input, actor, now) => transactTemplates(store => createTemplate(store, input, actor, now)),
+    createTemplateWithDraft: (input, contentJson, actor, now, metadata) => transactTemplates(store => {
+      const created = createTemplate(store, input, actor, now);
+      if (!created.ok) return created;
+      return saveTemplateDraft(created.store, created.value.id, contentJson, actor, now, metadata);
+    }),
     copyTemplate: (sourceTemplateId, input, actor, now) => transactTemplates(store => copyTemplate(store, sourceTemplateId, input, actor, now)),
     saveDraft: (templateId, contentJson, actor, now, metadata) => transactTemplates(store => saveTemplateDraft(store, templateId, contentJson, actor, now, metadata)),
     publish: (templateId, publication, actor, now) => transactTemplates(store => publishTemplateDraft(store, templateId, publication, actor, now)),
