@@ -141,6 +141,7 @@ export function publishTemplateDraft(storeValue, templateId, publication, actor,
     };
     template.versions = [...template.versions, version];
     template.activeVersionId = version.id;
+    template.draft = null;
     template.status = "published";
     template.updatedAt = now;
     Object.assign(template, actorFields(actor, "updated"));
