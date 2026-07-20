@@ -138,4 +138,21 @@ describe("transactional document template repository", () => {
     expect(loaded.store.templates[0]).toMatchObject({ id: "repair-fiz-legacy", source: "legacy-repair", status: "draft" });
     expect(loaded.store.templates[0].draft.contentJson.type).toBe("doc");
   });
+
+  it("creates and revises snapshots without writing the template store", async () => {
+    const storage = fakeStorage();
+    const service = createDocumentTemplateService({ storage, actor: ACTOR });
+    const created = await service.createSnapshot({
+      contract: { id: "contract-1", objectId: "object-1", type: "repair_fiz", createdAt: 3000 },
+      version: { id: "repair:v1", templateId: "repair", publishedAt: 2000, contentJson: DOC, page: { size: "A4" } },
+      variables: { "contract.number": "1019" },
+      canonicalHtml: "<p>Текст</p>",
+      title: "Договор №1019",
+    });
+    expect(created).toMatchObject({ ok: true, committed: true });
+    const revisedDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Личная правка" }] }] };
+    expect(await service.appendSnapshotRevision("contract:contract-1", revisedDoc)).toMatchObject({ ok: true, committed: true });
+    expect((await service.getSnapshot("contract:contract-1")).snapshot.instanceVersions).toHaveLength(1);
+    expect((await service.loadTemplates()).status).toBe("empty");
+  });
 });

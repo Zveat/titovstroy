@@ -20,7 +20,7 @@ function ToolButton({ title, active = false, disabled = false, onClick, children
   );
 }
 
-export default function TemplateEditor({ contentJson, editable, onChange }) {
+export default function TemplateEditor({ contentJson, editable, onChange, showAutofields = true, instanceMode = false }) {
   const extensions = useMemo(() => createTemplateExtensions({ editable }), [editable]);
   const editor = useEditor({
     extensions,
@@ -86,13 +86,13 @@ export default function TemplateEditor({ contentJson, editable, onChange }) {
         </div>
       </div>
 
-      <div className="dt-editor-workspace">
+      <div className={`dt-editor-workspace${showAutofields ? "" : " without-fields"}${instanceMode ? " instance-mode" : ""}`}>
         <main className="dt-page-wrap">
           <div className="dt-a4-page">
             <EditorContent editor={editor} />
           </div>
         </main>
-        <aside className="dt-fields-panel">
+        {showAutofields && <aside className="dt-fields-panel">
           <div className="dt-fields-title">Автозаполнение</div>
           <div className="dt-fields-note">Синие поля защищены. При создании документа они заполнятся из карточки объекта.</div>
           {[...new Set(AUTOFIELD_DEFINITIONS.map(item => item.group))].map(group => (
@@ -107,7 +107,7 @@ export default function TemplateEditor({ contentJson, editable, onChange }) {
               </div>
             </details>
           ))}
-        </aside>
+        </aside>}
       </div>
     </div>
   );
