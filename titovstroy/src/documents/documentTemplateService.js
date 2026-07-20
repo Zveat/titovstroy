@@ -46,19 +46,40 @@ export function createDocumentTemplateService({
       const loaded = await repository.loadSnapshots();
       return { ...loaded, snapshot: loaded.status === "found" ? getSnapshotForDocument(loaded.snapshots, documentId) : null };
     },
-    createSnapshot: input => repository.mutateSnapshots(list => {
+    createSnapshot: async input => {
+      let failure = "";
+      const result = await repository.mutateSnapshots(list => {
+        try {
       const documentId = `contract:${input?.contract?.id || ""}`;
       const existing = list.filter(item => item?.documentId === documentId);
       if (existing.length > 0) return undefined;
       return [...list, createDocumentSnapshot({ ...input, actor: currentActor(), now: Date.now() })];
-    }),
-    appendSnapshotRevision: (documentId, contentJson) => repository.mutateSnapshots(list => {
+        } catch (error) {
+          failure = error?.message || "Снимок документа не создан";
+          return undefined;
+        }
+      });
+      return failure ? { ...result, ok: false, committed: false, reason: failure } : result;
+    },
+    appendSnapshotRevision: async (documentId, contentJson) => {
+      let failure = "";
+      const result = await repository.mutateSnapshots(list => {
+        try {
       const matches = list.map((item, index) => ({ item, index })).filter(entry => entry.item?.documentId === documentId);
-      if (matches.length !== 1) return undefined;
+      if (matches.length !== 1) {
+        failure = "Экземпляр документа не найден однозначно";
+        return undefined;
+      }
       const next = [...list];
       next[matches[0].index] = appendDocumentRevision(matches[0].item, contentJson, currentActor(), Date.now());
       return next;
-    }),
+        } catch (error) {
+          failure = error?.message || "Индивидуальная версия не сохранена";
+          return undefined;
+        }
+      });
+      return failure ? { ...result, ok: false, committed: false, reason: failure } : result;
+    },
     createTemplate: input => run("createTemplate", input?.id, (by, now) => repository.createTemplate(input, by, now)),
     copyTemplate: (sourceTemplateId, input) => run("copyTemplate", input?.id, (by, now) => repository.copyTemplate(sourceTemplateId, input, by, now)),
     saveDraft: (templateId, contentJson, metadata) => run("saveDraft", templateId, (by, now) => repository.saveDraft(templateId, contentJson, by, now, metadata)),

@@ -8,6 +8,7 @@ const syntheticLegacyRenderer = (contract, client, company) => `<!doctype html><
   <p>Заказчик: ${client.name}; ИИН ${client.iin}</p>
   <p>Подрядчик: ${company.name}; БИН ${company.bin}</p>
   <table><tbody><tr><td>${contract.works[0].name}</td></tr></tbody></table>
+  <p class="tr">ИТОГО: 9 876 543 ₸</p>
   <p>Неизменяемый юридический пункт: стороны обязаны исполнить договор.</p>
 </body></html>`;
 
@@ -30,6 +31,7 @@ describe("legacy repair template seed", () => {
     expect(seed.importReport.ok).toBe(true);
     expect(JSON.stringify(seed.contentJson)).toContain("Неизменяемый юридический пункт");
     expect(JSON.stringify(seed.contentJson).match(/estimate\.worksTable/g)).toHaveLength(1);
+    expect(JSON.stringify(seed.contentJson)).not.toContain("ИТОГО: 9 876 543");
   });
 
   it("refuses a seed when the legacy renderer drops a protected marker", () => {

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { snapshotContent } from "./documentSnapshots.js";
 import TemplateEditor from "./TemplateEditor.jsx";
+import "./documentTemplates.css";
 
 export default function DocumentInstanceEditor({ snapshot, service, onClose, onSaved }) {
   const [contentJson, setContentJson] = useState(() => snapshotContent(snapshot));
@@ -16,7 +17,12 @@ export default function DocumentInstanceEditor({ snapshot, service, onClose, onS
   const save = async () => {
     if (!dirty || !service?.appendSnapshotRevision) return;
     setSaving(true);
-    const result = await service.appendSnapshotRevision(snapshot.documentId, contentJson);
+    let result;
+    try {
+      result = await service.appendSnapshotRevision(snapshot.documentId, contentJson);
+    } catch (error) {
+      result = { ok: false, committed: false, reason: error?.message || "Индивидуальная версия не сохранена" };
+    }
     setSaving(false);
     if (!result?.ok || !result?.committed) {
       setMessage(result?.reason || "Индивидуальная версия не сохранена в облаке");
