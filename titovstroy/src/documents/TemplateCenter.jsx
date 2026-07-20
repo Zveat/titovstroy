@@ -3,6 +3,7 @@ import TemplateEditor from "./TemplateEditor.jsx";
 import { AUTOFIELD_DEFINITIONS, buildRepairPreviewContext, requiredFieldIdsForType, resolveRepairContractVariables } from "./autofields.js";
 import { buildTemplateActions, filterTemplates } from "./templateModel.js";
 import { createRepairParityReport } from "./repairLegacySeed.js";
+import { buildDocxBlobFromCanonical } from "./exportAdapters.js";
 import { DEFAULT_PAGE, extractTemplateFieldIds, normalizeLegalText, renderTemplateToCanonicalHtml } from "./templateRender.js";
 
 const EMPTY_DOCUMENT = { type: "doc", content: [{ type: "paragraph" }] };
@@ -68,6 +69,7 @@ export default function TemplateCenter({ service, permissions = {}, data = {} })
   const [newOpen, setNewOpen] = useState(false);
   const [previewObjectId, setPreviewObjectId] = useState("");
   const [previewReady, setPreviewReady] = useState(false);
+  const [exportChecks, setExportChecks] = useState({ pdf: false, gdoc: false, docx: false });
   const [parityReport, setParityReport] = useState(null);
   const [legalChecked, setLegalChecked] = useState(false);
   const selected = templates.find(template => template.id === selectedId) || null;
@@ -89,6 +91,7 @@ export default function TemplateCenter({ service, permissions = {}, data = {} })
     setDraftContent(activeContent(selected));
     setDirty(false);
     setPreviewReady(false);
+    setExportChecks({ pdf: false, gdoc: false, docx: false });
     setParityReport(null);
     setLegalChecked(false);
   }, [selectedId, selected?.updatedAt]);
@@ -118,8 +121,10 @@ export default function TemplateCenter({ service, permissions = {}, data = {} })
     if (report(result)) { setDirty(false); await reload(selected.id); }
   };
 
-  const preview = () => {
+  const preview = async () => {
     if (!selected) return;
+    setPreviewReady(false);
+    setExportChecks({ pdf: false, gdoc: false, docx: false });
     let variables = {};
     let context = null;
     if (selected.type === "repair_fiz") {
@@ -135,6 +140,23 @@ export default function TemplateCenter({ service, permissions = {}, data = {} })
       if (!popup) { setMessage("Браузер заблокировал окно предпросмотра"); return; }
       popup.opener = null;
       popup.document.open(); popup.document.write(html); popup.document.close();
+      const imported = await import("docx");
+      const D = imported.Document ? imported : (imported.default?.Document ? imported.default : imported);
+      const docxCheck = await buildDocxBlobFromCanonical({
+        title: selected.name,
+        canonicalHtml: html,
+        contentJson: draftContent,
+        variablesSnapshot: variables,
+        page: selected.draft?.page || DEFAULT_PAGE,
+        normalizedText: normalizeLegalText(html),
+      }, D);
+      const nextExportChecks = { pdf: true, gdoc: true, docx: docxCheck.ok === true };
+      setExportChecks(nextExportChecks);
+      if (!docxCheck.ok) {
+        setPreviewReady(false);
+        setMessage(`Предпросмотр открыт, но Word не собран: ${docxCheck.reason || "неизвестная ошибка"}`);
+        return;
+      }
       if (selected.source === "legacy-repair") {
         const comparison = createRepairParityReport({
           buildLegacyHtml: service.renderLegacyRepair,
@@ -179,7 +201,7 @@ export default function TemplateCenter({ service, permissions = {}, data = {} })
       checksum: `text-${normalizeLegalText(html).length}`,
       parityReport: verifiedParity,
       manualLegalReview: legalChecked,
-      exportChecks: { pdf: true, gdoc: true, docx: true },
+      exportChecks,
     });
     if (report(result)) await reload(selected.id);
   };
@@ -222,16 +244,16 @@ export default function TemplateCenter({ service, permissions = {}, data = {} })
         <button className="dt-back" onClick={() => { if (!dirty || window.confirm("Закрыть редактор без сохранения черновика?")) setSelectedId(null); }}>←</button>
         <div className="dt-editor-identity"><h2>{selected.name}</h2><div><span className={`dt-status ${selected.status}`}>{STATUS_LABEL[selected.status] || selected.status}</span><span>{selected.type}</span>{dirty && <span className="dt-unsaved">Есть несохранённые изменения</span>}</div></div>
         <div className="dt-editor-actions">
-          {selected.type === "repair_fiz" && <select value={previewObjectId} onChange={event => setPreviewObjectId(event.target.value)}><option value="">Объект для проверки</option>{(data.objects || []).filter(item => !item.deletedAt).map(item => <option key={item.id} value={item.id}>{item.clientName || item.address || item.id}</option>)}</select>}
+          {selected.type === "repair_fiz" && <select value={previewObjectId} onChange={event => { setPreviewObjectId(event.target.value); setPreviewReady(false); setExportChecks({ pdf: false, gdoc: false, docx: false }); setParityReport(null); }}><option value="">Объект для проверки</option>{(data.objects || []).filter(item => !item.deletedAt).map(item => <option key={item.id} value={item.id}>{item.clientName || item.address || item.id}</option>)}</select>}
           <button className="dt-btn secondary" onClick={preview}>Предпросмотр</button>
           {editable && <button className="dt-btn primary" onClick={save} disabled={!dirty || saving}>{saving ? "Сохранение…" : "Сохранить черновик"}</button>}
         </div>
       </header>
-      <TemplateEditor contentJson={draftContent} editable={editable} onChange={next => { setDraftContent(next); setDirty(true); setPreviewReady(false); setParityReport(null); }} />
+      <TemplateEditor contentJson={draftContent} editable={editable} onChange={next => { setDraftContent(next); setDirty(true); setPreviewReady(false); setExportChecks({ pdf: false, gdoc: false, docx: false }); setParityReport(null); setLegalChecked(false); }} />
       <footer className="dt-publish-bar">
         <div><strong>Публикация версии</strong><span>Новые документы получат эту версию. Уже созданные документы не изменятся.</span></div>
         <label><input type="checkbox" checked={legalChecked} onChange={event => setLegalChecked(event.target.checked)} /> {selected.source === "legacy-repair" ? "Юридический текст сравнен с действующим документом" : "Юридический текст проверен без сокращений"}</label>
-        {can(permissions.templatePublish) && <button className="dt-btn primary" disabled={dirty || !selected.draft || !previewReady || !legalChecked || (selected.source === "legacy-repair" && parityReport?.ok !== true)} onClick={publish}>Опубликовать</button>}
+        {can(permissions.templatePublish) && <button className="dt-btn primary" disabled={dirty || !selected.draft || !previewReady || !legalChecked || !Object.values(exportChecks).every(Boolean) || (selected.source === "legacy-repair" && parityReport?.ok !== true)} onClick={publish}>Опубликовать</button>}
       </footer>
       {selected.source === "legacy-repair" && <div className="dt-legal-lock">{parityReport?.ok ? "Сравнение пройдено: текст совпадает с действующим договором." : "Пилотный договор ремонта публикуется только после автоматического сравнения с действующим генератором. Юридический текст здесь не меняется автоматически."}</div>}
       {(selected.versions?.length || 0) > 0 && <section className="dt-history"><h3>История версий</h3>{[...selected.versions].reverse().map(version => <div key={version.id}><span><b>Версия {version.versionNumber}</b><small>{new Date(version.publishedAt).toLocaleString("ru-RU")} · {version.publishedBy || "—"}</small></span>{version.id === selected.activeVersionId ? <em>Активна</em> : can(permissions.templateRollback) && <button onClick={() => rollback(version.id)}>Вернуть</button>}</div>)}</section>}

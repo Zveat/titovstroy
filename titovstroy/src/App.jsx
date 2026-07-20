@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef, Fragment } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef, Fragment, lazy, Suspense } from "react";
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, get, set, runTransaction } from "firebase/database";
 import ProductionModule, { flushPendingProduction, stopProductionSession, hasPendingProduction, productionDraftsAreDurable, startProductionSession, setProductionCommandHandler } from "./production/ProductionModule.jsx";
@@ -6,10 +6,12 @@ import { emptyProduction } from "./production/constants.js";
 import { applyProductionCommand, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, isRegenerableProductionCommand, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
-import DocumentTemplateAdminRoute from "./documents/DocumentTemplateAdminRoute.jsx";
-import { createDocumentTemplateService } from "./documents/documentTemplateService.js";
+import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+
+const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
+const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
 function useDebounce(value, ms) {
@@ -2813,11 +2815,13 @@ function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE
           onSaveRolePermissions={onSaveRolePermissions}
         />
       ) : tab === "documentTemplates" ? (
-        <DocumentTemplateAdminRoute
-          service={documentTemplateService}
-          permissions={permissions}
-          data={documentTemplateData}
-        />
+        <Suspense fallback={<div className="dt-empty">Загрузка редактора шаблонов…</div>}>
+          <DocumentTemplateAdminRoute
+            service={documentTemplateService}
+            permissions={permissions}
+            data={documentTemplateData}
+          />
+        </Suspense>
       ) : tab === "users" ? (
         <div>
           {/* Список сотрудников — карточки богатые (роль, онлайн, кнопки), поэтому шире: 2 колонки */}
@@ -4980,6 +4984,8 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [legacyDirtyN, setLegacyDirtyN] = useState(0); // legacy-маркеры без владельца (карантин — не авто-отправляются)
   const [cloudError, setCloudError] = useState(false); // последнее сохранение не ушло в облако (только локально)
   const [listBackups, setListBackups] = useState(null); // {label, items, onRestore}
+  const [documentSnapshotsById, setDocumentSnapshotsById] = useState(() => new Map());
+  const [documentInstanceSnapshot, setDocumentInstanceSnapshot] = useState(null);
 
   // Экраны: "list" | "editor" | "contracts"
   // Руководитель по умолчанию попадает на финансы
@@ -9016,7 +9022,7 @@ ${reqBlock}`;
     manualTotal: c.priceMode==="lump" ? (c.manualTotal||"") : "",
     avans: c.avans||"", termDays: c.termDays||"", withStamp,
   });
-  const generateContractPdf = (c, client, ca, withStamp=true) => {
+  const generateContractPdfLegacy = (c, client, ca, withStamp=true) => {
     if (c.type==="podryad" || c.type==="podryad_annex") {
       const worker = workersRef.current.find(w=>w.id===c.workerId) || null;
       openOrPrintHtml(buildPodryadHtml(podryadContractToModel(c, worker, withStamp)), 20000);
@@ -9213,7 +9219,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     openOrPrintHtml(html, 30000);
   };
 
-  const generateContractDocx = async (c, client, ca) => {
+  const generateContractDocxLegacy = async (c, client, ca) => {
     const clientName = client?.name || c.estClient || "договор";
     const num = c.number || c.id?.slice(-4) || "б-н";
     const dateStr = c.date ? c.date.split("-").reverse().join(".") : "";
@@ -9673,7 +9679,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     }
   };
 
-  const generateContractGDoc = async (c, client, ca) => {
+  const generateContractGDocLegacy = async (c, client, ca) => {
     const GDOC_CLIENT_ID = "363473710949-d67codd7dq0uk9g4tfl8lhhgecgcqe98.apps.googleusercontent.com";
     const clientName = client?.name || c.estClient || "договор";
     const num = c.number || c.id?.slice(-4) || "б-н";
@@ -9905,12 +9911,54 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
   };
   // Шаблоны документов живут в отдельном модуле. Здесь только связываем его с
   // текущим storage, пользователем, аудитом и неизменённым legacy-генератором.
-  const documentTemplateService = createDocumentTemplateService({
+  const documentTemplateRuntime = createDocumentTemplateRuntime({
     storage,
     actor: () => currentUser,
     audit: event => logChange(currentUser, event),
     legacyRepairRenderer: buildContractHtml,
+    getData: () => ({
+      objects: objectsRef.current,
+      estimates: estimatesRef.current,
+      contracts: contractsRef.current,
+      clients: clientsRef.current,
+      contragents: contragentsRef.current,
+    }),
+    legacyExports: {
+      pdf: ({ contract, client, contragent, withStamp }) => generateContractPdfLegacy(contract, client, contragent, withStamp ?? true),
+      gdoc: ({ contract, client, contragent }) => generateContractGDocLegacy(contract, client, contragent),
+      docx: ({ contract, client, contragent }) => generateContractDocxLegacy(contract, client, contragent),
+    },
+    openOrPrintHtml,
+    googleClientId: "363473710949-d67codd7dq0uk9g4tfl8lhhgecgcqe98.apps.googleusercontent.com",
+    confirmLegacy: reason => window.confirm(`${reason}.\n\nСоздать документ действующим способом?`),
   });
+  const documentTemplateService = documentTemplateRuntime.service;
+  const refreshDocumentSnapshots = useCallback(async () => {
+    if (!documentTemplateRuntime.enabled) return;
+    const loaded = await documentTemplateService.loadSnapshots();
+    if (loaded?.status !== "found") {
+      setDocumentSnapshotsById(new Map());
+      return;
+    }
+    setDocumentSnapshotsById(new Map((loaded.snapshots || []).filter(item => item?.documentId).map(item => [item.documentId, item])));
+  }, [currentUser.id]);
+  useEffect(() => { refreshDocumentSnapshots(); }, [refreshDocumentSnapshots]);
+  const openDocumentInstance = contract => {
+    const snapshot = documentSnapshotsById.get(`contract:${contract?.id || ""}`);
+    if (snapshot) setDocumentInstanceSnapshot(snapshot);
+  };
+  const runContractExport = async (format, contract, client, contragent, withStamp) => {
+    try {
+      const result = await documentTemplateRuntime.exportContract(format, { contract, client, contragent, withStamp });
+      if (result?.ok === false && !result?.canUseLegacy) alert(`Не удалось создать документ: ${result.reason || "неизвестная ошибка"}`);
+      if (result?.ok && documentTemplateRuntime.enabled) await refreshDocumentSnapshots();
+    } catch (error) {
+      alert(`Не удалось создать документ: ${error?.message || "неизвестная ошибка"}`);
+    }
+  };
+  const generateContractPdf = (contract, client, contragent, withStamp=true) => runContractExport("pdf", contract, client, contragent, withStamp);
+  const generateContractGDoc = (contract, client, contragent) => runContractExport("gdoc", contract, client, contragent);
+  const generateContractDocx = (contract, client, contragent) => runContractExport("docx", contract, client, contragent);
   const NAV_ITEMS = useMemo(() => {
     const show = access => access !== "none" || currentPermissions.showLocked;
     return [
@@ -14540,6 +14588,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                   style={{background:"#e2e8f0",color:"#334155",border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>}
                                 {accessAllows(currentPermissions.documentExport, estimatorObjectIds.has(obj.id)) && !_podLocked && <button onClick={()=>generateContractGDoc(c,cl2,ca2)}
                                   style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>}
+                                {documentSnapshotsById.has(`contract:${c.id}`) && accessAllows(currentPermissions.documentInstanceEdit, estimatorObjectIds.has(obj.id)) && !_podLocked && <button onClick={()=>openDocumentInstance(c)}
+                                  style={{background:"#f8fafc",color:"#475569",border:"1px solid #cbd5e1",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>✎ Экземпляр</button>}
                                 {currentUser.role==="admin" && c.type!=="podryad" && c.type!=="podryad_annex" && (()=>{
                                   const main = mainContractOf(c);
                                   const exists = finProjectsRef.current.find(p=>normCN(p.contractNo)===normCN(main?.number));
@@ -14874,6 +14924,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                   const ca2 = contragents.find(x=>x.id===c.contragentId);
                                   generateContractGDoc(c, cl, ca2);
                                 }} style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋 GDoc</button>}
+                                {documentSnapshotsById.has(`contract:${c.id}`) && accessAllows(currentPermissions.documentInstanceEdit, _isOwnDoc(c)) && !_podLocked && <button onClick={e=>{e.stopPropagation(); openDocumentInstance(c);}}
+                                  style={{background:"#f8fafc",color:"#475569",border:"1px solid #cbd5e1",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✎ Экземпляр</button>}
                                 {accessAllows(currentPermissions.documentDelete, c.createdById===currentUser.id||c.createdBy===currentUser.name) && (
                                   <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить в корзину?")){ saveContracts(contractsRef.current.map(x=>x.id===c.id?{...x,deletedAt:Date.now()}:x)); logChange(currentUser,{entity:"contract",entityId:c.id,objectId:c.objectId||"",label:c.contractNo||c.objectName||"Договор",action:"удалил договор"}); }}}
                                     style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
@@ -15089,6 +15141,23 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       </div>
 
       <DangerConfirmModal/>
+
+      {documentInstanceSnapshot && (
+        <div style={{position:"fixed",inset:0,zIndex:9998,background:"#f8fafc",overflow:"auto"}}>
+          <Suspense fallback={<div className="dt-empty">Загрузка редактора документа…</div>}>
+            <DocumentInstanceEditor
+              snapshot={documentInstanceSnapshot}
+              service={documentTemplateService}
+              onClose={()=>setDocumentInstanceSnapshot(null)}
+              onSaved={snapshot=>{
+                if (!snapshot) return;
+                setDocumentInstanceSnapshot(snapshot);
+                setDocumentSnapshotsById(current=>new Map(current).set(snapshot.documentId, snapshot));
+              }}
+            />
+          </Suspense>
+        </div>
+      )}
 
       {/* Модал подтверждения выхода */}
       {/* ── Построитель АВР (форма Р-1) ── */}

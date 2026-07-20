@@ -174,7 +174,29 @@ function blockNodes(node) {
   if (node.tag === "hr") return [{ type: "horizontalRule" }];
   if (node.tag === "ul" || node.tag === "ol") return [{ type: node.tag === "ul" ? "bulletList" : "orderedList", content: (node.children || []).filter(child => child.tag === "li").map(child => ({ type: "listItem", content: [{ type: "paragraph", content: inlineNodes(child) }] })) }];
   const pageBreak = node.tag === "div" && /page-break-before\s*:\s*always/i.test(String(node.attrs.style || "")) ? [{ type: "pageBreak" }] : [];
-  return [...pageBreak, ...(node.children || []).flatMap(blockNodes)];
+  const children = [];
+  const source = node.children || [];
+  for (let index = 0; index < source.length; index += 1) {
+    const child = source[index];
+    if (child?.tag === "table" && textOf(child).includes(WORKS_MARKER)) {
+      children.push(tableNode(child));
+      while (index + 1 < source.length) {
+        const next = source[index + 1];
+        const nextText = textOf(next).replace(/\s+/g, " ").trim();
+        if (next?.text != null && !nextText) {
+          index += 1;
+          continue;
+        }
+        const generatedSummary = (next?.tag === "table" && nextText.includes("Сводка по разделам"))
+          || (next?.tag === "p" && /^(Скидка\s|ИТОГО(?:\s|:))/u.test(nextText));
+        if (!generatedSummary) break;
+        index += 1;
+      }
+      continue;
+    }
+    children.push(...blockNodes(child));
+  }
+  return [...pageBreak, ...children];
 }
 
 export function createRepairLegacySeed({ buildLegacyHtml, requiredFieldIds } = {}) {
@@ -186,7 +208,22 @@ export function createRepairLegacySeed({ buildLegacyHtml, requiredFieldIds } = {
     : [...new Set(MARKERS.map(([, fieldId]) => fieldId))];
   const missing = required.filter(fieldId => !counts[fieldId]);
   if (missing.length) return { ok: false, reason: `Действующий генератор не вернул маркер: ${missing.join(", ")}`, importReport: { ok: false, counts, missing } };
-  const content = parseHtml(legacyHtml).children.flatMap(blockNodes).filter(Boolean);
+  const rawContent = parseHtml(legacyHtml).children.flatMap(blockNodes).filter(Boolean);
+  let afterDataTable = false;
+  const content = rawContent.filter(node => {
+    if (node?.type === "dataTable") {
+      afterDataTable = true;
+      return true;
+    }
+    if (!afterDataTable || node?.type !== "paragraph") {
+      afterDataTable = false;
+      return true;
+    }
+    const value = (node.content || []).map(item => item.text || "").join("").replace(/\s+/g, " ").trim();
+    const generatedSummary = /^(Скидка\s|ИТОГО(?:\s|:))/u.test(value);
+    if (!generatedSummary) afterDataTable = false;
+    return !generatedSummary;
+  });
   const contentJson = { type: "doc", content: content.length ? content : [{ type: "paragraph" }] };
   return {
     ok: true,
