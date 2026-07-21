@@ -271,6 +271,165 @@ function StaleObjectsPanel({ items, onOpen, onShowAll, fmt, title = "Без дв
 const _CAL_ST = { todo:{ l:"Не начат", c:"#94a3b8" }, progress:{ l:"В работе", c:"#2563eb" }, done:{ l:"Готово", c:"#059669" }, delayed:{ l:"Задержка", c:"#dc2626" } };
 const _CAL_DAY = 864e5;
 const _calDayStart = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
+// ── РАЗДЕЛ «МАСТЕРА» ── справочник с naimi.kz (наполняется парсером, только чтение)
+function _kzPhone(d) {
+  d = String(d || "").replace(/\D/g, "");
+  if (d.length === 11 && (d[0] === "8" || d[0] === "7")) d = "7" + d.slice(1);
+  else if (d.length === 10) d = "7" + d;
+  return d;
+}
+function _fmtPhone(d) {
+  const p = _kzPhone(d);
+  if (p.length === 11) return `+7 ${p.slice(1, 4)} ${p.slice(4, 7)}-${p.slice(7, 9)}-${p.slice(9)}`;
+  return d ? "+" + p : "";
+}
+function MastersSection({ masters = [], meta = null, loaded = true }) {
+  const [city, setCity] = useState("");
+  const [service, setService] = useState("");
+  const [minRating, setMinRating] = useState(0);
+  const [onlyVerified, setOnlyVerified] = useState(false);
+  const [onlyPhone, setOnlyPhone] = useState(false);
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState("rating");
+  const [limit, setLimit] = useState(60);
+
+  const cities = useMemo(() => [...new Set(masters.map(m => m.city).filter(Boolean))].sort(), [masters]);
+  const services = useMemo(() => {
+    const s = new Set();
+    for (const m of masters) for (const x of (m.services || [])) if (x) s.add(x);
+    return [...s].sort((a, b) => a.localeCompare(b, "ru"));
+  }, [masters]);
+
+  const filtered = useMemo(() => {
+    const qn = q.trim().toLowerCase();
+    const list = masters.filter(m => {
+      if (city && m.city !== city) return false;
+      if (service && !(m.services || []).includes(service)) return false;
+      if (minRating && (Number(m.rating) || 0) < minRating) return false;
+      if (onlyVerified && !m.verified) return false;
+      if (onlyPhone && !m.phone) return false;
+      if (qn && !String(m.name || "").toLowerCase().includes(qn)) return false;
+      return true;
+    });
+    list.sort((a, b) => {
+      if (sort === "reviews") return (b.reviews || 0) - (a.reviews || 0);
+      if (sort === "name") return String(a.name || "").localeCompare(String(b.name || ""), "ru");
+      return (Number(b.rating) || 0) - (Number(a.rating) || 0) || (b.reviews || 0) - (a.reviews || 0);
+    });
+    return list;
+  }, [masters, city, service, minRating, onlyVerified, onlyPhone, q, sort]);
+
+  const shown = filtered.slice(0, limit);
+  const withPhone = masters.filter(m => m.phone).length;
+
+  const selStyle = { height: 36, borderRadius: 9, border: "1px solid #e2e8f0", padding: "0 10px", fontSize: 13, background: "#fff", color: "#0f172a", fontFamily: "inherit", minWidth: 0 };
+  const chip = (active) => ({ border: "1px solid " + (active ? "#2563eb" : "#e2e8f0"), background: active ? "#eff6ff" : "#fff", color: active ? "#2563eb" : "#64748b", borderRadius: 8, padding: "6px 12px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" });
+
+  return (
+    <div className="page" style={{ maxWidth: 1600, minHeight: "100vh", paddingBottom: 40 }}>
+      <div className="hero" style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)", borderRadius: 16, padding: "22px 26px", marginBottom: 18, position: "relative", overflow: "hidden", boxShadow: "0 4px 20px rgba(15,23,42,.3)" }}>
+        <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: 13, flexWrap: "wrap" }}>
+          <div style={{ width: 40, height: 40, borderRadius: 11, background: "linear-gradient(135deg,#3b82f6,#2563eb)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>🔎</div>
+          <div style={{ minWidth: 0 }}>
+            <h1 style={{ margin: 0, fontSize: 21, fontWeight: 900, color: "#fff", lineHeight: 1.1 }}>Мастера</h1>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,.7)", marginTop: 3 }}>
+              База подрядчиков с naimi.kz · всего {masters.length}{withPhone ? ` · с телефоном ${withPhone}` : ""}
+              {meta?.updatedAt ? ` · обновлено ${new Date(meta.updatedAt).toLocaleDateString("ru-RU")}` : ""}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Фильтры */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Поиск по имени…" style={{ ...selStyle, flex: "1 1 200px", maxWidth: 280 }} />
+        <select value={city} onChange={e => setCity(e.target.value)} style={selStyle}>
+          <option value="">Все города</option>
+          {cities.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={service} onChange={e => setService(e.target.value)} style={{ ...selStyle, maxWidth: 260 }}>
+          <option value="">Все виды работ</option>
+          {services.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select value={sort} onChange={e => setSort(e.target.value)} style={selStyle}>
+          <option value="rating">По рейтингу</option>
+          <option value="reviews">По отзывам</option>
+          <option value="name">По имени</option>
+        </select>
+        <div style={{ display: "flex", gap: 4 }}>
+          {[[0, "Рейтинг: все"], [4, "4+"], [4.5, "4.5+"], [5, "5"]].map(([v, l]) => (
+            <button key={v} style={chip(minRating === v)} onClick={() => setMinRating(v)}>{l}</button>
+          ))}
+        </div>
+        <button style={chip(onlyVerified)} onClick={() => setOnlyVerified(v => !v)}>✓ Проверенные</button>
+        <button style={chip(onlyPhone)} onClick={() => setOnlyPhone(v => !v)}>📞 С телефоном</button>
+      </div>
+
+      {/* Пусто / загрузка */}
+      {!masters.length && (
+        <div style={{ textAlign: "center", padding: "60px 20px", color: "#94a3b8", background: "#f9fafb", border: "1px dashed #e5e7eb", borderRadius: 14 }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>🔎</div>
+          <div style={{ fontWeight: 700, marginBottom: 6, color: "#64748b" }}>{loaded ? "База мастеров пока пуста" : "Загрузка…"}</div>
+          <div style={{ fontSize: 12.5 }}>Парсер naimi.kz наполнит её в ближайший запуск (по расписанию раз в день).<br />Телефоны докапываются постепенно.</div>
+        </div>
+      )}
+
+      {/* Список */}
+      {!!masters.length && (
+        <>
+          <div style={{ fontSize: 12.5, color: "#94a3b8", marginBottom: 10 }}>Найдено: {filtered.length}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(320px,1fr))", gap: 12 }}>
+            {shown.map(m => {
+              const phoneD = m.phone ? _kzPhone(m.phone) : "";
+              return (
+                <div key={m.source + ":" + m.extId} style={{ background: "#fff", border: "1px solid #eef2f7", borderRadius: 14, padding: "14px 16px", boxShadow: "0 1px 2px rgba(15,23,42,.04)", display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 14.5, fontWeight: 800, color: "#0f172a" }}>{m.name || "Без имени"}</span>
+                        {m.verified && <span title="Проверенный" style={{ fontSize: 11, fontWeight: 800, color: "#059669", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 6, padding: "1px 6px" }}>✓</span>}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "#94a3b8", marginTop: 2 }}>
+                        {m.city || "—"}
+                        {m.rating ? <span style={{ color: "#d97706", fontWeight: 700 }}> · ★ {Number(m.rating).toFixed(1)}</span> : ""}
+                        {m.reviews ? ` · ${m.reviews} отзывов` : ""}
+                      </div>
+                    </div>
+                  </div>
+                  {!!(m.services || []).length && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                      {(m.services || []).slice(0, 4).map((s, i) => (
+                        <span key={i} style={{ fontSize: 10.5, color: "#475569", background: "#f1f5f9", borderRadius: 6, padding: "2px 7px" }}>{s}</span>
+                      ))}
+                      {(m.services || []).length > 4 && <span style={{ fontSize: 10.5, color: "#94a3b8" }}>+{(m.services || []).length - 4}</span>}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+                    {phoneD ? (
+                      <>
+                        <a href={"tel:+" + phoneD} style={{ textDecoration: "none", background: "#eff6ff", color: "#2563eb", border: "1px solid rgba(37,99,235,.2)", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>📞 {_fmtPhone(m.phone)}</a>
+                        <a href={"https://wa.me/" + phoneD} target="_blank" rel="noreferrer" style={{ textDecoration: "none", background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>WhatsApp</a>
+                      </>
+                    ) : (
+                      <span style={{ fontSize: 11.5, color: "#94a3b8", alignSelf: "center" }}>📞 номер собирается…</span>
+                    )}
+                    {m.url && <a href={m.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", background: "#f8fafc", color: "#64748b", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>🔗 Профиль</a>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {filtered.length > limit && (
+            <div style={{ textAlign: "center", marginTop: 16 }}>
+              <button onClick={() => setLimit(l => l + 60)} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 20px", fontSize: 13, fontWeight: 700, color: "#2563eb", cursor: "pointer", fontFamily: "inherit" }}>Показать ещё ({filtered.length - limit})</button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function ProductionCalendar({ objects, productions, onOpenObject }) {
   const [groupBy, setGroupBy] = useState("object"); // "object" | "foreman"
   const [windowDays, setWindowDays] = useState(30);  // 14 | 30 | 90
@@ -805,6 +964,7 @@ const WORKERS_KEY         = "titovstroy-workers";          // справочни
 const WORKERS_BACKUPS_KEY = "titovstroy-workers-backups";
 const PODRYADS_KEY        = "titovstroy-podryads";         // договоры подряда с рабочими + их приложения
 const PODRYADS_BACKUPS_KEY= "titovstroy-podryads-backups";
+const MASTERS_KEY         = "titovstroy-masters";          // справочник мастеров с naimi.kz (пишет парсер, читаем только на чтение)
 // единый снимок рабочего пространства: объекты + их сметы + их договора
 const WORKSPACE_BACKUPS_KEY = "titovstroy-workspace-backups";
 // legacy ключ для миграции старых сделок
@@ -5159,6 +5319,26 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [contragents, setContragents] = useState([{id:"1",name:"ТОО TITOVSTROY",bin:"231040002769",bank:'АО "Kaspi Bank"',bik:"CASPKZKA",account:"KZ38722S000030058973",director:"Титов В.Е.",phone:"8707 667 8766",email:"titovstroy@mail.ru",address:"Казахстан, район им.Казыбек би, улица Кирпичная, дом 8г"}]);
   const contragentsRef = useRef([]);
   useEffect(() => { contragentsRef.current = contragents; }, [contragents]);
+  // «Мастера» — внешний справочник с naimi.kz. Пишет отдельный парсер (GitHub Actions)
+  // в ключ titovstroy-masters; приложение только ЧИТАЕТ, боевых данных не касается.
+  const [masters, setMasters] = useState([]);
+  const [mastersMeta, setMastersMeta] = useState(null);
+  const [mastersLoaded, setMastersLoaded] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    storage.getResult(MASTERS_KEY).then(res => {
+      if (!alive) return;
+      setMastersLoaded(true);
+      if (res && res.status === "found" && res.value) {
+        try {
+          const d = JSON.parse(res.value);
+          setMasters(Array.isArray(d?.items) ? d.items : (Array.isArray(d) ? d : []));
+          setMastersMeta(d && !Array.isArray(d) ? { updatedAt: d.updatedAt, count: d.count, withPhone: d.withPhone } : null);
+        } catch {}
+      }
+    }).catch(() => { if (alive) setMastersLoaded(true); });
+    return () => { alive = false; };
+  }, []);
   const _contractsLoaded = useRef(false);
   const _productionsLoaded = useRef(false); // отдельно от _contractsLoaded: productions грузится в том же запросе, но может не долететь, пока остальное — долетит
   // Флаги загрузки — это refs (не вызывают ре-рендер). Авто-синки (этапы←сметы, бюджет←договоры)
@@ -9885,6 +10065,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       ...(show(currentPermissions.documents) ? [{ id:"contracts", icon:"📄", label:"Прочие документы", short:"Документы" }] : []),
       ...(show(currentPermissions.analytics) ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
       ...(show(currentPermissions.finance) ? [{ id:"finance", icon:"💰", label:"Финансы" }] : []),
+      ...(show(currentPermissions.objects) ? [{ id:"masters", icon:"🔎", label:"Мастера" }] : []),
       ...(show(currentPermissions.admin) ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
     ];
   }, [currentPermissions]);
@@ -14672,6 +14853,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         </div>
         );
       })()}
+
+        {effScreen === "masters" && <MastersSection masters={masters} meta={mastersMeta} loaded={mastersLoaded} />}
 
         {effScreen === "contracts" && currentPermissions.documents === "none" && restrictedSection("Прочие документы", "сотрудникам с соответствующим правом")}
         {effScreen === "contracts" && currentPermissions.documents !== "none" && (
