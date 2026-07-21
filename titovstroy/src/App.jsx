@@ -6,12 +6,14 @@ import { emptyProduction } from "./production/constants.js";
 import { applyProductionCommand, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, isRegenerableProductionCommand, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
+import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
+const DOCUMENT_TEMPLATE_FEATURE = createDocumentTemplateFeaturePolicy();
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
 function useDebounce(value, ms) {
@@ -2521,7 +2523,7 @@ function RolePermissionsEditor({ rolePermissions, onSaveRolePermissions }) {
 }
 
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
-function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE_PERMISSIONS.admin, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], documentTemplateService=null, documentTemplateData={}, fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
+function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE_PERMISSIONS.admin, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], documentTemplateEnabled=false, documentTemplateService=null, documentTemplateData={}, fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
   const [tab, setTab] = useState("users");
   const hasAdminPermission = (key) => accessAllows(permissions[key], true);
   const adminTabs = [
@@ -2531,7 +2533,7 @@ function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE
     ["contragents","🏢 Реквизиты","adminClients"],
     ["workers","🔨 Подрядчики","adminContractors"],
     ["prices","💰 Прайс-лист", hasAdminPermission("adminCatalog") || hasAdminPermission("adminPrices") ? null : "__none"],
-    ["documentTemplates","📑 Шаблоны документов","templateView"],
+    ...(documentTemplateEnabled ? [["documentTemplates","📑 Шаблоны документов","templateView"]] : []),
     ["backups","🗄 Бэкапы", hasAdminPermission("adminBackups") || hasAdminPermission("adminRestore") ? null : "__none"],
     ["audit","📋 Журнал","adminAudit"],
     ["check","🔍 Проверка базы","adminDbCheck"],
@@ -7554,7 +7556,7 @@ ${reqBlock}`;
     { k: "financeProjects", label: "Финансы: проекты",  key: FINANCE_PROJECTS_KEY, bkey: FINANCE_PROJECTS_BACKUPS_KEY },
     { k: "reports",         label: "Акты",              key: REPORTS_KEY,          bkey: REPORTS_BACKUPS_KEY },
     { k: "users",           label: "Пользователи",      key: USERS_KEY,            bkey: USERS_BACKUPS_KEY },
-    ...DOCUMENT_TEMPLATE_BACKUP_SECTIONS,
+    ...(DOCUMENT_TEMPLATE_FEATURE.includeBackups ? DOCUMENT_TEMPLATE_BACKUP_SECTIONS : []),
   ];
   // { list, ok } — читаем ТОЛЬКО из облака (getCloudResult, без localStorage-резерва). ok=false =
   // база не ответила ИЛИ значение есть, но это не валидный JSON-массив (битые данные — это ошибка,
@@ -7702,7 +7704,7 @@ ${reqBlock}`;
     // полная отмена, ни одна запись в Firebase не идёт.
     const _arraySpecs = [
       ..._backupSections.filter(s => !s.managedRestore).map(s => ({ key: s.k, idKey: s.k === "productions" ? "objectId" : "id" })),
-      ...documentTemplateBackupSpecs(),
+      ...(DOCUMENT_TEMPLATE_FEATURE.includeBackups ? documentTemplateBackupSpecs() : []),
     ];
     const schema = validateBackupSchema(snap, _arraySpecs);
     if (!schema.ok) { window.alert("❌ Файл бэкапа повреждён или имеет неверную структуру — восстановление отменено.\n\nПричина: " + schema.error); return; }
@@ -7815,7 +7817,9 @@ ${reqBlock}`;
       if (!list) continue; // нет раздела в файле — не трогаем текущий
       await restoreKey(s.key, s.bkey, list, s.label);
     }
-    await restoreDocumentTemplateSections({ data: d, has, restoreKey });
+    if (DOCUMENT_TEMPLATE_FEATURE.includeBackups) {
+      await restoreDocumentTemplateSections({ data: d, has, restoreKey });
+    }
     // hasOwnProperty, а не истинность: подтверждённое пустое значение тоже нужно восстановить,
     // иначе старые настройки/цены останутся, хотя в бэкапе их уже не было. Пустой объектный
     // раздел восстанавливаем как {} (не null) — загрузчики каталога/цен/настроек ждут объект.
@@ -15120,6 +15124,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           saveWorkers={saveWorkers}
           workersRef={workersRef}
           contracts={contracts}
+          documentTemplateEnabled={DOCUMENT_TEMPLATE_FEATURE.showAdmin}
           documentTemplateService={documentTemplateService}
           documentTemplateData={{
             objects,
@@ -15142,7 +15147,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 
       <DangerConfirmModal/>
 
-      {documentInstanceSnapshot && (
+      {DOCUMENT_TEMPLATE_FEATURE.allowInstances && documentInstanceSnapshot && (
         <div style={{position:"fixed",inset:0,zIndex:9998,background:"#f8fafc",overflow:"auto"}}>
           <Suspense fallback={<div className="dt-empty">Загрузка редактора документа…</div>}>
             <DocumentInstanceEditor
