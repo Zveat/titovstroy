@@ -283,7 +283,28 @@ function _fmtPhone(d) {
   if (p.length === 11) return `+7 ${p.slice(1, 4)} ${p.slice(4, 7)}-${p.slice(7, 9)}-${p.slice(9)}`;
   return d ? "+" + p : "";
 }
-function MastersSection({ masters = [], meta = null, loaded = true }) {
+function MastersSection({ masters = [], meta = null, loaded = true, config = null, onSaveConfig = null, canManage = false }) {
+  const [cfgOpen, setCfgOpen] = useState(false);
+  const [freq, setFreq] = useState("daily");
+  const [cfgCities, setCfgCities] = useState("almaty");
+  const [cfgPhones, setCfgPhones] = useState(25);
+  const [cfgMsg, setCfgMsg] = useState("");
+  const [cfgBusy, setCfgBusy] = useState(false);
+  useEffect(() => {
+    if (config) {
+      setFreq(["off", "daily", "twice", "weekly"].includes(config.frequency) ? config.frequency : "daily");
+      setCfgCities(config.cities || "almaty");
+      setCfgPhones(Number(config.phonesPerRun) || 25);
+    }
+  }, [config]);
+  const applyCfg = async (extra) => {
+    if (!onSaveConfig || cfgBusy) return;
+    setCfgBusy(true); setCfgMsg(extra?.runNow ? "Запрос отправлен…" : "Сохраняю…");
+    const ok = await onSaveConfig({ frequency: freq, cities: String(cfgCities).trim() || "almaty", phonesPerRun: Number(cfgPhones) || 25, ...(extra || {}) });
+    setCfgMsg(ok ? (extra?.runNow ? "✓ Обновление запрошено — подхватится ближайшим прогоном (до ~2 ч)" : "✓ Настройки сохранены") : "Не удалось сохранить в облако");
+    setCfgBusy(false);
+  };
+  const runPending = (Number(config?.runNow) || 0) > (Number(config?.lastRunNow) || 0);
   const [city, setCity] = useState("");
   const [service, setService] = useState("");
   const [minRating, setMinRating] = useState(0);
@@ -339,6 +360,46 @@ function MastersSection({ masters = [], meta = null, loaded = true }) {
           </div>
         </div>
       </div>
+
+      {/* Настройки парсера (только Админ) */}
+      {canManage && (
+        <div style={{ marginBottom: 14, border: "1px solid #e9eef5", borderRadius: 14, background: "#fff", overflow: "hidden", boxShadow: "0 1px 2px rgba(15,23,42,.04)" }}>
+          <div onClick={() => setCfgOpen(o => !o)} style={{ display: "flex", alignItems: "center", gap: 9, padding: "12px 16px", cursor: "pointer", background: cfgOpen ? "#fbfcfe" : "#fff", userSelect: "none" }}>
+            <span style={{ fontSize: 15 }}>⚙️</span>
+            <span style={{ fontSize: 13, fontWeight: 800, color: "#0f172a", flex: 1 }}>Настройки обновления</span>
+            {config?.lastRunAt ? <span style={{ fontSize: 11, color: "#94a3b8" }}>последнее: {new Date(config.lastRunAt).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</span> : null}
+            {runPending && <span style={{ fontSize: 10.5, fontWeight: 700, color: "#d97706", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 20, padding: "2px 8px" }}>в очереди</span>}
+            <span style={{ color: "#cbd5e1", fontSize: 12, transform: cfgOpen ? "none" : "rotate(-90deg)", transition: "transform .15s" }}>▾</span>
+          </div>
+          {cfgOpen && (
+            <div style={{ padding: "12px 16px", borderTop: "1px solid #f1f5f9" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
+                <label style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600 }}>Частота обновления<br />
+                  <select value={freq} onChange={e => setFreq(e.target.value)} style={{ ...selStyle, marginTop: 4, minWidth: 160 }}>
+                    <option value="off">Выключено</option>
+                    <option value="daily">Раз в день</option>
+                    <option value="twice">2 раза в день</option>
+                    <option value="weekly">Раз в неделю</option>
+                  </select>
+                </label>
+                <label style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600 }}>Города (слаги через запятую)<br />
+                  <input value={cfgCities} onChange={e => setCfgCities(e.target.value)} placeholder="almaty, astana" style={{ ...selStyle, marginTop: 4, width: 220 }} />
+                </label>
+                <label style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600 }}>Телефонов за прогон<br />
+                  <input type="number" min="0" max="200" value={cfgPhones} onChange={e => setCfgPhones(e.target.value)} style={{ ...selStyle, marginTop: 4, width: 120 }} />
+                </label>
+                <button disabled={cfgBusy} onClick={() => applyCfg()} style={{ background: "#0f172a", color: "#fff", border: "none", borderRadius: 9, padding: "9px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", height: 36 }}>💾 Сохранить</button>
+                <button disabled={cfgBusy} onClick={() => applyCfg({ runNow: Date.now() })} style={{ background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", borderRadius: 9, padding: "9px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", height: 36 }}>🔄 Обновить сейчас</button>
+                {cfgMsg && <span style={{ fontSize: 12, color: cfgMsg.startsWith("✓") ? "#059669" : "#64748b", alignSelf: "center" }}>{cfgMsg}</span>}
+              </div>
+              <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 10, lineHeight: 1.5 }}>
+                «Обновить сейчас» подхватывается ближайшим прогоном (проверка каждые ~2 ч). Телефоны докапываются медленно (антиблок).
+                Города: <b>almaty</b>, astana, shymkent, karaganda, ust-kamenogorsk и др.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Фильтры */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
@@ -965,6 +1026,7 @@ const WORKERS_BACKUPS_KEY = "titovstroy-workers-backups";
 const PODRYADS_KEY        = "titovstroy-podryads";         // договоры подряда с рабочими + их приложения
 const PODRYADS_BACKUPS_KEY= "titovstroy-podryads-backups";
 const MASTERS_KEY         = "titovstroy-masters";          // справочник мастеров с naimi.kz (пишет парсер, читаем только на чтение)
+const MASTERS_CONFIG_KEY  = "titovstroy-masters-config";   // настройки парсера (частота, «Обновить сейчас») — редактирует Админ, читает парсер
 // единый снимок рабочего пространства: объекты + их сметы + их договора
 const WORKSPACE_BACKUPS_KEY = "titovstroy-workspace-backups";
 // legacy ключ для миграции старых сделок
@@ -5339,6 +5401,23 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     }).catch(() => { if (alive) setMastersLoaded(true); });
     return () => { alive = false; };
   }, []);
+  // Настройки парсера (частота/«Обновить сейчас») — редактирует Админ, читает парсер.
+  const [mastersConfig, setMastersConfig] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    storage.getResult(MASTERS_CONFIG_KEY).then(res => {
+      if (!alive) return;
+      if (res && res.status === "found" && res.value) { try { setMastersConfig(JSON.parse(res.value)); } catch { setMastersConfig({}); } }
+      else setMastersConfig({});
+    }).catch(() => { if (alive) setMastersConfig({}); });
+    return () => { alive = false; };
+  }, []);
+  const saveMastersConfig = useCallback(async (patch) => {
+    const next = { ...(mastersConfig || {}), ...patch, updatedAt: Date.now() };
+    setMastersConfig(next);
+    try { const r = await storage.setCloudOnly(MASTERS_CONFIG_KEY, JSON.stringify(next)); return !!(r && r.fbOk); }
+    catch { return false; }
+  }, [mastersConfig]);
   const _contractsLoaded = useRef(false);
   const _productionsLoaded = useRef(false); // отдельно от _contractsLoaded: productions грузится в том же запросе, но может не долететь, пока остальное — долетит
   // Флаги загрузки — это refs (не вызывают ре-рендер). Авто-синки (этапы←сметы, бюджет←договоры)
@@ -14854,7 +14933,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         );
       })()}
 
-        {effScreen === "masters" && <MastersSection masters={masters} meta={mastersMeta} loaded={mastersLoaded} />}
+        {effScreen === "masters" && <MastersSection masters={masters} meta={mastersMeta} loaded={mastersLoaded} config={mastersConfig} onSaveConfig={saveMastersConfig} canManage={_isAdmin} />}
 
         {effScreen === "contracts" && currentPermissions.documents === "none" && restrictedSection("Прочие документы", "сотрудникам с соответствующим правом")}
         {effScreen === "contracts" && currentPermissions.documents !== "none" && (
