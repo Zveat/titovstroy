@@ -154,7 +154,15 @@ async function collectForServiceCity(browser, citySlug, service, categoryName, b
 
 // ── Медленный докап телефонов через сессию браузера (с человеческими паузами) ─
 async function fillPhones(browser, masters) {
-  const targets = masters.filter(m => !m.phone && m.specialistId).slice(0, PHONES_PER_RUN);
+  // Приоритет: сначала докапываем номера ЛУЧШИХ мастеров (по рейтингу, затем по отзывам,
+  // затем проверенные) — чтобы полезные контакты появлялись первыми, а не «хвост».
+  const targets = masters
+    .filter(m => !m.phone && m.specialistId)
+    .sort((a, b) =>
+      (Number(b.rating) || 0) - (Number(a.rating) || 0) ||
+      (Number(b.reviews) || 0) - (Number(a.reviews) || 0) ||
+      (b.verified ? 1 : 0) - (a.verified ? 1 : 0))
+    .slice(0, PHONES_PER_RUN);
   if (!targets.length) { console.log("телефоны: докапывать нечего"); return 0; }
 
   // отдельный контекст с cookies живого сайта — запрос выглядит как «показать телефон»
