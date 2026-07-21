@@ -44,6 +44,8 @@ const PHONES_PER_RUN = num("PHONES_PER_RUN", 25);
 const PHONE_DELAY_MIN = num("PHONE_DELAY_MIN_MS", 4000);
 const PHONE_DELAY_MAX = num("PHONE_DELAY_MAX_MS", 11000);
 const HEADFUL = env("HEADFUL", "") === "1";
+const RUN_NOW = num("RUN_NOW", 0);                         // timestamp «Обновить сейчас» (передаёт check.mjs)
+const CONFIG_KEY = "titovstroy-masters-config";            // настройки из раздела «Мастера» в CRM
 
 const fbKey = k => String(k).replace(/[^a-zA-Z0-9_]/g, "_");
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -207,6 +209,21 @@ async function writeToFirebase(masters) {
   await admin.database().ref(fbKey(MASTERS_KEY)).set(JSON.stringify(payload));
   console.log(`✔ записано ${masters.length} мастеров (с телефоном: ${payload.withPhone}) в ${fbKey(MASTERS_KEY)}`);
 }
+// Отмечаем в настройках, что прогон выполнен (для расписания и кнопки «Обновить сейчас»)
+async function markConfigDone() {
+  try {
+    const ref = admin.database().ref(fbKey(CONFIG_KEY));
+    const snap = await ref.get();
+    const v = snap.val();
+    const cfg = typeof v === "string" ? JSON.parse(v) : (v || {});
+    cfg.lastRunAt = Date.now();
+    if (RUN_NOW) cfg.lastRunNow = RUN_NOW;
+    cfg.lastCount = masterCountForConfig;
+    await ref.set(JSON.stringify(cfg));
+    console.log(`настройки: lastRunAt обновлён, lastRunNow=${RUN_NOW}`);
+  } catch (e) { console.warn("markConfigDone:", e.message); }
+}
+let masterCountForConfig = 0;
 
 // ── main ──────────────────────────────────────────────────────────────────────
 (async () => {
@@ -241,7 +258,9 @@ async function writeToFirebase(masters) {
   if (FETCH_PHONES) { try { await fillPhones(browser, all); } catch (e) { console.warn("phones stage:", e.message); } }
   await browser.close();
 
-  // 5) запись
+  // 5) запись + отметка в настройках
+  masterCountForConfig = all.length;
   await writeToFirebase(all);
+  await markConfigDone();
   await admin.app().delete();
 })().catch(e => { console.error("FATAL", e); process.exit(1); });
