@@ -1,0 +1,14 @@
+{
+  "name": "titovstroy-naimi-parser",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Парсер мастеров с naimi.kz в базу TitovStroy (GitHub Actions)",
+  "scripts": {
+    "scrape": "node scrape.mjs"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.7.0",
+    "playwright": "^1.56.0"
+  }
+}
