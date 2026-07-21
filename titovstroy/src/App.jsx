@@ -283,11 +283,29 @@ function _fmtPhone(d) {
   if (p.length === 11) return `+7 ${p.slice(1, 4)} ${p.slice(4, 7)}-${p.slice(7, 9)}-${p.slice(9)}`;
   return d ? "+" + p : "";
 }
+// Категории мастеров на naimi.kz (id → название). Админ выбирает, какие парсить.
+const MASTER_CATEGORIES = [
+  { id: "47", name: "Ремонт, монтаж, отделка" },
+  { id: "49", name: "Строительство" },
+  { id: "48", name: "Ремонт и установка техники" },
+  { id: "52", name: "Помощь по дому" },
+  { id: "51", name: "Перевозки, курьеры, грузчики" },
+  { id: "111", name: "Изготовление и ремесло" },
+  { id: "109", name: "СТО и автоуслуги" },
+  { id: "58", name: "Красота и здоровье" },
+  { id: "57", name: "IT и фриланс" },
+  { id: "59", name: "Деловые услуги" },
+  { id: "108", name: "Праздники и мероприятия" },
+  { id: "61", name: "Репетиторы, курсы, обучение" },
+  { id: "113", name: "Спортивные тренеры" },
+  { id: "112", name: "Прочие услуги" },
+];
 function MastersSection({ masters = [], meta = null, loaded = true, config = null, onSaveConfig = null, canManage = false }) {
   const [cfgOpen, setCfgOpen] = useState(false);
   const [freq, setFreq] = useState("daily");
   const [cfgCities, setCfgCities] = useState("almaty");
   const [cfgPhones, setCfgPhones] = useState(25);
+  const [cfgCats, setCfgCats] = useState(["47"]); // выбранные id категорий
   const [cfgMsg, setCfgMsg] = useState("");
   const [cfgBusy, setCfgBusy] = useState(false);
   useEffect(() => {
@@ -295,12 +313,16 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
       setFreq(["off", "daily", "twice", "weekly"].includes(config.frequency) ? config.frequency : "daily");
       setCfgCities(config.cities || "almaty");
       setCfgPhones(Number(config.phonesPerRun) || 25);
+      const ids = String(config.categoryIds || "47").split(",").map(s => s.trim()).filter(Boolean);
+      setCfgCats(ids.length ? ids : ["47"]);
     }
   }, [config]);
+  const toggleCat = (id) => setCfgCats(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   const applyCfg = async (extra) => {
     if (!onSaveConfig || cfgBusy) return;
+    const cats = cfgCats.length ? cfgCats : ["47"];
     setCfgBusy(true); setCfgMsg(extra?.runNow ? "Запрос отправлен…" : "Сохраняю…");
-    const ok = await onSaveConfig({ frequency: freq, cities: String(cfgCities).trim() || "almaty", phonesPerRun: Number(cfgPhones) || 25, ...(extra || {}) });
+    const ok = await onSaveConfig({ frequency: freq, cities: String(cfgCities).trim() || "almaty", categoryIds: cats.join(","), phonesPerRun: Number(cfgPhones) || 25, ...(extra || {}) });
     setCfgMsg(ok ? (extra?.runNow ? "✓ Обновление запрошено — подхватится ближайшим прогоном (до ~2 ч)" : "✓ Настройки сохранены") : "Не удалось сохранить в облако");
     setCfgBusy(false);
   };
@@ -392,7 +414,22 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
                 <button disabled={cfgBusy} onClick={() => applyCfg({ runNow: Date.now() })} style={{ background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", borderRadius: 9, padding: "9px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", height: 36 }}>🔄 Обновить сейчас</button>
                 {cfgMsg && <span style={{ fontSize: 12, color: cfgMsg.startsWith("✓") ? "#059669" : "#64748b", alignSelf: "center" }}>{cfgMsg}</span>}
               </div>
-              <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 10, lineHeight: 1.5 }}>
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600, marginBottom: 7 }}>Категории мастеров — что парсить ({cfgCats.length} выбрано)</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {MASTER_CATEGORIES.map(c => {
+                    const on = cfgCats.includes(c.id);
+                    return (
+                      <button key={c.id} type="button" onClick={() => toggleCat(c.id)}
+                        style={{ border: "1px solid " + (on ? "#2563eb" : "#e2e8f0"), background: on ? "#eff6ff" : "#fff", color: on ? "#2563eb" : "#64748b", borderRadius: 8, padding: "5px 11px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                        {on ? "✓ " : ""}{c.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 12, lineHeight: 1.5 }}>
+                Отмечены только выбранные категории (не «всё найми»). Изменил категории/города — нажми <b>💾 Сохранить</b>, затем <b>🔄 Обновить сейчас</b>.
                 «Обновить сейчас» подхватывается ближайшим прогоном (проверка каждые ~2 ч). Телефоны докапываются медленно (антиблок).
                 Города: <b>almaty</b>, astana, shymkent, karaganda, ust-kamenogorsk и др.
               </div>
