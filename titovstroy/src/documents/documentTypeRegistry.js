@@ -19,7 +19,7 @@ export const DOCUMENT_TYPE_REGISTRY = Object.freeze([
   }),
   defineType({
     id: "design", templateId: "legacy-design-contract", name: "Соглашение о разработке дизайн-проекта",
-    category: "design", requiredFieldIds: ["contract.number", "contract.dateLong", "client.name", "object.address", "company.name"],
+    category: "design", requiredFieldIds: ["contract.number", "contract.dateFull", "client.name", "object.address", "company.name"],
   }),
   defineType({
     id: "design_add", templateId: "legacy-design-addendum", name: "Дополнительное соглашение к дизайн-проекту",
@@ -27,7 +27,7 @@ export const DOCUMENT_TYPE_REGISTRY = Object.freeze([
   }),
   defineType({
     id: "reservation", templateId: "legacy-reservation-agreement", name: "Соглашение о резервировании",
-    category: "agreements", requiredFieldIds: ["contract.number", "contract.dateLong", "client.name", "object.address", "company.name"],
+    category: "agreements", requiredFieldIds: ["contract.number", "contract.dateFull", "client.name", "object.address", "company.name"],
   }),
   defineType({
     id: "podryad", templateId: "legacy-subcontract", name: "Договор подряда",

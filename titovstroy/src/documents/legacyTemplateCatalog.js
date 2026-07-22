@@ -192,7 +192,6 @@ export const LEGACY_TEMPLATE_DEFINITIONS = Object.freeze([
     marker(WORKS_MARKER, "estimate.worksTable", "table"),
   ]),
   contractDefinition("design", design, [
-    marker("«27» декабря 2099", "contract.dateLong"),
     marker(`${nbspNumber(design.designAdvance)} тенге`, "contract.designAdvanceText"),
   ]),
   contractDefinition("design_add", designAdd, [
@@ -215,7 +214,6 @@ export const LEGACY_TEMPLATE_DEFINITIONS = Object.freeze([
     marker(designAdd.deadline, "contract.deadlineText"),
   ]),
   contractDefinition("reservation", reservation, [
-    marker("«27» декабря 2099", "contract.dateLong"),
     marker(`${nbspNumber(reservation.reserveAmount)} тенге`, "contract.reserveAmountText"),
     marker("«24» сентября 2099 г.", "contract.reserveStartDateLong"),
   ]),
