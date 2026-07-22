@@ -49,6 +49,9 @@ const LIMIT           = 30;                                // мастеров �
 const MAX_PAGES       = num("MAX_PAGES", 20);              // предел пагинации на услугу
 const PHONE_DELAY_MIN = num("PHONE_DELAY_MIN_MS", 4000);
 const PHONE_DELAY_MAX = num("PHONE_DELAY_MAX_MS", 11000);
+const PHONES_HARD_CAP = num("PHONES_HARD_CAP", 60);       // потолок номеров за прогон (защита от опечатки в настройках)
+const PHONE_BUDGET_MS = num("PHONE_BUDGET_MS", 11 * 60e3); // лимит времени на телефоны (job timeout 20 мин)
+const PHONE_SAVE_EVERY = 8;                                // промежуточное сохранение каждые N номеров
 
 const fbKey      = k => String(k).replace(/[^a-zA-Z0-9_]/g, "_");
 const sleep      = ms => new Promise(r => setTimeout(r, ms));
@@ -126,11 +129,14 @@ function sessionHeaders() {
   return h;
 }
 
-async function fillPhones(masters, phonesPerRun, citySlug) {
+async function fillPhones(masters, phonesPerRun, citySlug, saveProgress) {
   if (!NAIMI_SESSION) {
     console.log("телефоны: пропуск — нет секрета NAIMI_SESSION (номер naimi отдаёт только авторизованным).");
     return 0;
   }
+  // Жёсткий потолок за прогон — чтобы опечатка в настройках (напр. 10000) не устроила
+  // многочасовой прогон с сотнями лишних «звонков» и таймаутом.
+  const cap = Math.min(Math.max(1, phonesPerRun || 0), PHONES_HARD_CAP);
   // Приоритет — лучшие мастера (рейтинг → отзывы → проверенные), чтобы полезные контакты шли первыми.
   const targets = masters
     .filter(m => !m.phone && m.specialistId)
@@ -138,13 +144,19 @@ async function fillPhones(masters, phonesPerRun, citySlug) {
       (Number(b.rating) || 0) - (Number(a.rating) || 0) ||
       (Number(b.reviews) || 0) - (Number(a.reviews) || 0) ||
       (b.verified ? 1 : 0) - (a.verified ? 1 : 0))
-    .slice(0, phonesPerRun);
+    .slice(0, cap);
   if (!targets.length) { console.log("телефоны: докапывать нечего"); return 0; }
+  console.log(`телефоны: цель ${targets.length} (потолок ${PHONES_HARD_CAP}, бюджет ${Math.round(PHONE_BUDGET_MS / 60e3)} мин)`);
 
   const headers = sessionHeaders();
   if (citySlug) headers["App-City"] = citySlug;
-  let got = 0, firstRaw = true;
+  const deadline = Date.now() + PHONE_BUDGET_MS;
+  let got = 0, done = 0, firstRaw = true;
   for (const m of targets) {
+    if (Date.now() > deadline) {
+      console.warn(`  ! лимит времени исчерпан — стоп на ${done}/${targets.length}, собранное сохранено`);
+      break;
+    }
     try {
       const r = await fetch(`${API}/pub/call/specialist`, {
         method: "PUT", headers,
@@ -161,9 +173,16 @@ async function fillPhones(masters, phonesPerRun, citySlug) {
       const phone = onlyDigits(c.phone || c.number || c.contact || c.phone_number || "");
       if (phone) { m.phone = phone; got++; }
     } catch (e) { console.warn(`  ! телефон ${m.specialistId}: ${e.message}`); }
+    done++;
+    // Сохраняем прогресс по ходу — чтобы таймаут/сбой не терял уже собранные номера,
+    // и следующий прогон не звонил повторно тем, у кого номер уже есть.
+    if (saveProgress && done % PHONE_SAVE_EVERY === 0) {
+      try { await saveProgress(); console.log(`  … сохранено (номеров ${got}, обработано ${done}/${targets.length})`); }
+      catch (e) { console.warn("  ! промежуточное сохранение:", e.message); }
+    }
     await sleep(rnd(PHONE_DELAY_MIN, PHONE_DELAY_MAX));     // человеческая пауза
   }
-  console.log(`телефоны: получено ${got} из ${targets.length} (партия за прогон)`);
+  console.log(`телефоны: получено ${got} из ${done} обработанных (партия за прогон)`);
   return got;
 }
 
@@ -264,15 +283,21 @@ function decideRun(cfg) {
   const all = [...byId.values()];
   console.log(`ИТОГО уникальных мастеров: ${all.length}`);
 
-  // 5) телефоны (только если задана сессия naimi)
-  try { await fillPhones(all, phonesPerRun, cities[0]); }
-  catch (e) { console.warn("этап телефонов:", e.message); }
-
-  // 6) запись + отметка в настройках (для расписания и кнопки «Обновить сейчас»)
-  const payload = {
+  const buildPayload = () => ({
     updatedAt: new Date().toISOString(), source: "naimi.kz",
     count: all.length, withPhone: all.filter(m => m.phone).length, items: all,
-  };
+  });
+
+  // 5) СНАЧАЛА сохраняем список (чтобы возможный таймаут на телефонах не потерял данные)
+  await writeJson(MASTERS_KEY, buildPayload());
+  console.log(`✔ список сохранён: ${all.length} мастеров`);
+
+  // 6) телефоны — с промежуточным сохранением и лимитом по времени (только если задана сессия naimi)
+  try { await fillPhones(all, phonesPerRun, cities[0], () => writeJson(MASTERS_KEY, buildPayload())); }
+  catch (e) { console.warn("этап телефонов:", e.message); }
+
+  // 7) финальная запись + отметка в настройках (для расписания и кнопки «Обновить сейчас»)
+  const payload = buildPayload();
   await writeJson(MASTERS_KEY, payload);
   console.log(`✔ записано ${payload.count} мастеров (с телефоном: ${payload.withPhone}) в ${fbKey(MASTERS_KEY)}`);
 
