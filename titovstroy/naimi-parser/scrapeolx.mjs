@@ -28,9 +28,22 @@ import {
   expandOlxCategoryIds,
   mergeFreshSnapshot,
   parseStoredJson,
-  planPhoneStep,
   selectPhoneTargets,
 } from "./parser-core.mjs";
+
+// Реакция на ответ телефонного эндпоинта при скользящем анти-бот лимите OLX (HTTP 400
+// «подозрительная активность» на серии быстрых запросов, восстановление за ~минуту).
+// Вшито прямо сюда, чтобы файл не зависел от версии parser-core.mjs.
+//   throttled → лимит: мастера НЕ помечаем, ждём растущую паузу и повторяем его же;
+//     после giveUpAfter подряд — стоп партии. Иначе → accept (штатный ответ), серия в 0.
+function planPhoneStep(result, streak = 0, { giveUpAfter = 4, backoffMs = 20000 } = {}) {
+  if (result?.status === "throttled") {
+    const nextStreak = (Number(streak) || 0) + 1;
+    if (nextStreak >= giveUpAfter) return { action: "giveup", streak: nextStreak, waitMs: 0 };
+    return { action: "backoff", streak: nextStreak, waitMs: backoffMs * nextStreak };
+  }
+  return { action: "accept", streak: 0, waitMs: 0 };
+}
 
 const API = "https://www.olx.kz/api/v1";
 const SITE = "https://www.olx.kz";
