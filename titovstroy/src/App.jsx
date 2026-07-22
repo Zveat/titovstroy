@@ -7,6 +7,7 @@ import { applyProductionCommand, createTxnApplier, accountProductionFailure, isB
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { MASTER_CATEGORIES, NAIMI_CITY_FALLBACK, OLX_REPAIR_CATEGORIES } from "./masters/catalog.mjs";
 import { SearchMultiSelect, SearchSelect as MasterSearchSelect } from "./masters/MasterSelects.jsx";
+import { parserRunMessage, triggerParserRun } from "./masters/parserTrigger.js";
 import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
@@ -324,8 +325,9 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
     const cats = cfgCats.length ? cfgCats : ["47"];
     setCfgBusy(true); setCfgMsg(extra?.runNow ? "Запрос отправлен…" : "Сохраняю…");
     const phoneLimit = Number(cfgPhones);
-    const ok = await onSaveConfig({ frequency: freq, cities: (cfgCities.length ? cfgCities : ["karaganda"]).join(","), categoryIds: cats.join(","), phonesPerRun: Number.isFinite(phoneLimit) ? Math.min(60, Math.max(0, phoneLimit)) : 25, ...(extra || {}) });
-    setCfgMsg(ok ? (extra?.runNow ? "✓ В очереди — прогон запустится автоматически (обычно 10–30 мин)" : "✓ Настройки сохранены") : "Не удалось сохранить в облако");
+    const result = await onSaveConfig({ frequency: freq, cities: (cfgCities.length ? cfgCities : ["karaganda"]).join(","), categoryIds: cats.join(","), phonesPerRun: Number.isFinite(phoneLimit) ? Math.min(60, Math.max(0, phoneLimit)) : 25, ...(extra || {}) });
+    const ok = result === true || result?.ok === true;
+    setCfgMsg(ok ? (extra?.runNow ? parserRunMessage(result?.trigger) : "✓ Настройки сохранены") : "Не удалось сохранить в облако");
     setCfgBusy(false);
   };
   const runPending = (Number(config?.runNow) || 0) > (Number(config?.lastRunNow) || 0);
@@ -446,7 +448,7 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
               </div>
               <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 12, lineHeight: 1.5 }}>
                 Отмечены только выбранные категории (не «всё найми»). Изменил категории/города — нажми <b>💾 Сохранить</b>, затем <b>🔄 Обновить сейчас</b>.
-                После «Обновить сейчас» появляется метка <b>⏳ в очереди</b> — запрос сохранён, прогон запустится сам (обычно 10–30 мин, зависит от GitHub). Телефоны докапываются медленно (антиблок).
+                «Обновить сейчас» сразу создаёт запуск парсера. Метка <b>⏳ в очереди</b> остаётся до завершения; расписание GitHub используется как резерв. Телефоны докапываются постепенно из-за защиты сайтов.
                 Список городов и категорий обновляется из справочника Naimi. Телефон может быть получен только при действующей сессии Naimi.
                 {config?.lastPhoneError ? <><br /><b style={{ color: "#dc2626" }}>{config.lastPhoneError}</b></> : null}
               </div>
@@ -568,8 +570,9 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
     const cats = cfgCats.length ? cfgCats : OLX_REPAIR_CATEGORIES.map(c => c.id);
     setCfgBusy(true); setCfgMsg(extra?.runNow ? "Запрос отправлен…" : "Сохраняю…");
     const phoneLimit = Number(cfgPhones);
-    const ok = await onSaveConfig({ frequency: freq, regionId: String(cfgRegion).trim() || "5", categoryIds: cats.join(","), phonesPerRun: Number.isFinite(phoneLimit) ? Math.min(300, Math.max(0, phoneLimit)) : 60, ...(extra || {}) });
-    setCfgMsg(ok ? (extra?.runNow ? "✓ В очереди — прогон запустится сам (обычно 10–30 мин)" : "✓ Настройки сохранены") : "Не удалось сохранить в облако");
+    const result = await onSaveConfig({ frequency: freq, regionId: String(cfgRegion).trim() || "5", categoryIds: cats.join(","), phonesPerRun: Number.isFinite(phoneLimit) ? Math.min(300, Math.max(0, phoneLimit)) : 60, ...(extra || {}) });
+    const ok = result === true || result?.ok === true;
+    setCfgMsg(ok ? (extra?.runNow ? parserRunMessage(result?.trigger) : "✓ Настройки сохранены") : "Не удалось сохранить в облако");
     setCfgBusy(false);
   };
   const runPending = (Number(config?.runNow) || 0) > (Number(config?.lastRunNow) || 0);
@@ -5743,7 +5746,14 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     if (!accessAllows(currentPermissions.mastersManage, true)) return false;
     const next = { ...(mastersConfig || {}), ...patch, updatedAt: Date.now() };
     setMastersConfig(next);
-    try { const r = await storage.setCloudOnly(MASTERS_CONFIG_KEY, JSON.stringify(next)); return !!(r && r.fbOk); }
+    try {
+      const r = await storage.setCloudOnly(MASTERS_CONFIG_KEY, JSON.stringify(next));
+      if (!(r && r.fbOk)) return { ok: false };
+      const trigger = patch?.runNow
+        ? await triggerParserRun({ source: "naimi", runNow: Number(patch.runNow), getToken: _restToken })
+        : null;
+      return { ok: true, trigger };
+    }
     catch { return false; }
   }, [mastersConfig, currentPermissions.mastersManage]);
   // Второй источник — OLX.kz (отдельный ключ/парсер, боевых данных не касается, только чтение).
@@ -5775,7 +5785,14 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     if (!accessAllows(currentPermissions.mastersManage, true)) return false;
     const next = { ...(mastersOlxConfig || {}), ...patch, updatedAt: Date.now() };
     setMastersOlxConfig(next);
-    try { const r = await storage.setCloudOnly(MASTERS_OLX_CONFIG_KEY, JSON.stringify(next)); return !!(r && r.fbOk); }
+    try {
+      const r = await storage.setCloudOnly(MASTERS_OLX_CONFIG_KEY, JSON.stringify(next));
+      if (!(r && r.fbOk)) return { ok: false };
+      const trigger = patch?.runNow
+        ? await triggerParserRun({ source: "olx", runNow: Number(patch.runNow), getToken: _restToken })
+        : null;
+      return { ok: true, trigger };
+    }
     catch { return false; }
   }, [mastersOlxConfig, currentPermissions.mastersManage]);
   const _contractsLoaded = useRef(false);
