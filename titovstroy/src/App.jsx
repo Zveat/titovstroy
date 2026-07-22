@@ -323,7 +323,7 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
     const cats = cfgCats.length ? cfgCats : ["47"];
     setCfgBusy(true); setCfgMsg(extra?.runNow ? "Запрос отправлен…" : "Сохраняю…");
     const ok = await onSaveConfig({ frequency: freq, cities: String(cfgCities).trim() || "almaty", categoryIds: cats.join(","), phonesPerRun: Number(cfgPhones) || 25, ...(extra || {}) });
-    setCfgMsg(ok ? (extra?.runNow ? "✓ Обновление запрошено — подхватится ближайшим прогоном (до ~2 ч)" : "✓ Настройки сохранены") : "Не удалось сохранить в облако");
+    setCfgMsg(ok ? (extra?.runNow ? "✓ В очереди — прогон запустится автоматически (обычно 10–30 мин)" : "✓ Настройки сохранены") : "Не удалось сохранить в облако");
     setCfgBusy(false);
   };
   const runPending = (Number(config?.runNow) || 0) > (Number(config?.lastRunNow) || 0);
@@ -389,8 +389,10 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
           <div onClick={() => setCfgOpen(o => !o)} style={{ display: "flex", alignItems: "center", gap: 9, padding: "12px 16px", cursor: "pointer", background: cfgOpen ? "#fbfcfe" : "#fff", userSelect: "none" }}>
             <span style={{ fontSize: 15 }}>⚙️</span>
             <span style={{ fontSize: 13, fontWeight: 800, color: "#0f172a", flex: 1 }}>Настройки обновления</span>
-            {config?.lastRunAt ? <span style={{ fontSize: 11, color: "#94a3b8" }}>последнее: {new Date(config.lastRunAt).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</span> : null}
-            {runPending && <span style={{ fontSize: 10.5, fontWeight: 700, color: "#d97706", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 20, padding: "2px 8px" }}>в очереди</span>}
+            {config?.lastRunAt ? <span style={{ fontSize: 11, color: "#94a3b8" }}>последнее: {new Date(config.lastRunAt).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}{config.lastCount != null ? ` · собрано ${config.lastCount}` : ""}{config.lastWithPhone ? ` · с тел. ${config.lastWithPhone}` : ""}</span> : null}
+            {runPending
+              ? <span title="Запрос сохранён. Прогон запустится сам — обычно в течение 10–30 минут." style={{ fontSize: 10.5, fontWeight: 700, color: "#d97706", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 20, padding: "2px 8px" }}>⏳ в очереди — запустится сам</span>
+              : (config?.lastRunAt ? <span title="Последний прогон завершён." style={{ fontSize: 10.5, fontWeight: 700, color: "#059669", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 20, padding: "2px 8px" }}>✓ обновлено</span> : null)}
             <span style={{ color: "#cbd5e1", fontSize: 12, transform: cfgOpen ? "none" : "rotate(-90deg)", transition: "transform .15s" }}>▾</span>
           </div>
           {cfgOpen && (
@@ -430,7 +432,7 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
               </div>
               <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 12, lineHeight: 1.5 }}>
                 Отмечены только выбранные категории (не «всё найми»). Изменил категории/города — нажми <b>💾 Сохранить</b>, затем <b>🔄 Обновить сейчас</b>.
-                «Обновить сейчас» подхватывается ближайшим прогоном (проверка каждые ~2 ч). Телефоны докапываются медленно (антиблок).
+                После «Обновить сейчас» появляется метка <b>⏳ в очереди</b> — запрос сохранён, прогон запустится сам (обычно 10–30 мин, зависит от GitHub). Телефоны докапываются медленно (антиблок).
                 Города: <b>almaty</b>, astana, shymkent, karaganda, ust-kamenogorsk и др.
               </div>
             </div>
