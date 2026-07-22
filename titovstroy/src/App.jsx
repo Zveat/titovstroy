@@ -2764,6 +2764,13 @@ const ROLE_PERMISSION_GROUPS = [
     ],
   },
   {
+    id:"masters", icon:"🔎", label:"Мастера и парсер",
+    actions:[
+      { key:"masters", label:"Просмотр базы мастеров", hint:"Карточки мастеров из Naimi.kz и OLX.kz", type:"binary" },
+      { key:"mastersManage", label:"Управление парсером", hint:"Настройки источников и запуск обновления", type:"binary" },
+    ],
+  },
+  {
     id:"finance", icon:"💰", label:"Финансы",
     actions:[
       { key:"finance", label:"Доступ к разделу", hint:"ДДС, ОПУ, баланс и проекты", type:"finance" },
@@ -5733,11 +5740,12 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     return () => { alive = false; };
   }, []);
   const saveMastersConfig = useCallback(async (patch) => {
+    if (!accessAllows(currentPermissions.mastersManage, true)) return false;
     const next = { ...(mastersConfig || {}), ...patch, updatedAt: Date.now() };
     setMastersConfig(next);
     try { const r = await storage.setCloudOnly(MASTERS_CONFIG_KEY, JSON.stringify(next)); return !!(r && r.fbOk); }
     catch { return false; }
-  }, [mastersConfig]);
+  }, [mastersConfig, currentPermissions.mastersManage]);
   // Второй источник — OLX.kz (отдельный ключ/парсер, боевых данных не касается, только чтение).
   const [mastersOlx, setMastersOlx] = useState([]);
   const [mastersOlxMeta, setMastersOlxMeta] = useState(null);
@@ -5764,11 +5772,12 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     return () => { alive = false; };
   }, []);
   const saveMastersOlxConfig = useCallback(async (patch) => {
+    if (!accessAllows(currentPermissions.mastersManage, true)) return false;
     const next = { ...(mastersOlxConfig || {}), ...patch, updatedAt: Date.now() };
     setMastersOlxConfig(next);
     try { const r = await storage.setCloudOnly(MASTERS_OLX_CONFIG_KEY, JSON.stringify(next)); return !!(r && r.fbOk); }
     catch { return false; }
-  }, [mastersOlxConfig]);
+  }, [mastersOlxConfig, currentPermissions.mastersManage]);
   const _contractsLoaded = useRef(false);
   const _productionsLoaded = useRef(false); // отдельно от _contractsLoaded: productions грузится в том же запросе, но может не долететь, пока остальное — долетит
   // Флаги загрузки — это refs (не вызывают ре-рендер). Авто-синки (этапы←сметы, бюджет←договоры)
@@ -10553,7 +10562,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       ...(show(currentPermissions.documents) ? [{ id:"contracts", icon:"📄", label:"Прочие документы", short:"Документы" }] : []),
       ...(show(currentPermissions.analytics) ? [{ id:"analytics", icon:"📊", label:"Аналитика" }] : []),
       ...(show(currentPermissions.finance) ? [{ id:"finance", icon:"💰", label:"Финансы" }] : []),
-      ...(show(currentPermissions.objects) ? [{ id:"masters", icon:"🔎", label:"Мастера" }] : []),
+      ...(show(currentPermissions.masters) ? [{ id:"masters", icon:"🔎", label:"Мастера" }] : []),
       ...(show(currentPermissions.admin) ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
     ];
   }, [currentPermissions]);
@@ -15344,7 +15353,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         );
       })()}
 
-        {effScreen === "masters" && <MastersSection masters={masters} meta={mastersMeta} loaded={mastersLoaded} config={mastersConfig} onSaveConfig={saveMastersConfig} canManage={_isAdmin} mastersOlx={mastersOlx} olxMeta={mastersOlxMeta} olxLoaded={mastersOlxLoaded} olxConfig={mastersOlxConfig} onSaveOlxConfig={saveMastersOlxConfig} />}
+        {effScreen === "masters" && currentPermissions.masters === "none" && restrictedSection("Мастера", "сотрудникам с соответствующим правом")}
+        {effScreen === "masters" && currentPermissions.masters !== "none" && <MastersSection masters={masters} meta={mastersMeta} loaded={mastersLoaded} config={mastersConfig} onSaveConfig={saveMastersConfig} canManage={accessAllows(currentPermissions.mastersManage, true)} mastersOlx={mastersOlx} olxMeta={mastersOlxMeta} olxLoaded={mastersOlxLoaded} olxConfig={mastersOlxConfig} onSaveOlxConfig={saveMastersOlxConfig} />}
 
         {effScreen === "contracts" && currentPermissions.documents === "none" && restrictedSection("Прочие документы", "сотрудникам с соответствующим правом")}
         {effScreen === "contracts" && currentPermissions.documents !== "none" && (

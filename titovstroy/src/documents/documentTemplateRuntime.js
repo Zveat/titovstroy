@@ -1,5 +1,5 @@
 import { createDocumentExportRouter } from "./documentExportRouter.js";
-import { REPAIR_TEMPLATE_ENABLED } from "./documentTemplateKeys.js";
+import { DOCUMENT_TEMPLATE_CENTER_ENABLED, REPAIR_TEMPLATE_EXPORT_ENABLED } from "./documentTemplateKeys.js";
 import { createDocumentTemplateService } from "./documentTemplateService.js";
 import {
   buildDocxBlobFromCanonical,
@@ -25,10 +25,11 @@ export function createDocumentTemplateRuntime({
     actor,
     audit,
     legacyRepairRenderer,
+    repairTemplateEnabled: DOCUMENT_TEMPLATE_CENTER_ENABLED,
   });
   const googleUploader = createBrowserGoogleUploader({ clientId: googleClientId });
   const router = createDocumentExportRouter({
-    enabled: REPAIR_TEMPLATE_ENABLED,
+    enabled: DOCUMENT_TEMPLATE_CENTER_ENABLED && REPAIR_TEMPLATE_EXPORT_ENABLED,
     service,
     getData,
     exportLegacy: async (format, payload) => {
@@ -54,7 +55,8 @@ export function createDocumentTemplateRuntime({
   });
 
   return {
-    enabled: REPAIR_TEMPLATE_ENABLED,
+    enabled: DOCUMENT_TEMPLATE_CENTER_ENABLED && REPAIR_TEMPLATE_EXPORT_ENABLED,
+    centerEnabled: DOCUMENT_TEMPLATE_CENTER_ENABLED,
     service,
     exportContract: router.exportContract,
   };

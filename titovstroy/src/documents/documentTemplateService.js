@@ -1,4 +1,4 @@
-import { REPAIR_TEMPLATE_ENABLED } from "./documentTemplateKeys.js";
+import { DOCUMENT_TEMPLATE_CENTER_ENABLED } from "./documentTemplateKeys.js";
 import { appendDocumentRevision, createDocumentSnapshot, getSnapshotForDocument } from "./documentSnapshots.js";
 import { createRepairLegacySeed } from "./repairLegacySeed.js";
 import { createTemplateRepository } from "./templateRepository.js";
@@ -18,7 +18,7 @@ export function createDocumentTemplateService({
   actor,
   audit,
   legacyRepairRenderer,
-  repairTemplateEnabled = REPAIR_TEMPLATE_ENABLED,
+  repairTemplateEnabled = DOCUMENT_TEMPLATE_CENTER_ENABLED,
 } = {}) {
   const repository = createTemplateRepository({ storage });
   const currentActor = () => typeof actor === "function" ? actor() : actor;

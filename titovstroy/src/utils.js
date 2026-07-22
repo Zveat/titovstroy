@@ -146,7 +146,7 @@ export const ROLE_DEFINITIONS = Object.freeze([
 
 const FULL_ADMIN_ACCESS = Object.freeze({
   dashboard:"all", objects:"all", calendar:"all", estimates:"all", production:"all",
-  documents:"all", analytics:"all", finance:"edit", admin:"full",
+  documents:"all", analytics:"all", masters:"all", mastersManage:"all", finance:"edit", admin:"full",
   objectCreate:"all", objectEdit:"all", objectDelete:"all", objectStatus:"all",
   objectAssign:"all", objectExport:"all", calendarEdit:"all",
   estimateCreate:"all", estimateEdit:"all", estimateDelete:"all", estimateStatus:"all",
@@ -178,7 +178,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
   manager: {
     ...NO_TEMPLATE_ACCESS,
     dashboard:"all", objects:"all", calendar:"all", estimates:"all", production:"all",
-    documents:"all", analytics:"all",
+    documents:"all", analytics:"all", masters:"all", mastersManage:"none",
     finance:"view", admin:"none", financialDetails:true,
     objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
     objectAssign:"none", objectExport:"all", calendarEdit:"none",
@@ -197,7 +197,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
   sales_head: {
     ...NO_TEMPLATE_ACCESS,
     dashboard:"all", objects:"all", calendar:"all", estimates:"all", production:"all",
-    documents:"all", analytics:"all",
+    documents:"all", analytics:"all", masters:"all", mastersManage:"none",
     finance:"none", admin:"none", financialDetails:false,
     objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
     objectAssign:"none", objectExport:"all", calendarEdit:"none",
@@ -216,7 +216,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
   foreman: {
     ...NO_TEMPLATE_ACCESS,
     dashboard:"own", objects:"all", calendar:"all", estimates:"none", production:"all",
-    documents:"none", analytics:"none",
+    documents:"none", analytics:"none", masters:"all", mastersManage:"none",
     finance:"none", admin:"none", financialDetails:true,
     objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
     objectAssign:"none", objectExport:"none", calendarEdit:"own",
@@ -235,7 +235,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
   user: {
     ...NO_TEMPLATE_ACCESS,
     dashboard:"own", objects:"own", calendar:"own", estimates:"own", production:"own",
-    documents:"own", analytics:"own",
+    documents:"own", analytics:"own", masters:"all", mastersManage:"none",
     finance:"none", admin:"none", financialDetails:false,
     objectCreate:"all", objectEdit:"own", objectDelete:"own", objectStatus:"own",
     objectAssign:"none", objectExport:"own", calendarEdit:"own",
@@ -254,7 +254,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
   viewer: {
     ...NO_TEMPLATE_ACCESS,
     dashboard:"none", objects:"all", calendar:"none", estimates:"none", production:"none",
-    documents:"none", analytics:"none",
+    documents:"none", analytics:"none", masters:"all", mastersManage:"none",
     finance:"none", admin:"none", financialDetails:false,
     objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
     objectAssign:"none", objectExport:"none", calendarEdit:"none",
@@ -274,7 +274,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
 
 const SCOPE_VALUES = new Set(["none", "own", "all"]);
 const SCOPE_KEYS = [
-  "dashboard","objects","calendar","estimates","production","documents","analytics",
+  "dashboard","objects","calendar","estimates","production","documents","analytics","masters","mastersManage",
   "objectCreate","objectEdit","objectDelete","objectStatus","objectAssign","objectExport",
   "calendarEdit",
   "estimateCreate","estimateEdit","estimateDelete","estimateStatus","estimatePublish","estimateExport",

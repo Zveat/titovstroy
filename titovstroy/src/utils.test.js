@@ -52,6 +52,19 @@ describe("матрица прав ролей", () => {
     }
   });
 
+  it("база мастеров видна по отдельному праву, а парсером по умолчанию управляет только администратор", () => {
+    const admin = permissionsForRole({}, "admin");
+    expect(admin).toMatchObject({ masters:"all", mastersManage:"all" });
+    for (const role of ["manager", "sales_head", "foreman", "user", "viewer"]) {
+      expect(permissionsForRole({}, role)).toMatchObject({ masters:"all", mastersManage:"none" });
+    }
+    const closed = permissionsForRole({ user:{ masters:"none" } }, "user");
+    expect(closed.masters).toBe("none");
+    expect(accessAllows(closed.masters, true)).toBe(false);
+    const manager = permissionsForRole({ manager:{ mastersManage:"all" } }, "manager");
+    expect(accessAllows(manager.mastersManage, true)).toBe(true);
+  });
+
   it("сохранённые настройки накладываются на пресет, но администратора нельзя заблокировать", () => {
     const matrix = normalizeRolePermissions({
       sales_head:{ objectEdit:"all", analytics:"own" },
