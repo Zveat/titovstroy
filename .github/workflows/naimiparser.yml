@@ -1,0 +1,77 @@
+name: Парсеры мастеров (naimi + OLX)
+
+# Два источника: naimi.kz (scrape.mjs) и OLX.kz (scrape-olx.mjs), каждый со своими
+# настройками в CRM (ключи titovstroy-masters-config и titovstroy-masters-olx-config)
+# и своим ключом базы. Оба берут данные напрямую с JSON-API (без браузера).
+# Проверка каждые 10 минут: парсер запускается только когда пора — по частоте или по
+# кнопке «Обновить сейчас». Не пора — шаг завершается за секунды (сайты не трогаются).
+# Репозиторий публичный → минуты Actions бесплатны.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:          # ручной запуск с GitHub — парсит всегда (для теста)
+    inputs:
+      cities:
+        description: "Города (слаги через запятую). Пусто = взять из настроек CRM"
+        default: ""
+      category_ids:
+        description: "ID категорий (через запятую). Пусто = из настроек CRM. 47=Ремонт"
+        default: ""
+      phones_per_run:
+        description: "naimi: телефонов за прогон. Пусто = из настроек CRM"
+        default: ""
+      olx_region_id:
+        description: "OLX: регион (Караганда=5). Пусто = из настроек CRM"
+        default: ""
+      olx_category_ids:
+        description: "OLX: категории (188=Ремонт и строительство). Пусто = из настроек CRM"
+        default: ""
+      olx_phones_per_run:
+        description: "OLX: телефонов за прогон. Пусто = из настроек CRM"
+        default: ""
+
+concurrency:
+  group: naimi-parser
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: titovstroy/naimi-parser
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Установка зависимостей
+        run: npm install --no-audit --no-fund
+
+      - name: Запуск парсера naimi
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          NAIMI_SESSION: ${{ secrets.NAIMI_SESSION }}   # для телефонов (опц.)
+          NAIMI_USER: ${{ secrets.NAIMI_USER }}         # для телефонов (опц.)
+          FB_DB_URL: ${{ vars.FB_DB_URL }}
+          MASTERS_KEY: ${{ vars.MASTERS_KEY }}
+          EVENT_NAME: ${{ github.event_name }}
+          CITIES: ${{ github.event.inputs.cities }}
+          CATEGORY_IDS: ${{ github.event.inputs.category_ids }}
+          PHONES_PER_RUN: ${{ github.event.inputs.phones_per_run }}
+        run: npm run scrape
+
+      # OLX-парсер: запускается всегда (if: always()), даже если naimi-шаг упал —
+      # источники независимы. Сам решает парсить/пропустить по своим настройкам.
+      - name: Запуск парсера OLX
+        if: ${{ always() }}
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FB_DB_URL: ${{ vars.FB_DB_URL }}
+          EVENT_NAME: ${{ github.event_name }}
+          OLX_REGION_ID: ${{ github.event.inputs.olx_region_id }}
+          OLX_CATEGORY_IDS: ${{ github.event.inputs.olx_category_ids }}
+          OLX_PHONES_PER_RUN: ${{ github.event.inputs.olx_phones_per_run }}
+        run: npm run scrape-olx
