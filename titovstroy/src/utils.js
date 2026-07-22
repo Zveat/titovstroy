@@ -1037,6 +1037,53 @@ export function discardOwnedDirty(store, uid, tab, mem, suffixes = { dirty: "__d
   return owned;
 }
 
+// Удаляет локальное зеркало после подтвержденной записи в облако. localStorage нужен как
+// durable-буфер только ПОКА запись не подтверждена; хранить там вечную полную копию каждого
+// рабочего списка нельзя — несколько больших разделов и истории бэкапов быстро выбивают квоту.
+// Чужой dirty-маркер блокирует очистку: его содержимое принадлежит другой вкладке/пользователю.
+export function clearSyncedLocalMirror(store, mem, base, canClearDirty, suffixes = { dirty: "__dirty", ts: "__wts" }) {
+  let marker = null;
+  try { marker = store.getItem(base + suffixes.dirty); } catch { return false; }
+  if (marker && !(canClearDirty && canClearDirty(marker))) return false;
+  try {
+    store.removeItem(base);
+    store.removeItem(base + suffixes.ts);
+    if (marker) store.removeItem(base + suffixes.dirty);
+  } catch { return false; }
+  if (mem) delete mem[base];
+  return true;
+}
+
+// Одноразовая/периодическая уборка старых зеркал, оставленных предыдущими версиями.
+// Рабочий ключ удаляем только при наличии __wts и отсутствии dirty. Технические *-backups
+// всегда можно убрать локально: их каноническая история находится в Firebase, это не черновики.
+// Durable production-draft/retry и служебные настройки без __wts функция не затрагивает.
+export function compactLocalStorageMirrors(store, mem, suffixes = { dirty: "__dirty", ts: "__wts" }) {
+  const keys = [];
+  try { for (let i = 0; i < store.length; i++) keys.push(store.key(i)); } catch { return { removed: [], preservedDirty: [] }; }
+  const bases = new Set();
+  for (const key of keys) {
+    if (!key) continue;
+    if (key.endsWith(suffixes.ts)) bases.add(key.slice(0, -suffixes.ts.length));
+    if (/^titovstroy-.*-backups$/.test(key)) bases.add(key);
+  }
+  const removed = [], preservedDirty = [];
+  for (const base of bases) {
+    const technicalBackup = /^titovstroy-.*-backups$/.test(base);
+    let marker = null;
+    try { marker = store.getItem(base + suffixes.dirty); } catch { continue; }
+    if (marker && !technicalBackup) { preservedDirty.push(base); continue; }
+    try {
+      store.removeItem(base);
+      store.removeItem(base + suffixes.ts);
+      if (technicalBackup) store.removeItem(base + suffixes.dirty);
+      if (mem) delete mem[base];
+      removed.push(base);
+    } catch { /* следующий вход попробует снова */ }
+  }
+  return { removed, preservedDirty };
+}
+
 // Legacy-маркер (голый timestamp/не-JSON из версий до владения) — владелец НЕИЗВЕСТЕН.
 export function isLegacyDirtyMarker(raw) {
   if (!raw) return false;

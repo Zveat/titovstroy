@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import * as utils from "./utils.js";
 import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch } from "./utils.js";
 
 describe("матрица прав ролей", () => {
@@ -1021,5 +1022,66 @@ describe("mayUseLocalCopy — чтение локальной копии тол�
     expect(mayUseLocalCopy(makeDirtyMarker("userA", "tab1"), "userA", "tab1")).toBe(true);  // своя
     expect(mayUseLocalCopy(null, "userA", "tab1")).toBe(true);                              // нет dirty — обычный кеш
     expect(mayUseLocalCopy(String(Date.now()), "userA", "tab1")).toBe(false);               // legacy: только ручная recovery-выгрузка
+  });
+});
+
+describe("compactLocalStorageMirrors — освобождение места без потери черновиков", () => {
+  it("удаляет подтвержденные зеркала и их timestamps", () => {
+    const ls = fakeLS();
+    const mem = { "titovstroy-estimates": "cached" };
+    ls.setItem("titovstroy-estimates", "cached");
+    ls.setItem("titovstroy-estimates__wts", "123");
+
+    const result = utils.compactLocalStorageMirrors(ls, mem);
+
+    expect(result.removed).toContain("titovstroy-estimates");
+    expect(ls.getItem("titovstroy-estimates")).toBeNull();
+    expect(ls.getItem("titovstroy-estimates__wts")).toBeNull();
+    expect(mem["titovstroy-estimates"]).toBeUndefined();
+  });
+
+  it("сохраняет рабочее значение, если у него есть dirty-маркер", () => {
+    const ls = fakeLS();
+    const marker = makeDirtyMarker("u1", "tab1");
+    ls.setItem("titovstroy-finance-tx", "unsynced");
+    ls.setItem("titovstroy-finance-tx__wts", "123");
+    ls.setItem("titovstroy-finance-tx__dirty", marker);
+
+    const result = utils.compactLocalStorageMirrors(ls, {});
+
+    expect(result.preservedDirty).toEqual(["titovstroy-finance-tx"]);
+    expect(ls.getItem("titovstroy-finance-tx")).toBe("unsynced");
+    expect(ls.getItem("titovstroy-finance-tx__dirty")).toBe(marker);
+  });
+
+  it("технические backup-ключи удаляет локально даже со старым dirty-маркером", () => {
+    const ls = fakeLS();
+    ls.setItem("titovstroy-workspace-backups", "huge-history");
+    ls.setItem("titovstroy-workspace-backups__wts", "123");
+    ls.setItem("titovstroy-workspace-backups__dirty", "legacy");
+    ls.setItem("titovstroy-production-draft-v2:u1:o1", "real-draft");
+
+    utils.compactLocalStorageMirrors(ls, {});
+
+    expect(ls.getItem("titovstroy-workspace-backups")).toBeNull();
+    expect(ls.getItem("titovstroy-workspace-backups__dirty")).toBeNull();
+    expect(ls.getItem("titovstroy-production-draft-v2:u1:o1")).toBe("real-draft");
+  });
+
+  it("после подтвержденной облачной записи удаляет зеркало, но не чужой dirty", () => {
+    const ls = fakeLS();
+    const mem = { clean: "value", foreign: "other-value" };
+    ls.setItem("clean", "value");
+    ls.setItem("clean__wts", "123");
+    ls.setItem("clean__dirty", makeDirtyMarker("u1", "tab1"));
+    ls.setItem("foreign", "other-value");
+    ls.setItem("foreign__wts", "123");
+    ls.setItem("foreign__dirty", makeDirtyMarker("u2", "tab2"));
+
+    expect(utils.clearSyncedLocalMirror(ls, mem, "clean", raw => mayClearDirtyOnSuccess(raw, "u1", "tab1"))).toBe(true);
+    expect(utils.clearSyncedLocalMirror(ls, mem, "foreign", raw => mayClearDirtyOnSuccess(raw, "u1", "tab1"))).toBe(false);
+    expect(ls.getItem("clean")).toBeNull();
+    expect(ls.getItem("clean__dirty")).toBeNull();
+    expect(ls.getItem("foreign")).toBe("other-value");
   });
 });

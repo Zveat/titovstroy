@@ -6,7 +6,7 @@ import { emptyProduction } from "./production/constants.js";
 import { applyProductionCommand, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, isRegenerableProductionCommand, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 // Debounce hook — задерживает обновление значения, чтобы не тригерить ре-рендер на каждый символ
 function useDebounce(value, ms) {
@@ -1953,7 +1953,8 @@ const storage = {
   // Запись ТОЛЬКО в облако (SDK, затем REST). НЕ пишет в localStorage/_mem и НЕ ставит dirty,
   // когда облако не ответило — иначе неудачная запись при ВОССТАНОВЛЕНИИ осела бы «грязной»
   // локальной копией, и автосинк позже неожиданно затолкал бы её в облако, хотя restore был
-  // объявлен частичным. При успехе — синхронизируем локальное зеркало (и снимаем dirty).
+  // объявлен частичным. При успехе снимаем подтвержденный dirty и не занимаем квоту постоянной
+  // копией: актуальное рабочее значение остаётся в памяти сессии, каноническое — в Firebase.
   async setCloudOnly(key, value) {
     const op = _beginEditorWrite();
     if (op.fail) return { fbOk: false, fbError: op.fail.reason };
@@ -1971,8 +1972,12 @@ const storage = {
         try { if (await _fbRestSet(key, value)) fbOk = true; else fbError = "no cloud"; } catch(e) { fbError = e?.message || String(e); }
       }
       if (fbOk && _mayApplyEditorResult(op.session) && !_foreignDirty(key)) {
-        try { localStorage.setItem(key, value); localStorage.setItem(key + _TS_SUFFIX, Date.now().toString()); if (mayClearDirtyOnSuccess(localStorage.getItem(key + _DIRTY_SUFFIX), _dirtyOwnerUid, _TAB_ID)) localStorage.removeItem(key + _DIRTY_SUFFIX); } catch(e) {}
-        _mem[key] = value;
+        clearSyncedLocalMirror(localStorage, _mem, key,
+          raw => mayClearDirtyOnSuccess(raw, _dirtyOwnerUid, _TAB_ID),
+          { dirty: _DIRTY_SUFFIX, ts: _TS_SUFFIX });
+        // В памяти держим только рабочее значение текущей сессии. Истории бэкапов могут быть
+        // десятками мегабайт и не нужны ни как локальный кеш, ни как офлайн-черновик.
+        if (!/^titovstroy-.*-backups$/.test(key)) _mem[key] = value;
       }
       return { fbOk, fbError };
     } finally {
@@ -2018,8 +2023,10 @@ const storage = {
         const v = res.snapshot ? res.snapshot.val() : null;
         const val = typeof v === "string" ? v : (v == null ? null : JSON.stringify(v));
         if (val != null && _mayApplyEditorResult(op.session) && !_foreignDirty(key)) {
-          try { localStorage.setItem(key, val); localStorage.setItem(key + _TS_SUFFIX, Date.now().toString()); if (mayClearDirtyOnSuccess(localStorage.getItem(key + _DIRTY_SUFFIX), _dirtyOwnerUid, _TAB_ID)) localStorage.removeItem(key + _DIRTY_SUFFIX); } catch(e) {}
-          _mem[key] = val;
+          clearSyncedLocalMirror(localStorage, _mem, key,
+            raw => mayClearDirtyOnSuccess(raw, _dirtyOwnerUid, _TAB_ID),
+            { dirty: _DIRTY_SUFFIX, ts: _TS_SUFFIX });
+          if (!/^titovstroy-.*-backups$/.test(key)) _mem[key] = val;
         }
         return { committed: true, value: val };
       }
@@ -2041,15 +2048,23 @@ const storage = {
     // отправила бы позже НАШЕ значение вместо своей правки). Пишем только в Firebase; наше
     // локальное зеркало пропускаем — getResult при чужом маркере и так читает только облако.
     const _foreign = _foreignDirty(key);
-    if (!_foreign) {
+    const _technicalBackup = /^titovstroy-.*-backups$/.test(key);
+    if (!_foreign && !_technicalBackup) {
       // Сначала localStorage — мгновенно, но СРАЗУ как pending. Если вкладка потеряет editor-lock
       // во время сетевого await, новая вкладка увидит владельца маркера и не примет эту копию за
       // подтверждённый кеш. Снять маркер может только успешный ответ той же editor-сессии.
-      try {
+      const persistPending = () => {
         localStorage.setItem(key, value);
         localStorage.setItem(key + _TS_SUFFIX, Date.now().toString());
         localStorage.setItem(key + _DIRTY_SUFFIX, makeDirtyMarker(_dirtyOwnerUid, _TAB_ID));
-      } catch(e) {}
+      };
+      try { persistPending(); }
+      catch(e) {
+        // Старые версии могли заполнить квоту чистыми копиями и облачными бэкапами.
+        // Освобождаем только их, dirty-черновики других рабочих разделов не трогаем.
+        compactLocalStorageMirrors(localStorage, _mem, { dirty: _DIRTY_SUFFIX, ts: _TS_SUFFIX });
+        try { persistPending(); } catch(e2) { console.warn("local pending save failed:", key, e2); }
+      }
       _mem[key] = value;
     }
     // Firebase — пишем СТРОКУ JSON целиком (а не вложенный объект),
@@ -2086,8 +2101,11 @@ const storage = {
       }
       if (_mayApplyEditorResult(op.session)) {
         try {
-          if (fbOk) {
-            if (mayClearDirtyOnSuccess(localStorage.getItem(key + _DIRTY_SUFFIX), _dirtyOwnerUid, _TAB_ID)) localStorage.removeItem(key + _DIRTY_SUFFIX);
+          if (fbOk && !_technicalBackup) {
+            clearSyncedLocalMirror(localStorage, _mem, key,
+              raw => mayClearDirtyOnSuccess(raw, _dirtyOwnerUid, _TAB_ID),
+              { dirty: _DIRTY_SUFFIX, ts: _TS_SUFFIX });
+            _mem[key] = value;
           }
         } catch(e) {}
       }
@@ -2144,6 +2162,11 @@ const storage = {
   // облако. Записи ДРУГИХ вкладок/пользователей не трогаем — та вкладка сама дожмёт или спросит.
   discardOwnDirty() {
     return discardOwnedDirty(localStorage, _dirtyOwnerUid, _TAB_ID, _mem, { dirty: _DIRTY_SUFFIX, ts: _TS_SUFFIX });
+  },
+  // Освобождает квоту браузера от подтвержденных зеркал и технических бэкапов. Реальные
+  // неподтвержденные правки с dirty-маркером сохраняются и продолжают участвовать в retry.
+  compactLocalMirrors() {
+    return compactLocalStorageMirrors(localStorage, _mem, { dirty: _DIRTY_SUFFIX, ts: _TS_SUFFIX });
   },
   // Технические фоновые ключи не являются пользовательскими правками. Старые версии
   // могли оставить для них dirty-маркер и из-за этого спрашивать о потере данных при
@@ -5335,6 +5358,7 @@ function EditorSessionGate({ currentUser, setCurrentUser }) {
     setSafeMode("checking");
     const ok = await storage.acquireEditLease();
     if (ok) {
+      storage.compactLocalMirrors();
       storage.adoptUserDirty();
       storage.discardTechnicalDirty(WORKSPACE_BACKUPS_KEY);
       startProductionSession(currentUser?.id);
@@ -5367,6 +5391,7 @@ function EditorSessionGate({ currentUser, setCurrentUser }) {
     storage.acquireEditLease().then(ok => {
       if (!stopped) {
         if (ok) {
+          storage.compactLocalMirrors();
           storage.adoptUserDirty();
           storage.discardTechnicalDirty(WORKSPACE_BACKUPS_KEY);
           startProductionSession(ownerUid);
