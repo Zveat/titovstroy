@@ -33,22 +33,25 @@ const protectedSignature = contentJson => {
   return signature;
 };
 
-export function createDocumentSnapshot({ contract, version, variables, canonicalHtml, title, actor, now = Date.now() } = {}) {
-  if (!contract?.id) throw new Error("Не указан ID договора");
+export function createDocumentSnapshot({ contract, report, source, version, variables, canonicalHtml, title, actor, now = Date.now() } = {}) {
+  const entity = source || contract || report;
+  const sourceEntity = report && !source ? "report" : "contract";
+  if (!entity?.id) throw new Error("Не указан ID документа");
   if (!version?.id || !version?.contentJson) throw new Error("Не указана опубликованная версия шаблона");
-  if (!isTemplateEligible(contract, version)) throw new Error("Договор создан раньше публикации шаблона");
-  const documentId = `contract:${contract.id}`;
+  if (!isTemplateEligible(entity, version)) throw new Error("Документ создан раньше публикации шаблона");
+  const documentId = `${sourceEntity}:${entity.id}`;
   return {
     documentId,
-    sourceEntity: "contract",
-    sourceEntityId: String(contract.id),
-    objectId: String(contract.objectId || ""),
-    documentType: String(contract.type || "repair_fiz"),
-    title: String(title || `Договор №${contract.number || ""}`),
+    sourceEntity,
+    sourceEntityId: String(entity.id),
+    objectId: String(entity.objectId || ""),
+    documentType: String(sourceEntity === "report" ? "avr_r1" : (entity.type || "repair_fiz")),
+    title: String(title || `Документ №${entity.number || entity.actNo || ""}`),
     templateId: String(version.templateId || ""),
     templateVersionId: String(version.id),
     templatePublishedAt: numericTime(version.publishedAt),
-    sourceCreatedAt: documentCreatedAt(contract),
+    sourceCreatedAt: documentCreatedAt(entity),
+    templateVersionNumber: Number(version.versionNumber) || 1,
     contentSnapshot: clone(version.contentJson),
     variablesSnapshot: clone(variables || {}),
     canonicalHtmlSnapshot: String(canonicalHtml || ""),

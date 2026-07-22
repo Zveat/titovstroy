@@ -281,6 +281,93 @@ export function resolveRepairContractVariables(context = {}) {
   return { ok: missing.length === 0, values, missing, warnings };
 }
 
+const moneyText = value => `${Math.round(finiteNumber(value)).toLocaleString("ru-RU")} тенге`;
+const checkedLine = (enabled, label) => `[${enabled ? "X" : " "}] ${label}`;
+
+export function resolveDocumentVariables(context = {}, type = context?.contract?.type || "repair_fiz") {
+  const repair = resolveRepairContractVariables(context);
+  const { object = {}, contract = {}, estimate = {}, client = {}, contragent = {}, report = {} } = context;
+  const contractor = context.contractor || {};
+  const values = { ...repair.values };
+  const contractDate = formatDateParts(contract.date || contract.contractDate);
+  const mainDate = formatDateParts(contract.mainDate || contract.date);
+  const annexDate = formatDateParts(contract.annexDate || contract.date);
+  const works = Array.isArray(contract.works) && contract.works.length ? contract.works : (estimate.works || estimate.rows || []);
+  const worksTable = formatRepairWorksTable(works, type === "repair_fiz" ? (contract.discount ?? estimate.discount ?? 0) : 0);
+  worksTable.tableStyle = type === "podryad" || type === "podryad_annex" ? "subcontract" : "estimate";
+
+  Object.assign(values, {
+    "contract.mainNumber": String(contract.mainNumber || contract.number || ""),
+    "contract.appendixNumber": String(contract.appendix ?? contract.annexNo ?? ""),
+    "contract.mainDateLong": mainDate.long,
+    "contract.mainDateText": contract.mainDate ? `«${String(new Date(`${contract.mainDate}T00:00:00`).getDate()).padStart(2, "0")}» ${String(new Date(`${contract.mainDate}T00:00:00`).getMonth() + 1).padStart(2, "0")}.${new Date(`${contract.mainDate}T00:00:00`).getFullYear()} г.` : "",
+    "contract.annexDateFull": annexDate.full,
+    "contract.city": String(contract.city || "Караганда"),
+    "contract.cityDateLine": `г. ${contract.city || "Караганда"}          ${contractDate.long} г.`,
+    "contract.designAdvanceText": moneyText(contract.designAdvance || 25000),
+    "contract.reserveAmountText": moneyText(contract.reserveAmount || 50000),
+    "contract.reserveStartDateLong": contract.reserveStartDate ? `${formatDateParts(contract.reserveStartDate).long} г.` : "",
+    "contract.avansText": `${Math.round(finiteNumber(contract.avans)).toLocaleString("ru-RU")} тг`,
+    "contract.termDays": String(contract.termDays || ""),
+    "estimate.worksTable": worksTable,
+    "contractor.name": String(contractor.name || contract.worker?.name || ""),
+    "contractor.iin": String(contractor.iin || contract.worker?.iin || ""),
+    "contractor.document": String(contractor.doc || contractor.document || contract.worker?.doc || ""),
+    "contractor.documentIssuer": String(contractor.docIssuer || contractor.documentIssuer || contract.worker?.docIssuer || ""),
+    "contractor.address": String(contractor.address || contract.worker?.address || ""),
+    "contractor.phone": String(contractor.phone || contract.worker?.phone || ""),
+    "contractor.email": String(contractor.email || contract.worker?.email || ""),
+  });
+
+  if (type === "design_add") {
+    const composition = contract.composition || {};
+    const area = finiteNumber(contract.area || object.area);
+    const advance = finiteNumber(contract.designAdvance || 25000);
+    const total = contract.priceType === "sqm" ? finiteNumber(contract.pricePerSqm) * area : finiteNumber(contract.totalCost);
+    Object.assign(values, {
+      "design.planLine": checkedLine(composition.plan, "Обмерочный план"),
+      "design.layoutLine": checkedLine(composition.layout, "Планировочное решение"),
+      "design.conceptLine": checkedLine(composition.concept, "Концепция интерьера"),
+      "design.vis3dLine": checkedLine(composition.vis3d, "3D визуализация"),
+      "design.drawingsLine": checkedLine(composition.drawings, "Рабочие чертежи"),
+      "design.materialsLine": checkedLine(composition.materials, "Ведомость отделочных материалов"),
+      "contract.areaText": String(contract.area || object.area || ""),
+      "contract.variantsLayout": String(contract.variantsLayout || ""),
+      "contract.corrLayout": String(contract.corrLayout || ""),
+      "contract.corrVis": String(contract.corrVis || ""),
+      "design.fixedPriceLine": checkedLine(contract.priceType !== "sqm", "фиксированной суммой"),
+      "design.sqmPriceLine": checkedLine(contract.priceType === "sqm", `из расчета ${contract.pricePerSqm || ""} тенге за 1 кв.м.`),
+      "contract.designTotalText": moneyText(total),
+      "contract.designRemainderText": moneyText(total - advance),
+      "contract.deadlineText": String(contract.deadline || ""),
+    });
+  }
+
+  if (type === "avr_r1") {
+    const rows = (report.lines || []).filter(row => row && (row.included !== false) && finiteNumber(row.doneQty) > 0).map((row, index) => ({
+      id: row.id || `avr-${index + 1}`, name: String(row.name || ""), unit: String(row.unit || ""),
+      quantity: finiteNumber(row.doneQty), price: finiteNumber(row.price), sum: finiteNumber(row.doneQty) * finiteNumber(row.price),
+    }));
+    const total = rows.reduce((sum, row) => sum + Math.round(row.sum), 0);
+    values["client.name"] = String(report.clientName || client.name || "");
+    values["client.iin"] = String(report.clientIin || client.iin || client.bin || "");
+    values["object.address"] = String(report.address || object.address || "");
+    values["contract.mainNumber"] = String(report.contractNo || "");
+    values["contract.dateFull"] = formatDateParts(report.contractDate).full;
+    values["avr.number"] = String(report.actNo || "");
+    values["avr.date"] = String(report.actDate || "");
+    values["avr.dateLong"] = report.actDate ? `${new Date(`${report.actDate}T00:00:00`).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" })} г.` : "";
+    values["avr.total"] = total;
+    values["avr.totalWords"] = typeof context.moneyWords === "function" ? String(context.moneyWords(total) || "") : "";
+    values["estimate.completedWorksTable"] = { rows, subtotal: total, total, discountPercent: 0, discountAmount: 0, tableStyle: "completed" };
+  }
+
+  const missing = requiredFieldIdsForType(type)
+    .filter(fieldId => emptyValue(values[fieldId]))
+    .map(fieldId => ({ fieldId, label: FIELD_BY_ID.get(fieldId)?.label || fieldId }));
+  return { ok: missing.length === 0, values, missing, warnings: repair.warnings || [] };
+}
+
 export function validateResolvedVariables(result) {
   if (!result || typeof result !== "object") return { ok: false, errors: ["Результат автозаполнения отсутствует"] };
   const unknown = Object.keys(result.values || {}).filter(fieldId => !FIELD_BY_ID.has(fieldId));

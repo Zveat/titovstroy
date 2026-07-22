@@ -9,7 +9,10 @@ export const DOCUMENT_TEMPLATE_CENTER_ENABLED = import.meta.env.VITE_DOCUMENT_TE
 
 // Переключение печати/Word/Google Docs на новый шаблон остаётся отдельным
 // явным пилотом. Без этого флага действующие генераторы работают как раньше.
-export const REPAIR_TEMPLATE_EXPORT_ENABLED = import.meta.env.VITE_DOCUMENT_TEMPLATES_REPAIR_ON === "1";
+// Published templates are now the primary route for new documents. Existing
+// documents remain frozen by their snapshot and older records stay on legacy.
+// A single emergency switch can disable the route without removing the center.
+export const REPAIR_TEMPLATE_EXPORT_ENABLED = import.meta.env.VITE_DOCUMENT_TEMPLATES_EXPORT_OFF !== "1";
 
 export const createDocumentTemplateFeaturePolicy = (
   centerEnabled = DOCUMENT_TEMPLATE_CENTER_ENABLED,

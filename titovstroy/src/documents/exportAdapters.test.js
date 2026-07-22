@@ -44,6 +44,7 @@ const fakeDocx = () => {
 describe("canonical document export adapters", () => {
   it("sends one canonical representation to PDF, Google Docs and DOCX", async () => {
     const exportDoc = buildCanonicalExport(snapshot);
+    expect(exportDoc.canonicalHtml).toContain("Версия 1.0");
     const pdf = vi.fn();
     const uploadHtml = vi.fn(async input => ({ id: "gdoc-1", ...input }));
     const pdfResult = await openPdfFromCanonical(exportDoc, pdf);

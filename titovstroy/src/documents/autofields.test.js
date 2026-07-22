@@ -4,6 +4,7 @@ import {
   buildRepairPreviewContext,
   formatRepairWorksTable,
   requiredFieldIdsForType,
+  resolveDocumentVariables,
   resolveRepairContractVariables,
   validateResolvedVariables,
 } from "./autofields.js";
@@ -147,5 +148,41 @@ describe("document autofields", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/clientId|клиент/iu);
+  });
+
+  it("resolves every contract template type without changing the source records", () => {
+    const contractor = { id: "worker-1", name: "Петров Пётр", iin: "900101300001", doc: "ID1" };
+    const variants = [
+      { type: "repair_fiz" },
+      { type: "annex", mainNumber: "1019", appendix: 2, mainDate: "2026-07-20", annexDate: "2026-07-21" },
+      { type: "design" },
+      { type: "design_add", mainNumber: "D-1", composition: { plan: true }, area: 55, priceType: "sqm", pricePerSqm: 10000 },
+      { type: "reservation", reserveStartDate: "2026-08-01" },
+      { type: "podryad", workerId: contractor.id, city: "Караганда", termDays: 20 },
+      { type: "podryad_annex", workerId: contractor.id, mainNumber: "P-1", appendix: 1 },
+    ];
+    for (const variant of variants) {
+      const context = { ...structuredClone(FIXTURE), contract: { ...structuredClone(FIXTURE.contract), ...variant }, contractor };
+      const before = structuredClone(context);
+      const result = resolveDocumentVariables(context, variant.type);
+      expect(result.ok, `${variant.type}: ${result.missing.map(item => item.fieldId).join(",")}`).toBe(true);
+      expect(context).toEqual(before);
+    }
+  });
+
+  it("resolves a new AVR from its frozen report lines", () => {
+    const result = resolveDocumentVariables({
+      object: FIXTURE.object,
+      contragent: FIXTURE.contragent,
+      moneyWords: value => `${value} прописью`,
+      report: {
+        id: "avr-1", objectId: "obj-1", actNo: "2", actDate: "2026-07-22",
+        clientName: "Иванов Иван", clientIin: "900101300000", address: "Адрес",
+        lines: [{ name: "Штукатурка", unit: "м²", price: 5000, doneQty: 3 }],
+      },
+    }, "avr_r1");
+    expect(result.ok).toBe(true);
+    expect(result.values["avr.total"]).toBe(15000);
+    expect(result.values["estimate.completedWorksTable"].rows).toHaveLength(1);
   });
 });

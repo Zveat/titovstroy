@@ -10,16 +10,23 @@ export function buildCanonicalExport(snapshot) {
   const variablesSnapshot = structuredClone(snapshot.variablesSnapshot || {});
   const page = structuredClone(snapshot.page || {});
   const hasRevision = (snapshot.instanceVersions?.length || 0) > 0;
-  const canonicalHtml = !hasRevision && snapshot.canonicalHtmlSnapshot
+  const legalHtml = !hasRevision && snapshot.canonicalHtmlSnapshot
     ? String(snapshot.canonicalHtmlSnapshot)
     : renderTemplateToCanonicalHtml({ contentJson, variables: variablesSnapshot, page });
+  const versionNumber = Number(snapshot.templateVersionNumber) || 1;
+  const publishedAt = Number(snapshot.templatePublishedAt) || 0;
+  const versionDate = publishedAt ? new Date(publishedAt).toLocaleDateString("ru-RU") : "";
+  const versionLabel = `Версия ${versionNumber}.0${versionDate ? ` от ${versionDate}` : ""}`;
+  const note = `<div data-template-version style="margin-top:12mm;text-align:right;color:#94a3b8;font:8pt Arial,sans-serif">${versionLabel}</div>`;
+  const canonicalHtml = legalHtml.includes("</body>") ? legalHtml.replace("</body>", `${note}</body>`) : `${legalHtml}${note}`;
   return {
     title: String(snapshot.title || "Документ"),
     canonicalHtml,
     contentJson,
     variablesSnapshot,
     page,
-    normalizedText: normalizeLegalText(canonicalHtml),
+    versionLabel,
+    normalizedText: normalizeLegalText(legalHtml),
   };
 }
 
@@ -198,6 +205,13 @@ export async function buildDocxBlobFromCanonical(exportDoc, D) {
   if (!D?.Document || !D?.Packer?.toBlob) return { ok: false, reason: "docx-adapter-unavailable" };
   try {
     const children = blockChildren(D, exportDoc.contentJson, exportDoc.variablesSnapshot || {});
+    if (exportDoc.versionLabel) {
+      children.push(new D.Paragraph({
+        children: [new D.TextRun({ text: exportDoc.versionLabel, font: "Arial", size: 16, color: "94A3B8" })],
+        alignment: D.AlignmentType?.RIGHT,
+        spacing: { before: 360 },
+      }));
+    }
     const document = new D.Document({ sections: [{ properties: {}, children }] });
     const blob = await D.Packer.toBlob(document);
     return { ok: true, blob, normalizedText: exportDoc.normalizedText };

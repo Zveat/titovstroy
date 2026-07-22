@@ -49,19 +49,19 @@ describe("document export router", () => {
     expect(canonical).toHaveBeenCalledTimes(2);
   });
 
-  it("does not silently fall back when the snapshot cannot be confirmed", async () => {
+  it("keeps the button working through legacy when snapshot cannot be confirmed", async () => {
     const { router, legacy } = setup({ createCommitted: false });
     const result = await router.exportContract("docx", { contract, client, contragent });
-    expect(result).toMatchObject({ ok: false, canUseLegacy: true });
-    expect(legacy).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, route: "legacy" });
+    expect(legacy).toHaveBeenCalledOnce();
   });
 
-  it("offers the explicit legacy path when snapshot creation throws", async () => {
+  it("automatically uses the legacy path when snapshot creation throws", async () => {
     const { router, service, legacy } = setup();
     service.createSnapshot.mockRejectedValueOnce(new Error("firebase unavailable"));
     const result = await router.exportContract("pdf", { contract, client, contragent });
-    expect(result).toMatchObject({ ok: false, canUseLegacy: true, reason: "firebase unavailable" });
-    expect(legacy).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, route: "legacy" });
+    expect(legacy).toHaveBeenCalledOnce();
   });
 
   it("leaves every non-pilot document type on the legacy path", async () => {

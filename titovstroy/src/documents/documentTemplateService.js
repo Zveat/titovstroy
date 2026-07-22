@@ -57,7 +57,9 @@ export function createDocumentTemplateService({
       let failure = "";
       const result = await repository.mutateSnapshots(list => {
         try {
-      const documentId = `contract:${input?.contract?.id || ""}`;
+      const entity = input?.source || input?.contract || input?.report;
+      const prefix = input?.report && !input?.source ? "report" : "contract";
+      const documentId = `${prefix}:${entity?.id || ""}`;
       const existing = list.filter(item => item?.documentId === documentId);
       if (existing.length > 0) return undefined;
       return [...list, createDocumentSnapshot({ ...input, actor: currentActor(), now: Date.now() })];

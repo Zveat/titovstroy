@@ -35,7 +35,7 @@ export function createDocumentTemplateRuntime({
     service,
     getData,
     exportLegacy: async (format, payload) => {
-      const handler = legacyExports?.[format];
+      const handler = payload?.report ? legacyExports?.[`report_${format}`] : legacyExports?.[format];
       if (typeof handler !== "function") return { ok: false, reason: `Неизвестный формат: ${format}` };
       await handler(payload);
       return { ok: true, route: "legacy" };
@@ -61,5 +61,6 @@ export function createDocumentTemplateRuntime({
     centerEnabled: DOCUMENT_TEMPLATE_CENTER_ENABLED,
     service,
     exportContract: router.exportContract,
+    exportReport: router.exportReport,
   };
 }

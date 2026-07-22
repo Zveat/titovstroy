@@ -6916,7 +6916,7 @@ tfoot td{font-weight:700}
     // затирает акты с других устройств.
     saveReports([record], { replace: false }).catch(e => console.warn("bg save avr err", e));
     setAvrModal(null);
-    openOrPrintHtml(buildAvrHtml({ ...m, lines: items }));
+    runReportExport("pdf", record);
   };
 
   // ── ВОССТАНОВЛЕНИЕ СМЕТЫ ИЗ АКТА (АВР) ──
@@ -10539,11 +10539,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       contracts: contractsRef.current,
       clients: clientsRef.current,
       contragents: contragentsRef.current,
+      workers: workersRef.current,
+      moneyWords: tengeInWords,
     }),
     legacyExports: {
       pdf: ({ contract, client, contragent, withStamp }) => generateContractPdfLegacy(contract, client, contragent, withStamp ?? true),
       gdoc: ({ contract, client, contragent }) => generateContractGDocLegacy(contract, client, contragent),
       docx: ({ contract, client, contragent }) => generateContractDocxLegacy(contract, client, contragent),
+      report_pdf: ({ report }) => openOrPrintHtml(buildAvrHtml({ ...report, lines:(report.lines||[]).map(line=>({ ...line, included:true, doneQty:line.doneQty })) })),
     },
     openOrPrintHtml,
     googleClientId: "363473710949-d67codd7dq0uk9g4tfl8lhhgecgcqe98.apps.googleusercontent.com",
@@ -10576,6 +10579,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
   const generateContractPdf = (contract, client, contragent, withStamp=true) => runContractExport("pdf", contract, client, contragent, withStamp);
   const generateContractGDoc = (contract, client, contragent) => runContractExport("gdoc", contract, client, contragent);
   const generateContractDocx = (contract, client, contragent) => runContractExport("docx", contract, client, contragent);
+  const runReportExport = async (format, report) => {
+    try {
+      const result = await documentTemplateRuntime.exportReport(format, { report });
+      if (result?.ok === false) alert(`Не удалось создать акт: ${result.reason || "неизвестная ошибка"}`);
+      if (result?.ok && documentTemplateRuntime.enabled) await refreshDocumentSnapshots();
+    } catch (error) {
+      alert(`Не удалось создать акт: ${error?.message || "неизвестная ошибка"}`);
+    }
+  };
   const NAV_ITEMS = useMemo(() => {
     const show = access => access !== "none" || currentPermissions.showLocked;
     return [
@@ -15268,7 +15280,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                               <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
                                 <div style={{fontWeight:800,fontSize:15,color:"#0f172a"}}>{fmt(r.total||0)} ₸</div>
                                 <div style={{display:"flex",gap:4}}>
-                                  {accessAllows(currentPermissions.documentExport, estimatorObjectIds.has(obj.id)) && <button title="Печать / PDF" onClick={()=>openOrPrintHtml(buildAvrHtml({...r, lines:(r.lines||[]).map(l=>({...l,included:true,doneQty:l.doneQty}))}))}
+                                  {accessAllows(currentPermissions.documentExport, estimatorObjectIds.has(obj.id)) && <button title="Печать / PDF" onClick={()=>runReportExport("pdf", r)}
                                     style={{background:"#e2e8f0",color:"#334155",border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🖨 Печать</button>
                                   }
                                   {accessAllows(currentPermissions.estimateCreate, estimatorObjectIds.has(obj.id)) && !(r.estId && estimates.some(e=>e.id===r.estId)) && (
