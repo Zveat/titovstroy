@@ -22,6 +22,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import admin from "firebase-admin";
+import {
+  OLX_REPAIR_CATEGORIES,
+  applyPhoneAttempt,
+  expandOlxCategoryIds,
+  mergeFreshSnapshot,
+  parseStoredJson,
+  selectPhoneTargets,
+} from "./parser-core.mjs";
 
 const API = "https://www.olx.kz/api/v1";
 const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36";
@@ -39,24 +47,21 @@ const EVENT         = env("EVENT_NAME", "");
 
 const PAGE_LIMIT    = 40;                                  // объявлений на страницу API
 const MAX_PAGES     = num("OLX_MAX_PAGES", 25);            // предел пагинации на категорию (25×40=1000, максимум OLX)
-const PHONES_HARD_CAP = num("OLX_PHONES_HARD_CAP", 120);  // потолок телефонов за прогon
-const PHONE_BUDGET_MS = num("OLX_PHONE_BUDGET_MS", 12 * 60e3);
+const PHONES_HARD_CAP = num("OLX_PHONES_HARD_CAP", 300);  // очередь честная: за несколько запусков проверит всех
+const PHONE_BUDGET_MS = num("OLX_PHONE_BUDGET_MS", 16 * 60e3);
 const PHONE_DELAY_MIN = num("OLX_PHONE_DELAY_MIN_MS", 1200);
 const PHONE_DELAY_MAX = num("OLX_PHONE_DELAY_MAX_MS", 3200);
 const PHONE_SAVE_EVERY = 12;
 
 // Карта категорий OLX «Услуги» → название специальности (чтобы видеть, кто что делает).
 // Ключи — id листовых подкатегорий; парсер берёт offer.category.id и подписывает мастера.
-const OLX_CAT_NAMES = {
-  188: "Ремонт и строительство",
-  822: "Строительные услуги", 823: "Дизайн / архитектура", 824: "Отделка / ремонт",
-  825: "Окна / двери / балконы", 826: "Сантехника / коммуникации", 827: "Вентиляция / кондиционирование",
-  828: "Электрика", 829: "Готовые конструкции", 1570: "Сварочные работы", 1572: "Ландшафтные работы",
-  1574: "Напольные работы", 1576: "Кровельные работы", 1578: "Гипсокартонные работы",
-  1580: "Малярные работы", 1582: "Поклейка обоев", 1584: "Укладка плитки", 1586: "Монтажные работы",
-  1588: "Столярные работы", 1590: "Изготовление мебели", 1592: "Строительство домов",
-  1564: "Услуги грузчика", 192: "Перевозки / грузчики", 186: "Прочие услуги",
-};
+const OLX_CAT_NAMES = Object.fromEntries([
+  { id: "188", name: "Ремонт и строительство" },
+  ...OLX_REPAIR_CATEGORIES,
+  { id: "1564", name: "Услуги грузчика" },
+  { id: "192", name: "Перевозки / грузчики" },
+  { id: "186", name: "Прочие услуги" },
+].map(({ id, name }) => [String(id), name]));
 
 const fbKey      = k => String(k).replace(/[^a-zA-Z0-9_]/g, "_");
 const sleep      = ms => new Promise(r => setTimeout(r, ms));
@@ -72,9 +77,36 @@ async function apiGet(path) {
 }
 
 // одна страница объявлений категории в регионе
-async function fetchOffers(categoryId, regionId, offset) {
-  const j = await apiGet(`offers/?offset=${offset}&limit=${PAGE_LIMIT}&category_id=${categoryId}&region_id=${regionId}`);
+async function fetchOffers(categoryId, regionId, offset, cityId = "") {
+  const location = cityId ? `&city_id=${cityId}` : `&region_id=${regionId}`;
+  const j = await apiGet(`offers/?offset=${offset}&limit=${PAGE_LIMIT}&category_id=${categoryId}${location}`);
   return { items: j?.data || [], total: j?.metadata?.total_elements ?? 0 };
+}
+
+async function crawlOffers(categoryId, regionId, cityId, onOffer) {
+  let got = 0, total = 0, complete = true;
+  const cityIds = new Set();
+  for (let page = 0; page < MAX_PAGES; page++) {
+    let res;
+    try { res = await fetchOffers(categoryId, regionId, page * PAGE_LIMIT, cityId); }
+    catch (error) {
+      console.warn(`  ! кат ${categoryId}${cityId ? ` город ${cityId}` : ""} стр.${page}: ${error.message}`);
+      complete = false;
+      break;
+    }
+    total = res.total;
+    if (!res.items.length) break;
+    for (const offer of res.items) {
+      const foundCityId = offer.location?.city?.id;
+      if (foundCityId) cityIds.add(String(foundCityId));
+      onOffer(offer);
+    }
+    got += res.items.length;
+    await sleep(rnd(250, 600));
+    if (res.items.length < PAGE_LIMIT) break;
+  }
+  if (got >= MAX_PAGES * PAGE_LIMIT && total >= got) complete = false;
+  return { got, total, complete, cityIds };
 }
 
 // Балл «серьёзности/активности» 0..100 (НЕ качество работы — его на OLX не узнать).
@@ -104,6 +136,7 @@ function upsert(byUser, offer, categoryName) {
   const city = offer.location?.city?.name || "";
   const svc = clean(categoryName || offer.category?.type || "");
   const prev = byUser.get(key);
+  const hasPhone = !!offer.contact?.phone;
   if (prev) {
     if (svc && !prev.services.includes(svc)) prev.services.push(svc);
     // держим самое свежее/богатое объявление как представителя (для телефона и url)
@@ -115,7 +148,10 @@ function upsert(byUser, offer, categoryName) {
     prev.photosMax = Math.max(prev.photosMax, photos);
     prev.descLen = Math.max(prev.descLen, descLen);
     prev.adsCount += 1;
-    if (!prev.hasPhoneFlag && offer.contact?.phone) prev.hasPhoneFlag = true;
+    if (hasPhone) {
+      prev.hasPhoneFlag = true;
+      prev.phoneOfferId = offer.id;
+    }
     return;
   }
   byUser.set(key, {
@@ -132,7 +168,8 @@ function upsert(byUser, offer, categoryName) {
     lastRefresh: offer.last_refresh_time || null,
     createdTime: offer.created_time || null,
     promoted, photosMax: photos, descLen, adsCount: 1,
-    hasPhoneFlag: !!offer.contact?.phone,
+    hasPhoneFlag: hasPhone,
+    phoneOfferId: hasPhone ? offer.id : null,
     phone: "", phoneCheckedAt: null,
     collectedAt: new Date().toISOString(),
   });
@@ -140,10 +177,17 @@ function upsert(byUser, offer, categoryName) {
 
 async function fetchPhone(offerId) {
   try {
-    const j = await apiGet(`offers/${offerId}/limited-phones/`);
-    const arr = j?.data?.phones || [];
-    return onlyDigits(arr[0] || "");
-  } catch { return ""; }
+    const r = await fetch(`${API}/offers/${offerId}/limited-phones/`, {
+      headers: { "Accept": "application/json", "User-Agent": UA },
+    });
+    if (r.status === 404 || r.status === 410) return { status: "unavailable" };
+    if (!r.ok) return { status: "retry", error: `HTTP ${r.status}` };
+    const j = await r.json();
+    const phone = onlyDigits(j?.data?.phones?.[0] || "");
+    return phone ? { status: "found", phone } : { status: "unavailable" };
+  } catch (error) {
+    return { status: "retry", error: error.message || "network error" };
+  }
 }
 
 // ── Firebase (узел = строка с JSON, как читает CRM) ───────────────────────────
@@ -154,11 +198,9 @@ function initFb() {
   catch (e) { throw new Error("FIREBASE_SERVICE_ACCOUNT — невалидный JSON: " + e.message); }
   admin.initializeApp({ credential: admin.credential.cert(cred), databaseURL: FB_DB_URL });
 }
-async function readJson(key, fallback) {
-  try { const v = (await admin.database().ref(fbKey(key)).get()).val();
-    if (typeof v === "string") return JSON.parse(v);
-    if (v && typeof v === "object") return v; } catch (e) { console.warn(`чтение ${key}:`, e.message); }
-  return fallback;
+async function readJson(key, empty) {
+  const value = (await admin.database().ref(fbKey(key)).get()).val();
+  return parseStoredJson(value, { key, empty });
 }
 const writeJson = (key, obj) => admin.database().ref(fbKey(key)).set(JSON.stringify(obj));
 
@@ -184,63 +226,96 @@ function decideRun(cfg) {
   if (!decision.run) { await admin.app().delete(); return; }
 
   const regionId = num("OLX_REGION_ID", Number(cfg.regionId) || 5);
-  const categoryIds = (env("OLX_CATEGORY_IDS", "") || String(cfg.categoryIds || "") || "188")
+  const selectedCategoryIds = (env("OLX_CATEGORY_IDS", "") || String(cfg.categoryIds || "") || "188")
     .split(",").map(s => s.trim()).filter(Boolean);
-  const phonesPerRun = num("OLX_PHONES_PER_RUN", Number(cfg.phonesPerRun) || 60);
+  const categoryIds = expandOlxCategoryIds(selectedCategoryIds);
+  const configuredPhones = Number(cfg.phonesPerRun);
+  const phonesPerRun = num("OLX_PHONES_PER_RUN", Number.isFinite(configuredPhones) ? configuredPhones : 60);
   console.log(`OLX-parser · регион=${regionId} категории=[${categoryIds}] телефоны/прогон=${phonesPerRun}`);
 
   // уже собранное → мержим (телефоны не теряем)
   const existingDoc = await readJson(MASTERS_KEY, { items: [] });
-  const existing = Array.isArray(existingDoc.items) ? existingDoc.items : [];
-  const byUser = new Map(existing.map(m => [`${m.source}:${m.extId}`, m]));
+  if (!existingDoc || typeof existingDoc !== "object" || Array.isArray(existingDoc) || !Array.isArray(existingDoc.items)) {
+    throw new Error(`${MASTERS_KEY}: ожидался объект с массивом items; запись остановлена`);
+  }
+  const existing = existingDoc.items;
+  const freshByUser = new Map();
   console.log(`в базе уже: ${existing.length} (${existing.filter(m => m.phone).length} с телефоном)`);
 
   // сбор объявлений по категориям
+  let crawlComplete = true;
+  const seenOfferIds = new Set();
   for (const cid of categoryIds) {
-    let got = 0, total = 0;
-    for (let page = 0; page < MAX_PAGES; page++) {
-      let res; try { res = await fetchOffers(cid, regionId, page * PAGE_LIMIT); }
-      catch (e) { console.warn(`  ! кат ${cid} стр.${page}: ${e.message}`); break; }
-      total = res.total;
-      if (!res.items.length) break;
-      // подпись специальности берём из ЛИСТОВОЙ категории объявления (точнее, чем запрошенная)
-      for (const o of res.items) upsert(byUser, o, OLX_CAT_NAMES[o.category?.id] || OLX_CAT_NAMES[cid] || "Услуга");
-      got += res.items.length;
-      await sleep(rnd(250, 600));
-      if (res.items.length < PAGE_LIMIT) break;
+    const addOffer = (offer) => {
+      const offerKey = String(offer.id || "");
+      if (!offerKey || seenOfferIds.has(offerKey)) return;
+      seenOfferIds.add(offerKey);
+      upsert(freshByUser, offer, OLX_CAT_NAMES[offer.category?.id] || OLX_CAT_NAMES[cid] || "Услуга");
+    };
+    const regionResult = await crawlOffers(cid, regionId, "", addOffer);
+    let categoryComplete = regionResult.complete;
+    let partitioned = false;
+    // Публичная выдача OLX обрезается на 1000. Для таких категорий повторяем
+    // обход по каждому найденному городу региона и схлопываем дубли по offer.id.
+    if (regionResult.total >= MAX_PAGES * PAGE_LIMIT && regionResult.cityIds.size) {
+      partitioned = true;
+      categoryComplete = true;
+      for (const cityId of regionResult.cityIds) {
+        const cityResult = await crawlOffers(cid, regionId, cityId, addOffer);
+        if (!cityResult.complete) categoryComplete = false;
+      }
     }
-    console.log(`  · категория ${cid}: объявлений ${got} (всего в регионе ~${total})`);
+    if (!categoryComplete) {
+      crawlComplete = false;
+      console.warn(`  ! категория ${cid} собрана частично; старые записи не будут помечены неактивными`);
+    }
+    console.log(`  · категория ${cid}: объявлений ${regionResult.got} (всего ~${regionResult.total})${partitioned ? `, разбито по ${regionResult.cityIds.size} городам` : ""}`);
   }
-  const all = [...byUser.values()];
+  const freshItems = [...freshByUser.values()];
+  const all = mergeFreshSnapshot(existing, freshItems, { complete: crawlComplete });
   for (const m of all) m.score = scoreOf(m);          // пересчёт балла
-  console.log(`ИТОГО уникальных мастеров (по продавцу): ${all.length}`);
+  console.log(`ИТОГО: активных ${all.filter(m => m.active !== false).length}, всего с историей ${all.length}`);
 
   const buildPayload = () => ({
     updatedAt: new Date().toISOString(), source: "olx.kz",
-    count: all.length, withPhone: all.filter(m => m.phone).length, items: all,
+    count: all.length,
+    activeCount: all.filter(m => m.active !== false).length,
+    withPhone: all.filter(m => m.phone).length,
+    pendingPhone: all.filter(m => m.active !== false && !m.phone && m.hasPhoneFlag).length,
+    crawlComplete,
+    selectedCategoryIds,
+    parsedCategoryIds: categoryIds,
+    availableCategories: OLX_REPAIR_CATEGORIES,
+    items: all,
   });
   await writeJson(MASTERS_KEY, buildPayload());
   console.log(`✔ список сохранён: ${all.length}`);
 
   // телефоны (открыты, без логина) — приоритет по баллу, с потолком/бюджетом/сохранением
-  const targets = all.filter(m => !m.phone && m.hasPhoneFlag && m.offerId)
-    .sort((a, b) => (b.score || 0) - (a.score || 0))
-    .slice(0, Math.min(Math.max(1, phonesPerRun), PHONES_HARD_CAP));
+  const targets = selectPhoneTargets(
+    all.filter(m => m.active !== false && m.hasPhoneFlag && m.offerId),
+    { limit: Math.min(Math.max(0, phonesPerRun), PHONES_HARD_CAP) },
+  );
   console.log(`телефоны: цель ${targets.length}`);
   const deadline = Date.now() + PHONE_BUDGET_MS;
-  let gotPhones = 0, done = 0;
+  let gotPhones = 0, done = 0, retryErrors = 0, lastPhoneError = "";
   for (const m of targets) {
     if (Date.now() > deadline) { console.warn(`  ! бюджет времени исчерпан на ${done}/${targets.length}`); break; }
-    const phone = await fetchPhone(m.offerId);
-    m.phoneCheckedAt = new Date().toISOString();
-    if (phone) { m.phone = phone; gotPhones++; }
+    const result = await fetchPhone(m.phoneOfferId || m.offerId);
+    Object.assign(m, applyPhoneAttempt(m, result));
+    if (result.status === "found") gotPhones++;
+    if (result.status === "retry") { retryErrors++; lastPhoneError = result.error || "Временная ошибка OLX"; }
     done++;
     if (done % PHONE_SAVE_EVERY === 0) {
       try { await writeJson(MASTERS_KEY, buildPayload()); console.log(`  … сохранено (номеров ${gotPhones}/${done})`); } catch {}
     }
+    if (result.status === "retry" && /HTTP (403|429)/.test(result.error || "")) {
+      console.warn(`  ! OLX временно ограничил телефоны (${result.error}); партия остановлена без ложной отметки «номера нет»`);
+      break;
+    }
     await sleep(rnd(PHONE_DELAY_MIN, PHONE_DELAY_MAX));
   }
-  console.log(`телефоны: получено ${gotPhones} из ${done}`);
+  console.log(`телефоны: получено ${gotPhones}, обработано ${done}, временных ошибок ${retryErrors}`);
 
   const payload = buildPayload();
   await writeJson(MASTERS_KEY, payload);
@@ -250,6 +325,11 @@ function decideRun(cfg) {
   fresh.lastRunAt = Date.now();
   if (decision.runNow) fresh.lastRunNow = decision.runNow;
   fresh.lastCount = all.length; fresh.lastWithPhone = payload.withPhone;
+  fresh.lastActiveCount = payload.activeCount;
+  fresh.lastPendingPhone = payload.pendingPhone;
+  fresh.lastRunStatus = crawlComplete ? "ok" : "partial";
+  fresh.lastPhoneError = lastPhoneError;
+  fresh.availableCategories = OLX_REPAIR_CATEGORIES;
   await writeJson(CONFIG_KEY, fresh);
   console.log(`настройки: lastRunAt обновлён`);
 

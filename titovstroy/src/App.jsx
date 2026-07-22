@@ -5,6 +5,8 @@ import ProductionModule, { flushPendingProduction, stopProductionSession, hasPen
 import { emptyProduction } from "./production/constants.js";
 import { applyProductionCommand, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, isRegenerableProductionCommand, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
+import { MASTER_CATEGORIES, NAIMI_CITY_FALLBACK, OLX_REPAIR_CATEGORIES } from "./masters/catalog.mjs";
+import { SearchMultiSelect, SearchSelect as MasterSearchSelect } from "./masters/MasterSelects.jsx";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
@@ -283,41 +285,18 @@ function _fmtPhone(d) {
   if (p.length === 11) return `+7 ${p.slice(1, 4)} ${p.slice(4, 7)}-${p.slice(7, 9)}-${p.slice(9)}`;
   return d ? "+" + p : "";
 }
-// Категории мастеров на naimi.kz (id → название). Админ выбирает, какие парсить.
-const MASTER_CATEGORIES = [
-  { id: "47", name: "Ремонт, монтаж, отделка" },
-  { id: "49", name: "Строительство" },
-  { id: "48", name: "Ремонт и установка техники" },
-  { id: "52", name: "Помощь по дому" },
-  { id: "51", name: "Перевозки, курьеры, грузчики" },
-  { id: "111", name: "Изготовление и ремесло" },
-  { id: "109", name: "СТО и автоуслуги" },
-  { id: "58", name: "Красота и здоровье" },
-  { id: "57", name: "IT и фриланс" },
-  { id: "59", name: "Деловые услуги" },
-  { id: "108", name: "Праздники и мероприятия" },
-  { id: "61", name: "Репетиторы, курсы, обучение" },
-  { id: "113", name: "Спортивные тренеры" },
-  { id: "112", name: "Прочие услуги" },
-];
-// Подкатегории OLX «Услуги» для выбора «кто что делает» (id → название).
-const OLX_SUBCATEGORIES = [
-  { id: "188", name: "Всё: Ремонт и строительство" },
-  { id: "822", name: "Строительные услуги" }, { id: "824", name: "Отделка / ремонт" },
-  { id: "826", name: "Сантехника" }, { id: "828", name: "Электрика" },
-  { id: "1584", name: "Плиточник" }, { id: "1580", name: "Маляр" }, { id: "1582", name: "Поклейка обоев" },
-  { id: "1578", name: "Гипсокартон" }, { id: "1574", name: "Напольные работы" }, { id: "1576", name: "Кровля" },
-  { id: "1570", name: "Сварка" }, { id: "1588", name: "Столяр" }, { id: "1590", name: "Мебель на заказ" },
-  { id: "825", name: "Окна / двери" }, { id: "827", name: "Вентиляция / кондиционеры" },
-  { id: "1592", name: "Строительство домов" }, { id: "823", name: "Дизайн / архитектура" },
-  { id: "1586", name: "Монтажные работы" }, { id: "1564", name: "Грузчики" },
-];
+function _phoneStatusLabel(master) {
+  if (master?.phoneStatus === "unavailable") return "Номер не опубликован источником";
+  if (master?.phoneStatus === "retry") return "Не удалось проверить — повторим автоматически";
+  if (master?.phoneCheckedAt) return "Ожидает повторной проверки";
+  return "В очереди на проверку номера";
+}
 function MastersSection({ masters = [], meta = null, loaded = true, config = null, onSaveConfig = null, canManage = false,
   mastersOlx = [], olxMeta = null, olxLoaded = true, olxConfig = null, onSaveOlxConfig = null }) {
   const [source, setSource] = useState("naimi"); // "naimi" | "olx"
   const [cfgOpen, setCfgOpen] = useState(false);
   const [freq, setFreq] = useState("daily");
-  const [cfgCities, setCfgCities] = useState("almaty");
+  const [cfgCities, setCfgCities] = useState(["karaganda"]);
   const [cfgPhones, setCfgPhones] = useState(25);
   const [cfgCats, setCfgCats] = useState(["47"]); // выбранные id категорий
   const [cfgMsg, setCfgMsg] = useState("");
@@ -325,18 +304,20 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
   useEffect(() => {
     if (config) {
       setFreq(["off", "daily", "twice", "weekly"].includes(config.frequency) ? config.frequency : "daily");
-      setCfgCities(config.cities || "almaty");
-      setCfgPhones(Number(config.phonesPerRun) || 25);
+      const cityIds = String(config.cities || "karaganda").split(",").map(s => s.trim()).filter(Boolean);
+      setCfgCities(cityIds.length ? cityIds : ["karaganda"]);
+      const phoneLimit = Number(config.phonesPerRun);
+      setCfgPhones(Number.isFinite(phoneLimit) ? Math.min(60, Math.max(0, phoneLimit)) : 25);
       const ids = String(config.categoryIds || "47").split(",").map(s => s.trim()).filter(Boolean);
       setCfgCats(ids.length ? ids : ["47"]);
     }
   }, [config]);
-  const toggleCat = (id) => setCfgCats(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   const applyCfg = async (extra) => {
     if (!onSaveConfig || cfgBusy) return;
     const cats = cfgCats.length ? cfgCats : ["47"];
     setCfgBusy(true); setCfgMsg(extra?.runNow ? "Запрос отправлен…" : "Сохраняю…");
-    const ok = await onSaveConfig({ frequency: freq, cities: String(cfgCities).trim() || "almaty", categoryIds: cats.join(","), phonesPerRun: Number(cfgPhones) || 25, ...(extra || {}) });
+    const phoneLimit = Number(cfgPhones);
+    const ok = await onSaveConfig({ frequency: freq, cities: (cfgCities.length ? cfgCities : ["karaganda"]).join(","), categoryIds: cats.join(","), phonesPerRun: Number.isFinite(phoneLimit) ? Math.min(60, Math.max(0, phoneLimit)) : 25, ...(extra || {}) });
     setCfgMsg(ok ? (extra?.runNow ? "✓ В очереди — прогон запустится автоматически (обычно 10–30 мин)" : "✓ Настройки сохранены") : "Не удалось сохранить в облако");
     setCfgBusy(false);
   };
@@ -346,6 +327,7 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
   const [minRating, setMinRating] = useState(0);
   const [onlyVerified, setOnlyVerified] = useState(false);
   const [onlyPhone, setOnlyPhone] = useState(false);
+  const [onlyActive, setOnlyActive] = useState(true);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState("rating");
   const [limit, setLimit] = useState(60);
@@ -356,6 +338,13 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
     for (const m of masters) for (const x of (m.services || [])) if (x) s.add(x);
     return [...s].sort((a, b) => a.localeCompare(b, "ru"));
   }, [masters]);
+  const naimiCityOptions = useMemo(() => {
+    const fromParser = Array.isArray(config?.availableCities) ? config.availableCities : [];
+    const normalized = fromParser.map(item => ({ id: String(item.slug || item.id || ""), name: String(item.name || item.title || item.slug || item.id || "") })).filter(item => item.id && item.name);
+    const options = normalized.length ? normalized : [...NAIMI_CITY_FALLBACK];
+    for (const id of cfgCities) if (!options.some(item => item.id === id)) options.push({ id, name: id });
+    return options;
+  }, [config?.availableCities, cfgCities]);
 
   const filtered = useMemo(() => {
     const qn = q.trim().toLowerCase();
@@ -365,6 +354,7 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
       if (minRating && (Number(m.rating) || 0) < minRating) return false;
       if (onlyVerified && !m.verified) return false;
       if (onlyPhone && !m.phone) return false;
+      if (onlyActive && m.active === false) return false;
       if (qn && !String(m.name || "").toLowerCase().includes(qn)) return false;
       return true;
     });
@@ -374,7 +364,7 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
       return (Number(b.rating) || 0) - (Number(a.rating) || 0) || (b.reviews || 0) - (a.reviews || 0);
     });
     return list;
-  }, [masters, city, service, minRating, onlyVerified, onlyPhone, q, sort]);
+  }, [masters, city, service, minRating, onlyVerified, onlyPhone, onlyActive, q, sort]);
 
   const shown = filtered.slice(0, limit);
   const withPhone = masters.filter(m => m.phone).length;
@@ -392,8 +382,8 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
             <h1 style={{ margin: 0, fontSize: 21, fontWeight: 900, color: "#fff", lineHeight: 1.1 }}>Мастера</h1>
             <div style={{ fontSize: 12, color: "rgba(255,255,255,.7)", marginTop: 3 }}>
               {source === "olx"
-                ? <>База с OLX.kz · всего {mastersOlx.length}{olxWithPhone ? ` · с телефоном ${olxWithPhone}` : ""}{olxMeta?.updatedAt ? ` · обновлено ${new Date(olxMeta.updatedAt).toLocaleDateString("ru-RU")}` : ""}</>
-                : <>База с naimi.kz · всего {masters.length}{withPhone ? ` · с телефоном ${withPhone}` : ""}{meta?.updatedAt ? ` · обновлено ${new Date(meta.updatedAt).toLocaleDateString("ru-RU")}` : ""}</>}
+                ? <>База с OLX.kz · актуальных {olxMeta?.activeCount ?? mastersOlx.filter(m => m.active !== false).length} · с телефоном {olxWithPhone}{olxMeta?.updatedAt ? ` · обновлено ${new Date(olxMeta.updatedAt).toLocaleDateString("ru-RU")}` : ""}</>
+                : <>База с naimi.kz · актуальных {meta?.activeCount ?? masters.filter(m => m.active !== false).length} · с телефоном {withPhone}{meta?.updatedAt ? ` · обновлено ${new Date(meta.updatedAt).toLocaleDateString("ru-RU")}` : ""}</>}
             </div>
           </div>
           <div style={{ display: "flex", gap: 5, background: "rgba(255,255,255,.08)", borderRadius: 10, padding: 4 }}>
@@ -410,14 +400,16 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
 
       {/* Настройки парсера (только Админ) */}
       {canManage && (
-        <div style={{ marginBottom: 14, border: "1px solid #e9eef5", borderRadius: 14, background: "#fff", overflow: "hidden", boxShadow: "0 1px 2px rgba(15,23,42,.04)" }}>
+        <div style={{ marginBottom: 14, border: "1px solid #e9eef5", borderRadius: 14, background: "#fff", overflow: cfgOpen ? "visible" : "hidden", boxShadow: "0 1px 2px rgba(15,23,42,.04)" }}>
           <div onClick={() => setCfgOpen(o => !o)} style={{ display: "flex", alignItems: "center", gap: 9, padding: "12px 16px", cursor: "pointer", background: cfgOpen ? "#fbfcfe" : "#fff", userSelect: "none" }}>
             <span style={{ fontSize: 15 }}>⚙️</span>
             <span style={{ fontSize: 13, fontWeight: 800, color: "#0f172a", flex: 1 }}>Настройки обновления</span>
             {config?.lastRunAt ? <span style={{ fontSize: 11, color: "#94a3b8" }}>последнее: {new Date(config.lastRunAt).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}{config.lastCount != null ? ` · собрано ${config.lastCount}` : ""}{config.lastWithPhone ? ` · с тел. ${config.lastWithPhone}` : ""}</span> : null}
             {runPending
               ? <span title="Запрос сохранён. Прогон запустится сам — обычно в течение 10–30 минут." style={{ fontSize: 10.5, fontWeight: 700, color: "#d97706", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 20, padding: "2px 8px" }}>⏳ в очереди — запустится сам</span>
-              : (config?.lastRunAt ? <span title="Последний прогон завершён." style={{ fontSize: 10.5, fontWeight: 700, color: "#059669", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 20, padding: "2px 8px" }}>✓ обновлено</span> : null)}
+              : (config?.lastRunAt ? (config.lastRunStatus === "partial"
+                ? <span style={{ fontSize: 10.5, fontWeight: 700, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 20, padding: "2px 8px" }}>частично — повторим</span>
+                : <span title="Последний прогон завершён." style={{ fontSize: 10.5, fontWeight: 700, color: "#059669", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 20, padding: "2px 8px" }}>✓ обновлено</span>) : null)}
             <span style={{ color: "#cbd5e1", fontSize: 12, transform: cfgOpen ? "none" : "rotate(-90deg)", transition: "transform .15s" }}>▾</span>
           </div>
           {cfgOpen && (
@@ -431,34 +423,25 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
                     <option value="weekly">Раз в неделю</option>
                   </select>
                 </label>
-                <label style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600 }}>Города (слаги через запятую)<br />
-                  <input value={cfgCities} onChange={e => setCfgCities(e.target.value)} placeholder="almaty, astana" style={{ ...selStyle, marginTop: 4, width: 220 }} />
+                <label style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600 }}>Города<br />
+                  <span style={{ display: "block", marginTop: 4 }}><SearchMultiSelect values={cfgCities} onChange={setCfgCities} options={naimiCityOptions} label="Выберите города" width={250} /></span>
                 </label>
                 <label style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600 }}>Телефонов за прогон<br />
-                  <input type="number" min="0" max="200" value={cfgPhones} onChange={e => setCfgPhones(e.target.value)} style={{ ...selStyle, marginTop: 4, width: 120 }} />
+                  <input type="number" min="0" max="60" value={cfgPhones} onChange={e => setCfgPhones(e.target.value)} style={{ ...selStyle, marginTop: 4, width: 120 }} />
                 </label>
                 <button disabled={cfgBusy} onClick={() => applyCfg()} style={{ background: "#0f172a", color: "#fff", border: "none", borderRadius: 9, padding: "9px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", height: 36 }}>💾 Сохранить</button>
                 <button disabled={cfgBusy} onClick={() => applyCfg({ runNow: Date.now() })} style={{ background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", borderRadius: 9, padding: "9px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", height: 36 }}>🔄 Обновить сейчас</button>
                 {cfgMsg && <span style={{ fontSize: 12, color: cfgMsg.startsWith("✓") ? "#059669" : "#64748b", alignSelf: "center" }}>{cfgMsg}</span>}
               </div>
               <div style={{ marginTop: 14 }}>
-                <div style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600, marginBottom: 7 }}>Категории мастеров — что парсить ({cfgCats.length} выбрано)</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {MASTER_CATEGORIES.map(c => {
-                    const on = cfgCats.includes(c.id);
-                    return (
-                      <button key={c.id} type="button" onClick={() => toggleCat(c.id)}
-                        style={{ border: "1px solid " + (on ? "#2563eb" : "#e2e8f0"), background: on ? "#eff6ff" : "#fff", color: on ? "#2563eb" : "#64748b", borderRadius: 8, padding: "5px 11px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-                        {on ? "✓ " : ""}{c.name}
-                      </button>
-                    );
-                  })}
-                </div>
+                <div style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600, marginBottom: 7 }}>Категории мастеров — что парсить</div>
+                <SearchMultiSelect values={cfgCats} onChange={setCfgCats} options={MASTER_CATEGORIES} label="Выберите категории" width={360} />
               </div>
               <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 12, lineHeight: 1.5 }}>
                 Отмечены только выбранные категории (не «всё найми»). Изменил категории/города — нажми <b>💾 Сохранить</b>, затем <b>🔄 Обновить сейчас</b>.
                 После «Обновить сейчас» появляется метка <b>⏳ в очереди</b> — запрос сохранён, прогон запустится сам (обычно 10–30 мин, зависит от GitHub). Телефоны докапываются медленно (антиблок).
-                Города: <b>almaty</b>, astana, shymkent, karaganda, ust-kamenogorsk и др.
+                Список городов и категорий обновляется из справочника Naimi. Телефон может быть получен только при действующей сессии Naimi.
+                {config?.lastPhoneError ? <><br /><b style={{ color: "#dc2626" }}>{config.lastPhoneError}</b></> : null}
               </div>
             </div>
           )}
@@ -468,14 +451,8 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
       {/* Фильтры */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Поиск по имени…" style={{ ...selStyle, flex: "1 1 200px", maxWidth: 280 }} />
-        <select value={city} onChange={e => setCity(e.target.value)} style={selStyle}>
-          <option value="">Все города</option>
-          {cities.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <select value={service} onChange={e => setService(e.target.value)} style={{ ...selStyle, maxWidth: 260 }}>
-          <option value="">Все виды работ</option>
-          {services.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <MasterSearchSelect value={city} onChange={setCity} options={cities.map(c => ({ id: c, name: c }))} emptyLabel="Все города" width={190} />
+        <MasterSearchSelect value={service} onChange={setService} options={services.map(s => ({ id: s, name: s }))} emptyLabel="Все виды работ" width={250} />
         <select value={sort} onChange={e => setSort(e.target.value)} style={selStyle}>
           <option value="rating">По рейтингу</option>
           <option value="reviews">По отзывам</option>
@@ -488,6 +465,7 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
         </div>
         <button style={chip(onlyVerified)} onClick={() => setOnlyVerified(v => !v)}>✓ Проверенные</button>
         <button style={chip(onlyPhone)} onClick={() => setOnlyPhone(v => !v)}>📞 С телефоном</button>
+        <button style={chip(onlyActive)} onClick={() => setOnlyActive(v => !v)}>Актуальные</button>
       </div>
 
       {/* Пусто / загрузка */}
@@ -536,7 +514,7 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
                         <a href={"https://wa.me/" + phoneD} target="_blank" rel="noreferrer" style={{ textDecoration: "none", background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>WhatsApp</a>
                       </>
                     ) : (
-                      <span style={{ fontSize: 11.5, color: "#94a3b8", alignSelf: "center" }}>📞 номер собирается…</span>
+                      <span style={{ fontSize: 11.5, color: "#94a3b8", alignSelf: "center" }}>📞 {_phoneStatusLabel(m)}</span>
                     )}
                     {m.url && <a href={m.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", background: "#f8fafc", color: "#64748b", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>🔗 Профиль</a>}
                   </div>
@@ -563,24 +541,27 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
   const [freq, setFreq] = useState("daily");
   const [cfgRegion, setCfgRegion] = useState("5");
   const [cfgPhones, setCfgPhones] = useState(60);
-  const [cfgCats, setCfgCats] = useState(["188"]);
+  const [cfgCats, setCfgCats] = useState(() => OLX_REPAIR_CATEGORIES.map(c => c.id));
   const [cfgMsg, setCfgMsg] = useState("");
   const [cfgBusy, setCfgBusy] = useState(false);
   useEffect(() => {
     if (config) {
       setFreq(["off", "daily", "twice", "weekly"].includes(config.frequency) ? config.frequency : "daily");
       setCfgRegion(String(config.regionId || "5"));
-      setCfgPhones(Number(config.phonesPerRun) || 60);
+      const phoneLimit = Number(config.phonesPerRun);
+      setCfgPhones(Number.isFinite(phoneLimit) ? Math.min(300, Math.max(0, phoneLimit)) : 60);
       const ids = String(config.categoryIds || "188").split(",").map(s => s.trim()).filter(Boolean);
-      setCfgCats(ids.length ? ids : ["188"]);
+      const officialIds = OLX_REPAIR_CATEGORIES.map(c => c.id);
+      const selected = ids.includes("188") ? officialIds : ids.filter(id => officialIds.includes(id));
+      setCfgCats(selected.length ? selected : officialIds);
     }
   }, [config]);
-  const toggleCat = (id) => setCfgCats(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   const applyCfg = async (extra) => {
     if (!onSaveConfig || cfgBusy) return;
-    const cats = cfgCats.length ? cfgCats : ["188"];
+    const cats = cfgCats.length ? cfgCats : OLX_REPAIR_CATEGORIES.map(c => c.id);
     setCfgBusy(true); setCfgMsg(extra?.runNow ? "Запрос отправлен…" : "Сохраняю…");
-    const ok = await onSaveConfig({ frequency: freq, regionId: String(cfgRegion).trim() || "5", categoryIds: cats.join(","), phonesPerRun: Number(cfgPhones) || 60, ...(extra || {}) });
+    const phoneLimit = Number(cfgPhones);
+    const ok = await onSaveConfig({ frequency: freq, regionId: String(cfgRegion).trim() || "5", categoryIds: cats.join(","), phonesPerRun: Number.isFinite(phoneLimit) ? Math.min(300, Math.max(0, phoneLimit)) : 60, ...(extra || {}) });
     setCfgMsg(ok ? (extra?.runNow ? "✓ В очереди — прогон запустится сам (обычно 10–30 мин)" : "✓ Настройки сохранены") : "Не удалось сохранить в облако");
     setCfgBusy(false);
   };
@@ -591,6 +572,7 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
   const [onlyPhone, setOnlyPhone] = useState(false);
   const [onlyPromoted, setOnlyPromoted] = useState(false);
   const [freshOnly, setFreshOnly] = useState(false);
+  const [onlyActive, setOnlyActive] = useState(true);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState("score");
   const [limit, setLimit] = useState(60);
@@ -614,6 +596,7 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
       if (onlyPhone && !m.phone) return false;
       if (onlyPromoted && !m.promoted) return false;
       if (freshOnly && freshDays(m) > 30) return false;
+      if (onlyActive && m.active === false) return false;
       if (qn && !(String(m.name || "").toLowerCase().includes(qn) || String(m.title || "").toLowerCase().includes(qn))) return false;
       return true;
     });
@@ -623,7 +606,7 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
       return (Number(b.score) || 0) - (Number(a.score) || 0);
     });
     return list;
-  }, [masters, city, service, who, onlyPhone, onlyPromoted, freshOnly, q, sort]);
+  }, [masters, city, service, who, onlyPhone, onlyPromoted, freshOnly, onlyActive, q, sort]);
 
   const shown = filtered.slice(0, limit);
   const selStyle = { height: 36, borderRadius: 9, border: "1px solid #e2e8f0", padding: "0 10px", fontSize: 13, background: "#fff", color: "#0f172a", fontFamily: "inherit", minWidth: 0 };
@@ -634,14 +617,16 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
     <>
       {/* Настройки OLX-парсера (только Админ) */}
       {canManage && (
-        <div style={{ marginBottom: 14, border: "1px solid #e9eef5", borderRadius: 14, background: "#fff", overflow: "hidden", boxShadow: "0 1px 2px rgba(15,23,42,.04)" }}>
+        <div style={{ marginBottom: 14, border: "1px solid #e9eef5", borderRadius: 14, background: "#fff", overflow: cfgOpen ? "visible" : "hidden", boxShadow: "0 1px 2px rgba(15,23,42,.04)" }}>
           <div onClick={() => setCfgOpen(o => !o)} style={{ display: "flex", alignItems: "center", gap: 9, padding: "12px 16px", cursor: "pointer", background: cfgOpen ? "#fbfcfe" : "#fff", userSelect: "none" }}>
             <span style={{ fontSize: 15 }}>⚙️</span>
             <span style={{ fontSize: 13, fontWeight: 800, color: "#0f172a", flex: 1 }}>Настройки обновления (OLX)</span>
             {config?.lastRunAt ? <span style={{ fontSize: 11, color: "#94a3b8" }}>последнее: {new Date(config.lastRunAt).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}{config.lastCount != null ? ` · собрано ${config.lastCount}` : ""}{config.lastWithPhone ? ` · с тел. ${config.lastWithPhone}` : ""}</span> : null}
             {runPending
               ? <span title="Запрос сохранён. Прогон запустится сам — обычно в течение 10–30 минут." style={{ fontSize: 10.5, fontWeight: 700, color: "#d97706", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 20, padding: "2px 8px" }}>⏳ в очереди — запустится сам</span>
-              : (config?.lastRunAt ? <span style={{ fontSize: 10.5, fontWeight: 700, color: "#059669", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 20, padding: "2px 8px" }}>✓ обновлено</span> : null)}
+              : (config?.lastRunAt ? (config.lastRunStatus === "partial"
+                ? <span style={{ fontSize: 10.5, fontWeight: 700, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 20, padding: "2px 8px" }}>частично — повторим</span>
+                : <span style={{ fontSize: 10.5, fontWeight: 700, color: "#059669", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 20, padding: "2px 8px" }}>✓ обновлено</span>) : null)}
             <span style={{ color: "#cbd5e1", fontSize: 12, transform: cfgOpen ? "none" : "rotate(-90deg)", transition: "transform .15s" }}>▾</span>
           </div>
           {cfgOpen && (
@@ -659,29 +644,21 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
                   <input value={cfgRegion} onChange={e => setCfgRegion(e.target.value)} style={{ ...selStyle, marginTop: 4, width: 120 }} />
                 </label>
                 <label style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600 }}>Телефонов за прогон<br />
-                  <input type="number" min="0" max="200" value={cfgPhones} onChange={e => setCfgPhones(e.target.value)} style={{ ...selStyle, marginTop: 4, width: 120 }} />
+                  <input type="number" min="0" max="300" value={cfgPhones} onChange={e => setCfgPhones(e.target.value)} style={{ ...selStyle, marginTop: 4, width: 120 }} />
                 </label>
                 <button disabled={cfgBusy} onClick={() => applyCfg()} style={{ background: "#0f172a", color: "#fff", border: "none", borderRadius: 9, padding: "9px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", height: 36 }}>💾 Сохранить</button>
                 <button disabled={cfgBusy} onClick={() => applyCfg({ runNow: Date.now() })} style={{ background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", borderRadius: 9, padding: "9px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", height: 36 }}>🔄 Обновить сейчас</button>
                 {cfgMsg && <span style={{ fontSize: 12, color: cfgMsg.startsWith("✓") ? "#059669" : "#64748b", alignSelf: "center" }}>{cfgMsg}</span>}
               </div>
               <div style={{ marginTop: 14 }}>
-                <div style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600, marginBottom: 7 }}>Категории/специальности — что парсить ({cfgCats.length} выбрано)</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {OLX_SUBCATEGORIES.map(c => {
-                    const on = cfgCats.includes(c.id);
-                    return (
-                      <button key={c.id} type="button" onClick={() => toggleCat(c.id)}
-                        style={{ border: "1px solid " + (on ? "#2563eb" : "#e2e8f0"), background: on ? "#eff6ff" : "#fff", color: on ? "#2563eb" : "#64748b", borderRadius: 8, padding: "5px 11px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-                        {on ? "✓ " : ""}{c.name}
-                      </button>
-                    );
-                  })}
-                </div>
+                <div style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600, marginBottom: 7 }}>Специальности OLX — что парсить</div>
+                <SearchMultiSelect values={cfgCats} onChange={setCfgCats} options={OLX_REPAIR_CATEGORIES} label="Выберите специальности" width={380} />
               </div>
               <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 12, lineHeight: 1.5 }}>
-                «Всё: Ремонт и строительство» = вся категория разом; либо отметь конкретные специальности (плиточник, электрик, грузчик…).
-                Телефоны OLX открыты (без авторизации) — докапываются пачкой, но с паузами. У OLX нет рейтингов/отзывов, поэтому вместо них — <b>балл серьёзности</b> (возраст аккаунта, свежесть, продвижение, фото).
+                Здесь полный текущий список из раздела OLX «Ремонт и строительство» — {OLX_REPAIR_CATEGORIES.length} специальностей.
+                Телефоны проверяются честной очередью: сначала новые мастера, затем самые давно проверенные. Если автор скрыл номер, это будет указано в карточке.
+                {config?.lastPendingPhone != null ? <><br />Ожидают проверки: <b>{config.lastPendingPhone}</b>.</> : null}
+                {config?.lastPhoneError ? <><br /><b style={{ color: "#dc2626" }}>{config.lastPhoneError}</b></> : null}
               </div>
             </div>
           )}
@@ -691,14 +668,8 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
       {/* Фильтры OLX */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Поиск по имени/объявлению…" style={{ ...selStyle, flex: "1 1 200px", maxWidth: 300 }} />
-        <select value={city} onChange={e => setCity(e.target.value)} style={selStyle}>
-          <option value="">Все города</option>
-          {cities.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <select value={service} onChange={e => setService(e.target.value)} style={{ ...selStyle, maxWidth: 240 }}>
-          <option value="">Все специальности</option>
-          {services.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <MasterSearchSelect value={city} onChange={setCity} options={cities.map(c => ({ id: c, name: c }))} emptyLabel="Все города" width={190} />
+        <MasterSearchSelect value={service} onChange={setService} options={services.map(s => ({ id: s, name: s }))} emptyLabel="Все специальности" width={250} />
         <select value={sort} onChange={e => setSort(e.target.value)} style={selStyle}>
           <option value="score">По баллу серьёзности</option>
           <option value="fresh">По свежести</option>
@@ -712,6 +683,7 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
         <button style={chip(freshOnly)} onClick={() => setFreshOnly(v => !v)}>🕒 Активные (30д)</button>
         <button style={chip(onlyPromoted)} onClick={() => setOnlyPromoted(v => !v)}>⭐ Продвигаемые</button>
         <button style={chip(onlyPhone)} onClick={() => setOnlyPhone(v => !v)}>📞 С телефоном</button>
+        <button style={chip(onlyActive)} onClick={() => setOnlyActive(v => !v)}>Актуальные объявления</button>
       </div>
 
       {!masters.length && (
@@ -764,7 +736,7 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
                         <a href={"https://wa.me/" + phoneD} target="_blank" rel="noreferrer" style={{ textDecoration: "none", background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>WhatsApp</a>
                       </>
                     ) : (
-                      <span style={{ fontSize: 11.5, color: "#94a3b8", alignSelf: "center" }}>📞 номер собирается…</span>
+                      <span style={{ fontSize: 11.5, color: "#94a3b8", alignSelf: "center" }}>📞 {_phoneStatusLabel(m)}</span>
                     )}
                     {m.url && <a href={m.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", background: "#f8fafc", color: "#64748b", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>🔗 Объявление</a>}
                   </div>
@@ -5714,7 +5686,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
         try {
           const d = JSON.parse(res.value);
           setMasters(Array.isArray(d?.items) ? d.items : (Array.isArray(d) ? d : []));
-          setMastersMeta(d && !Array.isArray(d) ? { updatedAt: d.updatedAt, count: d.count, withPhone: d.withPhone } : null);
+          setMastersMeta(d && !Array.isArray(d) ? d : null);
         } catch {}
       }
     }).catch(() => { if (alive) setMastersLoaded(true); });
@@ -5751,7 +5723,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
         try {
           const d = JSON.parse(res.value);
           setMastersOlx(Array.isArray(d?.items) ? d.items : (Array.isArray(d) ? d : []));
-          setMastersOlxMeta(d && !Array.isArray(d) ? { updatedAt: d.updatedAt, count: d.count, withPhone: d.withPhone } : null);
+          setMastersOlxMeta(d && !Array.isArray(d) ? d : null);
         } catch {}
       }
     }).catch(() => { if (alive) setMastersOlxLoaded(true); });

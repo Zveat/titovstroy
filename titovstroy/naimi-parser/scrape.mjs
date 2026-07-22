@@ -24,6 +24,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import admin from "firebase-admin";
+import {
+  applyPhoneAttempt,
+  mergeFreshSnapshot,
+  parseStoredJson,
+  selectPhoneTargets,
+} from "./parser-core.mjs";
 
 const API  = "https://apipub.naimi.kz/app";
 const SITE = "https://naimi.kz";
@@ -75,22 +81,35 @@ async function getServices(categoryId) {
     .filter(s => s.slug);
 }
 
+async function getCitiesCatalogue() {
+  const j = await apiGet("pub/reference/city/list");
+  const raw = j?.content?.cities || j?.content || j?.data || [];
+  const list = Array.isArray(raw) ? raw : Object.values(raw || {}).flat();
+  return list.map(city => ({
+    id: String(city.slug || city.code || city.id || ""),
+    slug: String(city.slug || city.code || city.id || ""),
+    name: clean(city.name || city.title || city.label || city.slug || ""),
+  })).filter(city => city.slug && city.name);
+}
+
 // Список мастеров по услуге в городе (с пагинацией по has_more).
 async function getSpecialists(citySlug, serviceSlug) {
   const acc = [];
+  let complete = true;
   for (let page = 1; page <= MAX_PAGES; page++) {
     let j;
     try {
       j = await apiGet(
         `pub/catalogue/categories/work/specialists?slug=${encodeURIComponent(serviceSlug)}` +
         `&limit=${LIMIT}&page=${page}&review_filter=`, citySlug);
-    } catch (e) { console.warn(`   ! ${serviceSlug} стр.${page}: ${e.message}`); break; }
+    } catch (e) { console.warn(`   ! ${serviceSlug} стр.${page}: ${e.message}`); complete = false; break; }
     const list = j?.content?.specialists || [];
     acc.push(...list);
     if (!j?.content?.has_more || !list.length) break;
+    if (page === MAX_PAGES) complete = false;
     await sleep(rnd(250, 700));                            // лёгкая пауза между страницами
   }
-  return acc;
+  return { items: acc, complete };
 }
 
 function normalize(raw, ctx) {
@@ -132,47 +151,51 @@ function sessionHeaders() {
 async function fillPhones(masters, phonesPerRun, citySlug, saveProgress) {
   if (!NAIMI_SESSION) {
     console.log("телефоны: пропуск — нет секрета NAIMI_SESSION (номер naimi отдаёт только авторизованным).");
-    return 0;
+    return { got: 0, done: 0, authError: "Не задан NAIMI_SESSION" };
   }
   // Жёсткий потолок за прогон — чтобы опечатка в настройках (напр. 10000) не устроила
   // многочасовой прогон с сотнями лишних «звонков» и таймаутом.
-  const cap = Math.min(Math.max(1, phonesPerRun || 0), PHONES_HARD_CAP);
-  // Приоритет — лучшие мастера (рейтинг → отзывы → проверенные), чтобы полезные контакты шли первыми.
-  const targets = masters
-    .filter(m => !m.phone && m.specialistId)
-    .sort((a, b) =>
-      (Number(b.rating) || 0) - (Number(a.rating) || 0) ||
-      (Number(b.reviews) || 0) - (Number(a.reviews) || 0) ||
-      (b.verified ? 1 : 0) - (a.verified ? 1 : 0))
-    .slice(0, cap);
-  if (!targets.length) { console.log("телефоны: докапывать нечего"); return 0; }
+  const cap = Math.min(Math.max(0, Number(phonesPerRun) || 0), PHONES_HARD_CAP);
+  // Сначала все ещё не проверенные, затем самые старые повторы. Так очередь
+  // неизбежно доходит до каждого мастера, а не крутится вокруг верхушки рейтинга.
+  const targets = selectPhoneTargets(
+    masters.filter(m => m.active !== false && m.specialistId),
+    { limit: cap },
+  );
+  if (!targets.length) { console.log("телефоны: докапывать нечего"); return { got: 0, done: 0, authError: "" }; }
   console.log(`телефоны: цель ${targets.length} (потолок ${PHONES_HARD_CAP}, бюджет ${Math.round(PHONE_BUDGET_MS / 60e3)} мин)`);
 
-  const headers = sessionHeaders();
-  if (citySlug) headers["App-City"] = citySlug;
   const deadline = Date.now() + PHONE_BUDGET_MS;
-  let got = 0, done = 0, firstRaw = true;
+  let got = 0, done = 0, firstRaw = true, authError = "";
   for (const m of targets) {
     if (Date.now() > deadline) {
       console.warn(`  ! лимит времени исчерпан — стоп на ${done}/${targets.length}, собранное сохранено`);
       break;
     }
+    let result;
     try {
+      const headers = sessionHeaders();
+      const masterCity = m.city || citySlug;
+      if (masterCity) headers["App-City"] = masterCity;
       const r = await fetch(`${API}/pub/call/specialist`, {
         method: "PUT", headers,
         body: JSON.stringify({ specialist_id: m.specialistId }),
       });
       const j = await r.json().catch(() => null);
       if (firstRaw) { console.log("  · пример ответа телефона:", JSON.stringify(j).slice(0, 200)); firstRaw = false; }
-      m.phoneCheckedAt = new Date().toISOString();
-      if (j && j.status === false && /access denied|unauthor|401|403/i.test(String(j.message || ""))) {
-        console.warn(`  ! телефон: сессия naimi не принята (${j.message}). Обнови секрет NAIMI_SESSION. Стоп.`);
-        break;
+      if (r.status === 401 || r.status === 403 || (j && j.status === false && /access denied|unauthor|401|403/i.test(String(j.message || "")))) {
+        authError = `Сессия Naimi не принята: ${j?.message || `HTTP ${r.status}`}`;
+        result = { status: "retry", error: authError };
+      } else if (!r.ok) {
+        result = { status: "retry", error: `HTTP ${r.status}` };
+      } else {
+        const c = j?.content || j || {};
+        const phone = onlyDigits(c.phone || c.number || c.contact || c.phone_number || "");
+        result = phone ? { status: "found", phone } : { status: "unavailable" };
       }
-      const c = j?.content || j || {};
-      const phone = onlyDigits(c.phone || c.number || c.contact || c.phone_number || "");
-      if (phone) { m.phone = phone; got++; }
-    } catch (e) { console.warn(`  ! телефон ${m.specialistId}: ${e.message}`); }
+    } catch (e) { result = { status: "retry", error: e.message || "network error" }; }
+    Object.assign(m, applyPhoneAttempt(m, result));
+    if (result.status === "found") got++;
     done++;
     // Сохраняем прогресс по ходу — чтобы таймаут/сбой не терял уже собранные номера,
     // и следующий прогон не звонил повторно тем, у кого номер уже есть.
@@ -180,10 +203,14 @@ async function fillPhones(masters, phonesPerRun, citySlug, saveProgress) {
       try { await saveProgress(); console.log(`  … сохранено (номеров ${got}, обработано ${done}/${targets.length})`); }
       catch (e) { console.warn("  ! промежуточное сохранение:", e.message); }
     }
+    if (authError) {
+      console.warn(`  ! ${authError}. Обнови секрет NAIMI_SESSION. Партия остановлена.`);
+      break;
+    }
     await sleep(rnd(PHONE_DELAY_MIN, PHONE_DELAY_MAX));     // человеческая пауза
   }
   console.log(`телефоны: получено ${got} из ${done} обработанных (партия за прогон)`);
-  return got;
+  return { got, done, authError };
 }
 
 // ── Firebase (узел = строка с JSON, как читает CRM) ───────────────────────────
@@ -195,14 +222,9 @@ function initFb() {
   catch (e) { throw new Error("FIREBASE_SERVICE_ACCOUNT — не валидный JSON (вставь содержимое .json целиком): " + e.message); }
   admin.initializeApp({ credential: admin.credential.cert(cred), databaseURL: FB_DB_URL });
 }
-async function readJson(key, fallback) {
-  try {
-    const snap = await admin.database().ref(fbKey(key)).get();
-    const v = snap.val();
-    if (typeof v === "string") return JSON.parse(v);
-    if (v && typeof v === "object") return v;
-  } catch (e) { console.warn(`чтение ${key}:`, e.message); }
-  return fallback;
+async function readJson(key, empty) {
+  const snap = await admin.database().ref(fbKey(key)).get();
+  return parseStoredJson(snap.val(), { key, empty });
 }
 async function writeJson(key, obj) {
   await admin.database().ref(fbKey(key)).set(JSON.stringify(obj));
@@ -238,20 +260,33 @@ function decideRun(cfg) {
     .split(",").map(s => s.trim()).filter(Boolean);
   const categoryIds = (env("CATEGORY_IDS", "") || String(cfg.categoryIds || "") || "47")
     .split(",").map(s => Number(s.trim())).filter(Boolean);
-  const phonesPerRun = num("PHONES_PER_RUN", Number(cfg.phonesPerRun) || 25);
+  const configuredPhones = Number(cfg.phonesPerRun);
+  const phonesPerRun = num("PHONES_PER_RUN", Number.isFinite(configuredPhones) ? configuredPhones : 25);
   console.log(`naimi-parser · города=[${cities}] категории=[${categoryIds}] телефоны/прогон=${phonesPerRun}` +
               (NAIMI_SESSION ? " (сессия задана)" : " (без сессии — телефоны пропускаются)"));
 
   // 2) уже собранное → мержим (телефоны и история не теряются)
   const existingDoc = await readJson(MASTERS_KEY, { items: [] });
-  const existing = Array.isArray(existingDoc.items) ? existingDoc.items : [];
-  const byId = new Map(existing.map(m => [`${m.source}:${m.extId}`, m]));
+  if (!existingDoc || typeof existingDoc !== "object" || Array.isArray(existingDoc) || !Array.isArray(existingDoc.items)) {
+    throw new Error(`${MASTERS_KEY}: ожидался объект с массивом items; запись остановлена`);
+  }
+  const existing = existingDoc.items;
+  const freshById = new Map();
   console.log(`в базе уже: ${existing.length} мастеров (${existing.filter(m => m.phone).length} с телефоном)`);
 
   // 3) справочник услуг по категориям
   const services = [];
+  let crawlComplete = true;
+  const availableCities = await getCitiesCatalogue().catch(e => {
+    console.warn("cities err", e.message);
+    return Array.isArray(cfg.availableCities) ? cfg.availableCities : [];
+  });
   for (const cid of categoryIds) {
-    const s = await getServices(cid).catch(e => (console.warn("services err", e.message), []));
+    const s = await getServices(cid).catch(e => {
+      crawlComplete = false;
+      console.warn("services err", e.message);
+      return [];
+    });
     for (const x of s) services.push({ ...x, categoryName: `cat-${cid}` });
   }
   console.log(`услуг к обходу: ${services.length}`);
@@ -259,13 +294,15 @@ function decideRun(cfg) {
   // 4) сбор списков напрямую с API (город × услуга)
   for (const city of cities) {
     for (const svc of services) {
-      const raws = await getSpecialists(city, svc.slug);
+      const pageResult = await getSpecialists(city, svc.slug);
+      const raws = pageResult.items;
+      if (!pageResult.complete) crawlComplete = false;
       let added = 0;
       for (const raw of raws) {
         const m = normalize(raw, { city, category: svc.categoryName, service: svc.name });
         if (!m.name || !m.extId) continue;
         const key = `${m.source}:${m.extId}`;
-        const prev = byId.get(key);
+        const prev = freshById.get(key);
         if (prev) {
           for (const s of m.services) if (!prev.services.includes(s)) prev.services.push(s);
           if (!prev.specialistId && m.specialistId) prev.specialistId = m.specialistId;
@@ -274,18 +311,23 @@ function decideRun(cfg) {
           prev.reviews = m.reviews ?? prev.reviews;
           if (m.about && !prev.about) prev.about = m.about;
           if (m.avatar && !prev.avatar) prev.avatar = m.avatar;
-        } else { byId.set(key, m); added++; }
+        } else { freshById.set(key, m); added++; }
       }
       console.log(`  · ${city} / ${svc.name}: +${added} новых (получено ${raws.length})`);
       await sleep(rnd(200, 500));
     }
   }
-  const all = [...byId.values()];
-  console.log(`ИТОГО уникальных мастеров: ${all.length}`);
+  const all = mergeFreshSnapshot(existing, [...freshById.values()], { complete: crawlComplete });
+  console.log(`ИТОГО: активных ${all.filter(m => m.active !== false).length}, всего с историей ${all.length}`);
 
   const buildPayload = () => ({
     updatedAt: new Date().toISOString(), source: "naimi.kz",
-    count: all.length, withPhone: all.filter(m => m.phone).length, items: all,
+    count: all.length,
+    activeCount: all.filter(m => m.active !== false).length,
+    withPhone: all.filter(m => m.phone).length,
+    pendingPhone: all.filter(m => m.active !== false && !m.phone).length,
+    crawlComplete,
+    items: all,
   });
 
   // 5) СНАЧАЛА сохраняем список (чтобы возможный таймаут на телефонах не потерял данные)
@@ -293,8 +335,9 @@ function decideRun(cfg) {
   console.log(`✔ список сохранён: ${all.length} мастеров`);
 
   // 6) телефоны — с промежуточным сохранением и лимитом по времени (только если задана сессия naimi)
-  try { await fillPhones(all, phonesPerRun, cities[0], () => writeJson(MASTERS_KEY, buildPayload())); }
-  catch (e) { console.warn("этап телефонов:", e.message); }
+  let phoneSummary = { got: 0, done: 0, authError: "" };
+  try { phoneSummary = await fillPhones(all, phonesPerRun, cities[0], () => writeJson(MASTERS_KEY, buildPayload())); }
+  catch (e) { console.warn("этап телефонов:", e.message); phoneSummary.authError = e.message; }
 
   // 7) финальная запись + отметка в настройках (для расписания и кнопки «Обновить сейчас»)
   const payload = buildPayload();
@@ -306,6 +349,11 @@ function decideRun(cfg) {
   if (decision.runNow) freshCfg.lastRunNow = decision.runNow;
   freshCfg.lastCount = all.length;
   freshCfg.lastWithPhone = payload.withPhone;
+  freshCfg.lastActiveCount = payload.activeCount;
+  freshCfg.lastPendingPhone = payload.pendingPhone;
+  freshCfg.lastRunStatus = crawlComplete ? "ok" : "partial";
+  freshCfg.lastPhoneError = phoneSummary.authError || "";
+  if (availableCities.length) freshCfg.availableCities = availableCities;
   await writeJson(CONFIG_KEY, freshCfg);
   console.log(`настройки: lastRunAt обновлён, lastRunNow=${decision.runNow}`);
 

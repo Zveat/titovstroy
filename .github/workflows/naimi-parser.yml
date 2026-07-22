@@ -35,9 +35,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  scrape:
+  naimi:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: titovstroy/naimi-parser
@@ -63,10 +63,22 @@ jobs:
           PHONES_PER_RUN: ${{ github.event.inputs.phones_per_run }}
         run: npm run scrape
 
-      # OLX-парсер: запускается всегда (if: always()), даже если naimi-шаг упал —
-      # источники независимы. Сам решает парсить/пропустить по своим настройкам.
+  olx:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: titovstroy/naimi-parser
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Установка зависимостей
+        run: npm install --no-audit --no-fund
+
       - name: Запуск парсера OLX
-        if: ${{ always() }}
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           FB_DB_URL: ${{ vars.FB_DB_URL }}
