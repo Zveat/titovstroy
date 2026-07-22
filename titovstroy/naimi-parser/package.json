@@ -1,11 +1,12 @@
 {
   "name": "titovstroy-naimi-parser",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
-  "description": "Парсер мастеров с naimi.kz в базу TitovStroy (GitHub Actions, чистый fetch)",
+  "description": "Парсеры мастеров с naimi.kz и OLX.kz в базу TitovStroy (GitHub Actions, чистый fetch)",
   "scripts": {
-    "scrape": "node scrape.mjs"
+    "scrape": "node scrape.mjs",
+    "scrape-olx": "node scrape-olx.mjs"
   },
   "dependencies": {
     "firebase-admin": "^12.7.0"
