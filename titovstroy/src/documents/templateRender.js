@@ -52,6 +52,14 @@ const renderWorksTable = (fieldId, value) => {
   const definition = FIELD_BY_ID.get(fieldId);
   if (!definition || definition.kind !== "table") throw new Error(`Неизвестное табличное автополе: ${fieldId}`);
   const rows = Array.isArray(value?.rows) ? value.rows : [];
+  if (fieldId === "estimate.completedWorksTable" || value?.tableStyle === "completed") {
+    const body = rows.map((row, index) => `<tr><td class="tc">${index + 1}</td><td>${escapeHtml(row.name)}</td><td class="tc">${escapeHtml(row.unit)}</td><td class="tc">${escapeHtml(row.quantity)}</td><td class="tr">${moneyHtml(row.price)}</td><td class="tr">${moneyHtml(row.sum)}</td></tr>`).join("");
+    return `<table data-field-id="${escapeHtml(fieldId)}"><thead><tr><th>№</th><th>Наименование работ (услуг)</th><th>Ед. изм.</th><th>Кол-во</th><th>Цена, ₸</th><th>Стоимость, ₸</th></tr></thead><tbody>${body}</tbody><tfoot><tr><td colspan="5" class="tr b">ИТОГО:</td><td class="tr b">${moneyHtml(value?.total)}&nbsp;₸</td></tr></tfoot></table>`;
+  }
+  if (value?.tableStyle === "subcontract") {
+    const body = rows.map((row, index) => `<tr><td class="tc">${index + 1}</td><td>${escapeHtml(row.name)}</td><td class="tc">${escapeHtml(row.quantity)}</td><td class="tc">${escapeHtml(row.unit)}</td><td class="tr">${moneyHtml(row.price)}</td><td class="tr">${moneyHtml(row.sum)}</td></tr>`).join("");
+    return `<table data-field-id="${escapeHtml(fieldId)}"><thead><tr><th>№</th><th>Наименование работ</th><th>Объём</th><th>Ед.</th><th>Цена, ₸</th><th>Сумма, ₸</th></tr></thead><tbody>${body}</tbody></table>`;
+  }
   const categories = [];
   const byCategory = new Map();
   for (const row of rows) {
@@ -143,8 +151,16 @@ function renderNode(node, variables) {
     case "pageBreak": return '<div class="page-break"></div>';
     case "table": return `<table><tbody>${renderChildren(node, variables)}</tbody></table>`;
     case "tableRow": return `<tr>${renderChildren(node, variables)}</tr>`;
-    case "tableHeader": return `<th>${renderChildren(node, variables)}</th>`;
-    case "tableCell": return `<td>${renderChildren(node, variables)}</td>`;
+    case "tableHeader": {
+      const colspan = Math.min(20, Math.max(1, Number(node.attrs?.colspan) || 1));
+      const rowspan = Math.min(100, Math.max(1, Number(node.attrs?.rowspan) || 1));
+      return `<th colspan="${colspan}" rowspan="${rowspan}">${renderChildren(node, variables)}</th>`;
+    }
+    case "tableCell": {
+      const colspan = Math.min(20, Math.max(1, Number(node.attrs?.colspan) || 1));
+      const rowspan = Math.min(100, Math.max(1, Number(node.attrs?.rowspan) || 1));
+      return `<td colspan="${colspan}" rowspan="${rowspan}">${renderChildren(node, variables)}</td>`;
+    }
     default: throw new Error(`Неподдерживаемый узел шаблона: ${node.type}`);
   }
 }

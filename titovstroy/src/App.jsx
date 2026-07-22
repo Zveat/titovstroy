@@ -7005,7 +7005,7 @@ tfoot td{font-weight:700}
   const buildPodryadHtml = (m) => {
     const esc = s => String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
     const money = n => Math.round(Number(n) || 0).toLocaleString("ru-RU");
-    const ca = contragentsRef.current.find(c => c.id === m.contragentId) || contragentsRef.current[0] || {};
+    const ca = m.__templateCompany || contragentsRef.current.find(c => c.id === m.contragentId) || contragentsRef.current[0] || {};
     const w = m.worker || {};
     const dt = m.date ? new Date(m.date) : new Date();
     const dd = String(dt.getDate()).padStart(2, "0"), mm = String(dt.getMonth() + 1).padStart(2, "0"), yy = dt.getFullYear();
@@ -10527,6 +10527,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     actor: () => currentUser,
     audit: event => logChange(currentUser, event),
     legacyRepairRenderer: buildContractHtml,
+    legacyRenderers: {
+      contract: buildContractHtml,
+      podryad: buildPodryadHtml,
+      avr: buildAvrHtml,
+      moneyWords: tengeInWords,
+    },
     getData: () => ({
       objects: objectsRef.current,
       estimates: estimatesRef.current,

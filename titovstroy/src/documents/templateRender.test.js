@@ -80,6 +80,28 @@ describe("safe document template renderer", () => {
     expect(html).toContain("ИТОГО: 50&nbsp;000&nbsp;₸");
   });
 
+  it("renders the protected AVR table in the active R-1 column order", () => {
+    const html = renderTemplateToCanonicalHtml({
+      contentJson: doc([{ type: "dataTable", attrs: { fieldId: "estimate.completedWorksTable" } }]),
+      variables: {
+        "estimate.completedWorksTable": {
+          rows: [{ name: "Монтаж", unit: "м²", quantity: 2, price: 5000, sum: 10000 }],
+          total: 10000,
+        },
+      },
+    });
+    expect(html).toContain("Кол-во");
+    expect(html).toContain("Стоимость, ₸");
+    expect(html).toContain("ИТОГО:");
+  });
+
+  it("preserves safe row and column spans in imported static tables", () => {
+    const html = renderTemplateToCanonicalHtml({
+      contentJson: doc([{ type: "table", content: [{ type: "tableRow", content: [{ type: "tableCell", attrs: { colspan: 2, rowspan: 3 }, content: [paragraph(text("Реквизиты"))] }] }] }]),
+    });
+    expect(html).toContain('<td colspan="2" rowspan="3">');
+  });
+
   it("compares legal text without changing punctuation, spelling, or paragraph order", () => {
     expect(normalizeLegalText("<p>1.  Текст</p>\n<p>2. Пункт.</p>")).toBe("1. Текст 2. Пункт.");
     expect(compareCanonicalDocuments("<p>1. Текст</p>", "<p>1. Текст</p>").ok).toBe(true);

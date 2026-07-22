@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createDocumentTemplateService } from "./documentTemplateService.js";
 import { createTemplateRepository } from "./templateRepository.js";
+import { LEGACY_TEMPLATE_DEFINITIONS } from "./legacyTemplateCatalog.js";
 
 const ACTOR = { id: "admin-1", name: "Администратор" };
 const DOC = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Текст" }] }] };
@@ -137,6 +138,31 @@ describe("transactional document template repository", () => {
     expect(loaded.store.templates).toHaveLength(1);
     expect(loaded.store.templates[0]).toMatchObject({ id: "repair-fiz-legacy", source: "legacy-repair", status: "draft" });
     expect(loaded.store.templates[0].draft.contentJson.type).toBe("doc");
+  });
+
+  it("imports the complete legal catalog in one cloud transaction and preserves it on retry", async () => {
+    const storage = fakeStorage();
+    const htmlFor = type => {
+      const definition = LEGACY_TEMPLATE_DEFINITIONS.find(item => item.type === type);
+      return `<html><body>${definition.markers.map(item => item.kind === "table" ? `<table><tr><td>${item.raw}</td></tr></table>` : `<p>${item.raw}</p>`).join("")}</body></html>`;
+    };
+    const service = createDocumentTemplateService({
+      storage,
+      actor: ACTOR,
+      legacyRenderers: {
+        contract: contract => htmlFor(contract.type),
+        podryad: model => htmlFor(model.kind === "annex" ? "podryad_annex" : "podryad"),
+        avr: () => htmlFor("avr_r1").replace("</body>", "<p>TS-MONEY-WORDS</p></body>"),
+        moneyWords: () => "TS-MONEY-WORDS",
+      },
+    });
+    const first = await service.importLegacyCatalog();
+    expect(first).toMatchObject({ ok: true, committed: true });
+    expect(first.value.createdIds).toHaveLength(8);
+    expect((await service.loadTemplates()).store.templates).toHaveLength(8);
+    const second = await service.importLegacyCatalog();
+    expect(second).toMatchObject({ ok: true, committed: true });
+    expect(second.value).toMatchObject({ createdIds: [] });
   });
 
   it("creates and revises snapshots without writing the template store", async () => {

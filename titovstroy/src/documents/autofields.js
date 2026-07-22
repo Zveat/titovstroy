@@ -1,3 +1,5 @@
+import { documentTypeById } from "./documentTypeRegistry.js";
+
 const field = definition => Object.freeze(definition);
 
 export const AUTOFIELD_DEFINITIONS = Object.freeze([
@@ -19,6 +21,13 @@ export const AUTOFIELD_DEFINITIONS = Object.freeze([
   field({ id: "object.type", group: "Объект", label: "Тип объекта", kind: "text", requiredFor: [] }),
   field({ id: "object.area", group: "Объект", label: "Площадь объекта", kind: "number", requiredFor: [] }),
   field({ id: "contract.number", group: "Договор", label: "Номер договора", kind: "text", requiredFor: ["repair_fiz"] }),
+  field({ id: "contract.mainNumber", group: "Договор", label: "Номер основного договора", kind: "text", requiredFor: [] }),
+  field({ id: "contract.appendixNumber", group: "Договор", label: "Номер приложения / доп. соглашения", kind: "text", requiredFor: [] }),
+  field({ id: "contract.mainDateLong", group: "Договор", label: "Дата основного договора, прописью", kind: "text", requiredFor: [] }),
+  field({ id: "contract.mainDateText", group: "Договор", label: "Дата основного договора в приложении", kind: "text", requiredFor: [] }),
+  field({ id: "contract.annexDateFull", group: "Договор", label: "Дата приложения", kind: "text", requiredFor: [] }),
+  field({ id: "contract.city", group: "Договор", label: "Город заключения", kind: "text", requiredFor: [] }),
+  field({ id: "contract.cityDateLine", group: "Договор", label: "Город и дата заключения", kind: "text", requiredFor: [] }),
   field({ id: "contract.date", group: "Договор", label: "Дата договора", kind: "date", requiredFor: [] }),
   field({ id: "contract.dateFull", group: "Договор", label: "Дата договора, цифрами", kind: "text", requiredFor: ["repair_fiz"] }),
   field({ id: "contract.dateLong", group: "Договор", label: "Дата договора, прописью", kind: "text", requiredFor: ["repair_fiz"] }),
@@ -28,7 +37,40 @@ export const AUTOFIELD_DEFINITIONS = Object.freeze([
   field({ id: "contract.advanceAmount", group: "Договор", label: "Сумма предоплаты", kind: "money", requiredFor: [] }),
   field({ id: "contract.advancePercentText", group: "Договор", label: "Предоплата с символом %", kind: "text", requiredFor: ["repair_fiz"] }),
   field({ id: "contract.advanceAmountText", group: "Договор", label: "Предоплата в тенге", kind: "text", requiredFor: ["repair_fiz"] }),
+  field({ id: "contract.designAdvanceText", group: "Договор", label: "Предоплата за дизайн", kind: "text", requiredFor: [] }),
+  field({ id: "contract.areaText", group: "Договор", label: "Площадь текстом", kind: "text", requiredFor: [] }),
+  field({ id: "contract.variantsLayout", group: "Договор", label: "Варианты планировки", kind: "text", requiredFor: [] }),
+  field({ id: "contract.corrLayout", group: "Договор", label: "Корректировки планировки", kind: "text", requiredFor: [] }),
+  field({ id: "contract.corrVis", group: "Договор", label: "Корректировки визуализаций", kind: "text", requiredFor: [] }),
+  field({ id: "contract.designTotalText", group: "Договор", label: "Стоимость дизайн-проекта", kind: "text", requiredFor: [] }),
+  field({ id: "contract.designRemainderText", group: "Договор", label: "Остаток оплаты за дизайн", kind: "text", requiredFor: [] }),
+  field({ id: "contract.deadlineText", group: "Договор", label: "Срок выполнения", kind: "text", requiredFor: [] }),
+  field({ id: "contract.reserveAmountText", group: "Договор", label: "Стоимость резервирования", kind: "text", requiredFor: [] }),
+  field({ id: "contract.reserveStartDateLong", group: "Договор", label: "Дата начала резервирования", kind: "text", requiredFor: [] }),
+  field({ id: "contract.avansText", group: "Договор", label: "Аванс подрядчику", kind: "text", requiredFor: [] }),
+  field({ id: "contract.termDays", group: "Договор", label: "Срок работ, дней", kind: "text", requiredFor: [] }),
+  field({ id: "design.planLine", group: "Дизайн", label: "Обмерочный план", kind: "text", requiredFor: [] }),
+  field({ id: "design.layoutLine", group: "Дизайн", label: "Планировочное решение", kind: "text", requiredFor: [] }),
+  field({ id: "design.conceptLine", group: "Дизайн", label: "Концепция интерьера", kind: "text", requiredFor: [] }),
+  field({ id: "design.vis3dLine", group: "Дизайн", label: "3D визуализация", kind: "text", requiredFor: [] }),
+  field({ id: "design.drawingsLine", group: "Дизайн", label: "Рабочие чертежи", kind: "text", requiredFor: [] }),
+  field({ id: "design.materialsLine", group: "Дизайн", label: "Ведомость материалов", kind: "text", requiredFor: [] }),
+  field({ id: "design.fixedPriceLine", group: "Дизайн", label: "Строка фиксированной цены", kind: "text", requiredFor: [] }),
+  field({ id: "design.sqmPriceLine", group: "Дизайн", label: "Строка цены за квадратный метр", kind: "text", requiredFor: [] }),
   field({ id: "estimate.worksTable", group: "Смета", label: "Таблица работ", kind: "table", requiredFor: ["repair_fiz"] }),
+  field({ id: "estimate.completedWorksTable", group: "АВР", label: "Таблица выполненных работ", kind: "table", requiredFor: [] }),
+  field({ id: "contractor.name", group: "Подрядчик", label: "ФИО / наименование подрядчика", kind: "text", requiredFor: [] }),
+  field({ id: "contractor.iin", group: "Подрядчик", label: "ИИН / БИН подрядчика", kind: "text", requiredFor: [] }),
+  field({ id: "contractor.document", group: "Подрядчик", label: "Документ подрядчика", kind: "text", requiredFor: [] }),
+  field({ id: "contractor.documentIssuer", group: "Подрядчик", label: "Кем выдан документ подрядчика", kind: "text", requiredFor: [] }),
+  field({ id: "contractor.address", group: "Подрядчик", label: "Адрес подрядчика", kind: "text", requiredFor: [] }),
+  field({ id: "contractor.phone", group: "Подрядчик", label: "Телефон подрядчика", kind: "text", requiredFor: [] }),
+  field({ id: "contractor.email", group: "Подрядчик", label: "Email подрядчика", kind: "text", requiredFor: [] }),
+  field({ id: "avr.number", group: "АВР", label: "Номер акта", kind: "text", requiredFor: [] }),
+  field({ id: "avr.date", group: "АВР", label: "Дата акта", kind: "date", requiredFor: [] }),
+  field({ id: "avr.dateLong", group: "АВР", label: "Дата акта, прописью", kind: "text", requiredFor: [] }),
+  field({ id: "avr.total", group: "АВР", label: "Сумма акта", kind: "money", requiredFor: [] }),
+  field({ id: "avr.totalWords", group: "АВР", label: "Сумма акта, прописью", kind: "text", requiredFor: [] }),
   field({ id: "company.name", group: "Компания", label: "Наименование подрядчика", kind: "text", requiredFor: ["repair_fiz"] }),
   field({ id: "company.bin", group: "Компания", label: "БИН подрядчика", kind: "text", requiredFor: ["repair_fiz"] }),
   field({ id: "company.bank", group: "Компания", label: "Банк подрядчика", kind: "text", requiredFor: ["repair_fiz"] }),
@@ -43,6 +85,8 @@ export const AUTOFIELD_DEFINITIONS = Object.freeze([
 const FIELD_BY_ID = new Map(AUTOFIELD_DEFINITIONS.map(definition => [definition.id, definition]));
 
 export function requiredFieldIdsForType(type) {
+  const registered = documentTypeById(type);
+  if (registered) return [...registered.requiredFieldIds];
   return AUTOFIELD_DEFINITIONS
     .filter(definition => definition.requiredFor.includes(type))
     .map(definition => definition.id);

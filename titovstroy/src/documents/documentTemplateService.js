@@ -1,6 +1,7 @@
 import { DOCUMENT_TEMPLATE_CENTER_ENABLED } from "./documentTemplateKeys.js";
 import { appendDocumentRevision, createDocumentSnapshot, getSnapshotForDocument } from "./documentSnapshots.js";
 import { createRepairLegacySeed } from "./repairLegacySeed.js";
+import { createLegacyTemplateCatalogSeeds } from "./legacyTemplateCatalog.js";
 import { createTemplateRepository } from "./templateRepository.js";
 
 const actionLabels = Object.freeze({
@@ -11,6 +12,7 @@ const actionLabels = Object.freeze({
   rollback: "откатил версию",
   archive: "архивировал шаблон",
   seedLegacyRepair: "импортировал действующий договор",
+  importLegacyCatalog: "импортировал действующие шаблоны",
 });
 
 export function createDocumentTemplateService({
@@ -18,9 +20,14 @@ export function createDocumentTemplateService({
   actor,
   audit,
   legacyRepairRenderer,
+  legacyRenderers,
   repairTemplateEnabled = DOCUMENT_TEMPLATE_CENTER_ENABLED,
 } = {}) {
   const repository = createTemplateRepository({ storage });
+  const catalogRenderers = {
+    ...(legacyRenderers || {}),
+    contract: legacyRenderers?.contract || legacyRepairRenderer,
+  };
   const currentActor = () => typeof actor === "function" ? actor() : actor;
 
   const run = async (method, entityId, invoke) => {
@@ -104,6 +111,12 @@ export function createDocumentTemplateService({
         legacyNormalizedText: seed.legacyNormalizedText,
         importReport: seed.importReport,
       }));
+    },
+    importLegacyCatalog: async () => {
+      if (!repairTemplateEnabled) return { ok: false, committed: false, reason: "Центр шаблонов выключен" };
+      const catalog = createLegacyTemplateCatalogSeeds(catalogRenderers);
+      if (!catalog.ok) return { ...catalog, committed: false };
+      return run("importLegacyCatalog", "legacy-document-catalog", (by, now) => repository.importLegacyCatalog(catalog.seeds, by, now));
     },
     renderLegacyRepair: (...args) => {
       if (typeof legacyRepairRenderer !== "function") throw new Error("Действующий генератор договора не подключён");

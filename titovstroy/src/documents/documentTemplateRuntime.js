@@ -14,6 +14,7 @@ export function createDocumentTemplateRuntime({
   actor,
   audit,
   legacyRepairRenderer,
+  legacyRenderers,
   getData,
   legacyExports,
   openOrPrintHtml,
@@ -25,6 +26,7 @@ export function createDocumentTemplateRuntime({
     actor,
     audit,
     legacyRepairRenderer,
+    legacyRenderers,
     repairTemplateEnabled: DOCUMENT_TEMPLATE_CENTER_ENABLED,
   });
   const googleUploader = createBrowserGoogleUploader({ clientId: googleClientId });

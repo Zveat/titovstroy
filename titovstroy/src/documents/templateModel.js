@@ -52,6 +52,7 @@ export function createTemplate(storeValue, input, actor, now = Date.now()) {
     activeVersionId: null,
     supportedExports: Array.isArray(input?.supportedExports) ? [...input.supportedExports] : ["pdf", "gdoc", "docx"],
     usageContexts: Array.isArray(input?.usageContexts) ? [...input.usageContexts] : [],
+    requiredFieldIds: Array.isArray(input?.requiredFieldIds) ? [...input.requiredFieldIds] : [],
     draft: null,
     versions: [],
     createdAt: now,
@@ -90,11 +91,12 @@ export function saveTemplateDraft(storeValue, templateId, contentJson, actor, no
   if (!validation.ok) return { ok: false, store: normalizeTemplateStore(storeValue), reason: validation.errors.join("; ") };
   return updateTemplate(storeValue, templateId, template => {
     template.draft = {
+      ...clone(template.draft || {}),
+      ...clone(metadata),
       contentJson: clone(contentJson),
       savedAt: now,
       savedBy: actor?.name || "",
       savedById: actor?.id || "",
-      ...clone(metadata),
     };
     if (template.status !== "archived") template.status = template.activeVersionId ? "published" : "draft";
     template.updatedAt = now;
@@ -116,6 +118,8 @@ export function publishTemplateDraft(storeValue, templateId, publication, actor,
     if (template.source === "legacy-repair") {
       if (publication?.parityReport?.ok !== true) return { ok: false, reason: "Юридический текст не сравнен с действующим документом" };
       if (publication?.manualLegalReview !== true) return { ok: false, reason: "Не подтверждена ручная проверка юридического текста" };
+    } else if (String(template.source || "").startsWith("legacy-") && publication?.manualLegalReview !== true) {
+      return { ok: false, reason: "Не подтверждена ручная проверка юридического текста" };
     }
     const checks = publication?.exportChecks || {};
     if (!["pdf", "gdoc", "docx"].every(format => checks[format] === true)) {
@@ -138,6 +142,7 @@ export function publishTemplateDraft(storeValue, templateId, publication, actor,
       previousVersionId,
       parityReport: clone(publication?.parityReport || null),
       exportChecks: clone(checks),
+      previewVariables: clone(template.draft?.previewVariables || {}),
     };
     template.versions = [...template.versions, version];
     template.activeVersionId = version.id;
@@ -177,12 +182,23 @@ export function getActiveTemplateVersion(storeValue, type) {
   return version ? clone(version) : null;
 }
 
+export function getTemplateEditorState(template) {
+  const version = template?.versions?.find(item => item.id === template.activeVersionId) || null;
+  const source = template?.draft || version || {};
+  return {
+    contentJson: clone(source.contentJson || null),
+    previewVariables: clone(source.previewVariables || {}),
+    page: clone(source.page || {}),
+  };
+}
+
 export function copyTemplate(storeValue, sourceTemplateId, input, actor, now = Date.now()) {
   const store = normalizeTemplateStore(storeValue);
   const source = store.templates.find(template => template.id === sourceTemplateId);
   if (!source) return { ok: false, store, reason: "Исходный шаблон не найден" };
   const active = source.versions.find(version => version.id === source.activeVersionId);
-  const sourceContent = active?.contentJson || source.draft?.contentJson;
+  const sourceRevision = source.draft || active;
+  const sourceContent = sourceRevision?.contentJson;
   if (!sourceContent) return { ok: false, store, reason: "В исходном шаблоне нет содержимого" };
   const created = createTemplate(store, {
     id: input?.id,
@@ -191,10 +207,49 @@ export function copyTemplate(storeValue, sourceTemplateId, input, actor, now = D
     category: input?.category || source.category,
     supportedExports: source.supportedExports,
     usageContexts: source.usageContexts,
+    requiredFieldIds: source.requiredFieldIds,
     source: "copy",
   }, actor, now);
   if (!created.ok) return created;
-  return saveTemplateDraft(created.store, created.value.id, sourceContent, actor, now, { copiedFromTemplateId: source.id });
+  return saveTemplateDraft(created.store, created.value.id, sourceContent, actor, now, {
+    copiedFromTemplateId: source.id,
+    page: clone(sourceRevision?.page || {}),
+    previewVariables: clone(sourceRevision?.previewVariables || {}),
+  });
+}
+
+export function importLegacyTemplateCatalog(storeValue, seeds, actor, now = Date.now()) {
+  const original = normalizeTemplateStore(storeValue);
+  if (!Array.isArray(seeds) || seeds.length === 0) return { ok: false, store: original, reason: "Каталог шаблонов пуст" };
+  const seedIds = seeds.map(seed => String(seed?.template?.id || "").trim());
+  if (seedIds.some(id => !id) || new Set(seedIds).size !== seedIds.length) {
+    return { ok: false, store: original, reason: "Каталог содержит пустые или повторяющиеся ID" };
+  }
+  for (const seed of seeds) {
+    const validation = validateTemplateContent(seed?.contentJson);
+    if (!validation.ok) return { ok: false, store: original, reason: `${seed?.template?.id || "Шаблон"}: ${validation.errors.join("; ")}` };
+  }
+
+  let store = original;
+  const createdIds = [];
+  const skippedIds = [];
+  for (const seed of seeds) {
+    const id = String(seed.template.id);
+    if (store.templates.some(template => template.id === id)) {
+      skippedIds.push(id);
+      continue;
+    }
+    const created = createTemplate(store, {
+      ...seed.template,
+      source: String(seed.template?.source || "legacy-import"),
+    }, actor, now);
+    if (!created.ok) return { ok: false, store: original, reason: created.reason };
+    const drafted = saveTemplateDraft(created.store, id, seed.contentJson, actor, now, seed.metadata || {});
+    if (!drafted.ok) return { ok: false, store: original, reason: drafted.reason };
+    store = drafted.store;
+    createdIds.push(id);
+  }
+  return { ok: true, store, value: { createdIds, skippedIds } };
 }
 
 export function filterTemplates(templates, filters = {}) {
