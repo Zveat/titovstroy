@@ -58,6 +58,10 @@ const PHONE_DELAY_MAX = num("PHONE_DELAY_MAX_MS", 11000);
 const PHONES_HARD_CAP = num("PHONES_HARD_CAP", 60);       // потолок номеров за прогон (защита от опечатки в настройках)
 const PHONE_BUDGET_MS = num("PHONE_BUDGET_MS", 11 * 60e3); // лимит времени на телефоны (job timeout 20 мин)
 const PHONE_SAVE_EVERY = 8;                                // промежуточное сохранение каждые N номеров
+// У бесплатного аккаунта naimi суточный лимит на раскрытие номеров (в логах видно: ~6 за прогон,
+// потом идёт стена «пусто»). Дальше долбить бессмысленно — только жжём 11 минут и плодим заявки.
+// Столько «пусто» подряд → считаем лимит исчерпанным и останавливаем партию.
+const PHONE_MISS_STREAK = num("PHONE_MISS_STREAK", 12);
 
 const fbKey      = k => String(k).replace(/[^a-zA-Z0-9_]/g, "_");
 const sleep      = ms => new Promise(r => setTimeout(r, ms));
@@ -166,7 +170,7 @@ async function fillPhones(masters, phonesPerRun, citySlug, saveProgress) {
   console.log(`телефоны: цель ${targets.length} (потолок ${PHONES_HARD_CAP}, бюджет ${Math.round(PHONE_BUDGET_MS / 60e3)} мин)`);
 
   const deadline = Date.now() + PHONE_BUDGET_MS;
-  let got = 0, done = 0, firstRaw = true, authError = "";
+  let got = 0, done = 0, firstRaw = true, authError = "", limitError = "", failDumps = 0, missStreak = 0;
   for (const m of targets) {
     if (Date.now() > deadline) {
       console.warn(`  ! лимит времени исчерпан — стоп на ${done}/${targets.length}, собранное сохранено`);
@@ -183,19 +187,27 @@ async function fillPhones(masters, phonesPerRun, citySlug, saveProgress) {
       });
       const j = await r.json().catch(() => null);
       if (firstRaw) { console.log("  · пример ответа телефона:", JSON.stringify(j).slice(0, 200)); firstRaw = false; }
-      if (r.status === 401 || r.status === 403 || (j && j.status === false && /access denied|unauthor|401|403/i.test(String(j.message || "")))) {
+      const msg = String(j?.message || j?.content?.message || "");
+      if (r.status === 401 || r.status === 403 || (j && j.status === false && /access denied|unauthor|401|403/i.test(msg))) {
         authError = `Сессия Naimi не принята: ${j?.message || `HTTP ${r.status}`}`;
         result = { status: "retry", error: authError };
+      } else if (j && j.status === false && /лимит|limit|исчерп|превыш|достиг|too many|quota|в день|сутк|day/i.test(msg)) {
+        // Явное сообщение о суточном лимите: retry (короткий кулдаун), НЕ «нет номера» на 7 дней, и стоп.
+        limitError = `Naimi суточный лимит: ${msg}`.slice(0, 200);
+        result = { status: "retry", error: limitError };
       } else if (!r.ok) {
         result = { status: "retry", error: `HTTP ${r.status}` };
       } else {
         const c = j?.content || j || {};
         const phone = onlyDigits(c.phone || c.number || c.contact || c.phone_number || "");
         result = phone ? { status: "found", phone } : { status: "unavailable" };
+        // Первые несколько «пусто» печатаем целиком — чтобы в логе была видна реальная причина
+        // (скрытый номер vs суточный лимит без явного message).
+        if (result.status === "unavailable" && failDumps < 3) { console.log("  · ответ без номера:", JSON.stringify(j).slice(0, 200)); failDumps++; }
       }
     } catch (e) { result = { status: "retry", error: e.message || "network error" }; }
     Object.assign(m, applyPhoneAttempt(m, result));
-    if (result.status === "found") got++;
+    if (result.status === "found") { got++; missStreak = 0; } else missStreak++;
     done++;
     // Сохраняем прогресс по ходу — чтобы таймаут/сбой не терял уже собранные номера,
     // и следующий прогон не звонил повторно тем, у кого номер уже есть.
@@ -207,10 +219,21 @@ async function fillPhones(masters, phonesPerRun, citySlug, saveProgress) {
       console.warn(`  ! ${authError}. Обнови секрет NAIMI_SESSION. Партия остановлена.`);
       break;
     }
+    if (limitError) {
+      console.warn(`  ! ${limitError}. Суточный лимит naimi исчерпан — партия остановлена, добор завтра.`);
+      break;
+    }
+    // Стена «пусто» подряд — почти наверняка исчерпан суточный лимит (наблюдали: ~6 номеров, дальше 0).
+    // Стоп, чтобы не жечь бюджет и не плодить пустые заявки; необработанные мастера остаются в очереди.
+    if (missStreak >= PHONE_MISS_STREAK) {
+      limitError = `Похоже, суточный лимит naimi исчерпан (${missStreak} «пусто» подряд)`;
+      console.warn(`  ! ${limitError} — партия остановлена на ${done}/${targets.length}, добор завтра.`);
+      break;
+    }
     await sleep(rnd(PHONE_DELAY_MIN, PHONE_DELAY_MAX));     // человеческая пауза
   }
   console.log(`телефоны: получено ${got} из ${done} обработанных (партия за прогон)`);
-  return { got, done, authError };
+  return { got, done, authError: authError || limitError };
 }
 
 // ── Firebase (узел = строка с JSON, как читает CRM) ───────────────────────────
