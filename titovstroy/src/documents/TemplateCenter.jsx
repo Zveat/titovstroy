@@ -78,6 +78,13 @@ export default function TemplateCenter({ service, permissions = {}, data = {} })
   const selected = templates.find(template => template.id === selectedId) || null;
   const editable = can(permissions.templateEdit) && selected?.status !== "archived";
   const missingLegacyTypes = DOCUMENT_TYPE_REGISTRY.filter(type => !templates.some(template => template.id === type.templateId));
+  const exportsVerified = Object.values(exportChecks).every(Boolean);
+  const parityVerified = selected?.source !== "legacy-repair" || parityReport?.ok === true;
+  const publishSteps = selected ? [
+    { ok: Boolean(selected.draft) && !dirty, label: dirty ? "Сохраните черновик" : "Черновик сохранён" },
+    { ok: previewReady && exportsVerified && parityVerified, label: previewReady && exportsVerified && parityVerified ? "Форматы проверены" : "Откройте предпросмотр" },
+    { ok: legalChecked, label: legalChecked ? "Юридический текст подтверждён" : "Подтвердите юридический текст" },
+  ] : [];
 
   const reload = async preferredId => {
     setLoading(true);
@@ -180,8 +187,12 @@ export default function TemplateCenter({ service, permissions = {}, data = {} })
   };
 
   const publish = async () => {
-    if (!selected || !can(permissions.templatePublish) || dirty) return;
-    if (!previewReady || !legalChecked) { setMessage("Сначала проверьте предпросмотр и подтвердите юридический текст"); return; }
+    if (!selected || !can(permissions.templatePublish)) return;
+    if (dirty) { setMessage("Сначала сохраните изменения кнопкой «Сохранить черновик»"); return; }
+    if (!selected.draft) { setMessage("У шаблона нет сохранённого черновика"); return; }
+    if (!previewReady || !exportsVerified) { setMessage("Сначала нажмите «Предпросмотр»: сервис проверит PDF, Google Docs и Word"); return; }
+    if (!parityVerified) { setMessage("Публикация отменена: юридическое сравнение с действующим документом не пройдено"); return; }
+    if (!legalChecked) { setMessage("Подтвердите проверку юридического текста"); return; }
     let variables = editorState(selected).previewVariables;
     let verifiedParity = null;
     if (selected.type === "repair_fiz" && selected.source === "legacy-repair") {
@@ -257,11 +268,12 @@ export default function TemplateCenter({ service, permissions = {}, data = {} })
       <TemplateEditor contentJson={draftContent} editable={editable} onChange={next => { setDraftContent(next); setDirty(true); setPreviewReady(false); setExportChecks({ pdf: false, gdoc: false, docx: false }); setParityReport(null); setLegalChecked(false); }} />
       <footer className="dt-publish-bar">
         <div><strong>Публикация версии</strong><span>Новые документы получат эту версию. Уже созданные документы не изменятся.</span></div>
+        <div className="dt-publish-steps">{publishSteps.map((step, index) => <span key={step.label} className={step.ok ? "is-ready" : "is-pending"}><b>{step.ok ? "✓" : index + 1}</b>{step.label}</span>)}</div>
         <label><input type="checkbox" checked={legalChecked} onChange={event => setLegalChecked(event.target.checked)} /> {selected.source === "legacy-repair" ? "Юридический текст сравнен с действующим документом" : "Юридический текст проверен без сокращений и изменения смысла"}</label>
-        {can(permissions.templatePublish) && <button className="dt-btn primary" disabled={dirty || !selected.draft || !previewReady || !legalChecked || !Object.values(exportChecks).every(Boolean) || (selected.source === "legacy-repair" && parityReport?.ok !== true)} onClick={publish}>Опубликовать</button>}
+        {can(permissions.templatePublish) && <button className={`dt-btn primary${publishSteps.every(step => step.ok) ? "" : " needs-steps"}`} onClick={publish}>Опубликовать</button>}
       </footer>
       {selected.source === "legacy-repair" && <div className="dt-legal-lock">{parityReport?.ok ? "Сравнение пройдено: текст совпадает с действующим договором." : "Пилотный договор ремонта публикуется только после автоматического сравнения с действующим генератором. Юридический текст здесь не меняется автоматически."}</div>}
-      {selected.source === "legacy-import" && <div className="dt-legal-lock">Шаблон перенесён напрямую из действующего генератора. Редактирование и версии не меняют уже созданные документы. Рабочие кнопки PDF, Google Docs и Word пока продолжают использовать прежний генератор.</div>}
+      {selected.source === "legacy-import" && <div className="dt-legal-lock">Шаблон перенесён напрямую из действующего генератора. Новая опубликованная версия применяется только к новым документам; уже созданные документы не меняются. Если шаблон не удастся применить, сервис автоматически использует прежний генератор.</div>}
       {(selected.versions?.length || 0) > 0 && <section className="dt-history"><h3>История версий</h3>{[...selected.versions].reverse().map(version => <div key={version.id}><span><b>Версия {version.versionNumber}</b><small>{new Date(version.publishedAt).toLocaleString("ru-RU")} · {version.publishedBy || "—"}</small></span>{version.id === selected.activeVersionId ? <em>Активна</em> : can(permissions.templateRollback) && <button onClick={() => rollback(version.id)}>Вернуть</button>}</div>)}</section>}
       {message && <div className="dt-toast" onClick={() => setMessage("")}>{message}</div>}
     </section>

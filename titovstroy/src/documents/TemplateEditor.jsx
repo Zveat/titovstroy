@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { AUTOFIELD_DEFINITIONS } from "./autofields.js";
 import { createTemplateExtensions } from "./editorExtensions.js";
@@ -21,7 +21,20 @@ function ToolButton({ title, active = false, disabled = false, onClick, children
 }
 
 export default function TemplateEditor({ contentJson, editable, onChange, showAutofields = true, instanceMode = false }) {
+  const [outline, setOutline] = useState([]);
   const extensions = useMemo(() => createTemplateExtensions({ editable }), [editable]);
+  const updateOutline = current => {
+    const next = [];
+    current.state.doc.descendants((node, pos) => {
+      if (!node.isTextblock) return;
+      const text = node.textContent.trim().replace(/\s+/g, " ");
+      if (!text || text.length > 150) return;
+      const isHeading = node.type.name === "heading";
+      const isNumberedSection = /^(?:раздел\s+)?(?:\d+(?:\.\d+)*[.)]?|[IVXLC]+[.)])\s+/iu.test(text);
+      if (isHeading || isNumberedSection) next.push({ pos, label: text });
+    });
+    setOutline(next.slice(0, 120));
+  };
   const editor = useEditor({
     extensions,
     content: contentJson || EMPTY_DOCUMENT,
@@ -29,7 +42,11 @@ export default function TemplateEditor({ contentJson, editable, onChange, showAu
     editorProps: {
       attributes: { class: "dt-prosemirror" },
     },
-    onUpdate: ({ editor: current }) => onChange?.(current.getJSON()),
+    onCreate: ({ editor: current }) => updateOutline(current),
+    onUpdate: ({ editor: current }) => {
+      updateOutline(current);
+      onChange?.(current.getJSON());
+    },
   });
 
   useEffect(() => {
@@ -41,6 +58,7 @@ export default function TemplateEditor({ contentJson, editable, onChange, showAu
     if (!editor || !contentJson) return;
     const incoming = JSON.stringify(contentJson);
     if (JSON.stringify(editor.getJSON()) !== incoming) editor.commands.setContent(contentJson, { emitUpdate: false });
+    updateOutline(editor);
   }, [editor, contentJson]);
 
   if (!editor) return <div className="dt-editor-loading">Подготовка редактора…</div>;
@@ -48,6 +66,16 @@ export default function TemplateEditor({ contentJson, editable, onChange, showAu
   const insertField = field => {
     if (field.kind === "table") editor.chain().focus().insertDataTable(field.id).run();
     else editor.chain().focus().insertProtectedField(field.id).run();
+  };
+
+  const scrollDocument = target => {
+    const viewport = editor.view.dom.closest(".dt-page-wrap");
+    if (target === "start" || target === "end") {
+      viewport?.scrollTo({ top: target === "start" ? 0 : viewport.scrollHeight, behavior: "smooth" });
+      return;
+    }
+    const element = editor.view.nodeDOM(Number(target));
+    element?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   };
 
   return (
@@ -83,6 +111,14 @@ export default function TemplateEditor({ contentJson, editable, onChange, showAu
         <div className="dt-tool-group">
           <ToolButton title="Вставить таблицу" disabled={!editable} onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}>▦</ToolButton>
           <ToolButton title="Разрыв страницы" disabled={!editable} onClick={() => editor.chain().focus().insertPageBreak().run()}>⇥</ToolButton>
+        </div>
+        <div className="dt-tool-group dt-document-nav">
+          <ToolButton title="В начало документа" onClick={() => scrollDocument("start")}>↑</ToolButton>
+          <select aria-label="Перейти к разделу договора" value="" disabled={outline.length === 0} onChange={event => scrollDocument(event.target.value)}>
+            <option value="">{outline.length ? `Перейти к разделу (${outline.length})` : "Разделы не найдены"}</option>
+            {outline.map((item, index) => <option key={`${item.pos}-${index}`} value={item.pos}>{item.label}</option>)}
+          </select>
+          <ToolButton title="В конец документа" onClick={() => scrollDocument("end")}>↓</ToolButton>
         </div>
       </div>
 
