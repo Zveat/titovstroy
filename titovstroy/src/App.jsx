@@ -300,7 +300,21 @@ const MASTER_CATEGORIES = [
   { id: "113", name: "Спортивные тренеры" },
   { id: "112", name: "Прочие услуги" },
 ];
-function MastersSection({ masters = [], meta = null, loaded = true, config = null, onSaveConfig = null, canManage = false }) {
+// Подкатегории OLX «Услуги» для выбора «кто что делает» (id → название).
+const OLX_SUBCATEGORIES = [
+  { id: "188", name: "Всё: Ремонт и строительство" },
+  { id: "822", name: "Строительные услуги" }, { id: "824", name: "Отделка / ремонт" },
+  { id: "826", name: "Сантехника" }, { id: "828", name: "Электрика" },
+  { id: "1584", name: "Плиточник" }, { id: "1580", name: "Маляр" }, { id: "1582", name: "Поклейка обоев" },
+  { id: "1578", name: "Гипсокартон" }, { id: "1574", name: "Напольные работы" }, { id: "1576", name: "Кровля" },
+  { id: "1570", name: "Сварка" }, { id: "1588", name: "Столяр" }, { id: "1590", name: "Мебель на заказ" },
+  { id: "825", name: "Окна / двери" }, { id: "827", name: "Вентиляция / кондиционеры" },
+  { id: "1592", name: "Строительство домов" }, { id: "823", name: "Дизайн / архитектура" },
+  { id: "1586", name: "Монтажные работы" }, { id: "1564", name: "Грузчики" },
+];
+function MastersSection({ masters = [], meta = null, loaded = true, config = null, onSaveConfig = null, canManage = false,
+  mastersOlx = [], olxMeta = null, olxLoaded = true, olxConfig = null, onSaveOlxConfig = null }) {
+  const [source, setSource] = useState("naimi"); // "naimi" | "olx"
   const [cfgOpen, setCfgOpen] = useState(false);
   const [freq, setFreq] = useState("daily");
   const [cfgCities, setCfgCities] = useState("almaty");
@@ -364,6 +378,7 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
 
   const shown = filtered.slice(0, limit);
   const withPhone = masters.filter(m => m.phone).length;
+  const olxWithPhone = mastersOlx.filter(m => m.phone).length;
 
   const selStyle = { height: 36, borderRadius: 9, border: "1px solid #e2e8f0", padding: "0 10px", fontSize: 13, background: "#fff", color: "#0f172a", fontFamily: "inherit", minWidth: 0 };
   const chip = (active) => ({ border: "1px solid " + (active ? "#2563eb" : "#e2e8f0"), background: active ? "#eff6ff" : "#fff", color: active ? "#2563eb" : "#64748b", borderRadius: 8, padding: "6px 12px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" });
@@ -373,15 +388,25 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
       <div className="hero" style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)", borderRadius: 16, padding: "22px 26px", marginBottom: 18, position: "relative", overflow: "hidden", boxShadow: "0 4px 20px rgba(15,23,42,.3)" }}>
         <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: 13, flexWrap: "wrap" }}>
           <div style={{ width: 40, height: 40, borderRadius: 11, background: "linear-gradient(135deg,#3b82f6,#2563eb)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>🔎</div>
-          <div style={{ minWidth: 0 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
             <h1 style={{ margin: 0, fontSize: 21, fontWeight: 900, color: "#fff", lineHeight: 1.1 }}>Мастера</h1>
             <div style={{ fontSize: 12, color: "rgba(255,255,255,.7)", marginTop: 3 }}>
-              База подрядчиков с naimi.kz · всего {masters.length}{withPhone ? ` · с телефоном ${withPhone}` : ""}
-              {meta?.updatedAt ? ` · обновлено ${new Date(meta.updatedAt).toLocaleDateString("ru-RU")}` : ""}
+              {source === "olx"
+                ? <>База с OLX.kz · всего {mastersOlx.length}{olxWithPhone ? ` · с телефоном ${olxWithPhone}` : ""}{olxMeta?.updatedAt ? ` · обновлено ${new Date(olxMeta.updatedAt).toLocaleDateString("ru-RU")}` : ""}</>
+                : <>База с naimi.kz · всего {masters.length}{withPhone ? ` · с телефоном ${withPhone}` : ""}{meta?.updatedAt ? ` · обновлено ${new Date(meta.updatedAt).toLocaleDateString("ru-RU")}` : ""}</>}
             </div>
+          </div>
+          <div style={{ display: "flex", gap: 5, background: "rgba(255,255,255,.08)", borderRadius: 10, padding: 4 }}>
+            {[["naimi", "naimi.kz"], ["olx", "OLX.kz"]].map(([s, l]) => (
+              <button key={s} onClick={() => setSource(s)} style={{ border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 800, borderRadius: 7, padding: "6px 14px", background: source === s ? "#fff" : "transparent", color: source === s ? "#0f172a" : "rgba(255,255,255,.8)" }}>{l}</button>
+            ))}
           </div>
         </div>
       </div>
+
+      {source === "olx" ? (
+        <MastersOlxView masters={mastersOlx} meta={olxMeta} loaded={olxLoaded} config={olxConfig} onSaveConfig={onSaveOlxConfig} canManage={canManage} />
+      ) : (<>
 
       {/* Настройки парсера (только Админ) */}
       {canManage && (
@@ -526,7 +551,235 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
           )}
         </>
       )}
+      </>)}
     </div>
+  );
+}
+
+// Отдельная вкладка OLX (доска объявлений: нет рейтингов/отзывов, поэтому — балл
+// «серьёзности» из косвенных сигналов + фильтры компания/частник, свежесть, продвижение).
+function MastersOlxView({ masters = [], meta = null, loaded = true, config = null, onSaveConfig = null, canManage = false }) {
+  const [cfgOpen, setCfgOpen] = useState(false);
+  const [freq, setFreq] = useState("daily");
+  const [cfgRegion, setCfgRegion] = useState("5");
+  const [cfgPhones, setCfgPhones] = useState(60);
+  const [cfgCats, setCfgCats] = useState(["188"]);
+  const [cfgMsg, setCfgMsg] = useState("");
+  const [cfgBusy, setCfgBusy] = useState(false);
+  useEffect(() => {
+    if (config) {
+      setFreq(["off", "daily", "twice", "weekly"].includes(config.frequency) ? config.frequency : "daily");
+      setCfgRegion(String(config.regionId || "5"));
+      setCfgPhones(Number(config.phonesPerRun) || 60);
+      const ids = String(config.categoryIds || "188").split(",").map(s => s.trim()).filter(Boolean);
+      setCfgCats(ids.length ? ids : ["188"]);
+    }
+  }, [config]);
+  const toggleCat = (id) => setCfgCats(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const applyCfg = async (extra) => {
+    if (!onSaveConfig || cfgBusy) return;
+    const cats = cfgCats.length ? cfgCats : ["188"];
+    setCfgBusy(true); setCfgMsg(extra?.runNow ? "Запрос отправлен…" : "Сохраняю…");
+    const ok = await onSaveConfig({ frequency: freq, regionId: String(cfgRegion).trim() || "5", categoryIds: cats.join(","), phonesPerRun: Number(cfgPhones) || 60, ...(extra || {}) });
+    setCfgMsg(ok ? (extra?.runNow ? "✓ В очереди — прогон запустится сам (обычно 10–30 мин)" : "✓ Настройки сохранены") : "Не удалось сохранить в облако");
+    setCfgBusy(false);
+  };
+  const runPending = (Number(config?.runNow) || 0) > (Number(config?.lastRunNow) || 0);
+  const [city, setCity] = useState("");
+  const [service, setService] = useState("");
+  const [who, setWho] = useState("");        // "" | "company" | "private"
+  const [onlyPhone, setOnlyPhone] = useState(false);
+  const [onlyPromoted, setOnlyPromoted] = useState(false);
+  const [freshOnly, setFreshOnly] = useState(false);
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState("score");
+  const [limit, setLimit] = useState(60);
+
+  const cities = useMemo(() => [...new Set(masters.map(m => m.city).filter(Boolean))].sort(), [masters]);
+  const services = useMemo(() => {
+    const s = new Set();
+    for (const m of masters) for (const x of (m.services || [])) if (x) s.add(x);
+    return [...s].sort((a, b) => a.localeCompare(b, "ru"));
+  }, [masters]);
+  const DAY = 24 * 3600e3;
+  const freshDays = (m) => m.lastRefresh ? (Date.now() - Date.parse(m.lastRefresh)) / DAY : 999;
+
+  const filtered = useMemo(() => {
+    const qn = q.trim().toLowerCase();
+    const list = masters.filter(m => {
+      if (city && m.city !== city) return false;
+      if (service && !(m.services || []).includes(service)) return false;
+      if (who === "company" && !m.business) return false;
+      if (who === "private" && m.business) return false;
+      if (onlyPhone && !m.phone) return false;
+      if (onlyPromoted && !m.promoted) return false;
+      if (freshOnly && freshDays(m) > 30) return false;
+      if (qn && !(String(m.name || "").toLowerCase().includes(qn) || String(m.title || "").toLowerCase().includes(qn))) return false;
+      return true;
+    });
+    list.sort((a, b) => {
+      if (sort === "fresh") return freshDays(a) - freshDays(b);
+      if (sort === "name") return String(a.name || "").localeCompare(String(b.name || ""), "ru");
+      return (Number(b.score) || 0) - (Number(a.score) || 0);
+    });
+    return list;
+  }, [masters, city, service, who, onlyPhone, onlyPromoted, freshOnly, q, sort]);
+
+  const shown = filtered.slice(0, limit);
+  const selStyle = { height: 36, borderRadius: 9, border: "1px solid #e2e8f0", padding: "0 10px", fontSize: 13, background: "#fff", color: "#0f172a", fontFamily: "inherit", minWidth: 0 };
+  const chip = (active) => ({ border: "1px solid " + (active ? "#2563eb" : "#e2e8f0"), background: active ? "#eff6ff" : "#fff", color: active ? "#2563eb" : "#64748b", borderRadius: 8, padding: "6px 12px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" });
+  const scoreColor = (s) => s >= 70 ? "#059669" : s >= 45 ? "#d97706" : "#94a3b8";
+
+  return (
+    <>
+      {/* Настройки OLX-парсера (только Админ) */}
+      {canManage && (
+        <div style={{ marginBottom: 14, border: "1px solid #e9eef5", borderRadius: 14, background: "#fff", overflow: "hidden", boxShadow: "0 1px 2px rgba(15,23,42,.04)" }}>
+          <div onClick={() => setCfgOpen(o => !o)} style={{ display: "flex", alignItems: "center", gap: 9, padding: "12px 16px", cursor: "pointer", background: cfgOpen ? "#fbfcfe" : "#fff", userSelect: "none" }}>
+            <span style={{ fontSize: 15 }}>⚙️</span>
+            <span style={{ fontSize: 13, fontWeight: 800, color: "#0f172a", flex: 1 }}>Настройки обновления (OLX)</span>
+            {config?.lastRunAt ? <span style={{ fontSize: 11, color: "#94a3b8" }}>последнее: {new Date(config.lastRunAt).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}{config.lastCount != null ? ` · собрано ${config.lastCount}` : ""}{config.lastWithPhone ? ` · с тел. ${config.lastWithPhone}` : ""}</span> : null}
+            {runPending
+              ? <span title="Запрос сохранён. Прогон запустится сам — обычно в течение 10–30 минут." style={{ fontSize: 10.5, fontWeight: 700, color: "#d97706", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 20, padding: "2px 8px" }}>⏳ в очереди — запустится сам</span>
+              : (config?.lastRunAt ? <span style={{ fontSize: 10.5, fontWeight: 700, color: "#059669", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 20, padding: "2px 8px" }}>✓ обновлено</span> : null)}
+            <span style={{ color: "#cbd5e1", fontSize: 12, transform: cfgOpen ? "none" : "rotate(-90deg)", transition: "transform .15s" }}>▾</span>
+          </div>
+          {cfgOpen && (
+            <div style={{ padding: "12px 16px", borderTop: "1px solid #f1f5f9" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
+                <label style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600 }}>Частота обновления<br />
+                  <select value={freq} onChange={e => setFreq(e.target.value)} style={{ ...selStyle, marginTop: 4, minWidth: 160 }}>
+                    <option value="off">Выключено</option>
+                    <option value="daily">Раз в день</option>
+                    <option value="twice">2 раза в день</option>
+                    <option value="weekly">Раз в неделю</option>
+                  </select>
+                </label>
+                <label style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600 }}>Регион (Караганда = 5)<br />
+                  <input value={cfgRegion} onChange={e => setCfgRegion(e.target.value)} style={{ ...selStyle, marginTop: 4, width: 120 }} />
+                </label>
+                <label style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600 }}>Телефонов за прогон<br />
+                  <input type="number" min="0" max="200" value={cfgPhones} onChange={e => setCfgPhones(e.target.value)} style={{ ...selStyle, marginTop: 4, width: 120 }} />
+                </label>
+                <button disabled={cfgBusy} onClick={() => applyCfg()} style={{ background: "#0f172a", color: "#fff", border: "none", borderRadius: 9, padding: "9px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", height: 36 }}>💾 Сохранить</button>
+                <button disabled={cfgBusy} onClick={() => applyCfg({ runNow: Date.now() })} style={{ background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", borderRadius: 9, padding: "9px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", height: 36 }}>🔄 Обновить сейчас</button>
+                {cfgMsg && <span style={{ fontSize: 12, color: cfgMsg.startsWith("✓") ? "#059669" : "#64748b", alignSelf: "center" }}>{cfgMsg}</span>}
+              </div>
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600, marginBottom: 7 }}>Категории/специальности — что парсить ({cfgCats.length} выбрано)</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {OLX_SUBCATEGORIES.map(c => {
+                    const on = cfgCats.includes(c.id);
+                    return (
+                      <button key={c.id} type="button" onClick={() => toggleCat(c.id)}
+                        style={{ border: "1px solid " + (on ? "#2563eb" : "#e2e8f0"), background: on ? "#eff6ff" : "#fff", color: on ? "#2563eb" : "#64748b", borderRadius: 8, padding: "5px 11px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                        {on ? "✓ " : ""}{c.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 12, lineHeight: 1.5 }}>
+                «Всё: Ремонт и строительство» = вся категория разом; либо отметь конкретные специальности (плиточник, электрик, грузчик…).
+                Телефоны OLX открыты (без авторизации) — докапываются пачкой, но с паузами. У OLX нет рейтингов/отзывов, поэтому вместо них — <b>балл серьёзности</b> (возраст аккаунта, свежесть, продвижение, фото).
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Фильтры OLX */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Поиск по имени/объявлению…" style={{ ...selStyle, flex: "1 1 200px", maxWidth: 300 }} />
+        <select value={city} onChange={e => setCity(e.target.value)} style={selStyle}>
+          <option value="">Все города</option>
+          {cities.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={service} onChange={e => setService(e.target.value)} style={{ ...selStyle, maxWidth: 240 }}>
+          <option value="">Все специальности</option>
+          {services.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select value={sort} onChange={e => setSort(e.target.value)} style={selStyle}>
+          <option value="score">По баллу серьёзности</option>
+          <option value="fresh">По свежести</option>
+          <option value="name">По имени</option>
+        </select>
+        <div style={{ display: "flex", gap: 4 }}>
+          {[["", "Все"], ["company", "Компании"], ["private", "Частники"]].map(([v, l]) => (
+            <button key={v} style={chip(who === v)} onClick={() => setWho(v)}>{l}</button>
+          ))}
+        </div>
+        <button style={chip(freshOnly)} onClick={() => setFreshOnly(v => !v)}>🕒 Активные (30д)</button>
+        <button style={chip(onlyPromoted)} onClick={() => setOnlyPromoted(v => !v)}>⭐ Продвигаемые</button>
+        <button style={chip(onlyPhone)} onClick={() => setOnlyPhone(v => !v)}>📞 С телефоном</button>
+      </div>
+
+      {!masters.length && (
+        <div style={{ textAlign: "center", padding: "60px 20px", color: "#94a3b8", background: "#f9fafb", border: "1px dashed #e5e7eb", borderRadius: 14 }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>🧱</div>
+          <div style={{ fontWeight: 700, marginBottom: 6, color: "#64748b" }}>{loaded ? "База OLX пока пуста" : "Загрузка…"}</div>
+          <div style={{ fontSize: 12.5 }}>Парсер OLX.kz наполнит её в ближайший запуск.<br />Телефоны на OLX открыты и собираются вместе со списком.</div>
+        </div>
+      )}
+
+      {!!masters.length && (
+        <>
+          <div style={{ fontSize: 12.5, color: "#94a3b8", marginBottom: 10 }}>Найдено: {filtered.length}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(320px,1fr))", gap: 12 }}>
+            {shown.map(m => {
+              const phoneD = m.phone ? _kzPhone(m.phone) : "";
+              const fd = freshDays(m);
+              return (
+                <div key={m.source + ":" + m.extId} style={{ background: "#fff", border: "1px solid #eef2f7", borderRadius: 14, padding: "14px 16px", boxShadow: "0 1px 2px rgba(15,23,42,.04)", display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 14.5, fontWeight: 800, color: "#0f172a" }}>{m.name || "Без имени"}</span>
+                        <span title="Балл серьёзности/активности (не качество работы)" style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: scoreColor(m.score || 0), borderRadius: 6, padding: "1px 6px" }}>{m.score || 0}</span>
+                        {m.business
+                          ? <span style={{ fontSize: 10, fontWeight: 700, color: "#7c3aed", background: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: 6, padding: "1px 6px" }}>компания</span>
+                          : <span style={{ fontSize: 10, fontWeight: 700, color: "#64748b", background: "#f1f5f9", borderRadius: 6, padding: "1px 6px" }}>частник</span>}
+                        {m.promoted && <span title="Платное продвижение" style={{ fontSize: 10 }}>⭐</span>}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "#94a3b8", marginTop: 2 }}>
+                        {m.city || "—"}
+                        {fd <= 7 ? <span style={{ color: "#059669", fontWeight: 700 }}> · свежее</span> : fd <= 30 ? " · активно" : fd < 999 ? ` · ${Math.round(fd)} дн. назад` : ""}
+                        {m.adsCount > 1 ? ` · ${m.adsCount} объявл.` : ""}
+                      </div>
+                    </div>
+                  </div>
+                  {m.title && <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.35 }}>{m.title.slice(0, 90)}</div>}
+                  {!!(m.services || []).length && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                      {(m.services || []).slice(0, 4).map((s, i) => (
+                        <span key={i} style={{ fontSize: 10.5, color: "#475569", background: "#f1f5f9", borderRadius: 6, padding: "2px 7px" }}>{s}</span>
+                      ))}
+                      {(m.services || []).length > 4 && <span style={{ fontSize: 10.5, color: "#94a3b8" }}>+{(m.services || []).length - 4}</span>}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+                    {phoneD ? (
+                      <>
+                        <a href={"tel:+" + phoneD} style={{ textDecoration: "none", background: "#eff6ff", color: "#2563eb", border: "1px solid rgba(37,99,235,.2)", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>📞 {_fmtPhone(m.phone)}</a>
+                        <a href={"https://wa.me/" + phoneD} target="_blank" rel="noreferrer" style={{ textDecoration: "none", background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>WhatsApp</a>
+                      </>
+                    ) : (
+                      <span style={{ fontSize: 11.5, color: "#94a3b8", alignSelf: "center" }}>📞 номер собирается…</span>
+                    )}
+                    {m.url && <a href={m.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", background: "#f8fafc", color: "#64748b", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>🔗 Объявление</a>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {filtered.length > limit && (
+            <div style={{ textAlign: "center", marginTop: 16 }}>
+              <button onClick={() => setLimit(l => l + 60)} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 20px", fontSize: 13, fontWeight: 700, color: "#2563eb", cursor: "pointer", fontFamily: "inherit" }}>Показать ещё ({filtered.length - limit})</button>
+            </div>
+          )}
+        </>
+      )}
+    </>
   );
 }
 
@@ -1066,6 +1319,8 @@ const PODRYADS_KEY        = "titovstroy-podryads";         // договоры �
 const PODRYADS_BACKUPS_KEY= "titovstroy-podryads-backups";
 const MASTERS_KEY         = "titovstroy-masters";          // справочник мастеров с naimi.kz (пишет парсер, читаем только на чтение)
 const MASTERS_CONFIG_KEY  = "titovstroy-masters-config";   // настройки парсера (частота, «Обновить сейчас») — редактирует Админ, читает парсер
+const MASTERS_OLX_KEY        = "titovstroy-masters-olx";       // справочник мастеров с OLX.kz (второй источник, пишет отдельный парсер)
+const MASTERS_OLX_CONFIG_KEY = "titovstroy-masters-olx-config";// настройки OLX-парсера
 // единый снимок рабочего пространства: объекты + их сметы + их договора
 const WORKSPACE_BACKUPS_KEY = "titovstroy-workspace-backups";
 // legacy ключ для миграции старых сделок
@@ -5457,6 +5712,37 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     try { const r = await storage.setCloudOnly(MASTERS_CONFIG_KEY, JSON.stringify(next)); return !!(r && r.fbOk); }
     catch { return false; }
   }, [mastersConfig]);
+  // Второй источник — OLX.kz (отдельный ключ/парсер, боевых данных не касается, только чтение).
+  const [mastersOlx, setMastersOlx] = useState([]);
+  const [mastersOlxMeta, setMastersOlxMeta] = useState(null);
+  const [mastersOlxLoaded, setMastersOlxLoaded] = useState(false);
+  const [mastersOlxConfig, setMastersOlxConfig] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    storage.getResult(MASTERS_OLX_KEY).then(res => {
+      if (!alive) return;
+      setMastersOlxLoaded(true);
+      if (res && res.status === "found" && res.value) {
+        try {
+          const d = JSON.parse(res.value);
+          setMastersOlx(Array.isArray(d?.items) ? d.items : (Array.isArray(d) ? d : []));
+          setMastersOlxMeta(d && !Array.isArray(d) ? { updatedAt: d.updatedAt, count: d.count, withPhone: d.withPhone } : null);
+        } catch {}
+      }
+    }).catch(() => { if (alive) setMastersOlxLoaded(true); });
+    storage.getResult(MASTERS_OLX_CONFIG_KEY).then(res => {
+      if (!alive) return;
+      if (res && res.status === "found" && res.value) { try { setMastersOlxConfig(JSON.parse(res.value)); } catch { setMastersOlxConfig({}); } }
+      else setMastersOlxConfig({});
+    }).catch(() => { if (alive) setMastersOlxConfig({}); });
+    return () => { alive = false; };
+  }, []);
+  const saveMastersOlxConfig = useCallback(async (patch) => {
+    const next = { ...(mastersOlxConfig || {}), ...patch, updatedAt: Date.now() };
+    setMastersOlxConfig(next);
+    try { const r = await storage.setCloudOnly(MASTERS_OLX_CONFIG_KEY, JSON.stringify(next)); return !!(r && r.fbOk); }
+    catch { return false; }
+  }, [mastersOlxConfig]);
   const _contractsLoaded = useRef(false);
   const _productionsLoaded = useRef(false); // отдельно от _contractsLoaded: productions грузится в том же запросе, но может не долететь, пока остальное — долетит
   // Флаги загрузки — это refs (не вызывают ре-рендер). Авто-синки (этапы←сметы, бюджет←договоры)
@@ -14972,7 +15258,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         );
       })()}
 
-        {effScreen === "masters" && <MastersSection masters={masters} meta={mastersMeta} loaded={mastersLoaded} config={mastersConfig} onSaveConfig={saveMastersConfig} canManage={_isAdmin} />}
+        {effScreen === "masters" && <MastersSection masters={masters} meta={mastersMeta} loaded={mastersLoaded} config={mastersConfig} onSaveConfig={saveMastersConfig} canManage={_isAdmin} mastersOlx={mastersOlx} olxMeta={mastersOlxMeta} olxLoaded={mastersOlxLoaded} olxConfig={mastersOlxConfig} onSaveOlxConfig={saveMastersOlxConfig} />}
 
         {effScreen === "contracts" && currentPermissions.documents === "none" && restrictedSection("Прочие документы", "сотрудникам с соответствующим правом")}
         {effScreen === "contracts" && currentPermissions.documents !== "none" && (
