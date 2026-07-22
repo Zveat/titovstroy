@@ -99,6 +99,20 @@ describe("generic legacy document importer", () => {
     expect(result.reason).toMatch(/client\.phone/);
   });
 
+  it("ignores marker-like values that exist only in the technical HTML head", () => {
+    const result = importLegacyHtmlTemplate({
+      html: `<html>
+        <head><title>Договор от 27.12.2099</title></head>
+        <body><p>Юридический текст без даты в теле документа.</p></body>
+      </html>`,
+      markers: [{ raw: "27.12.2099", fieldId: "contract.dateFull", kind: "text" }],
+      requiredFieldIds: [],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(extractTemplateFieldIds(result.contentJson)).not.toContain("contract.dateFull");
+  });
+
   it("removes legacy totals that the protected works table regenerates", () => {
     const result = importLegacyHtmlTemplate({
       html: `<html><body>

@@ -11,8 +11,10 @@ const parseAttrs = source => {
   return attrs;
 };
 
+const bodyHtmlOf = html => String(html || "").match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] ?? String(html || "");
+
 function parseHtml(html) {
-  const body = String(html || "").match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] ?? String(html || "");
+  const body = bodyHtmlOf(html);
   const root = { tag: "root", attrs: {}, children: [] };
   const stack = [root];
   const voidTags = new Set(["br", "hr", "img", "meta", "link", "input"]);
@@ -159,7 +161,11 @@ function blockNodes(node, markers) {
 export function importLegacyHtmlTemplate({ html, markers, requiredFieldIds = [] } = {}) {
   const normalizedMarkers = normalizeMarkers(markers);
   if (!String(html || "").trim()) return { ok: false, reason: "Действующий генератор вернул пустой документ" };
-  const counts = Object.fromEntries(normalizedMarkers.map(marker => [marker.fieldId, String(html).split(marker.rawHtml).length - 1]));
+  // The title, styles and print controls are transport chrome, not document
+  // content. A value mentioned only there must not be required as an editable
+  // protected field inside the legal body.
+  const bodyHtml = bodyHtmlOf(html);
+  const counts = Object.fromEntries(normalizedMarkers.map(marker => [marker.fieldId, bodyHtml.split(marker.rawHtml).length - 1]));
   const missing = [...new Set(requiredFieldIds)].filter(fieldId => !counts[fieldId]);
   if (missing.length) return { ok: false, reason: `Действующий генератор не вернул маркер: ${missing.join(", ")}`, importReport: { ok: false, counts, missing } };
   const content = blockNodes(parseHtml(html), normalizedMarkers).filter(Boolean);
