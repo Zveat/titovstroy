@@ -10550,7 +10550,11 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     },
     openOrPrintHtml,
     googleClientId: "363473710949-d67codd7dq0uk9g4tfl8lhhgecgcqe98.apps.googleusercontent.com",
-    confirmLegacy: reason => window.confirm(`${reason}.\n\nСоздать документ действующим способом?`),
+    confirmLegacy: reason => window.confirm(
+      `Новый шаблон не может сформировать документ:\n${reason}.\n\n` +
+      "OK — использовать старый генератор.\n" +
+      "Отмена — вернуться и заполнить недостающие данные."
+    ),
   });
   const documentTemplateService = documentTemplateRuntime.service;
   const refreshDocumentSnapshots = useCallback(async () => {

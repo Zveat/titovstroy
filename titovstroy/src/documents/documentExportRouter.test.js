@@ -8,7 +8,7 @@ const contragent = { id: "company-1", name: "ТОО", bin: "1", bank: "Банк"
 const version = { id: "repair:v1", templateId: "repair", publishedAt: 2000, contentJson: doc("Договор"), page: { size: "A4" } };
 const data = { objects: [{ id: "object-1", address: "Адрес", type: "Вторичка" }], estimates: [{ id: "estimate-1", objectId: "object-1", works: contract.works }], contracts: [contract], clients: [client], contragents: [contragent] };
 
-const setup = ({ enabled = true, snapshot = null, createCommitted = true } = {}) => {
+const setup = ({ enabled = true, snapshot = null, createCommitted = true, confirmLegacy = vi.fn(() => true) } = {}) => {
   const legacy = vi.fn(async () => ({ ok: true, route: "legacy" }));
   const canonical = vi.fn(async value => ({ ok: true, route: "template", documentId: value.documentId }));
   let stored = snapshot;
@@ -21,8 +21,8 @@ const setup = ({ enabled = true, snapshot = null, createCommitted = true } = {})
       return { ok: true, committed: true, snapshots: [stored] };
     }),
   };
-  const router = createDocumentExportRouter({ enabled, service, getData: () => data, exportLegacy: legacy, exportCanonical: canonical, confirmLegacy: vi.fn(() => false) });
-  return { router, service, legacy, canonical };
+  const router = createDocumentExportRouter({ enabled, service, getData: () => data, exportLegacy: legacy, exportCanonical: canonical, confirmLegacy });
+  return { router, service, legacy, canonical, confirmLegacy };
 };
 
 describe("document export router", () => {
@@ -31,6 +31,28 @@ describe("document export router", () => {
     expect((await router.exportContract("pdf", { contract, client, contragent })).route).toBe("legacy");
     expect(legacy).toHaveBeenCalledOnce();
     expect(service.loadTemplates).not.toHaveBeenCalled();
+  });
+
+  it("never silently opens the old generator when required data is missing", async () => {
+    const confirmLegacy = vi.fn(() => false);
+    const { router, legacy } = setup({ confirmLegacy });
+
+    const result = await router.exportContract("pdf", { contract, client: null, contragent });
+
+    expect(result).toMatchObject({ ok: false, canUseLegacy: true, route: "template-blocked" });
+    expect(confirmLegacy).toHaveBeenCalledWith(expect.stringContaining("Клиент договора"), expect.any(Object));
+    expect(legacy).not.toHaveBeenCalled();
+  });
+
+  it("uses the old generator only after explicit confirmation", async () => {
+    const confirmLegacy = vi.fn(() => true);
+    const { router, legacy } = setup({ confirmLegacy });
+
+    const result = await router.exportContract("pdf", { contract, client: null, contragent });
+
+    expect(result).toMatchObject({ ok: true, route: "legacy" });
+    expect(confirmLegacy).toHaveBeenCalledOnce();
+    expect(legacy).toHaveBeenCalledOnce();
   });
 
   it("never applies a published template to an older contract", async () => {

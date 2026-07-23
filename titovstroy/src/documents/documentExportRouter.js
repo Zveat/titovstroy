@@ -50,10 +50,14 @@ const titleForContract = (contract, client, contractor) => {
 };
 const titleForReport = report => `АВР №${report.actNo || "б-н"}${report.clientName ? ` ${report.clientName}` : ""}`.replace(/[<>:"/\\|?*]/g, "_");
 
-export function createDocumentExportRouter({ enabled = false, service, getData = () => ({}), exportLegacy, exportCanonical } = {}) {
+export function createDocumentExportRouter({ enabled = false, service, getData = () => ({}), exportLegacy, exportCanonical, confirmLegacy } = {}) {
   const legacy = (format, payload) => exportLegacy(format, payload);
   const safeLegacy = async (reason, format, payload) => {
     console.warn("document template fallback:", reason);
+    if (typeof confirmLegacy === "function") {
+      const accepted = await confirmLegacy(reason, { format, payload });
+      if (!accepted) return { ok: false, canUseLegacy: true, reason, route: "template-blocked" };
+    }
     return legacy(format, payload);
   };
 
