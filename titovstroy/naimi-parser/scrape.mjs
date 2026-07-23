@@ -259,7 +259,12 @@ function decideRun(cfg) {
   const freq = ["off", "daily", "twice", "weekly"].includes(cfg.frequency) ? cfg.frequency : "daily";
   const runNow = Number(cfg.runNow) || 0;
   const runNowPending = runNow > (Number(cfg.lastRunNow) || 0);
-  if (EVENT === "workflow_dispatch") return { run: true, reason: "ручной запуск с GitHub", runNow };
+  const forced = env("FORCE_NAIMI", "") === "1";      // явный форс (env/секрет воркфлоу) — для ручного теста
+  // ВАЖНО: workflow_dispatch БОЛЬШЕ не форсит найми. Иначе частый внешний крон (он для OLX и
+  // дёргает ВЕСЬ воркфлоу каждые ~30 мин) гонял бы найми десятки раз в день. А у найми суточный
+  // лимит на раскрытие номеров + КАЖДЫЙ номер = заявка от РЕАЛЬНОГО аккаунта → риск бана/спама.
+  // Найми идёт строго по своему интервалу; форс — кнопкой «Обновить сейчас» или FORCE_NAIMI=1.
+  if (forced)                        return { run: true, reason: "форс FORCE_NAIMI", runNow };
   if (runNowPending)                 return { run: true, reason: "кнопка «Обновить сейчас» в CRM", runNow };
   if (freq === "off")                return { run: false, reason: "обновление выключено в настройках", runNow };
   const iv = INTERVALS[freq] || INTERVALS.daily;
