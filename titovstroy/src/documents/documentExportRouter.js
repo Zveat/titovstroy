@@ -99,7 +99,8 @@ export function createDocumentExportRouter({ enabled = false, service, getData =
       const existing = await service.getSnapshot(documentId);
       if (existing?.snapshot) {
         const exportDoc = buildCanonicalExport(existing.snapshot);
-        if (format === "pdf" && payload?.withStamp) exportDoc.pdfStampFile = payload?.contragent?.stampFile || context?.contragent?.stampFile || "stamp.jpg";
+        exportDoc.documentType = type;
+        if (format === "pdf" && (payload?.withStamp ?? source?.withStamp)) exportDoc.pdfStampFile = payload?.contragent?.stampFile || context?.contragent?.stampFile || "stamp.jpg";
         return exportCanonical(existing.snapshot, format, exportDoc);
       }
       if (existing?.status === "unavailable" || existing?.status === "corrupt") return safeLegacy("Снимок недоступен", format, payload);
@@ -122,7 +123,8 @@ export function createDocumentExportRouter({ enabled = false, service, getData =
       const snapshot = created.snapshots?.find(item => item?.documentId === documentId) || (await service.getSnapshot(documentId))?.snapshot;
       if (!snapshot) return safeLegacy("Облако не вернуло снимок", format, payload);
       const exportDoc = buildCanonicalExport(snapshot);
-      if (format === "pdf" && payload?.withStamp) exportDoc.pdfStampFile = payload?.contragent?.stampFile || context?.contragent?.stampFile || "stamp.jpg";
+      exportDoc.documentType = type;
+      if (format === "pdf" && (payload?.withStamp ?? source?.withStamp)) exportDoc.pdfStampFile = payload?.contragent?.stampFile || actualContext?.contragent?.stampFile || context?.contragent?.stampFile || "stamp.jpg";
       return exportCanonical(snapshot, format, exportDoc);
     } catch (error) {
       return safeLegacy(error?.message || "Ошибка генератора шаблонов", format, payload);

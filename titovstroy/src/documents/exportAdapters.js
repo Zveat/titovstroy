@@ -11,11 +11,44 @@ const escapeHtml = value => String(value == null ? "" : value).replace(/[&<>"']/
   "'": "&#39;",
 }[character]));
 
-export function addBrowserPdfControls(html, title = "Документ", { stampUrl = "" } = {}) {
+const paragraphWithField = (html, fieldId) => {
+  const escapedFieldId = String(fieldId || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expression = new RegExp(`<p\\b[^>]*>(?:(?!<\\/p>)[\\s\\S])*data-field-id=["']${escapedFieldId}["'](?:(?!<\\/p>)[\\s\\S])*<\\/p>`, "gi");
+  return [...String(html || "").matchAll(expression)];
+};
+
+const replaceMatch = (source, match, replacement) => `${source.slice(0, match.index)}${replacement}${source.slice(match.index + match[0].length)}`;
+
+export function addCompanyStamp(html, stampUrl, documentType = "") {
   const source = String(html || "");
-  const stamp = stampUrl
-    ? `<div class="document-pdf-stamp" style="height:0;position:relative;z-index:2;pointer-events:none"><img src="${escapeHtml(stampUrl)}" alt="Печать ТОО TITOVSTROY" style="position:absolute;left:12mm;bottom:-5mm;width:42mm;height:42mm;object-fit:contain;opacity:.88;mix-blend-mode:multiply"></div>`
-    : "";
+  if (!stampUrl) return source;
+  const src = escapeHtml(stampUrl);
+  const type = String(documentType || "");
+  const directorParagraphs = paragraphWithField(source, "company.director");
+
+  if (type === "podryad" || type === "podryad_annex") {
+    const anchor = directorParagraphs.at(-1);
+    if (!anchor) return source;
+    const stamp = `<div class="document-company-stamp document-company-stamp-subcontract" style="margin-top:-6px"><img src="${src}" alt="Печать" style="width:230px;height:230px;object-fit:contain;opacity:.85;mix-blend-mode:multiply"/></div>`;
+    return replaceMatch(source, anchor, `${anchor[0]}${stamp}`);
+  }
+
+  if (type === "avr_r1") {
+    const companyParagraphs = paragraphWithField(source, "company.name");
+    const anchor = companyParagraphs.at(-1);
+    if (!anchor) return source;
+    const stamp = `<div class="document-company-stamp document-company-stamp-avr" style="height:206px;position:relative;margin-top:-6px;page-break-inside:avoid"><img src="${src}" alt="Печать" style="position:absolute;left:40px;top:0;width:200px;height:200px;object-fit:contain;opacity:.85;mix-blend-mode:multiply;pointer-events:none"/></div>`;
+    return replaceMatch(source, anchor, `${anchor[0]}${stamp}`);
+  }
+
+  const anchor = directorParagraphs.at(-1);
+  if (!anchor) return source;
+  const stamp = `<img class="document-company-stamp document-company-stamp-contract" src="${src}" style="width:200px;height:200px;object-fit:contain;vertical-align:middle;margin-left:6px;opacity:0.85;mix-blend-mode:multiply" alt="М.П."/>`;
+  return replaceMatch(source, anchor, anchor[0].replace(/<\/p>$/i, `${stamp}</p>`));
+}
+
+export function addBrowserPdfControls(html, title = "Документ", { stampUrl = "", documentType = "" } = {}) {
+  const source = String(html || "");
   const controls = `<div class="document-pdf-actions" style="margin:24px 0 8px;text-align:center;padding:16px"><button type="button" onclick="window.print()" style="padding:12px 36px;background:#2563eb;color:#fff;border:0;border-radius:7px;font:700 14px Arial,sans-serif;cursor:pointer;box-shadow:0 4px 12px rgba(37,99,235,.2)">🖨 Распечатать / Сохранить PDF</button></div>`;
   const printStyle = `<style data-document-pdf-controls>@media print{.document-pdf-actions{display:none!important}}</style>`;
   const titleTag = `<title>${escapeHtml(title || "Документ")}</title>`;
@@ -23,7 +56,8 @@ export function addBrowserPdfControls(html, title = "Документ", { stampU
     ? source.replace(/<title\b[^>]*>[\s\S]*?<\/title>/i, titleTag)
     : source.replace(/<head([^>]*)>/i, `<head$1>${titleTag}`);
   output = /<\/head>/i.test(output) ? output.replace(/<\/head>/i, `${printStyle}</head>`) : `${printStyle}${output}`;
-  return /<\/body>/i.test(output) ? output.replace(/<\/body>/i, `${stamp}${controls}</body>`) : `${output}${stamp}${controls}`;
+  output = addCompanyStamp(output, stampUrl, documentType);
+  return /<\/body>/i.test(output) ? output.replace(/<\/body>/i, `${controls}</body>`) : `${output}${controls}`;
 }
 
 export function buildCanonicalExport(snapshot) {

@@ -46,7 +46,7 @@ export function createDocumentTemplateRuntime({
         const stampUrl = exportDoc?.pdfStampFile
           ? `${typeof window !== "undefined" ? window.location.origin : ""}/${stampFile}`
           : "";
-        return openPdfFromCanonical(exportDoc, html => openOrPrintHtml(html, 30000), { stampUrl });
+        return openPdfFromCanonical(exportDoc, html => openOrPrintHtml(html, 30000), { stampUrl, documentType: exportDoc.documentType });
       }
       if (format === "gdoc") return uploadGoogleDocFromCanonical(exportDoc, { uploadHtml: googleUploader });
       if (format === "docx") {

@@ -108,7 +108,33 @@ describe("document export router", () => {
     expect(service.createSnapshot).toHaveBeenCalledOnce();
     expect(canonical).toHaveBeenCalledTimes(2);
     expect(canonical.mock.calls[0][2].pdfStampFile).toBe("stamp2.jpg");
+    expect(canonical.mock.calls[0][2].documentType).toBe("repair_fiz");
     expect(canonical.mock.calls[1][2].pdfStampFile).toBeUndefined();
+  });
+
+  it("keeps the saved stamp option for a template-based work report", async () => {
+    const report = { id: "report-1", objectId: "object-1", actNo: "1", actDate: "2026-07-23", clientName: "Иванов", withStamp: true, createdAt: 4000, lines: [{ id: "line-1", name: "Работа", unit: "м²", doneQty: 1, price: 1000 }] };
+    const reportVersion = { id: "avr:v1", templateId: "legacy-avr-r1", publishedAt: 3000, contentJson: doc("Акт"), page: { size: "A4" } };
+    let stored = null;
+    const canonical = vi.fn(async () => ({ ok: true, route: "template" }));
+    const service = {
+      loadTemplates: vi.fn(async () => ({ status: "found", store: { templates: [{ id: "legacy-avr-r1", type: "avr_r1", status: "published", activeVersionId: reportVersion.id, versions: [reportVersion] }] } })),
+      getSnapshot: vi.fn(async () => ({ status: stored ? "found" : "empty", snapshot: stored })),
+      createSnapshot: vi.fn(async input => {
+        stored = { documentId: `report:${input.report.id}`, title: input.title, contentSnapshot: input.version.contentJson, variablesSnapshot: input.variables, canonicalHtmlSnapshot: input.canonicalHtml, page: input.version.page, instanceVersions: [] };
+        return { ok: true, committed: true, snapshots: [stored] };
+      }),
+    };
+    const router = createDocumentExportRouter({
+      enabled: true,
+      service,
+      getData: () => ({ ...data, contragents: [{ ...contragent, stampFile: "stamp.jpg" }] }),
+      exportLegacy: vi.fn(),
+      exportCanonical: canonical,
+    });
+
+    expect((await router.exportReport("pdf", { report })).route).toBe("template");
+    expect(canonical.mock.calls[0][2]).toMatchObject({ documentType: "avr_r1", pdfStampFile: "stamp.jpg" });
   });
 
   it("keeps the button working through legacy when snapshot cannot be confirmed", async () => {
