@@ -11417,7 +11417,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                               const parentContract = isDs ? contracts.find(c=>c.estId===est.parentId && (c.type||"repair_fiz")!=="annex") : null;
                               const mainNumber = parentContract?.number || "";
                               const mainDate = parentContract?.date || "";
-                              const newContract = {id:Date.now().toString(),number:"",date:new Date().toISOString().split("T")[0],clientId:parentContract?.clientId||"",contragentId:parentContract?.contragentId||contragents[0]?.id||"",works,discount:est.discount||0,appendix:annexNum,estId:est.id,estClient:dProj?.name||"",estPhone:dProj?.phone||"",estAddress:dProj?.address||"",note:"",type:isDs?"annex":"repair_fiz",createdBy:currentUser.name,createdById:currentUser.id,...(isDs?{mainNumber,mainDate}:{})};
+                              const now = Date.now();
+                              const newContract = {id:now.toString(),createdAt:now,objectId:est.objectId||"",number:"",date:new Date(now).toISOString().split("T")[0],clientId:parentContract?.clientId||"",contragentId:parentContract?.contragentId||contragents[0]?.id||"",works,discount:est.discount||0,appendix:annexNum,estId:est.id,estClient:dProj?.name||"",estPhone:dProj?.phone||"",estAddress:dProj?.address||"",note:"",type:isDs?"annex":"repair_fiz",createdBy:currentUser.name,createdById:currentUser.id,...(isDs?{mainNumber,mainDate}:{})};
                               setCurrentContract(newContract);
                               setContractTab("editor");
                               setScreen("contracts");
@@ -14420,11 +14421,13 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           const siblings = fromEst ? estimatesRef.current.filter(e=>e.parentId===fromEst.parentId) : [];
           const annexNum = isDs ? (fromEst.dsNumber||1)+1 : 1;
           const parentContract = isDs ? contractsRef.current.find(c=>c.estId===fromEst.parentId && (c.type||"repair_fiz")!=="annex") : null;
+          const now = Date.now();
           const newC = {
-            id: Date.now().toString(),
+            id: now.toString(),
+            createdAt: now,
             objectId: obj.id,
             number: fromEst && !isDs ? nextContractNumber() : (isDs ? "" : nextContractNumber()),
-            date: new Date().toISOString().split("T")[0],
+            date: new Date(now).toISOString().split("T")[0],
             clientId,
             estClient: obj.clientName||"",
             estPhone: obj.clientPhone||"",
@@ -15139,8 +15142,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                   <button title="Договор подряда с подрядчиком (работы из этой сметы, суммы редактируются). Подрядчика и «новый договор / приложение» выбираешь в редакторе." onClick={()=>{
                                     const ws = estimateToWorks(est);
                                     const podCount = contractsRef.current.filter(c=>c.type==="podryad").length;
+                                    const now = Date.now();
                                     setObjectReturnId(obj.id);
-                                    setCurrentContract({id:Date.now().toString(),type:"podryad",number:String(1012+podCount),date:new Date().toISOString().slice(0,10),city:"Караганда",clientId:"",contragentId:contragentsRef.current[0]?.id||"",works:ws,objectId:obj.id,objectAddress:obj.address||"",appendix:1,note:"",createdBy:currentUser.name,createdById:currentUser.id});
+                                    setCurrentContract({id:now.toString(),createdAt:now,type:"podryad",number:String(1012+podCount),date:new Date(now).toISOString().slice(0,10),city:"Караганда",clientId:"",contragentId:contragentsRef.current[0]?.id||"",works:ws,objectId:obj.id,objectAddress:obj.address||"",appendix:1,note:"",createdBy:currentUser.name,createdById:currentUser.id});
                                     setContractTab("editor"); setScreen("contracts");
                                   }}
                                     style={{background:"rgba(124,58,237,.08)",color:"#7c3aed",border:"1px solid rgba(124,58,237,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>👷 Подряд</button>
@@ -15503,13 +15507,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   const createPodryadAnnex = (parent) => {
                     const kids = childMap[parent.id]||[];
                     const nextNo = kids.reduce((m,k)=>Math.max(m, k.appendix||0), 1) + 1;
+                    const now = Date.now();
                     setCurrentContract({
-                      id: Date.now().toString(), type:"podryad_annex", appendix: nextNo,
+                      id: now.toString(), createdAt: now, type:"podryad_annex", appendix: nextNo,
                       mainNumber: parent.number||"", mainDate: parent.date||"",
-                      number: parent.number||"", date: new Date().toISOString().slice(0,10),
+                      number: parent.number||"", date: new Date(now).toISOString().slice(0,10),
                       workerId: parent.workerId||"", ...(parent.worker?{worker:parent.worker}:{}),
-                      contragentId: parent.contragentId||"", works: [], priceMode: parent.priceMode||"perline",
-                      note:"", createdAt:Date.now(), createdBy: currentUser.name, createdById: currentUser.id,
+                      contragentId: parent.contragentId||"", objectId: parent.objectId||"", objectAddress: parent.objectAddress||"", estId: parent.estId||"", works: [], priceMode: parent.priceMode||"perline",
+                      note:"", createdBy: currentUser.name, createdById: currentUser.id,
                     });
                     setContractTab("editor");
                   };

@@ -101,6 +101,43 @@ describe("document export router", () => {
     expect(service.createSnapshot).not.toHaveBeenCalled();
   });
 
+  it("keeps every older object document on its original generator", async () => {
+    const types = ["repair_fiz", "annex", "design", "design_add", "podryad", "podryad_annex"];
+
+    for (const type of types) {
+      const activeVersion = {
+        id: `${type}:v1`, templateId: `${type}:template`, publishedAt: 3000,
+        contentJson: doc(type), page: { size: "A4" },
+      };
+      const source = {
+        ...contract, id: `old-${type}`, type, createdAt: 1000,
+        workerId: "worker-1", mainNumber: "1019", mainDate: "2026-07-20", appendix: 2,
+      };
+      const legacy = vi.fn(async () => ({ ok: true, route: "legacy" }));
+      const service = {
+        loadTemplates: vi.fn(async () => ({ status: "found", store: { templates: [{
+          id: activeVersion.templateId, type, status: "published",
+          activeVersionId: activeVersion.id, versions: [activeVersion],
+        }] } })),
+        getSnapshot: vi.fn(async () => ({ status: "empty", snapshot: null })),
+        createSnapshot: vi.fn(),
+      };
+      const router = createDocumentExportRouter({
+        enabled: true, service,
+        getData: () => ({
+          ...data, contracts: [source],
+          workers: [{ id: "worker-1", name: "Подрядчик", iin: "900101300001", doc: "123456789" }],
+        }),
+        exportLegacy: legacy,
+        exportCanonical: vi.fn(),
+      });
+
+      expect((await router.exportContract("pdf", { contract: source, client, contragent })).route, type).toBe("legacy");
+      expect(legacy, type).toHaveBeenCalledOnce();
+      expect(service.createSnapshot, type).not.toHaveBeenCalled();
+    }
+  });
+
   it("atomically creates one snapshot and reuses it on later exports", async () => {
     const { router, service, canonical } = setup();
     expect((await router.exportContract("pdf", { contract, client, contragent: { ...contragent, stampFile: "stamp2.jpg" }, withStamp: true })).route).toBe("template");
@@ -197,5 +234,63 @@ describe("document export router", () => {
     expect(service.createSnapshot).toHaveBeenCalledOnce();
     expect(service.createSnapshot.mock.calls[0][0].variables["object.address"]).toBe(client.address);
     expect(legacy).not.toHaveBeenCalled();
+  });
+
+  it("uses the published object-linked template for every contract document type", async () => {
+    const createdAt = 4000;
+    const object = { id: "object-1", address: "Адрес объекта", type: "Вторичка" };
+    const worker = { id: "worker-1", name: "Подрядчик", iin: "900101300001", doc: "123456789" };
+    const base = {
+      id: "future-contract", createdAt, objectId: object.id, clientId: client.id,
+      contragentId: contragent.id, number: "1026", date: "2026-07-23", city: "Караганда",
+      mainNumber: "1019", mainDate: "2026-07-20", appendix: 2, workerId: worker.id,
+      works: contract.works,
+    };
+    const variants = [
+      { ...base, type: "repair_fiz" },
+      { ...base, type: "annex" },
+      { ...base, type: "design" },
+      { ...base, type: "design_add" },
+      { ...base, type: "podryad" },
+      { ...base, type: "podryad_annex" },
+    ];
+
+    for (const source of variants) {
+      const activeVersion = {
+        id: `${source.type}:v1`, templateId: `${source.type}:template`, publishedAt: 3000,
+        contentJson: doc(source.type), page: { size: "A4" },
+      };
+      const legacy = vi.fn(async () => ({ ok: true, route: "legacy" }));
+      const canonical = vi.fn(async snapshot => ({ ok: true, route: "template", documentId: snapshot.documentId }));
+      const service = {
+        loadTemplates: vi.fn(async () => ({ status: "found", store: { templates: [{
+          id: activeVersion.templateId, type: source.type, status: "published",
+          activeVersionId: activeVersion.id, versions: [activeVersion],
+        }] } })),
+        getSnapshot: vi.fn(async () => ({ status: "empty", snapshot: null })),
+        createSnapshot: vi.fn(async input => ({
+          ok: true, committed: true, snapshots: [{
+            documentId: `contract:${input.contract.id}`, title: input.title,
+            contentSnapshot: input.version.contentJson, variablesSnapshot: input.variables,
+            canonicalHtmlSnapshot: input.canonicalHtml, page: input.version.page, instanceVersions: [],
+          }],
+        })),
+      };
+      const sourceData = {
+        objects: [object], estimates: [{ id: "estimate-1", objectId: object.id, works: source.works }],
+        contracts: [source], clients: [client], contragents: [contragent], workers: [worker],
+      };
+      const original = structuredClone(sourceData);
+      const router = createDocumentExportRouter({
+        enabled: true, service, getData: () => sourceData, exportLegacy: legacy, exportCanonical: canonical,
+      });
+
+      const result = await router.exportContract("pdf", { contract: source, client, contragent });
+
+      expect(result, source.type).toMatchObject({ ok: true, route: "template", documentId: "contract:future-contract" });
+      expect(service.createSnapshot, source.type).toHaveBeenCalledOnce();
+      expect(legacy, source.type).not.toHaveBeenCalled();
+      expect(sourceData, source.type).toEqual(original);
+    }
   });
 });
