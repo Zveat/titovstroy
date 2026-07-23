@@ -22,6 +22,7 @@ function ToolButton({ title, active = false, disabled = false, onClick, children
 
 export default function TemplateEditor({ contentJson, editable, onChange, showAutofields = true, instanceMode = false }) {
   const [outline, setOutline] = useState([]);
+  const [scrollProgress, setScrollProgress] = useState(0);
   const extensions = useMemo(() => createTemplateExtensions({ editable }), [editable]);
   const updateOutline = current => {
     const next = [];
@@ -61,6 +62,22 @@ export default function TemplateEditor({ contentJson, editable, onChange, showAu
     updateOutline(editor);
   }, [editor, contentJson]);
 
+  useEffect(() => {
+    if (!editor || typeof document === "undefined") return undefined;
+    const scroller = getDocumentScroller(editor);
+    const update = () => {
+      const maximum = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      setScrollProgress(maximum > 0 ? Math.round((scroller.scrollTop / maximum) * 100) : 0);
+    };
+    update();
+    scroller.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    return () => {
+      scroller.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [editor, contentJson]);
+
   if (!editor) return <div className="dt-editor-loading">Подготовка редактора…</div>;
 
   const insertField = field => {
@@ -69,13 +86,24 @@ export default function TemplateEditor({ contentJson, editable, onChange, showAu
   };
 
   const scrollDocument = target => {
-    const viewport = editor.view.dom.closest(".dt-page-wrap");
+    const viewport = getDocumentScroller(editor);
     if (target === "start" || target === "end") {
       viewport?.scrollTo({ top: target === "start" ? 0 : viewport.scrollHeight, behavior: "smooth" });
       return;
     }
     const element = editor.view.nodeDOM(Number(target));
     element?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  };
+
+  const scrollByScreen = direction => {
+    const viewport = getDocumentScroller(editor);
+    viewport.scrollBy({ top: direction * Math.max(320, viewport.clientHeight * 0.78), behavior: "smooth" });
+  };
+
+  const seekDocument = value => {
+    const viewport = getDocumentScroller(editor);
+    const maximum = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+    viewport.scrollTo({ top: maximum * (Number(value) / 100), behavior: "auto" });
   };
 
   return (
@@ -145,6 +173,22 @@ export default function TemplateEditor({ contentJson, editable, onChange, showAu
           ))}
         </aside>}
       </div>
+      <nav className="dt-scroll-rail" aria-label="Навигация по документу">
+        <button type="button" title="На экран вверх" aria-label="На экран вверх" onClick={() => scrollByScreen(-1)}>↑</button>
+        <input type="range" min="0" max="100" step="1" value={scrollProgress} aria-label="Положение в документе" onChange={event => seekDocument(event.target.value)} />
+        <small>{scrollProgress}%</small>
+        <button type="button" title="На экран вниз" aria-label="На экран вниз" onClick={() => scrollByScreen(1)}>↓</button>
+      </nav>
     </div>
   );
+}
+
+function getDocumentScroller(editor) {
+  let element = editor?.view?.dom?.parentElement;
+  while (element && element !== document.body) {
+    const style = window.getComputedStyle(element);
+    if (/(auto|scroll)/.test(style.overflowY) && element.scrollHeight > element.clientHeight + 8) return element;
+    element = element.parentElement;
+  }
+  return document.scrollingElement || document.documentElement;
 }
