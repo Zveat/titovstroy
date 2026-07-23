@@ -4158,7 +4158,7 @@ function NumInput({ value, onCommit, style, min = "0", placeholder, className, d
     style={style} />;
 }
 
-function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onGDoc, canExport=true, onAddClientFromEstimate, onUpdateClient, onCreateClient, workers=[], onCreateWorker, importObjects=[], getObjectWorks, currentUserRole, fmt }) {
+function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onSamplePdf, onGDoc, canExport=true, onAddClientFromEstimate, onUpdateClient, onCreateClient, workers=[], onCreateWorker, importObjects=[], getObjectWorks, currentUserRole, fmt }) {
   const [withStamp, setWithStamp] = useState(true);
   const [showClientForm, setShowClientForm] = useState(false);
   const [showNewClientForm, setShowNewClientForm] = useState(false);
@@ -4610,7 +4610,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
         <textarea className="fi" rows={2} value={contract.note||""} onChange={e=>upd({note:e.target.value})} placeholder="Дополнительные условия..."/>
       </div>
       {/* Кнопки */}
-      <div style={{display:"flex",gap:8}}>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
         <button className="btn btn-o" style={{flex:1}} onClick={onBack}>← Назад</button>
         <div style={{flex:1,display:"flex",flexDirection:"column",gap:4}}>
           {canExport && <button onClick={()=>onPdf(withStamp)} className="btn btn-o" style={{width:"100%"}}>
@@ -4625,6 +4625,10 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
         </div>
         {canExport && <button onClick={onGDoc} className="btn btn-o" style={{flex:1}}>
           📋 Google Doc
+        </button>}
+        {canExport && <button onClick={onSamplePdf} className="btn btn-o" style={{flex:1,color:"#b45309",borderColor:"#fcd34d",background:"#fffbeb"}}
+          title="PDF без данных клиента; не сохраняется как официальный документ">
+          📑 Образец PDF
         </button>}
       </div>
     </div>
@@ -10583,6 +10587,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
   const generateContractPdf = (contract, client, contragent, withStamp=true) => runContractExport("pdf", contract, client, contragent, withStamp);
   const generateContractGDoc = (contract, client, contragent) => runContractExport("gdoc", contract, client, contragent);
   const generateContractDocx = (contract, client, contragent) => runContractExport("docx", contract, client, contragent);
+  const generateContractSamplePdf = async contract => {
+    try {
+      const result = await documentTemplateRuntime.exportContractSample("pdf", { type: contract?.type || "repair_fiz" });
+      if (result?.ok === false) alert(`Не удалось создать образец: ${result.reason || "неизвестная ошибка"}`);
+    } catch (error) {
+      alert(`Не удалось создать образец: ${error?.message || "неизвестная ошибка"}`);
+    }
+  };
   const runReportExport = async (format, report) => {
     try {
       const result = await documentTemplateRuntime.exportReport(format, { report });
@@ -15677,6 +15689,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   const ca = contragents.find(x=>x.id===currentContract.contragentId);
                   generateContractPdf(currentContract, cl, ca, withStamp);
                 }}
+                onSamplePdf={()=>generateContractSamplePdf(currentContract)}
                 onGDoc={()=>{
                   const cl = contractClients.find(x=>x.id===currentContract.clientId);
                   const ca = contragents.find(x=>x.id===currentContract.contragentId);

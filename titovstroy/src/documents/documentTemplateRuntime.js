@@ -61,6 +61,7 @@ export function createDocumentTemplateRuntime({
     centerEnabled: DOCUMENT_TEMPLATE_CENTER_ENABLED,
     service,
     exportContract: router.exportContract,
+    exportContractSample: router.exportContractSample,
     exportReport: router.exportReport,
   };
 }

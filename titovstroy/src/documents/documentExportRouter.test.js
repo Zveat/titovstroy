@@ -55,6 +55,32 @@ describe("document export router", () => {
     expect(legacy).toHaveBeenCalledOnce();
   });
 
+  it("creates a watermarked PDF sample without client data or cloud snapshot", async () => {
+    const { router, service, legacy, canonical } = setup();
+
+    const result = await router.exportContractSample("pdf", { type: "repair_fiz" });
+
+    expect(result).toMatchObject({ ok: true, route: "template-sample", sample: true });
+    expect(service.createSnapshot).not.toHaveBeenCalled();
+    expect(service.getSnapshot).not.toHaveBeenCalled();
+    expect(legacy).not.toHaveBeenCalled();
+    expect(canonical).toHaveBeenCalledOnce();
+    expect(canonical.mock.calls[0][0].documentId).toBe("sample:repair_fiz");
+    expect(canonical.mock.calls[0][2].title).toContain("ОБРАЗЕЦ");
+    expect(canonical.mock.calls[0][2].canonicalHtml).toContain("НЕ ДЛЯ ПОДПИСАНИЯ");
+  });
+
+  it("does not fall back to legacy when a published sample template is absent", async () => {
+    const { router, service, legacy, canonical } = setup();
+    service.loadTemplates.mockResolvedValueOnce({ status: "found", store: { templates: [] } });
+
+    const result = await router.exportContractSample("pdf", { type: "repair_fiz" });
+
+    expect(result).toMatchObject({ ok: false });
+    expect(legacy).not.toHaveBeenCalled();
+    expect(canonical).not.toHaveBeenCalled();
+  });
+
   it("never applies a published template to an older contract", async () => {
     const { router, legacy, service } = setup();
     const old = { ...contract, id: "old", createdAt: 1000 };

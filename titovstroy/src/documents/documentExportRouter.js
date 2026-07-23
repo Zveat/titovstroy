@@ -1,4 +1,4 @@
-import { resolveDocumentVariables } from "./autofields.js";
+import { AUTOFIELD_DEFINITIONS, resolveDocumentVariables } from "./autofields.js";
 import { buildCanonicalExport } from "./exportAdapters.js";
 import { isTemplateEligible } from "./documentSnapshots.js";
 import { documentTypeById } from "./documentTypeRegistry.js";
@@ -50,6 +50,36 @@ const titleForContract = (contract, client, contractor) => {
 };
 const titleForReport = report => `АВР №${report.actNo || "б-н"}${report.clientName ? ` ${report.clientName}` : ""}`.replace(/[<>:"/\\|?*]/g, "_");
 
+const sampleTable = Object.freeze({
+  rows: [{ id: "sample-row", category: "Работы", subcategory: "", name: "Пример позиции", unit: "м²", quantity: 1, price: 100000, sum: 100000 }],
+  subtotal: 100000,
+  total: 100000,
+  discountPercent: 0,
+  discountAmount: 0,
+});
+
+const sampleValue = definition => {
+  if (definition.kind === "table") return { ...sampleTable, rows: sampleTable.rows.map(row => ({ ...row })) };
+  if (definition.kind === "money") return 100000;
+  if (definition.kind === "number") return 1;
+  if (definition.kind === "date") return "дд.мм.гггг";
+  return `[${definition.label}]`;
+};
+
+const sampleVariablesFor = version => ({
+  ...Object.fromEntries(AUTOFIELD_DEFINITIONS.map(definition => [definition.id, sampleValue(definition)])),
+  ...(version?.previewVariables || {}),
+  "contract.number": "ОБРАЗЕЦ",
+  "contract.mainNumber": "ОБРАЗЕЦ",
+});
+
+const withSampleMark = html => {
+  const mark = `<div data-document-sample style="position:fixed;inset:0;z-index:9999;pointer-events:none;display:flex;align-items:center;justify-content:center"><div style="transform:rotate(-24deg);text-align:center;color:rgba(220,38,38,.13);font:800 34pt Arial,sans-serif;line-height:1.2;letter-spacing:1px">ОБРАЗЕЦ<br><span style="font-size:15pt">НЕ ДЛЯ ПОДПИСАНИЯ</span></div></div>`;
+  const notice = `<div data-document-sample-notice style="margin:0 0 7mm;padding:2.5mm 4mm;border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;text-align:center;font:700 9pt Arial,sans-serif">ОБРАЗЕЦ · НЕ ДЛЯ ПОДПИСАНИЯ</div>`;
+  const body = String(html || "");
+  return /<body[^>]*>/i.test(body) ? body.replace(/<body([^>]*)>/i, `<body$1>${mark}${notice}`) : `${mark}${notice}${body}`;
+};
+
 export function createDocumentExportRouter({ enabled = false, service, getData = () => ({}), exportLegacy, exportCanonical, confirmLegacy } = {}) {
   const legacy = (format, payload) => exportLegacy(format, payload);
   const safeLegacy = async (reason, format, payload) => {
@@ -91,6 +121,36 @@ export function createDocumentExportRouter({ enabled = false, service, getData =
   };
 
   return {
+    async exportContractSample(format, payload = {}) {
+      const type = payload.type || payload.contract?.type || "repair_fiz";
+      const definition = documentTypeById(type);
+      if (format !== "pdf") return { ok: false, reason: "Образец доступен только в PDF" };
+      if (!enabled || !definition || !service?.loadTemplates) return { ok: false, reason: "Опубликованный шаблон недоступен" };
+      try {
+        const loaded = await service.loadTemplates();
+        if (loaded?.status !== "found") return { ok: false, reason: "Опубликованные шаблоны недоступны" };
+        const version = getActiveTemplateVersion(loaded.store, type);
+        if (!version) return { ok: false, reason: "Сначала опубликуйте шаблон этого документа" };
+        const variables = sampleVariablesFor(version);
+        const canonicalHtml = renderTemplateToCanonicalHtml({ contentJson: version.contentJson, variables, page: version.page });
+        const snapshot = {
+          documentId: `sample:${type}`,
+          title: `ОБРАЗЕЦ — ${definition.name}`,
+          contentSnapshot: version.contentJson,
+          variablesSnapshot: variables,
+          canonicalHtmlSnapshot: canonicalHtml,
+          page: version.page,
+          templateVersionNumber: version.versionNumber,
+          templatePublishedAt: version.publishedAt,
+          instanceVersions: [],
+        };
+        const exportDoc = buildCanonicalExport(snapshot);
+        const result = await exportCanonical(snapshot, format, { ...exportDoc, canonicalHtml: withSampleMark(exportDoc.canonicalHtml) });
+        return result?.ok === false ? result : { ...result, ok: true, route: "template-sample", sample: true };
+      } catch (error) {
+        return { ok: false, reason: error?.message || "Не удалось создать образец" };
+      }
+    },
     async exportContract(format, payload = {}) {
       const { contract, client, contragent } = payload;
       if (!contract) return { ok: false, reason: "Договор не указан" };
