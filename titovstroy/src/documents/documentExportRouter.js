@@ -91,30 +91,39 @@ export function createDocumentExportRouter({ enabled = false, service, getData =
     return legacy(format, payload);
   };
 
-  const exportFromTemplate = async ({ format, payload, source, sourceEntity, type, context, title }) => {
+  const exportFromTemplate = async ({ format, payload, source, sourceEntity, type, context, buildContext, title }) => {
     if (!enabled || !documentTypeById(type)) return legacy(format, payload);
     if (!service?.loadTemplates || !service?.getSnapshot || !service?.createSnapshot) return safeLegacy("Сервис шаблонов недоступен", format, payload);
     const documentId = `${sourceEntity}:${source.id}`;
     try {
       const existing = await service.getSnapshot(documentId);
-      if (existing?.snapshot) return exportCanonical(existing.snapshot, format, buildCanonicalExport(existing.snapshot));
+      if (existing?.snapshot) {
+        const exportDoc = buildCanonicalExport(existing.snapshot);
+        if (format === "pdf" && payload?.withStamp) exportDoc.pdfStampFile = payload?.contragent?.stampFile || context?.contragent?.stampFile || "stamp.jpg";
+        return exportCanonical(existing.snapshot, format, exportDoc);
+      }
       if (existing?.status === "unavailable" || existing?.status === "corrupt") return safeLegacy("Снимок недоступен", format, payload);
 
       const loaded = await service.loadTemplates();
       if (loaded?.status !== "found") return safeLegacy("Опубликованные шаблоны недоступны", format, payload);
       const version = getActiveTemplateVersion(loaded.store, type);
       if (!version || !isTemplateEligible(source, version)) return legacy(format, payload);
-      const resolved = resolveDocumentVariables(context, type);
+      const actualContext = typeof buildContext === "function" ? buildContext() : context;
+      if (actualContext?.ok === false) return safeLegacy(actualContext.reason, format, payload);
+      const resolved = resolveDocumentVariables(actualContext, type);
       if (!resolved.ok) return safeLegacy(`Не заполнены автополя: ${resolved.missing.map(item => item.label || item.fieldId).join(", ")}`, format, payload);
       const canonicalHtml = renderTemplateToCanonicalHtml({ contentJson: version.contentJson, variables: resolved.values, page: version.page });
       const created = await service.createSnapshot({
         ...(sourceEntity === "report" ? { report: source } : { contract: source }),
-        version, variables: resolved.values, canonicalHtml, title,
+        version, variables: resolved.values, canonicalHtml,
+        title: typeof title === "function" ? title(actualContext) : title,
       });
       if (!created?.ok || !created?.committed) return safeLegacy(created?.reason || "Снимок не подтверждён облаком", format, payload);
       const snapshot = created.snapshots?.find(item => item?.documentId === documentId) || (await service.getSnapshot(documentId))?.snapshot;
       if (!snapshot) return safeLegacy("Облако не вернуло снимок", format, payload);
-      return exportCanonical(snapshot, format, buildCanonicalExport(snapshot));
+      const exportDoc = buildCanonicalExport(snapshot);
+      if (format === "pdf" && payload?.withStamp) exportDoc.pdfStampFile = payload?.contragent?.stampFile || context?.contragent?.stampFile || "stamp.jpg";
+      return exportCanonical(snapshot, format, exportDoc);
     } catch (error) {
       return safeLegacy(error?.message || "Ошибка генератора шаблонов", format, payload);
     }
@@ -155,11 +164,10 @@ export function createDocumentExportRouter({ enabled = false, service, getData =
       const { contract, client, contragent } = payload;
       if (!contract) return { ok: false, reason: "Договор не указан" };
       const data = getData() || {};
-      const context = buildContractContext({ contract, client, contragent, data });
-      if (!context.ok) return safeLegacy(context.reason, format, payload);
       return exportFromTemplate({
-        format, payload, source: contract, sourceEntity: "contract", type: contract.type || "repair_fiz", context,
-        title: titleForContract(contract, client, context.contractor),
+        format, payload, source: contract, sourceEntity: "contract", type: contract.type || "repair_fiz",
+        buildContext: () => buildContractContext({ contract, client, contragent, data }),
+        title: context => titleForContract(contract, client, context?.contractor),
       });
     },
     async exportReport(format, payload = {}) {

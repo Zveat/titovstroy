@@ -3,6 +3,29 @@ import { normalizeLegalText, renderTemplateToCanonicalHtml } from "./templateRen
 
 const money = value => Math.round(Number(value) || 0).toLocaleString("ru-RU");
 
+const escapeHtml = value => String(value == null ? "" : value).replace(/[&<>"']/g, character => ({
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+}[character]));
+
+export function addBrowserPdfControls(html, title = "Документ", { stampUrl = "" } = {}) {
+  const source = String(html || "");
+  const stamp = stampUrl
+    ? `<div class="document-pdf-stamp" style="height:0;position:relative;z-index:2;pointer-events:none"><img src="${escapeHtml(stampUrl)}" alt="Печать ТОО TITOVSTROY" style="position:absolute;left:12mm;bottom:-5mm;width:42mm;height:42mm;object-fit:contain;opacity:.88;mix-blend-mode:multiply"></div>`
+    : "";
+  const controls = `<div class="document-pdf-actions" style="margin:24px 0 8px;text-align:center;padding:16px"><button type="button" onclick="window.print()" style="padding:12px 36px;background:#2563eb;color:#fff;border:0;border-radius:7px;font:700 14px Arial,sans-serif;cursor:pointer;box-shadow:0 4px 12px rgba(37,99,235,.2)">🖨 Распечатать / Сохранить PDF</button></div>`;
+  const printStyle = `<style data-document-pdf-controls>@media print{.document-pdf-actions{display:none!important}}</style>`;
+  const titleTag = `<title>${escapeHtml(title || "Документ")}</title>`;
+  let output = /<title\b[^>]*>[\s\S]*?<\/title>/i.test(source)
+    ? source.replace(/<title\b[^>]*>[\s\S]*?<\/title>/i, titleTag)
+    : source.replace(/<head([^>]*)>/i, `<head$1>${titleTag}`);
+  output = /<\/head>/i.test(output) ? output.replace(/<\/head>/i, `${printStyle}</head>`) : `${printStyle}${output}`;
+  return /<\/body>/i.test(output) ? output.replace(/<\/body>/i, `${stamp}${controls}</body>`) : `${output}${stamp}${controls}`;
+}
+
 export function buildCanonicalExport(snapshot) {
   if (!snapshot?.documentId) throw new Error("Снимок документа отсутствует");
   const contentJson = snapshotContent(snapshot);
@@ -30,9 +53,9 @@ export function buildCanonicalExport(snapshot) {
   };
 }
 
-export async function openPdfFromCanonical(exportDoc, openOrPrintHtml) {
+export async function openPdfFromCanonical(exportDoc, openOrPrintHtml, options = {}) {
   if (!exportDoc?.canonicalHtml || typeof openOrPrintHtml !== "function") return { ok: false, reason: "pdf-adapter-unavailable" };
-  await openOrPrintHtml(exportDoc.canonicalHtml);
+  await openOrPrintHtml(addBrowserPdfControls(exportDoc.canonicalHtml, exportDoc.title, options));
   return { ok: true, normalizedText: exportDoc.normalizedText };
 }
 

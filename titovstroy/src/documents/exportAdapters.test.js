@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  addBrowserPdfControls,
   buildCanonicalExport,
   buildDocxBlobFromCanonical,
   openPdfFromCanonical,
@@ -50,12 +51,25 @@ describe("canonical document export adapters", () => {
     const pdfResult = await openPdfFromCanonical(exportDoc, pdf);
     const gdocResult = await uploadGoogleDocFromCanonical(exportDoc, { uploadHtml });
     const docxResult = await buildDocxBlobFromCanonical(exportDoc, fakeDocx());
-    expect(pdf).toHaveBeenCalledWith(exportDoc.canonicalHtml);
+    const pdfHtml = pdf.mock.calls[0][0];
+    expect(pdfHtml).toContain("Распечатать / Сохранить PDF");
+    expect(pdfHtml).toContain("@media print{.document-pdf-actions{display:none!important}}");
+    expect(pdfHtml).toContain("<title>Договор №1019</title>");
     expect(uploadHtml).toHaveBeenCalledWith({ title: exportDoc.title, html: exportDoc.canonicalHtml });
     expect(pdfResult.normalizedText).toBe(exportDoc.normalizedText);
     expect(gdocResult.normalizedText).toBe(exportDoc.normalizedText);
     expect(docxResult.normalizedText).toBe(exportDoc.normalizedText);
     expect(docxResult.blob).toBeInstanceOf(Blob);
+  });
+
+  it("adds browser controls without changing the legal document source", () => {
+    const html = "<!doctype html><html><head></head><body><p>Юридический текст</p></body></html>";
+    const decorated = addBrowserPdfControls(html, "Документ <1>", { stampUrl: "https://example.test/stamp.jpg" });
+    expect(decorated).toContain("<title>Документ &lt;1&gt;</title>");
+    expect(decorated).toContain("<p>Юридический текст</p>");
+    expect(decorated).toContain('src="https://example.test/stamp.jpg"');
+    expect(decorated).toContain("Печать ТОО TITOVSTROY");
+    expect(html).not.toContain("document-pdf-actions");
   });
 
   it("fails visibly instead of dropping an unsupported node", async () => {

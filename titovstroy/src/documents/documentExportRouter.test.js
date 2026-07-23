@@ -55,6 +55,18 @@ describe("document export router", () => {
     expect(legacy).toHaveBeenCalledOnce();
   });
 
+  it("does not mention templates when this document type has no published version", async () => {
+    const confirmLegacy = vi.fn(() => true);
+    const { router, service, legacy } = setup({ confirmLegacy });
+    service.loadTemplates.mockResolvedValueOnce({ status: "found", store: { templates: [] } });
+
+    const result = await router.exportContract("pdf", { contract, client: null, contragent });
+
+    expect(result).toMatchObject({ ok: true, route: "legacy" });
+    expect(confirmLegacy).not.toHaveBeenCalled();
+    expect(legacy).toHaveBeenCalledOnce();
+  });
+
   it("creates a watermarked PDF sample without client data or cloud snapshot", async () => {
     const { router, service, legacy, canonical } = setup();
 
@@ -91,10 +103,12 @@ describe("document export router", () => {
 
   it("atomically creates one snapshot and reuses it on later exports", async () => {
     const { router, service, canonical } = setup();
-    expect((await router.exportContract("pdf", { contract, client, contragent })).route).toBe("template");
+    expect((await router.exportContract("pdf", { contract, client, contragent: { ...contragent, stampFile: "stamp2.jpg" }, withStamp: true })).route).toBe("template");
     expect((await router.exportContract("gdoc", { contract, client, contragent })).route).toBe("template");
     expect(service.createSnapshot).toHaveBeenCalledOnce();
     expect(canonical).toHaveBeenCalledTimes(2);
+    expect(canonical.mock.calls[0][2].pdfStampFile).toBe("stamp2.jpg");
+    expect(canonical.mock.calls[1][2].pdfStampFile).toBeUndefined();
   });
 
   it("keeps the button working through legacy when snapshot cannot be confirmed", async () => {

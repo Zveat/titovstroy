@@ -41,7 +41,13 @@ export function createDocumentTemplateRuntime({
       return { ok: true, route: "legacy" };
     },
     exportCanonical: async (snapshot, format, exportDoc) => {
-      if (format === "pdf") return openPdfFromCanonical(exportDoc, html => openOrPrintHtml(html, 30000));
+      if (format === "pdf") {
+        const stampFile = exportDoc?.pdfStampFile === "stamp2.jpg" ? "stamp2.jpg" : "stamp.jpg";
+        const stampUrl = exportDoc?.pdfStampFile
+          ? `${typeof window !== "undefined" ? window.location.origin : ""}/${stampFile}`
+          : "";
+        return openPdfFromCanonical(exportDoc, html => openOrPrintHtml(html, 30000), { stampUrl });
+      }
       if (format === "gdoc") return uploadGoogleDocFromCanonical(exportDoc, { uploadHtml: googleUploader });
       if (format === "docx") {
         const imported = await import("docx");
