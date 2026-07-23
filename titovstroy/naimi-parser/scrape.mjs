@@ -255,20 +255,35 @@ async function writeJson(key, obj) {
 
 // ── Решение «парсить сейчас или нет» по настройкам из базы ─────────────────────
 const INTERVALS = { daily: 22 * 3600e3, twice: 11 * 3600e3, weekly: 6.5 * 24 * 3600e3 };
+// HARVEST-режим найми. Замер показал: лимит найми СКОЛЬЗЯЩИЙ, а не суточный — восстанавливает
+// ~5-6 раскрытий в ~час (прогоны в 15:53/16:53/18:27 дали 6/5/5). Значит хвост непокрытых номеров
+// собирается быстрее, если гонять найми не 2 раза в день, а каждые NAIMI_HARVEST_GAP_MS. Дёргает
+// его тот же внешний OLX-крон (каждые ~30 мин), но decideRun пропускает найми, пока не прошёл зазор.
+// ВАЖНО: каждый номер найми = ЗАЯВКА от РЕАЛЬНОГО аккаунта, поэтому зазор «средний» (2ч ≈ ~60/день),
+// не чаще. Настраивается env NAIMI_HARVEST_GAP_MS. Когда прогон перестаёт находить номера
+// (lastGotPhones===0) — harvest сам выключается, остаётся обычное расписание (freq).
+const NAIMI_HARVEST_GAP_MS = num("NAIMI_HARVEST_GAP_MS", 2 * 3600e3); // «средний» темп: раз в 2 часа
 function decideRun(cfg) {
   const freq = ["off", "daily", "twice", "weekly"].includes(cfg.frequency) ? cfg.frequency : "daily";
   const runNow = Number(cfg.runNow) || 0;
   const runNowPending = runNow > (Number(cfg.lastRunNow) || 0);
   const forced = env("FORCE_NAIMI", "") === "1";      // явный форс (env/секрет воркфлоу) — для ручного теста
   // ВАЖНО: workflow_dispatch БОЛЬШЕ не форсит найми. Иначе частый внешний крон (он для OLX и
-  // дёргает ВЕСЬ воркфлоу каждые ~30 мин) гонял бы найми десятки раз в день. А у найми суточный
-  // лимит на раскрытие номеров + КАЖДЫЙ номер = заявка от РЕАЛЬНОГО аккаунта → риск бана/спама.
-  // Найми идёт строго по своему интервалу; форс — кнопкой «Обновить сейчас» или FORCE_NAIMI=1.
+  // дёргает ВЕСЬ воркфлоу каждые ~30 мин) гонял бы найми десятки раз в день → бан реального аккаунта.
+  // Найми идёт по своему зазору (harvest) или расписанию; форс — кнопкой «Обновить сейчас» или FORCE_NAIMI=1.
   if (forced)                        return { run: true, reason: "форс FORCE_NAIMI", runNow };
   if (runNowPending)                 return { run: true, reason: "кнопка «Обновить сейчас» в CRM", runNow };
   if (freq === "off")                return { run: false, reason: "обновление выключено в настройках", runNow };
+  const sinceLast = Date.now() - (Number(cfg.lastRunAt) || 0);
+  // HARVEST: пока есть непокрытые номера И прошлый прогон дал прогресс — собираем каждые ~2ч,
+  // а не 2 раза в день. Так скользящий лимит найми используется эффективнее (без риска перебора).
+  const pending = Number(cfg.lastPendingPhone) || 0;
+  const progressed = cfg.lastGotPhones == null || Number(cfg.lastGotPhones) > 0; // null = ещё не мерили
+  if (pending > 0 && progressed && sinceLast >= NAIMI_HARVEST_GAP_MS) {
+    return { run: true, reason: `сбор номеров (осталось ~${pending}), темп ${Math.round(NAIMI_HARVEST_GAP_MS / 3600e3 * 10) / 10}ч`, runNow };
+  }
   const iv = INTERVALS[freq] || INTERVALS.daily;
-  const run = (Date.now() - (Number(cfg.lastRunAt) || 0)) >= iv;
+  const run = sinceLast >= iv;
   return { run, reason: run ? `по расписанию (${freq})` : `ещё рано (${freq}, ждём интервал)`, runNow };
 }
 
@@ -379,6 +394,7 @@ function decideRun(cfg) {
   freshCfg.lastWithPhone = payload.withPhone;
   freshCfg.lastActiveCount = payload.activeCount;
   freshCfg.lastPendingPhone = payload.pendingPhone;
+  freshCfg.lastGotPhones = phoneSummary.got;            // прогресс за прогон — по нему harvest решает, гнать ли дальше
   freshCfg.lastRunStatus = crawlComplete ? "ok" : "partial";
   freshCfg.lastPhoneError = phoneSummary.authError || "";
   if (availableCities.length) freshCfg.availableCities = availableCities;

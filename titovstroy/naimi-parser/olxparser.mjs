@@ -31,16 +31,17 @@ import {
   selectPhoneTargets,
 } from "./parser-core.mjs";
 
-// Реакция на ответ телефонного эндпоинта при скользящем анти-бот лимите OLX (HTTP 400
-// «подозрительная активность» на серии быстрых запросов, восстановление за ~минуту).
-// Вшито прямо сюда, чтобы файл не зависел от версии parser-core.mjs.
-//   throttled → лимит: мастера НЕ помечаем, ждём растущую паузу и повторяем его же;
-//     после giveUpAfter подряд — стоп партии. Иначе → accept (штатный ответ), серия в 0.
-function planPhoneStep(result, streak = 0, { giveUpAfter = 4, backoffMs = 20000 } = {}) {
+// Реакция на ответ телефонного эндпоинта при анти-бот лимите OLX (HTTP 400 «подозрительная
+// активность» на серии быстрых запросов). Вшито сюда, чтобы файл не зависел от parser-core.mjs.
+// ВАЖНО (замер): частые тычки во время бана его ПРОДЛЕВАЮТ — на чистом IP при 2 тычках бан снялся
+// за ~30с, а на гитхаб-IP при долбёжке каждые 20-60с не отпускал и за 2 мин. Поэтому здесь ОДНА
+// длинная ТИХАЯ пауза (backoffMs, не растущая), потом пробуем снова того же мастера. Мастера НЕ
+// помечаем (останется в очереди). После giveUpAfter пауз подряд без толку — стоп партии.
+function planPhoneStep(result, streak = 0, { giveUpAfter = 3, backoffMs = 150000 } = {}) {
   if (result?.status === "throttled") {
     const nextStreak = (Number(streak) || 0) + 1;
     if (nextStreak >= giveUpAfter) return { action: "giveup", streak: nextStreak, waitMs: 0 };
-    return { action: "backoff", streak: nextStreak, waitMs: backoffMs * nextStreak };
+    return { action: "backoff", streak: nextStreak, waitMs: backoffMs };  // фиксированная длинная пауза, без долбёжки
   }
   return { action: "accept", streak: 0, waitMs: 0 };
 }
@@ -70,8 +71,11 @@ const PHONE_BUDGET_MS = num("OLX_PHONE_BUDGET_MS", 24 * 60e3); // job timeout 35
 // ~7-10с + бэкофф на троттлинг (ниже), иначе бюджет прогона сгорает впустую.
 const PHONE_DELAY_MIN = num("OLX_PHONE_DELAY_MIN_MS", 7000);
 const PHONE_DELAY_MAX = num("OLX_PHONE_DELAY_MAX_MS", 10000);
-const PHONE_THROTTLE_BACKOFF_MS = num("OLX_PHONE_BACKOFF_MS", 20000); // база растущей паузы при 400
-const PHONE_THROTTLE_GIVEUP = num("OLX_PHONE_GIVEUP", 4);             // столько троттлингов подряд → стоп партии
+// Одна ДЛИННАЯ тихая пауза при 400 (не частые тычки — они продлевают бан; замер: чистый IP
+// отходит за ~30с при 2 тычках, гитхаб-IP не отходил за 2 мин при долбёжке каждые 20-60с).
+// 2.5 мин обычно хватает, чтобы бан истёк и добрать ещё пачку; за 24-мин бюджет — 3-4 цикла.
+const PHONE_THROTTLE_BACKOFF_MS = num("OLX_PHONE_BACKOFF_MS", 150000); // тихая пауза при 400 (2.5 мин)
+const PHONE_THROTTLE_GIVEUP = num("OLX_PHONE_GIVEUP", 3);              // столько тихих пауз подряд без толку → стоп
 const PHONE_SAVE_EVERY = 12;
 
 // Карта категорий OLX «Услуги» → название специальности (чтобы видеть, кто что делает).
@@ -356,7 +360,7 @@ function decideRun(cfg) {
         console.warn(`  ! OLX держит лимит ${throttleStreak} раз подряд — стоп до следующего прогона (собрано ${gotPhones})`);
         break;
       }
-      console.warn(`  ! троттлинг ${throttleStreak}: пауза ${Math.round(plan.waitMs / 1000)}с и повтор того же мастера`);
+      console.warn(`  ! троттлинг ${throttleStreak}: тихая пауза ${Math.round(plan.waitMs / 1000)}с (даём бану истечь), потом повтор`);
       await sleep(plan.waitMs);
       idx--;                                              // повторить того же мастера
       continue;
