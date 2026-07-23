@@ -22,6 +22,7 @@ const CATEGORY_OPTIONS = [
   ["agreements", "Соглашения"],
 ];
 const STATUS_LABEL = { draft: "Черновик", published: "Опубликован", archived: "Архив" };
+const CATEGORY_MARK = { contracts: "ДГ", annexes: "ДС", acts: "АК", design: "ДЗ", subcontracts: "ПД", agreements: "СГ", custom: "ДОК" };
 const can = value => value === "all" || value === "own";
 const slug = value => String(value || "template").trim().toLowerCase().replace(/[^a-zа-яё0-9]+/giu, "-").replace(/^-|-$/g, "").slice(0, 42) || "template";
 const editorState = template => {
@@ -108,6 +109,13 @@ export default function TemplateCenter({ service, permissions = {}, data = {} })
   }, [selectedId, selected?.updatedAt]);
 
   const visible = useMemo(() => filterTemplates(templates, { query, category, status }), [templates, query, category, status]);
+  const templateCounts = useMemo(() => ({
+    active: templates.filter(item => item.status !== "archived").length,
+    all: templates.length,
+    draft: templates.filter(item => item.status === "draft").length,
+    published: templates.filter(item => item.status === "published").length,
+    archived: templates.filter(item => item.status === "archived").length,
+  }), [templates]);
 
   const report = result => {
     if (!result?.ok || !result?.committed) { setMessage(result?.reason || "Изменение не сохранено в облаке"); return false; }
@@ -280,11 +288,37 @@ export default function TemplateCenter({ service, permissions = {}, data = {} })
   );
 
   return (
-    <section className="dt-center">
-      <div className="dt-library-head"><div><h2>Шаблоны документов</h2><p>Договоры, соглашения, приложения и акты хранятся отдельно от рабочих объектов. Созданные ранее документы остаются без изменений.</p></div><div className="dt-library-actions">{service.repairTemplateEnabled && can(permissions.templatePublish) && missingLegacyTypes.length > 0 && <button className="dt-btn secondary" disabled={saving} onClick={importLegacyCatalog}>{saving ? "Импорт…" : `Импортировать из кода (${missingLegacyTypes.length})`}</button>}{can(permissions.templateEdit) && <button className="dt-btn primary" onClick={() => setNewOpen(true)}>+ Новый шаблон</button>}</div></div>
-      <div className="dt-summary"><div><strong>{templates.filter(item => item.status !== "archived").length}</strong><span>активных шаблонов</span></div><div><strong>{templates.filter(item => item.status === "draft").length}</strong><span>черновиков</span></div><div><strong>{templates.filter(item => item.status === "published").length}</strong><span>опубликовано</span></div><p>Редактор работает только с библиотекой шаблонов и не переписывает объекты, сметы, договоры или акты.</p></div>
-      <div className="dt-filters"><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Поиск по названию…" /><select value={category} onChange={event => setCategory(event.target.value)}><option value="all">Все разделы</option>{CATEGORY_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><select value={status} onChange={event => setStatus(event.target.value)}><option value="all">Все статусы</option><option value="draft">Черновики</option><option value="published">Опубликованные</option><option value="archived">Архив</option></select></div>
-      {loading ? <div className="dt-empty">Загрузка шаблонов…</div> : visible.length === 0 ? <div className="dt-empty"><strong>Шаблонов пока нет</strong><span>Импортируйте действующие документы из кода или создайте новый шаблон.</span></div> : <div className="dt-template-table"><div className="dt-template-row header"><span>Шаблон</span><span>Раздел</span><span>Статус</span><span>Версии</span><span>Обновлён</span><span /></div>{visible.map(template => <div className="dt-template-row" key={template.id}><span><b>{template.name}</b><small>{template.source === "legacy-import" ? "Перенесён из действующего документа" : (documentTypeById(template.type)?.name || "Произвольный")}</small></span><span>{CATEGORY_OPTIONS.find(([value]) => value === template.category)?.[1] || template.category}</span><span><i className={`dt-status ${template.status}`}>{STATUS_LABEL[template.status] || template.status}</i></span><span>{template.versions?.length || 0}</span><span>{template.updatedAt ? new Date(template.updatedAt).toLocaleDateString("ru-RU") : "—"}</span><span className="dt-row-actions">{buildTemplateActions(template, permissions).map(action => <button key={action} title={{ open: "Открыть", copy: "Создать копию", archive: "Архивировать", history: "История версий" }[action]} onClick={() => runAction(action, template)}>{{ open: "Открыть", copy: "Копия", archive: "Архив", history: "Версии" }[action]}</button>)}</span></div>)}</div>}
+    <section className="dt-center dt-library">
+      <header className="dt-library-hero">
+        <div className="dt-library-hero-mark">DOC</div>
+        <div className="dt-library-hero-copy"><h2>Шаблоны документов</h2><p>Единая библиотека договоров, соглашений, приложений и актов</p></div>
+        <div className="dt-library-metrics"><span><b>{templateCounts.active}</b>активных</span><span><b>{templateCounts.published}</b>опубликовано</span><span><b>{templateCounts.draft}</b>черновиков</span></div>
+        <div className="dt-library-actions">{service.repairTemplateEnabled && can(permissions.templatePublish) && missingLegacyTypes.length > 0 && <button className="dt-btn hero-secondary" disabled={saving} onClick={importLegacyCatalog}>{saving ? "Импорт…" : `Импорт из кода (${missingLegacyTypes.length})`}</button>}{can(permissions.templateEdit) && <button className="dt-btn hero-primary" onClick={() => setNewOpen(true)}>+ Новый шаблон</button>}</div>
+      </header>
+
+      <div className="dt-library-controls">
+        <nav className="dt-status-tabs" aria-label="Статус шаблонов">
+          {[["all", "Все"], ["draft", "Черновики"], ["published", "Опубликованные"], ["archived", "Архив"]].map(([value, label]) => <button key={value} type="button" className={status === value ? "is-active" : ""} onClick={() => setStatus(value)}>{label}<b>{templateCounts[value]}</b></button>)}
+        </nav>
+        <div className="dt-library-search"><span>⌕</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Найти шаблон" /></div>
+        <select className="dt-library-category" value={category} onChange={event => setCategory(event.target.value)}><option value="all">Все разделы</option>{CATEGORY_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+      </div>
+
+      <div className="dt-library-note"><b>Безопасное редактирование</b><span>Изменения применяются только после публикации и только к новым документам. Созданные объекты и документы не переписываются.</span></div>
+
+      {loading ? <div className="dt-empty">Загрузка шаблонов…</div> : visible.length === 0 ? <div className="dt-empty"><strong>Ничего не найдено</strong><span>Измените поиск или фильтры.</span></div> : <div className="dt-document-list">{visible.map(template => {
+        const actions = buildTemplateActions(template, permissions);
+        const secondaryActions = actions.filter(action => action !== "open");
+        return <article className="dt-document-row" key={template.id}>
+          <span className={`dt-document-mark ${template.category}`}>{CATEGORY_MARK[template.category] || "ДОК"}</span>
+          <div className="dt-document-identity"><b>{template.name}</b><small>{template.source === "legacy-import" ? "Из действующего документа" : (documentTypeById(template.type)?.name || "Произвольный документ")}</small></div>
+          <div className="dt-document-meta"><span>{CATEGORY_OPTIONS.find(([value]) => value === template.category)?.[1] || template.category}</span><i className={`dt-status ${template.status}`}>{STATUS_LABEL[template.status] || template.status}</i><span><b>{template.versions?.length || 0}</b> вер.</span><time>{template.updatedAt ? new Date(template.updatedAt).toLocaleDateString("ru-RU") : "—"}</time></div>
+          <div className="dt-document-actions">
+            {actions.includes("open") && <button type="button" className="dt-open-template" onClick={() => runAction("open", template)}>Открыть</button>}
+            {secondaryActions.length > 0 && <details className="dt-action-menu"><summary title="Другие действия" aria-label="Другие действия">•••</summary><div>{secondaryActions.map(action => <button key={action} type="button" onClick={() => runAction(action, template)}>{{ copy: "Создать копию", archive: "Переместить в архив", history: "История версий" }[action]}</button>)}</div></details>}
+          </div>
+        </article>;
+      })}</div>}
       {newOpen && <NewTemplateModal onClose={() => setNewOpen(false)} onCreate={create} />}
       {message && <div className="dt-toast" onClick={() => setMessage("")}>{message}</div>}
     </section>

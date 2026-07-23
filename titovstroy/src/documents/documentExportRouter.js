@@ -16,8 +16,6 @@ const exactOne = (list, predicate) => {
 };
 
 const buildContractContext = ({ contract, client, contragent, data }) => {
-  const object = exactOne(data.objects, item => item.id === contract.objectId);
-  if (!object) return { ok: false, reason: "Объект договора не найден по точному ID" };
   const type = contract.type || "repair_fiz";
   const isPodryad = type === "podryad" || type === "podryad_annex";
   if (!isPodryad && (!client?.id || (contract.clientId && client.id !== contract.clientId))) {
@@ -26,6 +24,14 @@ const buildContractContext = ({ contract, client, contragent, data }) => {
   if (!contragent?.id || (contract.contragentId && contragent.id !== contract.contragentId)) {
     return { ok: false, reason: "Компания договора не подтверждена по точному ID" };
   }
+  // Reservation agreements created in "Other documents" intentionally have no
+  // object card. Their legacy form stores the address on the contract/client,
+  // so keep that supported without weakening exact objectId checks elsewhere.
+  const standaloneReservation = type === "reservation" && !contract.objectId;
+  const object = standaloneReservation
+    ? { id: "", address: contract.objectAddress || contract.estAddress || client?.address || "", type: contract.objectType || "" }
+    : exactOne(data.objects, item => item.id === contract.objectId);
+  if (!object) return { ok: false, reason: "Объект договора не найден по точному ID" };
   const estimates = (Array.isArray(data.estimates) ? data.estimates : []).filter(item => item && !item.deletedAt && item.objectId === contract.objectId && (!item.parentId || item.parentId === item.id));
   const estimate = newest(estimates) || {};
   if (!isPodryad && !estimate.id && !(Array.isArray(contract.works) && contract.works.length) && ["repair_fiz", "annex"].includes(type)) {

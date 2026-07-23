@@ -15417,7 +15417,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 const trashedCount = contracts.filter(c=>c.deletedAt && _seeDoc(c)).length;
                 return (<>
                   {trashedCount>0 && <button onClick={()=>setContractTab("trash")} style={{background:"rgba(220,38,38,.12)",color:"#ef4444",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"8px 13px",fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>🗑 Корзина ({trashedCount})</button>}
-                  {currentPermissions.documentCreate!=="none" && <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>{ setCurrentContract({id:Date.now().toString(),number:nextContractNumber(),date:new Date().toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:"",createdBy:currentUser.name,createdById:currentUser.id}); setContractTab("editor"); }}>+ Новый</button>}
+                  {currentPermissions.documentCreate!=="none" && <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>{ const now=Date.now(); setCurrentContract({id:now.toString(),number:nextContractNumber(),date:new Date(now).toISOString().split("T")[0],clientId:"",contragentId:contragents[0]?.id||"",works:[],appendix:1,note:"",createdAt:now,createdBy:currentUser.name,createdById:currentUser.id}); setContractTab("editor"); }}>+ Новый</button>}
                 </>);
               })()}
             </div>
@@ -15493,7 +15493,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       number: parent.number||"", date: new Date().toISOString().slice(0,10),
                       workerId: parent.workerId||"", ...(parent.worker?{worker:parent.worker}:{}),
                       contragentId: parent.contragentId||"", works: [], priceMode: parent.priceMode||"perline",
-                      note:"", createdBy: currentUser.name, createdById: currentUser.id,
+                      note:"", createdAt:Date.now(), createdBy: currentUser.name, createdById: currentUser.id,
                     });
                     setContractTab("editor");
                   };

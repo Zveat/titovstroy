@@ -69,4 +69,45 @@ describe("document export router", () => {
     await router.exportContract("pdf", { contract: { ...contract, type: "annex" }, client, contragent });
     expect(legacy).toHaveBeenCalledOnce();
   });
+
+  it("uses the published template for a new standalone reservation agreement", async () => {
+    const reservation = {
+      id: "reservation-1", type: "reservation", number: "1020", date: "2026-07-23", createdAt: 4000,
+      clientId: client.id, contragentId: contragent.id, reserveAmount: 50000, reserveStartDate: "2026-08-01",
+    };
+    const reservationVersion = {
+      id: "reservation:v1", templateId: "legacy-reservation-agreement", publishedAt: 3000,
+      contentJson: doc("Соглашение о резервировании"), page: { size: "A4" },
+    };
+    let stored = null;
+    const legacy = vi.fn(async () => ({ ok: true, route: "legacy" }));
+    const canonical = vi.fn(async snapshot => ({ ok: true, route: "template", documentId: snapshot.documentId }));
+    const service = {
+      loadTemplates: vi.fn(async () => ({ status: "found", store: { templates: [{
+        id: "legacy-reservation-agreement", type: "reservation", status: "published",
+        activeVersionId: reservationVersion.id, versions: [reservationVersion],
+      }] } })),
+      getSnapshot: vi.fn(async () => ({ status: stored ? "found" : "empty", snapshot: stored })),
+      createSnapshot: vi.fn(async input => {
+        stored = {
+          documentId: `contract:${input.contract.id}`, title: input.title,
+          contentSnapshot: input.version.contentJson, variablesSnapshot: input.variables,
+          canonicalHtmlSnapshot: input.canonicalHtml, page: input.version.page, instanceVersions: [],
+        };
+        return { ok: true, committed: true, snapshots: [stored] };
+      }),
+    };
+    const router = createDocumentExportRouter({
+      enabled: true, service,
+      getData: () => ({ ...data, objects: [], estimates: [], contracts: [reservation] }),
+      exportLegacy: legacy, exportCanonical: canonical,
+    });
+
+    const result = await router.exportContract("pdf", { contract: reservation, client, contragent });
+
+    expect(result).toMatchObject({ ok: true, route: "template", documentId: "contract:reservation-1" });
+    expect(service.createSnapshot).toHaveBeenCalledOnce();
+    expect(service.createSnapshot.mock.calls[0][0].variables["object.address"]).toBe(client.address);
+    expect(legacy).not.toHaveBeenCalled();
+  });
 });
