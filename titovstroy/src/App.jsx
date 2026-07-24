@@ -2662,7 +2662,7 @@ function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note })
           </div>
         ))}
         <div style={{display:"flex",gap:10,marginTop:5}}>
-          <span style={{color:"#b8904a",fontWeight:700,minWidth:18,flexShrink:0}}>7.</span>
+          <span style={{color:"#b8904a",fontWeight:700,minWidth:18,flexShrink:0}}>9.</span>
           <span>Ссылка для ознакомления с договором (шаблон):{" "}
             <a href="https://drive.google.com/file/d/1qmhQhn6LE3F3lnU_BBEDXqCiyj-LDjSC/view?usp=sharing"
               target="_blank" rel="noreferrer"
