@@ -9,7 +9,7 @@ import { MASTER_CATEGORIES, NAIMI_CITY_FALLBACK, OLX_REPAIR_CATEGORIES } from ".
 import { SearchMultiSelect, SearchSelect as MasterSearchSelect } from "./masters/MasterSelects.jsx";
 import { parserRunMessage, triggerParserRun } from "./masters/parserTrigger.js";
 import { MasterCrmButton, MasterCrmDatabase, MasterCrmEditor } from "./masters/MasterCRM.jsx";
-import { normalizeMasterCrm } from "./masters/masterCrm.js";
+import { interactionsForContact, masterSourceKey, normalizeMasterCrm } from "./masters/masterCrm.js";
 import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
@@ -301,6 +301,54 @@ function _phoneStatusLabel(master) {
   if (master?.phoneCheckedAt) return "Ожидает повторной проверки";
   return "В очереди на проверку номера";
 }
+function _masterCrmExport(crmValue, source, master) {
+  const crm = normalizeMasterCrm(crmValue);
+  const sourceKey = masterSourceKey(source, master);
+  const contact = crm.contacts.find(item => item.sourceKey === sourceKey);
+  const history = contact ? interactionsForContact(crm, contact.id) : [];
+  return {
+    status: contact?.status || "",
+    tags: Array.isArray(contact?.tags) ? contact.tags.join(", ") : "",
+    note: contact?.note || "",
+    history: history.map(item => {
+      const date = item.createdAt ? new Date(item.createdAt).toLocaleString("ru-RU") : "";
+      return [date, item.author, item.note].filter(Boolean).join(" — ");
+    }).join(" | "),
+  };
+}
+function exportFilteredMasters(source, masters, crmValue) {
+  const isOlx = source === "olx";
+  const headers = [
+    "Источник", "Имя", "Телефон", "Город", "Специализации", "Рейтинг / балл",
+    "Отзывы", "Тип", "Проверен", "Актуален", "Заголовок", "Объявлений",
+    "Ссылка", "Обновлён", "CRM статус", "CRM метки", "CRM заметка", "История взаимодействий",
+  ];
+  const rows = masters.map(master => {
+    const crm = _masterCrmExport(crmValue, source, master);
+    return [
+      isOlx ? "OLX.kz" : "Naimi.kz",
+      master.name || "",
+      _fmtPhone(master.phone),
+      master.city || "",
+      Array.isArray(master.services) ? master.services.join(", ") : "",
+      isOlx ? (master.score ?? "") : (master.rating ?? ""),
+      isOlx ? "" : (master.reviews ?? ""),
+      isOlx ? (master.business ? "Компания" : "Частник") : "",
+      master.verified ? "Да" : "",
+      master.active === false ? "Нет" : "Да",
+      master.title || "",
+      master.adsCount ?? "",
+      master.url || "",
+      master.lastRefresh || master.updatedAt || master.phoneCheckedAt || "",
+      crm.status,
+      crm.tags,
+      crm.note,
+      crm.history,
+    ];
+  });
+  const day = new Date().toISOString().slice(0, 10);
+  downloadCSV(`masters_${isOlx ? "olx" : "naimi"}_${day}.csv`, headers, rows);
+}
 function MastersSection({ masters = [], meta = null, loaded = true, config = null, onSaveConfig = null, canManage = false,
   mastersOlx = [], olxMeta = null, olxLoaded = true, olxConfig = null, onSaveOlxConfig = null,
   crmData = null, onSaveCrm = null, currentUser = null }) {
@@ -497,7 +545,10 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
       {/* Список */}
       {!!masters.length && (
         <>
-          <div style={{ fontSize: 12.5, color: "#94a3b8", marginBottom: 10 }}>Найдено: {filtered.length}</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+            <div style={{ fontSize: 12.5, color: "#94a3b8" }}>Найдено: {filtered.length}</div>
+            <button onClick={() => exportFilteredMasters("naimi", filtered, crmData)} style={{ border: "1px solid #bfdbfe", background: "#eff6ff", color: "#2563eb", borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 750, cursor: "pointer", fontFamily: "inherit" }}>⬇ Excel по фильтру</button>
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(320px,1fr))", gap: 12 }}>
             {shown.map(m => {
               const phoneD = m.phone ? _kzPhone(m.phone) : "";
@@ -716,7 +767,10 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
 
       {!!masters.length && (
         <>
-          <div style={{ fontSize: 12.5, color: "#94a3b8", marginBottom: 10 }}>Найдено: {filtered.length}</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+            <div style={{ fontSize: 12.5, color: "#94a3b8" }}>Найдено: {filtered.length}</div>
+            <button onClick={() => exportFilteredMasters("olx", filtered, crmData)} style={{ border: "1px solid #bfdbfe", background: "#eff6ff", color: "#2563eb", borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 750, cursor: "pointer", fontFamily: "inherit" }}>⬇ Excel по фильтру</button>
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(320px,1fr))", gap: 12 }}>
             {shown.map(m => {
               const phoneD = m.phone ? _kzPhone(m.phone) : "";
@@ -14830,6 +14884,37 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               {/* Плитки объектов — как в «Производстве». Статус единый: производство перевешивает сделку. */}
               {(()=>{
               const usRows = filteredObjects.filter(o=>!objectFilterStatus||unifiedStatusOf(o)===objectFilterStatus);
+              // Та же математика, что в «Финансы → Проекты», но только по объектам,
+              // оставшимся после текущих фильтров списка. Без права financialDetails
+              // финансовые значения не вычисляются для интерфейса и не выводятся в DOM.
+              let objectFinanceSummary = null;
+              if (hasFinancialDetails) {
+                const selectedObjectIds = new Set(usRows.map(o=>o.id));
+                const linkedProjects = finProjects.filter(p=>selectedObjectIds.has(financeObjectOf(p)?.id));
+                const coveredObjectIds = new Set(linkedProjects.map(p=>financeObjectOf(p)?.id).filter(Boolean));
+                const projectStatuses = new Set(["signed","work","paused","done"]);
+                const virtualProjects = usRows
+                  .filter(o=>!coveredObjectIds.has(o.id) && projectStatuses.has(unifiedStatusOf(o)))
+                  .map(o=>{
+                    const c=financeContractOf({},o);
+                    return {id:"",_virtual:true,objectId:o.id,contractNo:c?.number||"",budget:finBudgetOfContract(c)||0,createdAt:String(o.createdAt||"")};
+                  });
+                const projects=[...linkedProjects,...virtualProjects];
+                const stats={};
+                for (const tx of financeTx) {
+                  if (tx.deletedAt||tx.included===false) continue;
+                  const cn=normCN(tx.contractNo);
+                  if (!cn) continue;
+                  if (!stats[cn]) stats[cn]={income:0,expense:0};
+                  if (tx.type==="income") stats[cn].income+=Number(tx.amount)||0;
+                  else if (tx.type==="expense") stats[cn].expense+=Number(tx.amount)||0;
+                }
+                const budget=projects.reduce((sum,p)=>sum+financeBudgetOf(p),0);
+                const income=projects.reduce((sum,p)=>sum+(stats[normCN(p.contractNo)]?.income||0),0);
+                const expense=projects.reduce((sum,p)=>sum+(stats[normCN(p.contractNo)]?.expense||0),0);
+                const debt=projects.reduce((sum,p)=>sum+Math.max(0,financeBudgetOf(p)-(stats[normCN(p.contractNo)]?.income||0)),0);
+                objectFinanceSummary={budget,income,expense,debt,gross:income-expense,margin:income>0?Math.round((income-expense)/income*100):0,projects:projects.length};
+              }
               // Проекты из Финансов без объекта — тоже показываем (клик = создать объект, с подтверждением)
               const orphanFps = (objectAttentionFilter ? [] : prodEntries.filter(e=>!e.objectId)).filter(e=>{
                 const pr = productions.find(p=>p.objectId===e.key);
@@ -14842,6 +14927,30 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               });
               return (<>
               <div style={{fontSize:12,color:"#94a3b8"}}>Объектов: {usRows.length}{!objectAttentionFilter&&orphanFps.length>0?` · проектов из Финансов без объекта: ${orphanFps.length}`:""}</div>
+              {objectFinanceSummary && objectFinanceSummary.projects>0 && (()=>{
+                const money=n=>new Intl.NumberFormat("ru-RU").format(Math.round(Number(n)||0))+" ₸";
+                const s=objectFinanceSummary;
+                const tiles=[
+                  ["Объём продаж",money(s.budget),"#0f172a","#f1f5f9"],
+                  ["Оплачено факт",money(s.income),"#059669","#f0fdf4"],
+                  ["Дебиторка",s.debt>0?money(s.debt):"—",s.debt>0?"#dc2626":"#94a3b8","#fef2f2"],
+                  ["Расходы",money(s.expense),"#dc2626","#fef2f2"],
+                  ["Валовая прибыль",money(s.gross),s.gross>=0?"#059669":"#dc2626","#f0fdf4"],
+                  ["Маржа",s.margin+"%",s.margin>=30?"#059669":s.margin>=0?"#f59e0b":"#dc2626","#fffbeb"],
+                ];
+                return <div style={{margin:"2px 0 4px"}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:8}}>
+                    <div style={{fontSize:12,fontWeight:800,color:"#475569"}}>Финансы по выбранным объектам</div>
+                    <div style={{fontSize:10.5,color:"#94a3b8"}}>{s.projects} проектов</div>
+                  </div>
+                  <div className="fin-tiles" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:8}}>
+                    {tiles.map(([label,value,color,bg])=><div key={label} style={{background:bg,border:"1px solid "+color+"22",borderRadius:10,padding:"10px 12px",minWidth:0}}>
+                      <div style={{fontSize:10.5,color:"#64748b",fontWeight:650,marginBottom:3}}>{label}</div>
+                      <div style={{fontSize:16,fontWeight:850,color,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{value}</div>
+                    </div>)}
+                  </div>
+                </div>;
+              })()}
               {objectAttentionFilter && usRows.length === 0 && (
                 <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:"18px",textAlign:"center",color:"#166534",fontSize:13,fontWeight:700}}>
                   ✓ Сейчас нет объектов без движения 14+ дней
