@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as utils from "./utils.js";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations } from "./utils.js";
 import { documentTemplateBackupSpecs } from "./documents/documentTemplateBackup.js";
 
 describe("поиск финансового проекта по связанному объекту", () => {
@@ -358,6 +358,42 @@ describe("главная замерщика", () => {
 });
 
 describe("объекты без движения и единый источник данных финпроекта", () => {
+  it("заменяет старый импортный бюджет суммой всех актуальных смет связанного объекта", () => {
+    const result = resolveFinanceProjectBudget({
+      project:{ budget:333, objectId:"o1" },
+      object:{ id:"o1" },
+      estimates:[
+        { id:"e1", objectId:"o1", total:2_000_000 },
+        { id:"e2", objectId:"o1", total:436_000 },
+        { id:"other", objectId:"o2", total:9_999_999 },
+      ],
+      contractTotal:2_436_000,
+    });
+    expect(result).toEqual({ budget:2_436_000, source:"estimates", estimateCount:2 });
+  });
+
+  it("после удаления допсметы немедленно пересчитывает сумму, не сохраняя старый итог", () => {
+    const base = { project:{ budget:2_436_000 }, object:{ id:"o1" }, contractTotal:2_000_000 };
+    expect(resolveFinanceProjectBudget({ ...base, estimates:[{ id:"e1", objectId:"o1", total:2_000_000 }, { id:"e2", objectId:"o1", total:436_000 }] }).budget).toBe(2_436_000);
+    expect(resolveFinanceProjectBudget({ ...base, estimates:[{ id:"e1", objectId:"o1", total:2_000_000 }, { id:"e2", objectId:"o1", total:436_000, deletedAt:1 }] }).budget).toBe(2_000_000);
+  });
+
+  it("учитывает старые дополнительные сметы, связанные через parentId", () => {
+    expect(resolveFinanceProjectBudget({
+      project:{ budget:333 },
+      object:{ id:"o1" },
+      estimates:[
+        { id:"main", objectId:"o1", total:2_000_000 },
+        { id:"extra", parentId:"main", total:436_000 },
+      ],
+    })).toMatchObject({ budget:2_436_000, estimateCount:2 });
+  });
+
+  it("использует договор без смет и legacy-сумму только без актуальных данных объекта", () => {
+    expect(resolveFinanceProjectBudget({ project:{ budget:333 }, object:{ id:"o1" }, estimates:[], contractTotal:2_436_000 })).toMatchObject({ budget:2_436_000, source:"contracts" });
+    expect(resolveFinanceProjectBudget({ project:{ budget:333 } })).toMatchObject({ budget:333, source:"legacy" });
+  });
+
   it("считает зависшим только живой объект на согласовании без движения 14+ дней", () => {
     const now = new Date("2026-07-18T00:00:00Z").getTime();
     expect(isStaleApprovalObject({ status:"approval", updatedAt:now-14*86400000 }, now)).toBe(true);
