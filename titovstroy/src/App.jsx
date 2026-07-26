@@ -54,6 +54,12 @@ const _FB_ENV = {
 // Признак dev-окружения: конфиг взят из переменных (значит база — не боевая)
 const IS_DEV_ENV = !!_FB_ENV.databaseURL;
 const firebaseConfig = IS_DEV_ENV ? _FB_ENV : _FB_PROD;
+// Временный пользователь для проверки preview-сборок. Он доступен только если сам
+// Firebase-проект явно тестовый; одного наличия Vercel env недостаточно, чтобы случайно
+// открыть такой вход на боевой базе.
+const IS_PREVIEW_TEST_ENV = IS_DEV_ENV && /(?:dev|test)/i.test(
+  `${_FB_ENV.projectId || ""} ${_FB_ENV.databaseURL || ""}`,
+);
 // Обёртка над window.confirm для опасных массовых операций (восстановление бэкапа,
 // импорт JSON и т.п.): на боевой базе добавляет явное предупреждение перед вопросом,
 // чтобы не восстановить/импортировать что-то не туда по рассеянности.
@@ -1481,6 +1487,13 @@ const DEFAULT_USERS = [
   { id:"1", login:"admin",    password:"titov2024", name:"Василий Титов",   role:"admin"  },
   { id:"2", login:"zamer1",   password:"zamer1",    name:"Замерщик 1",      role:"user"   },
 ];
+const PREVIEW_TEST_USER = Object.freeze({
+  id:"preview-test-admin",
+  login:"test-admin",
+  password:"Test2026!",
+  name:"Тестовый администратор",
+  role:"admin",
+});
 
 // Старый "хэш" — на деле обратимая обфускация (base64 + реверс), не защищает пароль
 // при доступе к базе. Оставлен только для проверки паролей, созданных до перехода
@@ -2333,6 +2346,15 @@ function LoginScreen({ onLogin }) {
       setError("Не удалось подключиться к базе. Проверьте интернет и попробуйте снова.");
       setLoading(false);
       return;
+    }
+
+    // Не записываем тестового пользователя в Firebase: он существует только внутри
+    // preview-сборки и не меняет импортированную копию списка сотрудников.
+    if (IS_PREVIEW_TEST_ENV) {
+      users = [
+        ...users.filter(user => user?.id !== PREVIEW_TEST_USER.id && user?.login?.toLowerCase() !== PREVIEW_TEST_USER.login),
+        PREVIEW_TEST_USER,
+      ];
     }
 
     const candidate = users.find(u => u.login.toLowerCase() === login.trim().toLowerCase());
