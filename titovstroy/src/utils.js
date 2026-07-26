@@ -547,12 +547,45 @@ export function resolveFinanceProjectBudget({ project = {}, object = null, estim
     ? estimatesForObject((estimates || []).filter(e => e && !e.deletedAt), object.id)
     : [];
   const estimateTotal = linkedEstimates.reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0);
+  const calcMode = object?.financeCalcMode || project?.financeCalcMode || "estimates-v1";
+  const safeContractTotal = Math.max(0, Number(contractTotal) || 0);
+  if (calcMode === "contracts-v2") {
+    return { budget: safeContractTotal, source: "contracts-v2", estimateCount: linkedEstimates.length, calcMode };
+  }
   if (estimateTotal > 0) return { budget: estimateTotal, source: "estimates", estimateCount: linkedEstimates.length };
 
-  const safeContractTotal = Number(contractTotal) || 0;
   if (safeContractTotal > 0) return { budget: safeContractTotal, source: "contracts", estimateCount: linkedEstimates.length };
 
   return { budget: Number(project?.budget) || 0, source: "legacy", estimateCount: linkedEstimates.length };
+}
+
+export function sortProductionStages(stages = []) {
+  return (Array.isArray(stages) ? stages : [])
+    .map((stage, index) => ({ stage, index }))
+    .sort((a, b) => {
+      const ao = a.stage?.order == null ? 1e9 + a.index : Number(a.stage.order);
+      const bo = b.stage?.order == null ? 1e9 + b.index : Number(b.stage.order);
+      return ao - bo || a.index - b.index;
+    })
+    .map(item => item.stage);
+}
+
+export function moveProductionStage(stages = [], stageId, targetIndex) {
+  const sorted = sortProductionStages(stages).filter(Boolean);
+  const moving = sorted.find(stage => stage.id === stageId);
+  if (!moving) return sorted;
+  const category = moving.cat || "Прочее";
+  const sameCategory = sorted.filter(stage => (stage.cat || "Прочее") === category);
+  const from = sameCategory.findIndex(stage => stage.id === stageId);
+  if (from < 0 || sameCategory.length < 2) return sorted.map((stage, order) => ({ ...stage, order }));
+  const to = Math.max(0, Math.min(sameCategory.length - 1, Number(targetIndex) || 0));
+  const reorderedCategory = [...sameCategory];
+  const [item] = reorderedCategory.splice(from, 1);
+  reorderedCategory.splice(to, 0, item);
+  let categoryIndex = 0;
+  return sorted
+    .map(stage => (stage.cat || "Прочее") === category ? reorderedCategory[categoryIndex++] : stage)
+    .map((stage, order) => ({ ...stage, order }));
 }
 
 export function buildFinanceProjectView({ project = {}, object = null, production = null, contract = null, estimates = [], contractTotal = 0, reports = [], status = null } = {}) {

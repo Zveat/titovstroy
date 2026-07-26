@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as utils from "./utils.js";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations } from "./utils.js";
 import { documentTemplateBackupSpecs } from "./documents/documentTemplateBackup.js";
 
 describe("поиск финансового проекта по связанному объекту", () => {
@@ -394,6 +394,27 @@ describe("объекты без движения и единый источни�
     expect(resolveFinanceProjectBudget({ project:{ budget:333 } })).toMatchObject({ budget:333, source:"legacy" });
   });
 
+  it("не меняет схему расчёта существующих объектов без версии", () => {
+    expect(resolveFinanceProjectBudget({
+      project:{ budget:333 }, object:{ id:"o1" },
+      estimates:[{ id:"e1", objectId:"o1", total:2_000_000 }], contractTotal:2_436_000,
+    })).toMatchObject({ budget:2_000_000, source:"estimates" });
+  });
+
+  it("для новых objects contracts-v2 считает бюджет только по договорам", () => {
+    expect(resolveFinanceProjectBudget({
+      project:{ budget:333 }, object:{ id:"o1", financeCalcMode:"contracts-v2" },
+      estimates:[{ id:"e1", objectId:"o1", total:9_999_999 }], contractTotal:2_436_000,
+    })).toMatchObject({ budget:2_436_000, source:"contracts-v2", calcMode:"contracts-v2" });
+  });
+
+  it("для contracts-v2 без договора не подставляет смету или старый budget", () => {
+    expect(resolveFinanceProjectBudget({
+      project:{ budget:333 }, object:{ id:"o1", financeCalcMode:"contracts-v2" },
+      estimates:[{ id:"e1", objectId:"o1", total:9_999_999 }], contractTotal:0,
+    })).toMatchObject({ budget:0, source:"contracts-v2" });
+  });
+
   it("считает зависшим только живой объект на согласовании без движения 14+ дней", () => {
     const now = new Date("2026-07-18T00:00:00Z").getTime();
     expect(isStaleApprovalObject({ status:"approval", updatedAt:now-14*86400000 }, now)).toBe(true);
@@ -431,6 +452,30 @@ describe("объекты без движения и единый источни�
     expect(isActiveFinanceStatus("в работе")).toBe(true);
     expect(isActiveFinanceStatus("выполнен")).toBe(false);
     expect(isActiveFinanceStatus("archive")).toBe(false);
+  });
+});
+
+describe("порядок этапов производства", () => {
+  const stages = [
+    { id:"a", cat:"Черновые", order:2 },
+    { id:"b", cat:"Черновые", order:0 },
+    { id:"c", cat:"Чистовые", order:1 },
+    { id:"d", cat:"Черновые", order:3 },
+  ];
+
+  it("сортирует одинаково для карточки и клиентского кабинета", () => {
+    expect(sortProductionStages(stages).map(s => s.id)).toEqual(["b", "c", "a", "d"]);
+  });
+
+  it("переносит этап сразу на выбранную позицию внутри раздела", () => {
+    const moved = moveProductionStage(stages, "d", 0);
+    expect(moved.filter(s => s.cat === "Черновые").map(s => s.id)).toEqual(["d", "b", "a"]);
+    expect(sortProductionStages(moved).map(s => s.id)).toEqual(moved.map(s => s.id));
+  });
+
+  it("не меняет порядок других разделов", () => {
+    const moved = moveProductionStage(stages, "a", 0);
+    expect(moved.filter(s => s.cat === "Чистовые").map(s => s.id)).toEqual(["c"]);
   });
 });
 

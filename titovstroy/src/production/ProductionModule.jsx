@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, Fragment } from "react";
 import { STAGE_STATUSES, emptyProduction } from "./constants.js";
-import { normCN, estimatesForObject, findFinanceProjectForObject } from "../utils.js";
+import { normCN, estimatesForObject, findFinanceProjectForObject, sortProductionStages, moveProductionStage } from "../utils.js";
 import { buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, _stageKey } from "./commands.js";
 import { listProductionDrafts, removeProductionDraft, saveProductionDraft } from "./drafts.js";
 
@@ -866,18 +866,14 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
   // ПОРЯДОК ЭТАПОВ: порядок массива дифф НЕ отслеживает (сравнение по id), поэтому храним явное
   // числовое поле order на этапе — его изменение дифф ловит как обычную правку поля (patch-item)
   // и сохраняет в облако. Сортируем по order (у кого нет — по текущей позиции в массиве, стабильно).
-  const _effOrder = (s, i) => (s.order != null ? s.order : 1e6 + i); // без order — всегда в конце (по позиции)
-  const sortedStages = stages.map((s, i) => ({ s, i })).sort((a, b) => _effOrder(a.s, a.i) - _effOrder(b.s, b.i) || a.i - b.i).map(x => x.s);
+  const sortedStages = sortProductionStages(stages);
   // Переставить этап местами с соседом (той же категории). Если порядок ещё не проставлен —
   // проставляем последовательный один раз для всех (в текущем порядке), затем меняем два значения.
   const moveStage = (id, neighborId) => {
     if (!neighborId) return;
-    const anyMissing = stages.some(s => s.order == null);
-    const arr = anyMissing ? sortedStages.map((s, idx) => ({ ...s, order: idx })) : stages.map(s => ({ ...s }));
-    const A = arr.find(s => s.id === id), B = arr.find(s => s.id === neighborId);
-    if (!A || !B) return;
-    const t = A.order; A.order = B.order; B.order = t;
-    patch({ stages: arr });
+    const list = sortedStages.filter(s => (s.cat || "Прочее") === ((sortedStages.find(x => x.id === id)?.cat) || "Прочее"));
+    const target = list.findIndex(s => s.id === neighborId);
+    if (target >= 0) patch({ stages: moveProductionStage(stages, id, target) });
   };
   const grouped = groupByCat(sortedStages);
 
@@ -904,10 +900,20 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
                   const arrBtn = (on) => ({ background: "none", border: "none", color: on ? "#94a3b8" : "#e2e8f0", cursor: on ? "pointer" : "default", fontSize: 12, lineHeight: 1, padding: 0, height: 15 });
                   return (
                     <div key={s.id} style={{ display: "flex", gap: 10, padding: "10px 0", borderBottom: "1px solid #f1f5f9" }}>
-                      {/* Перестановка порядка в пределах категории */}
-                      <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", flexShrink: 0, gap: 2 }}>
-                        <button title="Выше" disabled={!upId} onClick={() => moveStage(s.id, upId)} style={arrBtn(!!upId)}>▲</button>
-                        <button title="Ниже" disabled={!downId} onClick={() => moveStage(s.id, downId)} style={arrBtn(!!downId)}>▼</button>
+                      {/* Быстрая перестановка в пределах категории: край, шаг или точная позиция. */}
+                      <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", flexShrink: 0, gap: 2, width: 40 }}>
+                        <div style={{ display:"flex", gap:3 }}>
+                          <button title="В начало раздела" disabled={!upId} onClick={() => patch({ stages: moveProductionStage(stages, s.id, 0) })} style={arrBtn(!!upId)}>⇤</button>
+                          <button title="Выше" disabled={!upId} onClick={() => moveStage(s.id, upId)} style={arrBtn(!!upId)}>▲</button>
+                        </div>
+                        <select title="Позиция в разделе" value={li} onChange={e => patch({ stages: moveProductionStage(stages, s.id, Number(e.target.value)) })}
+                          style={{width:38,height:24,border:"1px solid #e2e8f0",borderRadius:6,fontSize:11,color:"#475569",background:"#fff",textAlign:"center",fontFamily:"inherit"}}>
+                          {list.map((_, index) => <option key={index} value={index}>{index + 1}</option>)}
+                        </select>
+                        <div style={{ display:"flex", gap:3 }}>
+                          <button title="Ниже" disabled={!downId} onClick={() => moveStage(s.id, downId)} style={arrBtn(!!downId)}>▼</button>
+                          <button title="В конец раздела" disabled={!downId} onClick={() => patch({ stages: moveProductionStage(stages, s.id, list.length - 1) })} style={arrBtn(!!downId)}>⇥</button>
+                        </div>
                       </div>
                       <div style={{ width: 3, borderRadius: 3, background: st.color, flexShrink: 0, minHeight: 36 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>

@@ -8,11 +8,13 @@ import { countAllProductionRecovery, listProductionRetries, saveProductionRetry,
 import { MASTER_CATEGORIES, NAIMI_CITY_FALLBACK, OLX_REPAIR_CATEGORIES } from "./masters/catalog.mjs";
 import { SearchMultiSelect, SearchSelect as MasterSearchSelect } from "./masters/MasterSelects.jsx";
 import { parserRunMessage, triggerParserRun } from "./masters/parserTrigger.js";
+import { MasterCrmButton, MasterCrmDatabase, MasterCrmEditor } from "./masters/MasterCRM.jsx";
+import { normalizeMasterCrm } from "./masters/masterCrm.js";
 import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -300,8 +302,10 @@ function _phoneStatusLabel(master) {
   return "В очереди на проверку номера";
 }
 function MastersSection({ masters = [], meta = null, loaded = true, config = null, onSaveConfig = null, canManage = false,
-  mastersOlx = [], olxMeta = null, olxLoaded = true, olxConfig = null, onSaveOlxConfig = null }) {
-  const [source, setSource] = useState("naimi"); // "naimi" | "olx"
+  mastersOlx = [], olxMeta = null, olxLoaded = true, olxConfig = null, onSaveOlxConfig = null,
+  crmData = null, onSaveCrm = null, currentUser = null }) {
+  const [source, setSource] = useState("naimi"); // "naimi" | "olx" | "own"
+  const [crmTarget, setCrmTarget] = useState(null);
   const [cfgOpen, setCfgOpen] = useState(false);
   const [freq, setFreq] = useState("daily");
   const [cfgCities, setCfgCities] = useState(["karaganda"]);
@@ -390,21 +394,25 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
           <div style={{ minWidth: 0, flex: 1 }}>
             <h1 style={{ margin: 0, fontSize: 21, fontWeight: 900, color: "#fff", lineHeight: 1.1 }}>Мастера</h1>
             <div style={{ fontSize: 12, color: "rgba(255,255,255,.7)", marginTop: 3 }}>
-              {source === "olx"
+              {source === "own"
+                ? <>Собственная база · контактов {normalizeMasterCrm(crmData).contacts.length} · история взаимодействий сохраняется отдельно от парсеров</>
+                : source === "olx"
                 ? <>База с OLX.kz · актуальных {olxMeta?.activeCount ?? mastersOlx.filter(m => m.active !== false).length} · с телефоном {olxWithPhone}{olxMeta?.updatedAt ? ` · обновлено ${new Date(olxMeta.updatedAt).toLocaleDateString("ru-RU")}` : ""}</>
                 : <>База с naimi.kz · актуальных {meta?.activeCount ?? masters.filter(m => m.active !== false).length} · с телефоном {withPhone}{meta?.updatedAt ? ` · обновлено ${new Date(meta.updatedAt).toLocaleDateString("ru-RU")}` : ""}</>}
             </div>
           </div>
           <div style={{ display: "flex", gap: 5, background: "rgba(255,255,255,.08)", borderRadius: 10, padding: 4 }}>
-            {[["naimi", "naimi.kz"], ["olx", "OLX.kz"]].map(([s, l]) => (
+            {[["naimi", "naimi.kz"], ["olx", "OLX.kz"], ["own", "Своя база"]].map(([s, l]) => (
               <button key={s} onClick={() => setSource(s)} style={{ border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 800, borderRadius: 7, padding: "6px 14px", background: source === s ? "#fff" : "transparent", color: source === s ? "#0f172a" : "rgba(255,255,255,.8)" }}>{l}</button>
             ))}
           </div>
         </div>
       </div>
 
-      {source === "olx" ? (
-        <MastersOlxView masters={mastersOlx} meta={olxMeta} loaded={olxLoaded} config={olxConfig} onSaveConfig={onSaveOlxConfig} canManage={canManage} />
+      {source === "own" ? (
+        <MasterCrmDatabase crmData={crmData} onSave={onSaveCrm} onOpen={setCrmTarget} canDelete={canManage} />
+      ) : source === "olx" ? (
+        <MastersOlxView masters={mastersOlx} meta={olxMeta} loaded={olxLoaded} config={olxConfig} onSaveConfig={onSaveOlxConfig} canManage={canManage} crmData={crmData} onOpenCrm={setCrmTarget} />
       ) : (<>
 
       {/* Настройки парсера (только Админ) */}
@@ -526,6 +534,7 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
                       <span style={{ fontSize: 11.5, color: "#94a3b8", alignSelf: "center" }}>📞 {_phoneStatusLabel(m)}</span>
                     )}
                     {m.url && <a href={m.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", background: "#f8fafc", color: "#64748b", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>🔗 Профиль</a>}
+                    <MasterCrmButton crmData={crmData} source="naimi" master={m} onOpen={setCrmTarget} />
                   </div>
                 </div>
               );
@@ -539,13 +548,14 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
         </>
       )}
       </>)}
+      {crmTarget && <MasterCrmEditor crmData={crmData} target={crmTarget} currentUser={currentUser} onSave={onSaveCrm} onClose={() => setCrmTarget(null)} canDelete={canManage} />}
     </div>
   );
 }
 
 // Отдельная вкладка OLX (доска объявлений: нет рейтингов/отзывов, поэтому — балл
 // «серьёзности» из косвенных сигналов + фильтры компания/частник, свежесть, продвижение).
-function MastersOlxView({ masters = [], meta = null, loaded = true, config = null, onSaveConfig = null, canManage = false }) {
+function MastersOlxView({ masters = [], meta = null, loaded = true, config = null, onSaveConfig = null, canManage = false, crmData = null, onOpenCrm = null }) {
   const [cfgOpen, setCfgOpen] = useState(false);
   const [freq, setFreq] = useState("daily");
   const [cfgRegion, setCfgRegion] = useState("5");
@@ -749,6 +759,7 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
                       <span style={{ fontSize: 11.5, color: "#94a3b8", alignSelf: "center" }}>📞 {_phoneStatusLabel(m)}</span>
                     )}
                     {m.url && <a href={m.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", background: "#f8fafc", color: "#64748b", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>🔗 Объявление</a>}
+                    {onOpenCrm && <MasterCrmButton crmData={crmData} source="olx" master={m} onOpen={onOpenCrm} />}
                   </div>
                 </div>
               );
@@ -1312,6 +1323,7 @@ const MASTERS_KEY         = "titovstroy-masters";          // справочни
 const MASTERS_CONFIG_KEY  = "titovstroy-masters-config";   // настройки парсера (частота, «Обновить сейчас») — редактирует Админ, читает парсер
 const MASTERS_OLX_KEY        = "titovstroy-masters-olx";       // справочник мастеров с OLX.kz (второй источник, пишет отдельный парсер)
 const MASTERS_OLX_CONFIG_KEY = "titovstroy-masters-olx-config";// настройки OLX-парсера
+const MASTERS_CRM_KEY        = "titovstroy-masters-crm-v1";    // собственная база и история взаимодействий; парсеры этот ключ не меняют
 // единый снимок рабочего пространства: объекты + их сметы + их договора
 const WORKSPACE_BACKUPS_KEY = "titovstroy-workspace-backups";
 // legacy ключ для миграции старых сделок
@@ -5824,6 +5836,28 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     }
     catch { return false; }
   }, [mastersOlxConfig, currentPermissions.mastersManage]);
+  // Внутренняя CRM мастеров хранится отдельно от выгрузок Naimi/OLX. Поэтому ежедневный
+  // парсер может полностью заменить свои списки, не затронув заметки и собственную базу.
+  const [mastersCrm, setMastersCrm] = useState(() => normalizeMasterCrm(null));
+  useEffect(() => {
+    let alive = true;
+    storage.getResult(MASTERS_CRM_KEY).then(res => {
+      if (!alive) return;
+      if (res?.status === "found" && res.value) {
+        try { setMastersCrm(normalizeMasterCrm(JSON.parse(res.value))); } catch { setMastersCrm(normalizeMasterCrm(null)); }
+      }
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const saveMastersCrm = useCallback(async (nextValue) => {
+    if (currentPermissions.masters === "none") return false;
+    const next = normalizeMasterCrm(nextValue);
+    setMastersCrm(next);
+    try {
+      const result = await storage.set(MASTERS_CRM_KEY, JSON.stringify(next));
+      return result?.fbOk !== false;
+    } catch { return false; }
+  }, [currentPermissions.masters]);
   const _contractsLoaded = useRef(false);
   const _productionsLoaded = useRef(false); // отдельно от _contractsLoaded: productions грузится в том же запросе, но может не долететь, пока остальное — долетит
   // Флаги загрузки — это refs (не вызывают ре-рендер). Авто-синки (этапы←сметы, бюджет←договоры)
@@ -5971,11 +6005,13 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     const estimateTotal = obj?.id
       ? estimatesForObject(estimatesRef.current, obj.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0)
       : 0;
+    const contractsV2 = obj?.financeCalcMode === "contracts-v2";
     return {
       id:"", contractNo: main?.number||"",
-      budget: estimateTotal || finBudgetOfContract(main) || 0,
+      budget: contractsV2 ? finBudgetOfContract(main) : (estimateTotal || finBudgetOfContract(main) || 0),
       createdAt: main?.date || new Date().toISOString().slice(0,10),
       comment:"", objectId: obj?.id||"",
+      ...(contractsV2 ? { financeCalcMode:"contracts-v2" } : {}),
     };
   };
   // завести проект в финансах из объекта (или открыть существующий). Доп. соглашение
@@ -5990,9 +6026,11 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       const estimateTotal = obj?.id
         ? estimatesForObject(estimatesRef.current, obj.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0)
         : 0;
-      const nb = estimateTotal || finBudgetOfContract(main) || Number(existing.budget) || 0;
-      const upd = { ...existing, objectId:obj?.id || existing.objectId || "", contractNo:main?.number || existing.contractNo || "", budget: nb };
-      if (Number(existing.budget) !== nb || upd.objectId !== (existing.objectId || "") || upd.contractNo !== (existing.contractNo || "")) {
+      const contractsV2 = obj?.financeCalcMode === "contracts-v2" || existing.financeCalcMode === "contracts-v2";
+      const nb = contractsV2 ? finBudgetOfContract(main) : (estimateTotal || finBudgetOfContract(main) || Number(existing.budget) || 0);
+      const upd = { ...existing, objectId:obj?.id || existing.objectId || "", contractNo:main?.number || existing.contractNo || "", budget: nb,
+        ...(contractsV2 ? { financeCalcMode:"contracts-v2" } : {}) };
+      if (Number(existing.budget) !== nb || upd.objectId !== (existing.objectId || "") || upd.contractNo !== (existing.contractNo || "") || upd.financeCalcMode !== existing.financeCalcMode) {
         try { await saveFinanceProjects(finProjectsRef.current.map(p=>p.id===existing.id?upd:p)); } catch(e) {}
       }
       setFinProjModal(upd);
@@ -6310,7 +6348,8 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       const estimateBudget = o
         ? estimatesForObject(estimates, o.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0)
         : 0;
-      const budget = estimateBudget > 0 ? estimateBudget : (Number(fp.budget) || 0);
+      const contractsV2 = o?.financeCalcMode === "contracts-v2" || fp.financeCalcMode === "contracts-v2";
+      const budget = contractsV2 ? (Number(fp.budget) || 0) : (estimateBudget > 0 ? estimateBudget : (Number(fp.budget) || 0));
       const finStatus = financeProjectStatusKeyOf(fp);
       entries.push({
         key: objectId || ("fp:" + fp.id), objectId, fpId: fp.id,
@@ -6324,7 +6363,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       });
     }
     return entries;
-  }, [finProjects, financeTx, matchFpToObject, financeProjectStatusKeyOf]);
+  }, [finProjects, financeTx, estimates, matchFpToObject, financeProjectStatusKeyOf]);
   const financeObjectOf = (project) => {
     if (project?.objectId) {
       const direct = liveObjects.find(o => o.id === project.objectId);
@@ -7191,7 +7230,7 @@ ${reqBlock}`;
     if (!obj) return null;
     const prod = productionsRef.current.find(p => p.objectId === objectId) || {};
     const entry = (prodEntriesRef.current || []).find(e => e.objectId === objectId);
-    const stages = (prod.stages || []).filter(st => st && String(st.name || "").trim());
+    const stages = sortProductionStages(prod.stages || []).filter(st => st && String(st.name || "").trim());
     let doneCnt = 0;
     for (const st of stages) { if ((st.status || "todo") === "done") doneCnt++; }
     // Готовность считаем ТАК ЖЕ, как в производстве: доля выполненных этапов (по количеству)
@@ -7611,9 +7650,8 @@ ${reqBlock}`;
     return await saveListProtected(FINANCE_PROJECTS_KEY, FINANCE_PROJECTS_BACKUPS_KEY, list, (fl)=>{ finProjectsRef.current = fl; setFinProjects(fl); }, { loadedRef: _financeLoaded, ...opts });
   };
 
-  // БЫСТРОЕ ОБНОВЛЕНИЕ бюджета проектов: единый источник — все актуальные сметы
-  // связанного объекта; если смет нет, основной договор и его доп. соглашения.
-  // Это также исправляет старые импортированные проекты с устаревшим budget.
+  // Старые объекты сохраняют схему «сметы, затем договор». Только новые объекты
+  // с financeCalcMode=contracts-v2 считают бюджет по договору и допсоглашениям.
   const _budgetSyncTimer = useRef(null);
   useEffect(() => {
     if (!_financeLoaded.current || !_contractsLoaded.current || !_estimatesLoaded.current || !_productionsLoaded.current) return;
@@ -7636,11 +7674,12 @@ ${reqBlock}`;
           ? estimatesForObject(estimatesRef.current, linkedObjectId).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0)
           : 0;
         const contractBudget = finBudgetOfContract(main);
-        const hasCurrentBudgetSource = objectEstimateTotal > 0 || !!main;
-        const nb = objectEstimateTotal > 0 ? objectEstimateTotal : contractBudget;
-        if ((hasCurrentBudgetSource && Math.round(Number(fp.budget) || 0) !== Math.round(nb)) || linkedObjectId !== (fp.objectId || "")) {
+        const contractsV2 = directObject?.financeCalcMode === "contracts-v2" || fp.financeCalcMode === "contracts-v2";
+        const hasCurrentBudgetSource = contractsV2 || objectEstimateTotal > 0 || !!main;
+        const nb = contractsV2 ? contractBudget : (objectEstimateTotal > 0 ? objectEstimateTotal : contractBudget);
+        if ((hasCurrentBudgetSource && Math.round(Number(fp.budget) || 0) !== Math.round(nb)) || linkedObjectId !== (fp.objectId || "") || (contractsV2 && fp.financeCalcMode !== "contracts-v2")) {
           changed = true;
-          return { ...fp, budget: nb, objectId: linkedObjectId };
+          return { ...fp, budget: nb, objectId: linkedObjectId, ...(contractsV2 ? { financeCalcMode:"contracts-v2" } : {}) };
         }
         return fp;
       });
@@ -7663,13 +7702,15 @@ ${reqBlock}`;
         if (existing) {
           if (!existing.objectId) {
             const estimateTotal = estimatesForObject(estimatesRef.current, object.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0);
-            updated = updated.map(fp => fp.id === existing.id ? { ...fp, objectId:object.id, budget:estimateTotal || finBudgetOfContract(main) || Number(fp.budget) || 0 } : fp);
+            const contractsV2 = object.financeCalcMode === "contracts-v2" || existing.financeCalcMode === "contracts-v2";
+            const budget = contractsV2 ? finBudgetOfContract(main) : (estimateTotal || finBudgetOfContract(main) || Number(existing.budget) || 0);
+            updated = updated.map(fp => fp.id === existing.id ? { ...fp, objectId:object.id, budget, ...(contractsV2 ? { financeCalcMode:"contracts-v2" } : {}) } : fp);
             changed = true;
           }
           continue;
         }
         const estimateTotal = estimatesForObject(estimatesRef.current, object.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0);
-        const budget = estimateTotal || finBudgetOfContract(main);
+        const budget = object.financeCalcMode === "contracts-v2" ? finBudgetOfContract(main) : (estimateTotal || finBudgetOfContract(main));
         if (!main && budget <= 0) continue;
         updated.push({ ...finProjDraftFromObject(object, main), id:genId(), objectId:object.id, budget });
         changed = true;
@@ -8979,6 +9020,7 @@ ${reqBlock}`;
       manager: est.proj?.manager || currentUser.name,
       createdBy: est.createdBy || currentUser.name, createdById: currentUser.id,
       createdAt: est.createdAt || Date.now(), updatedAt: Date.now(),
+      financeCalcMode:"contracts-v2",
     };
     // привязываем смету + все её доп. сметы
     const childIds = new Set(estimatesRef.current.filter(e=>e.parentId===est.id).map(e=>e.id));
@@ -14688,7 +14730,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               {objectTab==="list" && (currentPermissions.objectCreate !== "none" || currentPermissions.objectDelete !== "none") && (<>
                 {(()=>{const trashed=objectsRef.current.filter(o=>o.deletedAt); return trashed.length>0&&(<button onClick={()=>setObjectTab("trash")} style={{background:"rgba(220,38,38,.12)",color:"#dc2626",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"7px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginRight:4}}>🗑 Корзина ({trashed.length})</button>);})()}
                   {currentPermissions.objectCreate !== "none" && <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>{
-                  const newObj = {id:genId(),clientId:"",clientName:"",clientPhone:"",clientType:"физ",clientIin:"",clientDoc:"",address:"",objType:"Вторичка",area:"",status:"new",note:"",manager:currentUser.name,createdBy:currentUser.name,createdById:currentUser.id,createdAt:Date.now(),updatedAt:Date.now()};
+                  const newObj = {id:genId(),clientId:"",clientName:"",clientPhone:"",clientType:"физ",clientIin:"",clientDoc:"",address:"",objType:"Вторичка",area:"",status:"new",note:"",manager:currentUser.name,createdBy:currentUser.name,createdById:currentUser.id,createdAt:Date.now(),updatedAt:Date.now(),financeCalcMode:"contracts-v2"};
                   // Оптимистично: сразу открываем карточку нового объекта, запись — в фон (раньше был
                   // await saveObjects перед открытием → кнопка подвисала на медленном облаке).
                   const nextList = [newObj, ...objectsRef.current];
@@ -15529,7 +15571,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       })()}
 
         {effScreen === "masters" && currentPermissions.masters === "none" && restrictedSection("Мастера", "сотрудникам с соответствующим правом")}
-        {effScreen === "masters" && currentPermissions.masters !== "none" && <MastersSection masters={masters} meta={mastersMeta} loaded={mastersLoaded} config={mastersConfig} onSaveConfig={saveMastersConfig} canManage={accessAllows(currentPermissions.mastersManage, true)} mastersOlx={mastersOlx} olxMeta={mastersOlxMeta} olxLoaded={mastersOlxLoaded} olxConfig={mastersOlxConfig} onSaveOlxConfig={saveMastersOlxConfig} />}
+        {effScreen === "masters" && currentPermissions.masters !== "none" && <MastersSection masters={masters} meta={mastersMeta} loaded={mastersLoaded} config={mastersConfig} onSaveConfig={saveMastersConfig} canManage={accessAllows(currentPermissions.mastersManage, true)} mastersOlx={mastersOlx} olxMeta={mastersOlxMeta} olxLoaded={mastersOlxLoaded} olxConfig={mastersOlxConfig} onSaveOlxConfig={saveMastersOlxConfig} crmData={mastersCrm} onSaveCrm={saveMastersCrm} currentUser={currentUser} />}
 
         {effScreen === "contracts" && currentPermissions.documents === "none" && restrictedSection("Прочие документы", "сотрудникам с соответствующим правом")}
         {effScreen === "contracts" && currentPermissions.documents !== "none" && (
