@@ -86,7 +86,7 @@ export function sealLegacyEstimateRows(sourceRows = {}, catalog = []) {
 // Returns every estimate belonging to an object, including legacy additional estimates
 // linked only through parentId. The source array is never mutated.
 export function estimatesForObject(estimates = [], objectId) {
-  const list = (estimates || []).filter(Boolean);
+  const list = (estimates || []).filter(e => e && !e.deletedAt);
   if (!objectId) return [];
   const selected = new Set(list.filter(e => e.objectId === objectId && e.id).map(e => e.id));
   let changed = true;
@@ -542,7 +542,20 @@ export function buildEstimatorDashboard({ objects = [], estimates = [], producti
 // Финансовый проект хранит деньги и ссылку objectId. Описательные поля всегда
 // вычисляются из объекта, производства, договора и актов, чтобы их нельзя было
 // независимо изменить в двух разделах.
-export function buildFinanceProjectView({ project = {}, object = null, production = null, contract = null, reports = [], status = null } = {}) {
+export function resolveFinanceProjectBudget({ project = {}, object = null, estimates = [], contractTotal = 0 } = {}) {
+  const linkedEstimates = object?.id
+    ? estimatesForObject((estimates || []).filter(e => e && !e.deletedAt), object.id)
+    : [];
+  const estimateTotal = linkedEstimates.reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0);
+  if (estimateTotal > 0) return { budget: estimateTotal, source: "estimates", estimateCount: linkedEstimates.length };
+
+  const safeContractTotal = Number(contractTotal) || 0;
+  if (safeContractTotal > 0) return { budget: safeContractTotal, source: "contracts", estimateCount: linkedEstimates.length };
+
+  return { budget: Number(project?.budget) || 0, source: "legacy", estimateCount: linkedEstimates.length };
+}
+
+export function buildFinanceProjectView({ project = {}, object = null, production = null, contract = null, estimates = [], contractTotal = 0, reports = [], status = null } = {}) {
   const linked = !!object;
   const clientType = object?.clientType === "юр" ? "Юр лицо" : object ? "Физ лицо" : (project.client || "—");
   const legacyStatus = financeStatusMeta(linked ? (object.status || "new") : (project.rawStatus || project.status || ""));
@@ -554,6 +567,7 @@ export function buildFinanceProjectView({ project = {}, object = null, productio
   const contractSigned = linked
     ? !!(contract && contract.contractStatus === "signed")
     : project.contractSigned === "да";
+  const budgetView = resolveFinanceProjectBudget({ project, object, estimates, contractTotal });
   return {
     linked,
     object,
@@ -578,6 +592,9 @@ export function buildFinanceProjectView({ project = {}, object = null, productio
     factEndDate: production?.factEndDate || "",
     contractSigned,
     hasAvr,
+    budget: budgetView.budget,
+    budgetSource: budgetView.source,
+    estimateCount: budgetView.estimateCount,
   };
 }
 
