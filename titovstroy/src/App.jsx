@@ -549,42 +549,48 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
             <div style={{ fontSize: 12.5, color: "#94a3b8" }}>Найдено: {filtered.length}</div>
             <button onClick={() => exportFilteredMasters("naimi", filtered, crmData)} style={{ border: "1px solid #bfdbfe", background: "#eff6ff", color: "#2563eb", borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 750, cursor: "pointer", fontFamily: "inherit" }}>⬇ Excel по фильтру</button>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(320px,1fr))", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(310px,1fr))", gap: 12, alignItems: "stretch" }}>
             {shown.map(m => {
               const phoneD = m.phone ? _kzPhone(m.phone) : "";
               return (
-                <div key={m.source + ":" + m.extId} style={{ background: "#fff", border: "1px solid #eef2f7", borderRadius: 14, padding: "14px 16px", boxShadow: "0 1px 2px rgba(15,23,42,.04)", display: "flex", flexDirection: "column", gap: 8 }}>
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                <div key={m.source + ":" + m.extId} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "15px 16px 13px", boxShadow: "0 2px 7px rgba(15,23,42,.045)", display: "flex", flexDirection: "column", minHeight: 214, overflow: "hidden" }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 11 }}>
+                    <div style={{ width: 38, height: 38, flex: "0 0 38px", borderRadius: 9, display: "grid", placeItems: "center", background: "#eff6ff", color: "#2563eb", fontSize: 16, fontWeight: 850 }}>
+                      {String(m.name || "М").trim().charAt(0).toUpperCase() || "М"}
+                    </div>
                     <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 14.5, fontWeight: 800, color: "#0f172a" }}>{m.name || "Без имени"}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                        <span title={m.name || "Без имени"} style={{ fontSize: 14.5, fontWeight: 800, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name || "Без имени"}</span>
                         {m.verified && <span title="Проверенный" style={{ fontSize: 11, fontWeight: 800, color: "#059669", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 6, padding: "1px 6px" }}>✓</span>}
                       </div>
-                      <div style={{ fontSize: 11.5, color: "#94a3b8", marginTop: 2 }}>
+                      <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {m.city || "—"}
                         {m.rating ? <span style={{ color: "#d97706", fontWeight: 700 }}> · ★ {Number(m.rating).toFixed(1)}</span> : ""}
                         {m.reviews ? ` · ${m.reviews} отзывов` : ""}
                       </div>
                     </div>
+                    <span style={{ flex: "0 0 auto", fontSize: 9.5, fontWeight: 800, color: "#64748b", background: "#f1f5f9", borderRadius: 6, padding: "3px 6px" }}>NAIMI</span>
                   </div>
-                  {!!(m.services || []).length && (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                      {(m.services || []).slice(0, 4).map((s, i) => (
+                  <div style={{ minHeight: 44, marginBottom: 11 }}>
+                    {!!(m.services || []).length ? <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignContent: "flex-start" }}>
+                      {(m.services || []).slice(0, 3).map((s, i) => (
                         <span key={i} style={{ fontSize: 10.5, color: "#475569", background: "#f1f5f9", borderRadius: 6, padding: "2px 7px" }}>{s}</span>
                       ))}
-                      {(m.services || []).length > 4 && <span style={{ fontSize: 10.5, color: "#94a3b8" }}>+{(m.services || []).length - 4}</span>}
-                    </div>
-                  )}
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+                      {(m.services || []).length > 3 && <span style={{ fontSize: 10.5, color: "#64748b", background: "#f8fafc", borderRadius: 6, padding: "2px 5px" }}>+{(m.services || []).length - 3}</span>}
+                    </div> : <span style={{ fontSize: 11, color: "#94a3b8" }}>Специализация не указана</span>}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 11, minHeight: 33 }}>
                     {phoneD ? (
                       <>
-                        <a href={"tel:+" + phoneD} style={{ textDecoration: "none", background: "#eff6ff", color: "#2563eb", border: "1px solid rgba(37,99,235,.2)", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>📞 {_fmtPhone(m.phone)}</a>
-                        <a href={"https://wa.me/" + phoneD} target="_blank" rel="noreferrer" style={{ textDecoration: "none", background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>WhatsApp</a>
+                        <a href={"tel:+" + phoneD} style={{ minWidth: 0, flex: "1 1 auto", textAlign: "center", textDecoration: "none", background: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe", borderRadius: 8, padding: "6px 8px", fontSize: 12, fontWeight: 750, whiteSpace: "nowrap" }}>📞 {_fmtPhone(m.phone)}</a>
+                        <a href={"https://wa.me/" + phoneD} target="_blank" rel="noreferrer" style={{ flex: "0 0 auto", textDecoration: "none", background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", borderRadius: 8, padding: "6px 10px", fontSize: 12, fontWeight: 750 }}>WhatsApp</a>
                       </>
                     ) : (
-                      <span style={{ fontSize: 11.5, color: "#94a3b8", alignSelf: "center" }}>📞 {_phoneStatusLabel(m)}</span>
+                      <span style={{ width: "100%", fontSize: 11.5, color: "#94a3b8", background: "#f8fafc", borderRadius: 8, padding: "7px 10px" }}>📞 {_phoneStatusLabel(m)}</span>
                     )}
-                    {m.url && <a href={m.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", background: "#f8fafc", color: "#64748b", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>🔗 Профиль</a>}
+                  </div>
+                  <div style={{ marginTop: "auto", paddingTop: 10, borderTop: "1px solid #f1f5f9", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                    {m.url && <a href={m.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", background: "#fff", color: "#64748b", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 10px", fontSize: 12, fontWeight: 700 }}>🔗 Профиль</a>}
                     <MasterCrmButton crmData={crmData} source="naimi" master={m} onOpen={setCrmTarget} />
                   </div>
                 </div>
@@ -771,48 +777,51 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
             <div style={{ fontSize: 12.5, color: "#94a3b8" }}>Найдено: {filtered.length}</div>
             <button onClick={() => exportFilteredMasters("olx", filtered, crmData)} style={{ border: "1px solid #bfdbfe", background: "#eff6ff", color: "#2563eb", borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 750, cursor: "pointer", fontFamily: "inherit" }}>⬇ Excel по фильтру</button>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(320px,1fr))", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(310px,1fr))", gap: 12, alignItems: "stretch" }}>
             {shown.map(m => {
               const phoneD = m.phone ? _kzPhone(m.phone) : "";
               const fd = freshDays(m);
               return (
-                <div key={m.source + ":" + m.extId} style={{ background: "#fff", border: "1px solid #eef2f7", borderRadius: 14, padding: "14px 16px", boxShadow: "0 1px 2px rgba(15,23,42,.04)", display: "flex", flexDirection: "column", gap: 8 }}>
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                <div key={m.source + ":" + m.extId} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "15px 16px 13px", boxShadow: "0 2px 7px rgba(15,23,42,.045)", display: "flex", flexDirection: "column", minHeight: 236, overflow: "hidden" }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
+                    <div style={{ width: 38, height: 38, flex: "0 0 38px", borderRadius: 9, display: "grid", placeItems: "center", background: "#f0fdf4", color: "#059669", fontSize: 16, fontWeight: 850 }}>
+                      {String(m.name || "М").trim().charAt(0).toUpperCase() || "М"}
+                    </div>
                     <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 14.5, fontWeight: 800, color: "#0f172a" }}>{m.name || "Без имени"}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                        <span title={m.name || "Без имени"} style={{ minWidth: 0, fontSize: 14.5, fontWeight: 800, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name || "Без имени"}</span>
                         <span title="Балл серьёзности/активности (не качество работы)" style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: scoreColor(m.score || 0), borderRadius: 6, padding: "1px 6px" }}>{m.score || 0}</span>
-                        {m.business
-                          ? <span style={{ fontSize: 10, fontWeight: 700, color: "#7c3aed", background: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: 6, padding: "1px 6px" }}>компания</span>
-                          : <span style={{ fontSize: 10, fontWeight: 700, color: "#64748b", background: "#f1f5f9", borderRadius: 6, padding: "1px 6px" }}>частник</span>}
                         {m.promoted && <span title="Платное продвижение" style={{ fontSize: 10 }}>⭐</span>}
                       </div>
-                      <div style={{ fontSize: 11.5, color: "#94a3b8", marginTop: 2 }}>
+                      <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {m.city || "—"}
                         {fd <= 7 ? <span style={{ color: "#059669", fontWeight: 700 }}> · свежее</span> : fd <= 30 ? " · активно" : fd < 999 ? ` · ${Math.round(fd)} дн. назад` : ""}
                         {m.adsCount > 1 ? ` · ${m.adsCount} объявл.` : ""}
                       </div>
                     </div>
+                    <span style={{ flex: "0 0 auto", fontSize: 9.5, fontWeight: 800, color: m.business ? "#7c3aed" : "#64748b", background: m.business ? "#f5f3ff" : "#f1f5f9", borderRadius: 6, padding: "3px 6px" }}>{m.business ? "КОМПАНИЯ" : "ЧАСТНИК"}</span>
                   </div>
-                  {m.title && <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.35 }}>{m.title.slice(0, 90)}</div>}
-                  {!!(m.services || []).length && (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                      {(m.services || []).slice(0, 4).map((s, i) => (
+                  <div title={m.title || ""} style={{ minHeight: 34, marginBottom: 8, fontSize: 12, color: m.title ? "#334155" : "#94a3b8", lineHeight: 1.4, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{m.title || "Описание не указано"}</div>
+                  <div style={{ minHeight: 44, marginBottom: 10 }}>
+                    {!!(m.services || []).length ? <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignContent: "flex-start" }}>
+                      {(m.services || []).slice(0, 3).map((s, i) => (
                         <span key={i} style={{ fontSize: 10.5, color: "#475569", background: "#f1f5f9", borderRadius: 6, padding: "2px 7px" }}>{s}</span>
                       ))}
-                      {(m.services || []).length > 4 && <span style={{ fontSize: 10.5, color: "#94a3b8" }}>+{(m.services || []).length - 4}</span>}
-                    </div>
-                  )}
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+                      {(m.services || []).length > 3 && <span style={{ fontSize: 10.5, color: "#64748b", background: "#f8fafc", borderRadius: 6, padding: "2px 5px" }}>+{(m.services || []).length - 3}</span>}
+                    </div> : <span style={{ fontSize: 11, color: "#94a3b8" }}>Специализация не указана</span>}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 11, minHeight: 33 }}>
                     {phoneD ? (
                       <>
-                        <a href={"tel:+" + phoneD} style={{ textDecoration: "none", background: "#eff6ff", color: "#2563eb", border: "1px solid rgba(37,99,235,.2)", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>📞 {_fmtPhone(m.phone)}</a>
-                        <a href={"https://wa.me/" + phoneD} target="_blank" rel="noreferrer" style={{ textDecoration: "none", background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>WhatsApp</a>
+                        <a href={"tel:+" + phoneD} style={{ minWidth: 0, flex: "1 1 auto", textAlign: "center", textDecoration: "none", background: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe", borderRadius: 8, padding: "6px 8px", fontSize: 12, fontWeight: 750, whiteSpace: "nowrap" }}>📞 {_fmtPhone(m.phone)}</a>
+                        <a href={"https://wa.me/" + phoneD} target="_blank" rel="noreferrer" style={{ flex: "0 0 auto", textDecoration: "none", background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", borderRadius: 8, padding: "6px 10px", fontSize: 12, fontWeight: 750 }}>WhatsApp</a>
                       </>
                     ) : (
-                      <span style={{ fontSize: 11.5, color: "#94a3b8", alignSelf: "center" }}>📞 {_phoneStatusLabel(m)}</span>
+                      <span style={{ width: "100%", fontSize: 11.5, color: "#94a3b8", background: "#f8fafc", borderRadius: 8, padding: "7px 10px" }}>📞 {_phoneStatusLabel(m)}</span>
                     )}
-                    {m.url && <a href={m.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", background: "#f8fafc", color: "#64748b", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 11px", fontSize: 12.5, fontWeight: 700 }}>🔗 Объявление</a>}
+                  </div>
+                  <div style={{ marginTop: "auto", paddingTop: 10, borderTop: "1px solid #f1f5f9", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                    {m.url && <a href={m.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", background: "#fff", color: "#64748b", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 10px", fontSize: 12, fontWeight: 700 }}>🔗 Объявление</a>}
                     {onOpenCrm && <MasterCrmButton crmData={crmData} source="olx" master={m} onOpen={onOpenCrm} />}
                   </div>
                 </div>
@@ -2785,7 +2794,8 @@ const ROLE_PERMISSION_GROUPS = [
       { key:"objectAssign", label:"Назначение ответственного", hint:"Менеджер и прораб", type:"scope" },
       { key:"objectDelete", label:"Удаление и восстановление", hint:"Корзина объектов", type:"scope" },
       { key:"objectExport", label:"Экспорт", hint:"Выгрузка списка в Excel", type:"scope" },
-      { key:"financialDetails", label:"Финансовые показатели", hint:"Деньги в объектах, на Главной и в Аналитике: себестоимость, прибыль, маржа, долги", type:"boolean" },
+      { key:"objectFinanceSummary", label:"Финансовая сводка списка", hint:"Объём продаж, оплаты, дебиторка, расходы, валовая прибыль и маржа над списком объектов", type:"boolean" },
+      { key:"financialDetails", label:"Подробные финпоказатели", hint:"Себестоимость, прибыль, маржа и долги внутри карточек, на Главной и в Аналитике", type:"boolean" },
     ],
   },
   {
@@ -7939,8 +7949,8 @@ ${reqBlock}`;
   // вкладка Финансы + карточки. Сам раздел «Финансы» ему всё равно закрыт через effScreen).
   // Замерщику финансы НЕ грузим — он видит себестоимость/маржу только в смете при заполнении.
   useEffect(() => {
-    if (currentPermissions.finance !== "none" || currentPermissions.financialDetails) loadFinance();
-  }, [currentPermissions.finance, currentPermissions.financialDetails, loadFinance]);
+    if (currentPermissions.finance !== "none" || currentPermissions.financialDetails || currentPermissions.objectFinanceSummary) loadFinance();
+  }, [currentPermissions.finance, currentPermissions.financialDetails, currentPermissions.objectFinanceSummary, loadFinance]);
 
   // ── САМОИСЦЕЛЕНИЕ СИНХРОНИЗАЦИИ ──
   const [resyncing, setResyncing] = useState(false);
@@ -7955,7 +7965,7 @@ ${reqBlock}`;
       try { await flushAllProductionPending(); } catch(e) { console.warn("flush prod pending err", e); }
       await storage.flushDirty();
       await Promise.all([loadEstimates(), loadContracts()]);
-      if (currentPermissions.finance !== "none" || currentPermissions.financialDetails) await loadFinance();
+      if (currentPermissions.finance !== "none" || currentPermissions.financialDetails || currentPermissions.objectFinanceSummary) await loadFinance();
       const left = storage.dirtyKeysVisible().length;
       setDirtyCount(left);
       // гасим только когда чисто ВЕЗДЕ: успех storage не должен скрывать ошибку производства
@@ -10797,6 +10807,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
   const canFinanceExport = currentPermissions.finance !== "none" && currentPermissions.financeExport !== "none";
   const canFinanceDirectories = financeWritable && currentPermissions.financeDirectories !== "none";
   const hasFinancialDetails = currentPermissions.financialDetails;
+  const hasObjectFinanceSummary = currentPermissions.objectFinanceSummary;
   const restrictedSection = (name, audience = "руководству") => (
     <div className="page">
       <div style={{maxWidth:560,margin:"56px auto",textAlign:"center",background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:"40px 28px",boxShadow:"0 1px 3px rgba(15,23,42,.07)"}}>
@@ -14885,19 +14896,21 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               {(()=>{
               const usRows = filteredObjects.filter(o=>!objectFilterStatus||unifiedStatusOf(o)===objectFilterStatus);
               // Та же математика, что в «Финансы → Проекты», но только по объектам,
-              // оставшимся после текущих фильтров списка. Без права financialDetails
+              // оставшимся после текущих фильтров списка. Без отдельного права
               // финансовые значения не вычисляются для интерфейса и не выводятся в DOM.
               let objectFinanceSummary = null;
-              if (hasFinancialDetails) {
+              if (hasObjectFinanceSummary) {
                 const selectedObjectIds = new Set(usRows.map(o=>o.id));
                 const linkedProjects = finProjects.filter(p=>selectedObjectIds.has(financeObjectOf(p)?.id));
                 const coveredObjectIds = new Set(linkedProjects.map(p=>financeObjectOf(p)?.id).filter(Boolean));
-                const projectStatuses = new Set(["signed","work","paused","done"]);
                 const virtualProjects = usRows
-                  .filter(o=>!coveredObjectIds.has(o.id) && projectStatuses.has(unifiedStatusOf(o)))
+                  .filter(o=>!coveredObjectIds.has(o.id))
                   .map(o=>{
                     const c=financeContractOf({},o);
-                    return {id:"",_virtual:true,objectId:o.id,contractNo:c?.number||"",budget:finBudgetOfContract(c)||0,createdAt:String(o.createdAt||"")};
+                    const estimateTotal=estimates
+                      .filter(e=>e.objectId===o.id)
+                      .reduce((sum,e)=>sum+(Number(e.total)||0),0);
+                    return {id:"",_virtual:true,objectId:o.id,contractNo:c?.number||"",budget:finBudgetOfContract(c)||estimateTotal||0,createdAt:String(o.createdAt||"")};
                   });
                 const projects=[...linkedProjects,...virtualProjects];
                 const stats={};
@@ -14913,7 +14926,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 const income=projects.reduce((sum,p)=>sum+(stats[normCN(p.contractNo)]?.income||0),0);
                 const expense=projects.reduce((sum,p)=>sum+(stats[normCN(p.contractNo)]?.expense||0),0);
                 const debt=projects.reduce((sum,p)=>sum+Math.max(0,financeBudgetOf(p)-(stats[normCN(p.contractNo)]?.income||0)),0);
-                objectFinanceSummary={budget,income,expense,debt,gross:income-expense,margin:income>0?Math.round((income-expense)/income*100):0,projects:projects.length};
+                objectFinanceSummary={budget,income,expense,debt,gross:income-expense,margin:income>0?Math.round((income-expense)/income*100):0,objects:usRows.length};
               }
               // Проекты из Финансов без объекта — тоже показываем (клик = создать объект, с подтверждением)
               const orphanFps = (objectAttentionFilter ? [] : prodEntries.filter(e=>!e.objectId)).filter(e=>{
@@ -14927,7 +14940,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               });
               return (<>
               <div style={{fontSize:12,color:"#94a3b8"}}>Объектов: {usRows.length}{!objectAttentionFilter&&orphanFps.length>0?` · проектов из Финансов без объекта: ${orphanFps.length}`:""}</div>
-              {objectFinanceSummary && objectFinanceSummary.projects>0 && (()=>{
+              {objectFinanceSummary && objectFinanceSummary.objects>0 && (()=>{
                 const money=n=>new Intl.NumberFormat("ru-RU").format(Math.round(Number(n)||0))+" ₸";
                 const s=objectFinanceSummary;
                 const tiles=[
@@ -14941,7 +14954,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 return <div style={{margin:"2px 0 4px"}}>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:8}}>
                     <div style={{fontSize:12,fontWeight:800,color:"#475569"}}>Финансы по выбранным объектам</div>
-                    <div style={{fontSize:10.5,color:"#94a3b8"}}>{s.projects} проектов</div>
+                    <div style={{fontSize:10.5,color:"#94a3b8"}}>{s.objects} объектов</div>
                   </div>
                   <div className="fin-tiles" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:8}}>
                     {tiles.map(([label,value,color,bg])=><div key={label} style={{background:bg,border:"1px solid "+color+"22",borderRadius:10,padding:"10px 12px",minWidth:0}}>

@@ -237,7 +237,7 @@ const FULL_ADMIN_ACCESS = Object.freeze({
   adminUsers:"all", adminRoles:"all", adminClients:"all", adminContractors:"all",
   adminCatalog:"all", adminPrices:"all", adminBackups:"all", adminRestore:"all",
   adminAudit:"all", adminDbCheck:"all",
-  financialDetails:true, showLocked:false,
+  financialDetails:true, objectFinanceSummary:true, showLocked:false,
 });
 
 const NO_TEMPLATE_ACCESS = Object.freeze({
@@ -253,7 +253,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     ...NO_TEMPLATE_ACCESS,
     dashboard:"all", objects:"all", calendar:"all", estimates:"all", production:"all",
     documents:"all", analytics:"all", masters:"all", mastersManage:"none",
-    finance:"view", admin:"none", financialDetails:true,
+    finance:"view", admin:"none", financialDetails:true, objectFinanceSummary:true,
     objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
     objectAssign:"none", objectExport:"all", calendarEdit:"none",
     estimateCreate:"all", estimateEdit:"all", estimateDelete:"all", estimateStatus:"all",
@@ -272,7 +272,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     ...NO_TEMPLATE_ACCESS,
     dashboard:"all", objects:"all", calendar:"all", estimates:"all", production:"all",
     documents:"all", analytics:"all", masters:"all", mastersManage:"none",
-    finance:"none", admin:"none", financialDetails:false,
+    finance:"none", admin:"none", financialDetails:false, objectFinanceSummary:false,
     objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
     objectAssign:"none", objectExport:"all", calendarEdit:"none",
     estimateCreate:"none", estimateEdit:"none", estimateDelete:"none", estimateStatus:"none",
@@ -291,7 +291,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     ...NO_TEMPLATE_ACCESS,
     dashboard:"own", objects:"all", calendar:"all", estimates:"none", production:"all",
     documents:"none", analytics:"none", masters:"all", mastersManage:"none",
-    finance:"none", admin:"none", financialDetails:true,
+    finance:"none", admin:"none", financialDetails:true, objectFinanceSummary:false,
     objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
     objectAssign:"none", objectExport:"none", calendarEdit:"own",
     estimateCreate:"none", estimateEdit:"none", estimateDelete:"none", estimateStatus:"none",
@@ -310,7 +310,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     ...NO_TEMPLATE_ACCESS,
     dashboard:"own", objects:"own", calendar:"own", estimates:"own", production:"own",
     documents:"own", analytics:"own", masters:"all", mastersManage:"none",
-    finance:"none", admin:"none", financialDetails:false,
+    finance:"none", admin:"none", financialDetails:false, objectFinanceSummary:false,
     objectCreate:"all", objectEdit:"own", objectDelete:"own", objectStatus:"own",
     objectAssign:"none", objectExport:"own", calendarEdit:"own",
     estimateCreate:"all", estimateEdit:"own", estimateDelete:"own", estimateStatus:"own",
@@ -329,7 +329,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     ...NO_TEMPLATE_ACCESS,
     dashboard:"none", objects:"all", calendar:"none", estimates:"none", production:"none",
     documents:"none", analytics:"none", masters:"all", mastersManage:"none",
-    finance:"none", admin:"none", financialDetails:false,
+    finance:"none", admin:"none", financialDetails:false, objectFinanceSummary:false,
     objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
     objectAssign:"none", objectExport:"none", calendarEdit:"none",
     estimateCreate:"none", estimateEdit:"none", estimateDelete:"none", estimateStatus:"none",
@@ -433,6 +433,7 @@ export function normalizeRolePermissions(saved = {}) {
     if (!["none","view","edit"].includes(merged.finance)) merged.finance = base.finance;
     if (!["none","full"].includes(merged.admin)) merged.admin = base.admin;
     merged.financialDetails = merged.financialDetails === true;
+    merged.objectFinanceSummary = merged.objectFinanceSummary === true;
     merged.showLocked = merged.showLocked === true;
     result[role.key] = merged;
   }

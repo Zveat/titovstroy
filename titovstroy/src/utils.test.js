@@ -117,6 +117,7 @@ describe("матрица прав ролей", () => {
       analytics:"all",
       finance:"none",
       financialDetails:false,
+      objectFinanceSummary:false,
       objectEdit:"none",
       objectCreate:"none",
       objectDelete:"none",
@@ -178,6 +179,9 @@ describe("матрица прав ролей", () => {
     expect(matrix.sales_head.objectEdit).toBe("all");
     expect(matrix.sales_head.analytics).toBe("own");
     expect(matrix.sales_head.financialDetails).toBe(false);
+    expect(matrix.manager.objectFinanceSummary).toBe(true);
+    expect(matrix.foreman.objectFinanceSummary).toBe(false);
+    expect(matrix.admin.objectFinanceSummary).toBe(true);
     expect(matrix.admin).toMatchObject({ objects:"all", admin:"full", finance:"edit" });
     expect(matrix.admin.adminRoles).toBe("all");
     expect(matrix.admin.adminRestore).toBe("all");
