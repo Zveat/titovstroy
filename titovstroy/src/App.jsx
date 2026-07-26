@@ -12,7 +12,7 @@ import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restore
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -5547,10 +5547,13 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     setFinFilterCat(s.finFilterCat || "");
     setFinFilterCategory(s.finFilterCategory || "");
     setFinFilterContract(s.finFilterContract || "");
+    setFinFilterPreset(s.finFilterPreset || "");
+    setFinFilterType(s.finFilterType || "");
+    setFinFilterAccount(s.finFilterAccount || "");
   };
 
   const navigate = (newScreen, newFinTab, extraState = {}) => {
-    const snapshot = { screen, financeTab, finFilterCat, finFilterCategory, finFilterContract };
+    const snapshot = { screen, financeTab, finFilterCat, finFilterCategory, finFilterContract, finFilterPreset, finFilterType, finFilterAccount };
     setNavHistory(h => [...h, snapshot]);
     // пушим в браузерную историю
     try { window.history.pushState(snapshot, ""); } catch(e) {}
@@ -5559,6 +5562,9 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     if (extraState.finFilterCat !== undefined) setFinFilterCat(extraState.finFilterCat);
     if (extraState.finFilterCategory !== undefined) setFinFilterCategory(extraState.finFilterCategory);
     if (extraState.finFilterContract !== undefined) setFinFilterContract(extraState.finFilterContract);
+    if (extraState.finFilterPreset !== undefined) setFinFilterPreset(extraState.finFilterPreset);
+    if (extraState.finFilterType !== undefined) setFinFilterType(extraState.finFilterType);
+    if (extraState.finFilterAccount !== undefined) setFinFilterAccount(extraState.finFilterAccount);
   };
 
   const goBack = () => {
@@ -5877,6 +5883,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [finFilterCategory, setFinFilterCategory] = useState("");
   const [finFilterContract, setFinFilterContract] = useState(""); // фильтр по проекту/договору
   const [finFilterCat, setFinFilterCat] = useState("");           // фильтр по категории (из ДДС/ОПУ)
+  const [finFilterPreset, setFinFilterPreset] = useState("");     // точная выборка из карточек дашборда
   const [finSearch, setFinSearch] = useState("");
   const [finAmtMin, setFinAmtMin] = useState("");
   const [finAmtMax, setFinAmtMax] = useState("");
@@ -10955,7 +10962,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>{new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"})} · <span style={{color:"#bfdbfe",fontWeight:600}}>{currentUser.name}</span></div>
           </div>
           <div style={{fontSize:16,fontWeight:900,color:"#0f172a",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>🔥 Что требует внимания по моим объектам</div>
-          <OperationsPanel issues={_myIssues} onNav={openIssue} onDismiss={dismissIssueTomorrow} emptyText="По вашим объектам всё в порядке" />
+          <OperationsPanel issues={_myIssues} onNav={openIssue} onDismiss={_isAdmin ? dismissIssueTomorrow : undefined} emptyText="По вашим объектам всё в порядке" />
         </div>
       )}
       {effScreen === "dashboard" && currentPermissions.dashboard !== "none" && !_isForeman && (()=>{
@@ -11067,7 +11074,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               <OperationsPanel
                 issues={_isUser ? _myIssues : (hasFinancialDetails ? _todayIssues : _todayIssues.filter(i=>i.group!=="Финансы"))}
                 onNav={openIssue}
-                onDismiss={dismissIssueTomorrow}
+                onDismiss={_isAdmin ? dismissIssueTomorrow : undefined}
                 emptyText={_isUser ? "По вашим объектам всё в порядке" : "Всё под контролем — срочных задач нет"}
               />
             </div>
@@ -12795,6 +12802,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         const opsList = financeTx
           .filter(t=>!t.deletedAt) // скрываем мягко-удалённые
           .filter(t=>inPeriod(t.date||t.createdAt||0))
+          .filter(t=>matchesFinanceOperationsPreset(t, finFilterPreset))
           .filter(t=>!finFilterType || t.type===finFilterType)
           .filter(t=>!finFilterAccount || t.account===finFilterAccount || t.accountTo===finFilterAccount)
           .filter(t=>finAmtMin===""||(Number(t.amount)||0)>=Number(finAmtMin))
@@ -12812,10 +12820,22 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             ((b.updatedAt||0)-(a.updatedAt||0)) ||
             String(b.id||"").localeCompare(String(a.id||""))
           );
+        const opsSummary = summarizeFinanceOperations(opsList);
 
         const PERIODS=[["all","Всё"],["month","Месяц"],["3month","3 мес"],["year","Год"],["custom","Период"]];
         const TYPE_LABEL={income:"Доход",expense:"Расход",transfer:"Перевод"};
         const TYPE_COLOR={income:"#059669",expense:"#dc2626",transfer:"#7c3aed"};
+        const PRESET_LABEL={
+          revenue:"Выручка без авансов",
+          cogs:"Себестоимость",
+          gross:"Валовая прибыль: выручка и себестоимость",
+          "pnl-expense":"Расходы ОПУ без дивидендов",
+          "net-profit":"Чистая прибыль: доходы и расходы ОПУ",
+          dividends:"Дивиденды",
+          "cash-in":"Все поступления ДДС",
+          "cash-out":"Все выплаты ДДС",
+          "cash-flow":"Денежный поток: поступления и выплаты",
+        };
 
         const openNewTx = (type="income") => { if (!canFinanceCreate) return; setFinCatSearch(""); setFinCatOpen(false); setFinTxProjSearch(""); setFinTxProjOpen(false); setFinTxModal({ id:null, type, date:new Date().toISOString().slice(0,10), amount:"", account:accounts[0]?.name||"", accountTo:accounts[1]?.name||"", category:"", subcategory:"", note:"", contractNo:"" }); };
         const openEditTx = (t) => { if (!canFinanceEditRecord(t)) return; setFinCatSearch(t.subcategory||t.category||""); setFinCatOpen(false); setFinTxProjSearch(t.contractNo||""); setFinTxProjOpen(false); setFinTxModal({ ...t, date:new Date(t.date||t.createdAt||Date.now()).toISOString().slice(0,10) }); };
@@ -12883,6 +12903,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               divTx.forEach(t=>{ const r=t.recipient||"Не указан"; divByRecipient[r]=(divByRecipient[r]||0)+(Number(t.amount)||0); });
               // Выручка без авансов и без финансирования (займы/вклады/возврат активов — не выручка)
               const incSumNoAdv = periodTx.filter(t=>t.type==="income"&&!t.isAdvance&&t.category!==C_FINANCING_INC&&t.category!==C_ASSET_INC).reduce((s,t)=>s+(Number(t.amount)||0),0);
+              const cogsSum = periodTx.filter(t=>t.type==="expense"&&t.category==="Прямые расходы (COGS / себестоимость)").reduce((s,t)=>s+(Number(t.amount)||0),0);
+              const grossP = incSumNoAdv - cogsSum;
               // Расходы P&L: без дивидендов, без финансовой деятельности и выданных займов/активов (они не расход); CapEx — расход кассовым методом
               const expNoDivSum = periodTx.filter(t=>t.type==="expense"&&t.subcategory!==S_DIV&&t.category!==C_FINACT&&t.category!==C_ASSET_OUT).reduce((s,t)=>s+(Number(t.amount)||0),0);
               const netP = incSumNoAdv - expNoDivSum;
@@ -12941,14 +12963,25 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   </div>
                 </div>
               );
-              const KpiRow=({label,val,color,bold,big})=>(
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:bold?"9px 0":"6px 0",borderBottom:"1px solid #f5f7fa",gap:8}}>
+              const KpiRow=({label,val,color,bold,big,onClick})=>(
+                <div role={onClick?"button":undefined} tabIndex={onClick?0:undefined} onClick={onClick} onKeyDown={onClick?e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();onClick();}}:undefined}
+                  style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:bold?"9px 0":"6px 0",borderBottom:"1px solid #f5f7fa",gap:8,cursor:onClick?"pointer":"default",borderRadius:onClick?6:0}}
+                  title={onClick?"Показать операции, из которых рассчитана сумма":undefined}>
                   <span style={{fontSize:bold?13:12.5,color:bold?"#0f172a":"#64748b",fontWeight:bold?700:500}}>{label}</span>
                   <span style={{fontSize:big?20:(bold?15:13.5),fontWeight:bold?800:600,color:color||"#0f172a",whiteSpace:"nowrap"}}>
-                    {typeof val==="number"?fM(val)+" ₸":val}
+                    {typeof val==="number"?fM(val)+" ₸":val}{onClick?<span style={{fontSize:10,color:"#94a3b8",marginLeft:6}}>↗</span>:null}
                   </span>
                 </div>
               );
+              const openOpsPreset = (preset, extra={}) => navigate(undefined,"ops",{
+                finFilterPreset:preset,
+                finFilterType:"",
+                finFilterAccount:"",
+                finFilterCat:"",
+                finFilterCategory:"",
+                finFilterContract:"",
+                ...extra,
+              });
               const LegendItem=({label,val,total,color})=>{ const p=total>0?Math.round(val/total*100):0; return (
                 <div style={{marginBottom:9}}>
                   <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3,gap:8}}>
@@ -12965,24 +12998,25 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   <div className="fin-dash-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:16,marginBottom:16}}>
                     {/* Прибыль */}
                     <CardSection title="💎 Прибыль, ₸" accent="#2563eb">
-                      <KpiRow label="Выручка (без авансов)" val={incSumNoAdv} color="#059669"/>
-                      <KpiRow label="Расходы (без дивид.)" val={expNoDivSum} color="#dc2626"/>
-                      <KpiRow label="Дивиденды" val={divSum} color="#d97706"/>
+                      <KpiRow label="Выручка (без авансов)" val={incSumNoAdv} color="#059669" onClick={()=>openOpsPreset("revenue")}/>
+                      <KpiRow label="Валовая прибыль" val={grossP} color={grossP>=0?"#0891b2":"#dc2626"} bold onClick={()=>openOpsPreset("gross")}/>
+                      <KpiRow label="Расходы (без дивид.)" val={expNoDivSum} color="#dc2626" onClick={()=>openOpsPreset("pnl-expense")}/>
+                      <KpiRow label="Дивиденды" val={divSum} color="#d97706" onClick={()=>openOpsPreset("dividends")}/>
                       {Object.entries(divByRecipient).filter(([r])=>r!=="Не указан").map(([r,v])=>(
                         <div key={r} style={{display:"flex",justifyContent:"space-between",padding:"3px 0 3px 14px",borderBottom:"1px solid #f5f7fa",gap:8}}>
                           <span style={{fontSize:11.5,color:"#94a3b8"}}>↳ {r}</span>
                           <span style={{fontSize:12,fontWeight:600,color:"#d97706",whiteSpace:"nowrap"}}>{fM(v)} ₸</span>
                         </div>
                       ))}
-                      <KpiRow label="Чистая прибыль" val={netP} color={netP>=0?"#2563eb":"#dc2626"} bold big/>
+                      <KpiRow label="Чистая прибыль" val={netP} color={netP>=0?"#2563eb":"#dc2626"} bold big onClick={()=>openOpsPreset("net-profit")}/>
                       <KpiRow label="Рентабельность" val={rentab+"%"} color={rentab>=0?"#7c3aed":"#dc2626"} bold/>
                     </CardSection>
 
                     {/* Денежный поток */}
                     <CardSection title="💸 Денежный поток, ₸" accent="#0891b2">
-                      <KpiRow label="Поступления (вкл. авансы)" val={incomeSum} color="#059669"/>
-                      <KpiRow label="Выплаты" val={expenseSum} color="#dc2626"/>
-                      <KpiRow label="Разница" val={incomeSum-expenseSum} color={(incomeSum-expenseSum)>=0?"#0891b2":"#dc2626"} bold big/>
+                      <KpiRow label="Поступления (вкл. авансы)" val={incomeSum} color="#059669" onClick={()=>openOpsPreset("cash-in")}/>
+                      <KpiRow label="Выплаты" val={expenseSum} color="#dc2626" onClick={()=>openOpsPreset("cash-out")}/>
+                      <KpiRow label="Разница" val={incomeSum-expenseSum} color={(incomeSum-expenseSum)>=0?"#0891b2":"#dc2626"} bold big onClick={()=>openOpsPreset("cash-flow")}/>
                       <div style={{marginTop:12,padding:"10px 12px",background:"#f8fafc",borderRadius:10,fontSize:11.5,color:"#64748b",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                         <span>Сальдо по всем счетам</span><b style={{color:"#0f172a",fontSize:13}}>{fM(totalBalance)} ₸</b>
                       </div>
@@ -12991,7 +13025,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     {/* Остатки */}
                     <CardSection title="💳 Остатки на счетах, ₸" accent="#7c3aed">
                       {accounts.map(a=>(
-                        <div key={a.id} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f5f7fa"}}>
+                        <div key={a.id} role="button" tabIndex={0} onClick={()=>openOpsPreset("",{finFilterAccount:a.name})} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openOpsPreset("",{finFilterAccount:a.name});}}} title="Показать операции по счёту" style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f5f7fa",cursor:"pointer"}}>
                           <span style={{fontSize:12.5,color:"#64748b"}}>{a.name}</span>
                           <span style={{fontSize:13.5,fontWeight:700,color:(balances[a.name]||0)>=0?"#0f172a":"#dc2626"}}>{fM(balances[a.name]||0)} ₸</span>
                         </div>
@@ -13268,7 +13302,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               const fmt = v => v ? fM(v) : "—";
               const sumStyle=(v)=>({textAlign:"right",fontWeight:700,color:v>=0?"#0f172a":"#dc2626"});
               // строки-помощники
-              const goOps=(cat,sub)=>{ navigate(undefined,"ops",{finFilterCat:cat||"",finFilterCategory:sub||"",finFilterContract:""}); };
+              const goOps=(cat,sub)=>{ navigate(undefined,"ops",{finFilterCat:cat||"",finFilterCategory:sub||"",finFilterContract:"",finFilterPreset:""}); };
               const groupRow=(label,ser,color,cat)=>(
                 <tr key={"g-"+label} onClick={()=>goOps(cat||label,"")} style={{borderBottom:"1px solid #f1f5f9",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}>
                   <td style={{paddingLeft:24,fontWeight:700,color:"#334155"}}>{label} <span style={{fontSize:9,color:"#cbd5e1",marginLeft:4}}>↗</span></td>
@@ -13389,7 +13423,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 {months.map(m=><td key={m}>{fpct(ser.byM[m])}</td>)}
                 <td className="colTot">{fpct(ser.tot)}</td>
               </tr>);
-              const goOps=(cat,sub)=>{ navigate(undefined,"ops",{finFilterCat:cat||"",finFilterCategory:sub||"",finFilterContract:""}); };
+              const goOps=(cat,sub)=>{ navigate(undefined,"ops",{finFilterCat:cat||"",finFilterCategory:sub||"",finFilterContract:"",finFilterPreset:""}); };
               // группа расходов: категория + подкатегории
               const ExpGroupRows=({cat,exclude=[]})=>{
                 const meta=(financeMeta.expense||[]).find(c=>c.cat===cat); if(!meta)return null;
@@ -13659,8 +13693,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 {currentPermissions.financeDelete !== "none" && (()=>{const td=financeTx.filter(t=>t.deletedAt); return td.length>0&&(<button onClick={()=>setFinTxTrash(true)} style={{background:"rgba(220,38,38,.1)",color:"#dc2626",border:"1px solid rgba(220,38,38,.18)",borderRadius:9,padding:"9px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🗑 {td.length}</button>);})()}
                 <span style={{fontSize:12,color:"#94a3b8"}}>Операций: <b style={{color:"#334155"}}>{opsList.length}</b></span>
               </div>
-              {(finFilterContract || finFilterCat || finFilterCategory) && (
+              {(finFilterContract || finFilterCat || finFilterCategory || finFilterPreset) && (
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+                  {finFilterPreset && <div style={{display:"flex",alignItems:"center",gap:6,background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:9,padding:"7px 12px"}}>
+                    <span style={{fontSize:12,fontWeight:700,color:"#7c3aed"}}>↗ {PRESET_LABEL[finFilterPreset]||"Выборка дашборда"}</span>
+                    <button onClick={()=>setFinFilterPreset("")} title="Снять фильтр" style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:16,lineHeight:1,padding:0}}>✕</button>
+                  </div>}
                   {finFilterContract && <div style={{display:"flex",alignItems:"center",gap:6,background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:9,padding:"7px 12px"}}>
                     <span style={{fontSize:12,fontWeight:700,color:"#2563eb"}}>📋 Проект: {finFilterContract}</span>
                     <button onClick={()=>setFinFilterContract("")} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:16,lineHeight:1,padding:0}}>✕</button>
@@ -13710,6 +13748,22 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     <div style={{fontSize:14,fontWeight:800,color:TYPE_COLOR[t.type],whiteSpace:"nowrap"}}>{t.type==="expense"?"−":t.type==="income"?"+":""}{fM(t.amount)} ₸</div>
                   </div>
                 ))}
+              </div>
+              <div style={{marginTop:12,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
+                {[
+                  ["Поступления",opsSummary.income,"#059669","#f0fdf4"],
+                  ["Выплаты",opsSummary.expense,"#dc2626","#fef2f2"],
+                  ["Разница",opsSummary.net,opsSummary.net>=0?"#0891b2":"#dc2626",opsSummary.net>=0?"#ecfeff":"#fef2f2"],
+                  ["Переводы",opsSummary.transfer,"#7c3aed","#f5f3ff"],
+                ].map(([label,value,color,bg])=>(
+                  <div key={label} style={{background:bg,border:"1px solid "+color+"22",borderRadius:10,padding:"11px 13px"}}>
+                    <div style={{fontSize:11,color:"#64748b",fontWeight:650,marginBottom:4}}>{label} по фильтру</div>
+                    <div style={{fontSize:17,fontWeight:850,color}}>{fM(value)} ₸</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{marginTop:7,fontSize:11,color:"#94a3b8",textAlign:"right"}}>
+                Учтено операций: {opsSummary.counted}{opsSummary.excluded?` · не входят в отчёты: ${opsSummary.excluded}`:""}
               </div>
             </>)}
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as utils from "./utils.js";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations } from "./utils.js";
 import { documentTemplateBackupSpecs } from "./documents/documentTemplateBackup.js";
 
 describe("поиск финансового проекта по связанному объекту", () => {
@@ -17,6 +17,38 @@ describe("поиск финансового проекта по связанно
 
   it("не подменяет связь похожим, но посторонним объектом", () => {
     expect(financeProjectMatchesSearch(project, "лариса", { object, contract })).toBe(false);
+  });
+});
+
+describe("переходы с финансового дашборда в операции", () => {
+  const revenue = { type:"income", amount:1000, category:"Оплата клиентов" };
+  const advance = { type:"income", amount:300, isAdvance:true, category:"Оплата клиентов" };
+  const financing = { type:"income", amount:5000, category:"Финансирование (не выручка)" };
+  const cogs = { type:"expense", amount:400, category:"Прямые расходы (COGS / себестоимость)" };
+  const opex = { type:"expense", amount:200, category:"Косвенные расходы (OPEX / операционные)" };
+  const dividend = { type:"expense", amount:100, category:"Финансовые расходы", subcategory:"Дивиденды учредителям" };
+
+  it("открывает выручку без авансов и финансирования", () => {
+    expect(matchesFinanceOperationsPreset(revenue, "revenue")).toBe(true);
+    expect(matchesFinanceOperationsPreset(advance, "revenue")).toBe(false);
+    expect(matchesFinanceOperationsPreset(financing, "revenue")).toBe(false);
+    expect(matchesFinanceOperationsPreset({ type:"income", category:"Возврат займов и активов" }, "revenue")).toBe(false);
+  });
+
+  it("для валовой прибыли показывает выручку и себестоимость, а для чистой — все P&L операции", () => {
+    expect([revenue, advance, financing, cogs, opex, dividend].filter(t=>matchesFinanceOperationsPreset(t, "gross"))).toEqual([revenue, cogs]);
+    expect([revenue, advance, financing, cogs, opex, dividend].filter(t=>matchesFinanceOperationsPreset(t, "net-profit"))).toEqual([revenue, cogs, opex]);
+    expect(matchesFinanceOperationsPreset({ type:"expense", category:"Финансовая деятельность (не расход)" }, "net-profit")).toBe(false);
+    expect(matchesFinanceOperationsPreset({ type:"expense", category:"Выданные займы и прочие активы" }, "net-profit")).toBe(false);
+  });
+
+  it("считает итоги только по учитываемым отфильтрованным операциям", () => {
+    expect(summarizeFinanceOperations([
+      revenue,
+      cogs,
+      { type:"transfer", amount:250 },
+      { type:"income", amount:999, included:false },
+    ])).toEqual({ income:1000, expense:400, transfer:250, net:600, counted:3, excluded:1 });
   });
 });
 

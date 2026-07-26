@@ -1196,6 +1196,50 @@ export function visibleDirtyKeys(keys, inFlight) {
     : () => false;
   return list.filter(key => !has(key));
 }
+
+// Единые предустановки перехода из финансового дашборда в список операций.
+// Важно держать их вне JSX: цифра на карточке и открытый по ней список должны
+// строиться по одной и той же классификации.
+export function matchesFinanceOperationsPreset(tx, preset) {
+  if (!preset) return true;
+  const type = tx?.type || "";
+  const category = tx?.category || "";
+  const subcategory = tx?.subcategory || "";
+  const revenue = type === "income"
+    && !tx?.isAdvance
+    && category !== "Финансирование (не выручка)"
+    && category !== "Возврат займов и активов";
+  const pnlExpense = type === "expense"
+    && subcategory !== "Дивиденды учредителям"
+    && category !== "Финансовая деятельность (не расход)"
+    && category !== "Выданные займы и прочие активы";
+
+  if (preset === "revenue") return revenue;
+  if (preset === "cogs") return type === "expense" && category === "Прямые расходы (COGS / себестоимость)";
+  if (preset === "gross") return revenue || (type === "expense" && category === "Прямые расходы (COGS / себестоимость)");
+  if (preset === "pnl-expense") return pnlExpense;
+  if (preset === "net-profit") return revenue || pnlExpense;
+  if (preset === "dividends") return type === "expense" && subcategory === "Дивиденды учредителям";
+  if (preset === "cash-in") return type === "income";
+  if (preset === "cash-out") return type === "expense";
+  if (preset === "cash-flow") return type === "income" || type === "expense";
+  return true;
+}
+
+export function summarizeFinanceOperations(list) {
+  const result = { income:0, expense:0, transfer:0, net:0, counted:0, excluded:0 };
+  for (const tx of Array.isArray(list) ? list : []) {
+    if (!tx || tx.deletedAt) continue;
+    if (tx.included === false) { result.excluded += 1; continue; }
+    const amount = Number(tx.amount) || 0;
+    result.counted += 1;
+    if (tx.type === "income") result.income += amount;
+    else if (tx.type === "expense") result.expense += amount;
+    else if (tx.type === "transfer") result.transfer += amount;
+  }
+  result.net = result.income - result.expense;
+  return result;
+}
 // Можно ли УСПЕШНОЙ облачной записи этой вкладки снять dirty-метку ключа: свою или
 // отсутствующую — да. Legacy НЕ снимаем: обычное чтение намеренно не примешивает его локальную
 // копию, поэтому новая облачная запись не доказывает, что неизвестная старая правка сохранена.
