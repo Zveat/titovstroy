@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as utils from "./utils.js";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, normalizeEstimateSuggestionRules, createDefaultEstimateSuggestionRules, resolveEstimateSuggestionRules, buildEstimateSuggestions } from "./utils.js";
 import { documentTemplateBackupSpecs } from "./documents/documentTemplateBackup.js";
 
 describe("поиск финансового проекта по связанному объекту", () => {
@@ -788,6 +788,66 @@ describe("withCatalogOverrides — мердж дефолтов каталога"
   it("не мутирует CATALOG_DEFAULTS между вызовами", () => {
     withCatalogOverrides({}, { hiddenCats: ["X"] });
     expect(CATALOG_DEFAULTS.hiddenCats).toEqual([]);
+  });
+});
+
+describe("умные подсказки сметы", () => {
+  const catalog = [
+    { code:"FLOOR-005", name:"Стяжка ц/п 5–8 см", unit:"м²" },
+    { code:"PREP-007", name:"Грунтовка пола", unit:"м²" },
+    { code:"FLOOR-002", name:"Армирование сеткой (пол)", unit:"м²" },
+    { code:"FLOOR-003", name:"Монтаж маяков (пол)", unit:"м.п." },
+  ];
+
+  it("предлагает только существующие в текущем прайсе работы", () => {
+    const rules = normalizeEstimateSuggestionRules([
+      { sourceCode:"FLOOR-005", targetCode:"PREP-007", multiplier:1 },
+      { sourceCode:"FLOOR-005", targetCode:"DELETED", multiplier:1 },
+    ], catalog);
+    expect(rules).toHaveLength(1);
+    expect(rules[0].targetCode).toBe("PREP-007");
+  });
+
+  it("не предлагает уже добавленную позицию и не мутирует смету", () => {
+    const rows = { "FLOOR-005":{ qty:45.7 }, "PREP-007":{ qty:45.7 } };
+    const before = JSON.stringify(rows);
+    const result = buildEstimateSuggestions(rows, catalog, [
+      { sourceCode:"FLOOR-005", targetCode:"PREP-007", multiplier:1 },
+    ]);
+    expect(result).toEqual([]);
+    expect(JSON.stringify(rows)).toBe(before);
+  });
+
+  it("рассчитывает количество, но ручную единицу оставляет пустой", () => {
+    const result = buildEstimateSuggestions({ "FLOOR-005":{ qty:45.7 } }, catalog, [
+      { sourceCode:"FLOOR-005", targetCode:"PREP-007", multiplier:1, defaultSelected:true },
+      { sourceCode:"FLOOR-005", targetCode:"FLOOR-003", multiplier:null, defaultSelected:true },
+    ]);
+    expect(result.find(x=>x.targetCode==="PREP-007")).toMatchObject({ qty:45.7, defaultSelected:true });
+    expect(result.find(x=>x.targetCode==="FLOOR-003")).toMatchObject({ qty:"", defaultSelected:false });
+  });
+
+  it("убирает дубли одной рекомендации от нескольких исходных работ", () => {
+    const result = buildEstimateSuggestions({ A:{qty:10}, B:{qty:20} }, [
+      {code:"A",name:"A"}, {code:"B",name:"B"}, {code:"T",name:"T"},
+    ], [
+      {sourceCode:"A",targetCode:"T",multiplier:1},
+      {sourceCode:"B",targetCode:"T",multiplier:1},
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ targetCode:"T", qty:20 });
+  });
+
+  it("базовые правила появляются только для реально существующих кодов", () => {
+    expect(createDefaultEstimateSuggestionRules(catalog).map(x=>x.targetCode).sort()).toEqual([
+      "FLOOR-002", "FLOOR-003", "PREP-007",
+    ]);
+    expect(createDefaultEstimateSuggestionRules(catalog.filter(w=>w.code!=="PREP-007")).some(x=>x.targetCode==="PREP-007")).toBe(false);
+  });
+
+  it("пустой сохранённый список отключает подсказки, null включает базовые", () => {
+    expect(resolveEstimateSuggestionRules({ suggestionRules:[] }, catalog)).toEqual([]);
+    expect(resolveEstimateSuggestionRules({ suggestionRules:null }, catalog).length).toBeGreaterThan(0);
   });
 });
 

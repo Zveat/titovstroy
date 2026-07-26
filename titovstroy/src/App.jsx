@@ -10,11 +10,12 @@ import { SearchMultiSelect, SearchSelect as MasterSearchSelect } from "./masters
 import { parserRunMessage, triggerParserRun } from "./masters/parserTrigger.js";
 import { MasterCrmButton, MasterCrmDatabase, MasterCrmEditor } from "./masters/MasterCRM.jsx";
 import { interactionsForContact, masterSourceKey, normalizeMasterCrm } from "./masters/masterCrm.js";
+import { EstimateSuggestions, EstimateSuggestionRulesEditor } from "./estimate/EstimateSuggestions.jsx";
 import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, resolveEstimateSuggestionRules, buildEstimateSuggestions, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -3804,6 +3805,14 @@ function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE
               🕘 Бэкапы
             </button>}
           </div>
+
+          <EstimateSuggestionRulesEditor
+            catalog={getEffectiveCatalog()}
+            rules={resolveEstimateSuggestionRules(localCatalog, getEffectiveCatalog())}
+            usesDefaults={localCatalog?.suggestionRules == null}
+            disabled={!hasAdminPermission("adminCatalog")}
+            onSave={rules => saveCatalog(withCatalogOverrides(localCatalog, { suggestionRules: rules }))}
+          />
 
           {/* Модал бэкапов каталога */}
           {catalogBackupsModal !== null && (
@@ -8784,6 +8793,33 @@ ${reqBlock}`;
     return { ...prev, [name]: next };
   }), []);
 
+  // Подсказки только анализируют текущую смету. Добавление идёт через setRow,
+  // поэтому цена и себестоимость фиксируются тем же способом, что при ручном вводе.
+  const estimateSuggestionCatalog = useMemo(() => getEffectiveCatalog(), [catalogVersion]);
+  const estimateSuggestionRules = useMemo(
+    () => resolveEstimateSuggestionRules(_catalogOverrides, estimateSuggestionCatalog),
+    [catalogVersion, estimateSuggestionCatalog],
+  );
+  const estimateSuggestions = useMemo(() => buildEstimateSuggestions(
+    rows,
+    estimateSuggestionCatalog,
+    estimateSuggestionRules,
+  ).map(item => {
+    const targetWork = estimateSuggestionCatalog.find(work => work.code === item.targetCode);
+    return {
+      ...item,
+      targetPrice: targetWork ? getBasePrice(targetWork) : null,
+    };
+  }), [rows, estimateSuggestionCatalog, estimateSuggestionRules]);
+  const addEstimateSuggestions = useCallback(items => {
+    for (const item of items || []) {
+      const qty = Number(item?.qty);
+      if (item?.targetCode && Number.isFinite(qty) && qty > 0) {
+        setRow(item.targetCode, "qty", qty);
+      }
+    }
+  }, [setRow]);
+
   const rowPrice = (work) => {
     const r = rows[work.code] || rows[work.name] || {};
     const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
@@ -12101,6 +12137,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     </div>
                   ) : null;
                 })()}
+                {currentUser.role !== "viewer" && (
+                  <EstimateSuggestions
+                    estimateKey={`${currentId || "new"}:${currentObjectId || ""}`}
+                    suggestions={estimateSuggestions}
+                    onAdd={addEstimateSuggestions}
+                    fmt={fmt}
+                  />
+                )}
               </div>
 
               {/* ПРАВАЯ ПАНЕЛЬ */}

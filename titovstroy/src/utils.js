@@ -632,9 +632,107 @@ export function buildFinanceProjectView({ project = {}, object = null, productio
   };
 }
 
-export const CATALOG_DEFAULTS = Object.freeze({ renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[] });
+export const CATALOG_DEFAULTS = Object.freeze({ renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], suggestionRules:null });
 // Дефолты + текущее состояние + патч, одним местом.
 export const withCatalogOverrides = (cur, patch = {}) => ({ ...CATALOG_DEFAULTS, ...(cur||{}), ...patch });
+
+const roundSuggestionQty = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return Math.round(n * 100) / 100;
+};
+
+// Правила хранят только стабильные коды работ. Названия, цены и единицы всегда берутся
+// из актуального прайса, поэтому удалённая/скрытая позиция физически не попадёт в подсказки.
+export function normalizeEstimateSuggestionRules(rawRules, catalog = []) {
+  if (!Array.isArray(rawRules)) return [];
+  const byCode = new Map((catalog || []).filter(w => w?.code).map(w => [String(w.code), w]));
+  const seen = new Set();
+  const result = [];
+  for (const raw of rawRules) {
+    if (!raw || typeof raw !== "object") continue;
+    const sourceCode = String(raw.sourceCode || "").trim();
+    const targetCode = String(raw.targetCode || "").trim();
+    const pairKey = `${sourceCode}>${targetCode}`;
+    if (!sourceCode || !targetCode || sourceCode === targetCode || seen.has(pairKey)) continue;
+    if (!byCode.has(sourceCode) || !byCode.has(targetCode)) continue;
+    const multiplierRaw = raw.multiplier;
+    const multiplier = multiplierRaw === null || multiplierRaw === ""
+      ? null
+      : Number(multiplierRaw);
+    if (multiplier !== null && (!Number.isFinite(multiplier) || multiplier <= 0)) continue;
+    seen.add(pairKey);
+    result.push({
+      id: String(raw.id || pairKey),
+      sourceCode,
+      targetCode,
+      multiplier,
+      reason: String(raw.reason || "Связанная работа").trim() || "Связанная работа",
+      defaultSelected: raw.defaultSelected !== false,
+    });
+  }
+  return result;
+}
+
+// Базовый набор намеренно небольшой и консервативный. Он активируется только если
+// обе работы реально есть в текущем прайсе. Администратор может заменить его своими правилами.
+export function createDefaultEstimateSuggestionRules(catalog = []) {
+  const codes = new Set((catalog || []).map(w => String(w?.code || "")).filter(Boolean));
+  const rules = [];
+  const add = (sourceCode, targetCode, multiplier, reason, defaultSelected = true) => {
+    if (codes.has(sourceCode) && codes.has(targetCode)) {
+      rules.push({ sourceCode, targetCode, multiplier, reason, defaultSelected });
+    }
+  };
+  for (const sourceCode of ["FLOOR-004", "FLOOR-005", "FLOOR-006"]) {
+    add(sourceCode, "PREP-007", 1, "Перед стяжкой обычно грунтуют основание", true);
+    add(sourceCode, "FLOOR-002", 1, "Проверьте, требуется ли армирование стяжки", false);
+    add(sourceCode, "FLOOR-003", null, "Проверьте монтаж маяков и укажите погонные метры", false);
+  }
+  add("FLOOR-008", "PREP-007", 1, "Перед наливным полом обычно грунтуют основание", true);
+  return normalizeEstimateSuggestionRules(rules, catalog);
+}
+
+export function resolveEstimateSuggestionRules(catalogSettings, catalog = []) {
+  const configured = catalogSettings?.suggestionRules;
+  return configured === null || configured === undefined
+    ? createDefaultEstimateSuggestionRules(catalog)
+    : normalizeEstimateSuggestionRules(configured, catalog);
+}
+
+// Функция только читает rows/catalog и возвращает рекомендации. Исходная смета не мутируется.
+export function buildEstimateSuggestions(rows = {}, catalog = [], rules = []) {
+  const byCode = new Map((catalog || []).filter(w => w?.code).map(w => [String(w.code), w]));
+  const normalizedRules = normalizeEstimateSuggestionRules(rules, catalog);
+  const resultByTarget = new Map();
+  for (const rule of normalizedRules) {
+    const source = byCode.get(rule.sourceCode);
+    const target = byCode.get(rule.targetCode);
+    if (!source || !target) continue;
+    const sourceRow = rows?.[source.code] || rows?.[source.name] || {};
+    const sourceQty = Number(sourceRow?.qty || 0);
+    if (!Number.isFinite(sourceQty) || sourceQty <= 0) continue;
+    const targetRow = rows?.[target.code] || rows?.[target.name] || {};
+    if (Number(targetRow?.qty || 0) > 0) continue;
+    const qty = rule.multiplier === null ? "" : roundSuggestionQty(sourceQty * rule.multiplier);
+    const suggestion = {
+      id: rule.id,
+      sourceCode: source.code,
+      sourceName: source.name,
+      targetCode: target.code,
+      targetName: target.name,
+      targetUnit: target.unit || "",
+      reason: rule.reason,
+      qty,
+      defaultSelected: rule.defaultSelected && qty !== "",
+    };
+    const previous = resultByTarget.get(target.code);
+    if (!previous || Number(suggestion.qty || 0) > Number(previous.qty || 0)) {
+      resultByTarget.set(target.code, suggestion);
+    }
+  }
+  return [...resultByTarget.values()];
+}
 
 // Группировка строк по (cat, sub) — категория › подкатегория, с сохранением порядка появления.
 export function groupData(works) {
