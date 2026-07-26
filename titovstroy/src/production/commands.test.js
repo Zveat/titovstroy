@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { applyProductionCommand, syncEstimateStages, isUntouchedLegacyEstimateStage, isRegenerableProductionCommand, _stageKey, diffProductionToCommands, buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled } from "./commands.js";
+import { applyProductionCommand, syncEstimateStages, isUntouchedLegacyEstimateStage, isRegenerableProductionCommand, _stageKey, diffProductionToCommands, buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, createTxnApplier, runVerifiedProductionTransaction, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled } from "./commands.js";
 import { flushPendingProduction, stopProductionSession, hasPendingProduction, productionDraftsAreDurable, startProductionSession, __prodQueueTesting } from "./ProductionModule.jsx";
 import { countAllProductionRecovery, listProductionDrafts, listProductionRetries, productionDraftKey, saveProductionDraft, saveProductionRetry, removeProductionDraft, removeProductionRetry } from "./drafts.js";
 
@@ -386,6 +386,44 @@ describe("createTxnApplier — перезапуск колбэка транза�
     expect(applier.state.notOk).toBeNull();
     expect(applier.mutate([])).toBeUndefined(); // карточка исчезла к пере-прогону
     expect(applier.state.notOk).toBe("no-card");
+  });
+});
+
+describe("runVerifiedProductionTransaction — холодный кеш", () => {
+  it("сразу повторяет подтверждённую команду этапа и не оставляет её до фонового интервала", async () => {
+    const server = [{ objectId:"o1", stages:[{ id:"s1", name:"Штукатурка", status:"todo" }] }];
+    const command = { type:"patch-item", objectId:"o1", field:"stages", itemId:"s1", patch:{ status:"work" }, ts:1 };
+    let calls = 0;
+    const transact = async mutate => {
+      calls += 1;
+      const current = calls === 1 ? [] : server;
+      const next = mutate(current);
+      return { committed:true, value:JSON.stringify(next === undefined ? current : next) };
+    };
+
+    const result = await runVerifiedProductionTransaction(command, {
+      transact,
+      readFresh:async () => ({ status:"found", value:JSON.stringify(server) }),
+    });
+
+    expect(calls).toBe(2);
+    expect(result.committed).toBe(true);
+    expect(JSON.parse(result.value)[0].stages[0].status).toBe("work");
+  });
+
+  it("не повторяет настоящую ошибку сети как логический конфликт", async () => {
+    let transactionCalls = 0;
+    let freshReads = 0;
+    const result = await runVerifiedProductionTransaction(
+      { type:"patch-item", objectId:"o1", field:"stages", itemId:"s1", patch:{ status:"work" } },
+      {
+        transact:async () => { transactionCalls += 1; return { committed:false, reason:"timeout" }; },
+        readFresh:async () => { freshReads += 1; return { status:"found", value:"[]" }; },
+      },
+    );
+    expect(result).toMatchObject({ committed:false, conflict:false, reason:"timeout" });
+    expect(transactionCalls).toBe(1);
+    expect(freshReads).toBe(0);
   });
 });
 
