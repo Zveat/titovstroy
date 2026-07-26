@@ -1,7 +1,80 @@
 import { describe, it, expect } from "vitest";
 import * as utils from "./utils.js";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch } from "./utils.js";
 import { documentTemplateBackupSpecs } from "./documents/documentTemplateBackup.js";
+
+describe("поиск финансового проекта по связанному объекту", () => {
+  const project = { id:"fp1", contractNo:"1019", description:"Ремонт квартиры", comment:"этап 1" };
+  const object = { id:"o1", clientName:"Сергей", address:"Аманжолова 33-47", clientPhone:"+7 777 123 45 67" };
+  const contract = { id:"c1", number:"№1019", customer:"Сергей Иванов" };
+
+  it("находит один и тот же проект по имени, адресу, телефону и номеру договора", () => {
+    expect(financeProjectMatchesSearch(project, "сергей", { object, contract })).toBe(true);
+    expect(financeProjectMatchesSearch(project, "аманжолова", { object, contract })).toBe(true);
+    expect(financeProjectMatchesSearch(project, "777123", { object, contract })).toBe(true);
+    expect(financeProjectMatchesSearch(project, "1019", { object, contract })).toBe(true);
+  });
+
+  it("не подменяет связь похожим, но посторонним объектом", () => {
+    expect(financeProjectMatchesSearch(project, "лариса", { object, contract })).toBe(false);
+  });
+});
+
+describe("цена и себестоимость из прайса", () => {
+  it("одновременно применяет новую цену и новую себестоимость", () => {
+    const work = { code:"W-1", fixedPrice:1000, cost:600, margin:0.4, tiers:[] };
+    expect(applyWorkPricingOverride(work, { fixedPrice:1400, cost:850 })).toMatchObject({
+      fixedPrice:1400,
+      cost:850,
+    });
+  });
+
+  it("не обнуляет поля, которых нет в переопределении", () => {
+    const work = { code:"W-1", fixedPrice:1000, cost:600, margin:0.4, tiers:[] };
+    expect(applyWorkPricingOverride(work, { fixedPrice:1400 })).toMatchObject({
+      fixedPrice:1400,
+      cost:600,
+      margin:0.4,
+    });
+  });
+
+  it("снимок старой сметы не меняется после следующего обновления прайса", () => {
+    const base = { code:"W-1", fixedPrice:1000, cost:600, tiers:[{ min:1, max:10, price:1000 }] };
+    const atCreation = applyWorkPricingOverride(base, { fixedPrice:1400, cost:850, tiers:[{ min:1, max:10, price:1400 }] });
+    const row = { qty:3, pricingSnapshot:createEstimatePricingSnapshot(atCreation) };
+    const laterPrice = applyWorkPricingOverride(base, { fixedPrice:2000, cost:1200, tiers:[{ min:1, max:10, price:2000 }] });
+
+    expect(resolveEstimateRowWork(laterPrice, row)).toMatchObject({ fixedPrice:1400, cost:850 });
+    expect(resolveEstimateRowWork(laterPrice, row).tiers[0].price).toBe(1400);
+  });
+
+  it("legacy-строка без снимка использует переданную базовую цену", () => {
+    const base = { code:"W-1", fixedPrice:1000, cost:600, tiers:[] };
+    expect(resolveEstimateRowWork(base, { qty:2 })).toMatchObject({ fixedPrice:1000, cost:600 });
+  });
+
+  it("снимок копирует диапазоны цен и не меняется вместе с исходным прайсом", () => {
+    const work = { fixedPrice:null, cost:500, tiers:[{ min:1, max:5, price:900 }] };
+    const snapshot = createEstimatePricingSnapshot(work);
+    work.tiers[0].price = 1700;
+    expect(snapshot.tiers[0].price).toBe(900);
+  });
+
+  it("при сохранении старой заполненной сметы фиксирует базовую историческую цену", () => {
+    const rows = { "W-1": { qty:2, complexity:"std" }, empty:{ qty:0 } };
+    const sealed = sealLegacyEstimateRows(rows, [{ code:"W-1", fixedPrice:1000, cost:600, tiers:[] }]);
+    expect(sealed["W-1"].pricingSnapshot).toMatchObject({ fixedPrice:1000, cost:600 });
+    expect(sealed.empty.pricingSnapshot).toBeUndefined();
+    expect(rows["W-1"].pricingSnapshot).toBeUndefined();
+  });
+
+  it("не переписывает уже сохранённый снимок старой сметы", () => {
+    const rows = { "W-1": { qty:2, pricingSnapshot:{ fixedPrice:1400, cost:850, tiers:[] } } };
+    const sealed = sealLegacyEstimateRows(rows, [{ code:"W-1", fixedPrice:2000, cost:1200, tiers:[] }]);
+    expect(sealed).toBe(rows);
+    expect(sealed["W-1"].pricingSnapshot).toMatchObject({ fixedPrice:1400, cost:850 });
+  });
+});
 
 describe("матрица прав ролей", () => {
   it("руководитель продаж видит все объекты и общую аналитику без финансовых деталей", () => {
