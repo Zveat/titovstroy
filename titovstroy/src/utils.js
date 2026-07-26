@@ -9,6 +9,80 @@
 // приложению для связки договоров/финпроектов/операций между собой. 
 export const normCN = (s) => String(s||"").trim().toLowerCase().replace(/[\s№#]/g,"");
 
+const normalizedSearchText = (value) => String(value ?? "")
+  .toLocaleLowerCase("ru-RU")
+  .replace(/[ё]/g, "е")
+  .replace(/[^a-zа-яәіңғүұқөһ0-9]+/gi, " ")
+  .trim();
+
+// Поиск не создаёт новую связь между сущностями: object/contract сюда передаются только после
+// точного сопоставления по objectId или номеру договора. Функция лишь расширяет видимые поля.
+export function financeProjectMatchesSearch(project, query, context = {}) {
+  const needle = normalizedSearchText(query);
+  if (!needle) return true;
+  const { object, contract } = context;
+  const fields = [
+    project?.id, project?.contractNo, project?.description, project?.comment, project?.name,
+    object?.id, object?.clientName, object?.name, object?.address, object?.clientPhone, object?.phone,
+    contract?.id, contract?.number, contract?.mainNumber, contract?.customer,
+    contract?.customerName, contract?.address, contract?.objectAddress,
+  ];
+  const haystack = normalizedSearchText(fields.filter(Boolean).join(" "));
+  if (haystack.includes(needle)) return true;
+  const compactNeedle = needle.replace(/\s+/g, "");
+  return compactNeedle.length >= 3 && haystack.replace(/\s+/g, "").includes(compactNeedle);
+}
+
+export function applyWorkPricingOverride(work = {}, override) {
+  const base = { ...work, tiers: Array.isArray(work?.tiers) ? work.tiers.map(t => ({ ...t })) : [] };
+  if (!override || typeof override !== "object" || Array.isArray(override)) return base;
+  const result = { ...base };
+  for (const key of ["fixedPrice", "cost", "margin", "priceFrom"]) {
+    if (override[key] !== undefined) result[key] = override[key];
+  }
+  if (override.tiers !== undefined) {
+    result.tiers = Array.isArray(override.tiers) ? override.tiers.map(t => ({ ...t })) : [];
+  }
+  return result;
+}
+
+export function createEstimatePricingSnapshot(work = {}) {
+  return {
+    fixedPrice: work.fixedPrice ?? null,
+    tiers: Array.isArray(work.tiers) ? work.tiers.map(t => ({ ...t })) : [],
+    cost: work.cost ?? null,
+    margin: work.margin ?? null,
+    priceFrom: work.priceFrom ?? null,
+  };
+}
+
+// Снимок в строке имеет приоритет над текущим прайсом. Legacy-строки без снимка продолжают
+// использовать переданную цену; при следующем сохранении сметы App закрепляет её в строке.
+export function resolveEstimateRowWork(work = {}, row = {}) {
+  const snapshot = row?.pricingSnapshot;
+  return snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+    ? applyWorkPricingOverride(work, snapshot)
+    : applyWorkPricingOverride(work, null);
+}
+
+export function sealLegacyEstimateRows(sourceRows = {}, catalog = []) {
+  const byKey = new Map();
+  for (const work of catalog || []) {
+    if (work?.code) byKey.set(work.code, work);
+    if (work?.name) byKey.set(work.name, work);
+  }
+  let changed = false;
+  const sealed = { ...(sourceRows || {}) };
+  for (const [key, row] of Object.entries(sourceRows || {})) {
+    if (!row || Number(row.qty || 0) <= 0 || row.pricingSnapshot) continue;
+    const work = byKey.get(key);
+    if (!work) continue;
+    sealed[key] = { ...row, pricingSnapshot: createEstimatePricingSnapshot(work) };
+    changed = true;
+  }
+  return changed ? sealed : sourceRows;
+}
+
 // Returns every estimate belonging to an object, including legacy additional estimates
 // linked only through parentId. The source array is never mutated.
 export function estimatesForObject(estimates = [], objectId) {
