@@ -1873,7 +1873,8 @@ function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note })
     "Сроки выполнения указывается дополнительно в основном договоре.",
     "Работы выполняются по договору.",
     "Гарантия на работы составляет 12 месяцев.",
-    "Срок действия настоящего предложения — 7 рабочих дней с даты составления.",
+    "При организации закупки и обеспечении объекта материалами взимается комиссия в размере 10% от стоимости материалов и логистики.",
+    "Срок действия настоящего предложения — 12 рабочих дней с даты составления.",
   ];
   return (
     <div style={{fontFamily:"'Golos Text','Segoe UI',sans-serif",color:"#1a1a28",background:"#f5f2ec"}}>
@@ -2019,7 +2020,7 @@ function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note })
           </div>
         ))}
         <div style={{display:"flex",gap:10,marginTop:5}}>
-          <span style={{color:"#b8904a",fontWeight:700,minWidth:18,flexShrink:0}}>7.</span>
+          <span style={{color:"#b8904a",fontWeight:700,minWidth:18,flexShrink:0}}>9.</span>
           <span>Ссылка для ознакомления с договором (шаблон):{" "}
             <a href="https://drive.google.com/file/d/1qmhQhn6LE3F3lnU_BBEDXqCiyj-LDjSC/view?usp=sharing"
               target="_blank" rel="noreferrer"
