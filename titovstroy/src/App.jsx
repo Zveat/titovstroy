@@ -3,7 +3,7 @@ import { initializeApp } from "firebase/app";
 import { getDatabase, ref, get, set, runTransaction } from "firebase/database";
 import ProductionModule, { flushPendingProduction, stopProductionSession, hasPendingProduction, productionDraftsAreDurable, startProductionSession, setProductionCommandHandler } from "./production/ProductionModule.jsx";
 import { emptyProduction } from "./production/constants.js";
-import { applyProductionCommand, createTxnApplier, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, isRegenerableProductionCommand, _stageKey, normalizeProductionIds } from "./production/commands.js";
+import { applyProductionCommand, runVerifiedProductionTransaction, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, isRegenerableProductionCommand, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { MASTER_CATEGORIES, NAIMI_CITY_FALLBACK, OLX_REPAIR_CATEGORIES } from "./masters/catalog.mjs";
 import { SearchMultiSelect, SearchSelect as MasterSearchSelect } from "./masters/MasterSelects.jsx";
@@ -12,7 +12,7 @@ import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restore
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -1140,23 +1140,17 @@ const validUntil = () => addWorkdays(new Date(),7).toLocaleDateString("ru-RU",{d
 // Базовая цена для отображения в колонке (без объёма) — первый диапазон или fixedPrice
 // priceOverrides = {code: {fixedPrice?, tiers?}} — загружается из Firebase
 let _priceOverrides = {};
-export function setPriceOverrides(o) { _priceOverrides = o || {}; }
+export function setPriceOverrides(o) {
+  _priceOverrides = o || {};
+  if (_onCatalogChange) _onCatalogChange();
+}
 
 export function getEffectiveWork(work) {
   const safe = { ...work, tiers: work.tiers || [] };
   const renamed = _catalogOverrides.renames[safe.code]
     ? { ...safe, name: _catalogOverrides.renames[safe.code] }
     : safe;
-  const ov = _priceOverrides[renamed.code];
-  if (!ov) return renamed;
-  return {
-    ...renamed,
-    fixedPrice: ov.fixedPrice !== undefined ? ov.fixedPrice : renamed.fixedPrice,
-    tiers: ov.tiers !== undefined ? ov.tiers : renamed.tiers,
-    cost: ov.cost !== undefined ? ov.cost : renamed.cost,
-    margin: ov.margin !== undefined ? ov.margin : renamed.margin,
-    priceFrom: ov.priceFrom !== undefined ? ov.priceFrom : renamed.priceFrom,
-  };
+  return applyWorkPricingOverride(renamed, _priceOverrides[renamed.code]);
 }
 
 export function getBasePrice(work) {
@@ -1166,9 +1160,9 @@ export function getBasePrice(work) {
   return null;
 }
 
-export function getPrice(work, qty, complexity, cpxPct) {
+function getResolvedPrice(work, qty, complexity, cpxPct) {
   if (!qty || qty <= 0) return null;
-  const w = getEffectiveWork(work);
+  const w = work || {};
   const mult = cpxPct !== undefined && cpxPct !== null
     ? 1 + cpxPct / 100
     : (COMPLEXITY.find(c => c.key === complexity)?.mult || 1);
@@ -1184,6 +1178,18 @@ export function getPrice(work, qty, complexity, cpxPct) {
   return (price !== null && !isNaN(Number(price))) ? Number(price) * mult : null;
 }
 
+export function getPrice(work, qty, complexity, cpxPct) {
+  return getResolvedPrice(getEffectiveWork(work), qty, complexity, cpxPct);
+}
+
+function getEstimateRowPrice(row, work, qty, complexity, cpxPct) {
+  if (row?.manualPrice !== undefined && row.manualPrice !== "") {
+    const value = Number(row.manualPrice);
+    return Number.isNaN(value) ? null : value;
+  }
+  return getResolvedPrice(resolveEstimateRowWork(getEffectiveWork(work), row), qty, complexity, cpxPct);
+}
+
 // Виртуальная категория для позиций сметы без каталога (восстановленные из актов и пр.)
 const EXTRA_CAT = "Восстановлено из актов";
 
@@ -1192,7 +1198,10 @@ const EXTRA_CAT = "Восстановлено из актов";
 // ─── УТИЛИТЫ ────────────────────────────────────────────────────────────────
 const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
 // Себестоимость за единицу с учётом разового ручного переопределения в строке сметы
-const rowCostPerUnit = (r, w) => (r && r.manualCost !== undefined && r.manualCost !== "" && !isNaN(Number(r.manualCost))) ? Number(r.manualCost) : (Number(w?.cost) || 0);
+const rowCostPerUnit = (r, w) => {
+  if (r && r.manualCost !== undefined && r.manualCost !== "" && !isNaN(Number(r.manualCost))) return Number(r.manualCost);
+  return Number(resolveEstimateRowWork(getEffectiveWork(w), r).cost) || 0;
+};
 // Надёжное приведение updatedAt к числу: поддерживает и число (Date.now()), и ISO-строку
 const _ts = v => { if (typeof v === "number") return v; const n = new Date(v).getTime(); return isNaN(n) ? 0 : n; };
 // tengeInWords импортирован из ./utils.js
@@ -3045,7 +3054,7 @@ function RolePermissionsEditor({ rolePermissions, onSaveRolePermissions }) {
 }
 
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
-function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE_PERMISSIONS.admin, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], documentTemplateEnabled=false, documentTemplateService=null, documentTemplateData={}, fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
+function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE_PERMISSIONS.admin, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], documentTemplateEnabled=false, documentTemplateService=null, documentTemplateData={}, fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBeforePriceChange=async()=>true, onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
   const [tab, setTab] = useState("users");
   const hasAdminPermission = (key) => accessAllows(permissions[key], true);
   const adminTabs = [
@@ -3218,6 +3227,15 @@ function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE
       if (validTiers.length > 0) { overrides[code] = {tiers: validTiers}; }
       else if (src.fixedPrice!==""&&src.fixedPrice!==undefined&&!isNaN(Number(src.fixedPrice))) { overrides[code] = {fixedPrice: Number(src.fixedPrice), tiers:[]}; }
       else { delete overrides[code]; }
+    }
+    if (Object.keys(priceCardCache).length > 0) {
+      const protectedHistory = await onBeforePriceChange();
+      if (!protectedHistory) {
+        setPriceSaving(false);
+        setPriceMsg("Не удалось зафиксировать цены заполненных смет. Прайс не изменён.");
+        setTimeout(()=>setPriceMsg(""),5000);
+        return;
+      }
     }
     await storage.set(PRICES_KEY, JSON.stringify(overrides));
     setPriceOverrides(overrides); setSavedOverrides(overrides);
@@ -6385,6 +6403,9 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   // Автосохранение сметы
   const _autoSaveRef = useRef(null);
   const _estFlushRef = useRef(null); // id открытой сметы — для принудительного флеша при уходе
+  // Старые сметы не хранили цену и себестоимость строки. При первом безопасном сохранении
+  // фиксируем базовые значения каталога, чтобы дальнейшие изменения прайса не меняли историю.
+  // Для новых строк снимок создаётся сразу из актуального прайса в setRow ниже.
   // Собрать актуальный список смет из текущего состояния редактора (или null, если сохранять нельзя)
   const _buildEstimateList = () => {
     if (!currentId) return null;
@@ -6402,7 +6423,8 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     const pId = currentParentId || _ep;
     const dsN = pId ? (currentDsNumber || exists?.dsNumber) : null;
     const objId = currentObjectId || exists?.objectId || null;
-    const updated = { id:currentId, proj, rows, discount, markup, note, status:estStatus, sentAt: estStatus==="sent" ? (estSentAt||exists?.sentAt||new Date().toISOString().slice(0,10)) : (exists?.sentAt||null), comment:estComment, createdAt:exists?.createdAt||Date.now(), createdBy:exists?.createdBy||currentUser?.name, updatedAt:Date.now(), updatedBy:currentUser?.name, total:final, ...(objId ? {objectId:objId} : {}), ...(pId ? {parentId:pId, dsNumber:dsN} : {}) };
+    const sealedRows = sealLegacyEstimateRows(rows, getEffectiveCatalog().map(getEffectiveWork));
+    const updated = { id:currentId, proj, rows:sealedRows, discount, markup, note, status:estStatus, sentAt: estStatus==="sent" ? (estSentAt||exists?.sentAt||new Date().toISOString().slice(0,10)) : (exists?.sentAt||null), comment:estComment, createdAt:exists?.createdAt||Date.now(), createdBy:exists?.createdBy||currentUser?.name, updatedAt:Date.now(), updatedBy:currentUser?.name, total:final, ...(objId ? {objectId:objId} : {}), ...(pId ? {parentId:pId, dsNumber:dsN} : {}) };
     updated.history = _appendHistory(exists, updated);
     return exists ? cur.map(e=>e.id===currentId?updated:e) : [updated,...cur];
   };
@@ -6596,22 +6618,17 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       };
       if (_productionsLoaded && !_productionsLoaded.current) return _fail("not-loaded", false);
       const cmd = { ...command, ts: command.ts || Date.now() };
-      // Мутатор транзакции применяет команду к свежему списку. Если команда НЕ применима
-      // (ok:false — нет карточки/элемента, битая) — возвращаем undefined → runTransaction
-      // ОТМЕНЯЕТСЯ (committed:false), правка НЕ считается сохранённой (не «тихий успех»).
-      // createTxnApplier СБРАСЫВАЕТ notOk на каждом прогоне колбэка: SDK перезапускает его
-      // (холодный кеш → CAS → реальные данные), и «залипший» notOk первого прогона объявлял бы
-      // РЕАЛЬНО закоммиченное сохранение конфликтом (блокер rev4-аудита №1).
-      const applier = createTxnApplier(cmd);
-      const res = await storage.mutateTransaction(PRODUCTIONS_KEY, applier.mutate);
-      const notOk = applier.state.notOk, notOkList = applier.state.notOkList;
+      const res = await runVerifiedProductionTransaction(cmd, {
+        transact: mutate => storage.mutateTransaction(PRODUCTIONS_KEY, mutate),
+        readFresh: () => storage.getCloudResult(PRODUCTIONS_KEY),
+      });
       if (!storage.mayApplyEditorResult(editorSession)) {
         return { committed: false, reason: "editor-session-ended" };
       }
       // Сессия завершилась, пока шла транзакция: запись (если успела) — легитимный «дожим»
       // правок ЭТОГО пользователя, но React-state и учёты больше не трогаем.
-      if (sess !== _prodAppSession.current) return { committed: !!(res.committed && !notOk), reason: "session-ended" };
-      if (res.committed && !notOk) {
+      if (sess !== _prodAppSession.current) return { committed: !!res.committed, reason: "session-ended" };
+      if (res.committed) {
         let next = [];
         try { next = res.value ? JSON.parse(res.value) : []; } catch { next = productionsRef.current; }
         if (Array.isArray(next)) { productionsRef.current = next; setProductions(next); }
@@ -6624,34 +6641,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
         _clearCloudErrorIfAllClean();
         return { committed: true, list: next };
       }
-      // SDK может сначала прогнать transaction-callback по холодному локальному cache=[].
-      // Если соединение ещё поднимается, этот предварительный no-card нельзя выдавать за
-      // подтверждённое удаление карточки: пользователь увидит ложный confirm, а черновик может
-      // быть обработан против неавторитетного списка. Любой логический конфликт перепроверяем
-      // отдельным облачным чтением (SDK→REST). Только если команда НЕ применима и к свежему
-      // списку Firebase, возвращаем conflict:true; при недоступном облаке оставляем pending.
-      if (notOk) {
-        try {
-          const freshResult = await storage.getCloudResult(PRODUCTIONS_KEY);
-          if (freshResult.status === "unavailable") return _fail("conflict-unverified", false);
-          let fresh = [];
-          if (freshResult.status === "found" && freshResult.value) {
-            try { fresh = JSON.parse(freshResult.value); } catch { return _fail("conflict-cloud-json", false); }
-          }
-          if (!Array.isArray(fresh)) return _fail("conflict-cloud-shape", false);
-          const verified = applyProductionCommand(fresh, cmd);
-          if (verified.ok) {
-            // Конфликт был только в холодном кеше. Fresh-read заодно прогревает SDK; следующий
-            // фоновый retry применит тот же идемпотентный batch, durable-draft пока не удаляем.
-            return _fail("stale-transaction-cache", false);
-          }
-          return _fail(verified.reason || notOk, true, fresh);
-        } catch {
-          return _fail("conflict-unverified", false);
-        }
-      }
-      // Транзакция не дошла до подтверждённого логического конфликта: сеть/SDK/таймаут.
-      return _fail(res.reason, false);
+      return _fail(res.reason, !!res.conflict, res.list);
     };
     const next = _prodQueue.current.then(run, run);
     _prodQueue.current = next.then(() => {}, () => {});
@@ -6789,7 +6779,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       const w = lk.get(key); if (!w) continue;
       let price;
       if (r.manualPrice !== undefined && r.manualPrice !== "") { const n = Number(r.manualPrice); price = isNaN(n) ? 0 : n; }
-      else { const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined; price = getPrice(w, qty, r.complexity || "std", cpxPct) || 0; }
+      else { const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined; price = getEstimateRowPrice(r, w, qty, r.complexity || "std", cpxPct) || 0; }
       if (!price) continue; // позиции «цена от» в акт не берём
       const name = r.manualName !== undefined ? r.manualName : w.name;
       const unit = r.manualUnit !== undefined ? r.manualUnit : w.unit;
@@ -7394,7 +7384,7 @@ ${reqBlock}`;
         const cpxPct = r?.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
         const raw = (r?.manualPrice !== undefined && r.manualPrice !== "")
           ? Number(r.manualPrice)
-          : w ? getPrice(w, qty, r?.complexity || "std", cpxPct) : Number(r?.price || 0);
+          : w ? getEstimateRowPrice(r, w, qty, r?.complexity || "std", cpxPct) : Number(r?.price || 0);
         const priceClient = (Number(raw) || 0) * mk * disc * qty;
         const fallbackCost = Number(r?.costPrice ?? r?.manualCost ?? 0) * qty;
         const costPlan = w ? rowCostPerUnit(r, w) * qty : fallbackCost;
@@ -7943,11 +7933,41 @@ ${reqBlock}`;
         }
       } catch(e) { console.warn("backup err", e); }
       const res = await storage.set(STORAGE_KEY, JSON.stringify(finalList));
-      if (res && res.fbOk === false) { console.error("Firebase save FAILED:", res.fbError); setCloudError(true); setSyncStatus("error"); }
+      if (res && res.fbOk === false) { console.error("Firebase save FAILED:", res.fbError); setCloudError(true); setSyncStatus("error"); setSaving(false); return false; }
       else { _clearCloudErrorIfAllClean(); setSyncStatus("saved"); setTimeout(()=>setSyncStatus("idle"), 3000); }
-    } catch(e) { console.error(e); setCloudError(true); setSyncStatus("error"); }
+    } catch(e) { console.error(e); setCloudError(true); setSyncStatus("error"); setSaving(false); return false; }
     setSaving(false);
+    return finalList;
   }, [currentUser, _clearCloudErrorIfAllClean]);
+
+  // Перед изменением прайса закрепляем действующие на этот момент цену и себестоимость
+  // только в заполненных legacy-строках. Транзакция работает с самой свежей облачной
+  // версией списка, поэтому параллельная правка сметы другого сотрудника не перезаписывается.
+  // Само открытие приложения ничего не мигрирует. Если облако не подтвердило запись,
+  // AdminPage блокирует изменение прайса.
+  const protectHistoricalEstimatePricing = useCallback(async () => {
+    const catalog = getEffectiveCatalog().map(getEffectiveWork);
+    const result = await storage.mutateTransaction(STORAGE_KEY, currentList => {
+      let changed = false;
+      const protectedList = currentList.map(estimate => {
+        const protectedRows = sealLegacyEstimateRows(estimate?.rows, catalog);
+        if (protectedRows === estimate?.rows) return estimate;
+        changed = true;
+        return { ...estimate, rows: protectedRows };
+      });
+      return changed ? protectedList : currentList;
+    });
+    if (!result?.committed || !result.value) return false;
+    try {
+      const protectedList = JSON.parse(result.value);
+      if (!Array.isArray(protectedList)) return false;
+      estimatesRef.current = protectedList;
+      setEstimates(protectedList);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
 
   // ── УНИВЕРСАЛЬНОЕ защищённое сохранение списка (договоры, клиенты, контрагенты) ──
   // Та же логика, что у смет: слияние по id, бэкап, защита от затирания, баннер при сбое облака.
@@ -8612,14 +8632,22 @@ ${reqBlock}`;
   };
 
   // ── Вычисления текущей сметы ──
-  const setRow = useCallback((name, field, val) =>
-    setRows(p => ({ ...p, [name]: { ...p[name], [field]: val } })), []);
+  const setRow = useCallback((name, field, val) => setRows(prev => {
+    const before = prev[name] || {};
+    let next = { ...before, [field]: val };
+    // Новая заполненная позиция фиксирует актуальные цену/себестоимость именно сейчас.
+    // Снимок не удаляем при временном обнулении количества: это часть истории сметы.
+    if (field === "qty" && Number(before.qty || 0) <= 0 && Number(val || 0) > 0 && !before.pricingSnapshot) {
+      const work = getEffectiveCatalog().find(w => w.code === name || w.name === name);
+      if (work) next = { ...next, pricingSnapshot: createEstimatePricingSnapshot(getEffectiveWork(work)) };
+    }
+    return { ...prev, [name]: next };
+  }), []);
 
   const rowPrice = (work) => {
     const r = rows[work.code] || rows[work.name] || {};
-    if (r.manualPrice !== undefined && r.manualPrice !== "") { const n = Number(r.manualPrice); return isNaN(n) ? null : n; }
     const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
-    return getPrice(work, Number(r.qty || 0), r.complexity || "std", cpxPct);
+    return getEstimateRowPrice(r, work, Number(r.qty || 0), r.complexity || "std", cpxPct);
   };
   const rowTotal = (work) => {
     const qty = Number((rows[work.code] || rows[work.name] || {}).qty || 0);
@@ -8630,7 +8658,7 @@ ${reqBlock}`;
   const rowPriceFrom = (work) => {
     const r = rows[work.code] || rows[work.name] || {};
     if (r.manualPrice !== undefined && r.manualPrice !== "") return null; // ручная цена — точная
-    const w = getEffectiveWork(work);
+    const w = resolveEstimateRowWork(getEffectiveWork(work), r);
     if (w.fixedPrice || (w.tiers && w.tiers.length > 0) || w.cost) return null; // есть точная цена
     return w.priceFrom || null;
   };
@@ -8648,10 +8676,7 @@ ${reqBlock}`;
           const qty = Number(r.qty || 0);
           if (!qty) continue;
           const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
-          const mp = Number(r.manualPrice);
-          const price = (r.manualPrice !== undefined && r.manualPrice !== "" && !isNaN(mp))
-            ? mp
-            : getPrice(w, qty, r.complexity || "std", cpxPct);
+          const price = getEstimateRowPrice(r, w, qty, r.complexity || "std", cpxPct);
           if (price) subTotal += qty * price;
         }
         subMap[cat+"||"+sub] = subTotal;
@@ -8814,7 +8839,7 @@ ${reqBlock}`;
         const qty=Number(r?.qty||0); if(!qty) continue;
         const w=workLookup.get(key); if(!w) continue;
         const mp = Number(r.manualPrice);
-        const price = (r.manualPrice!==undefined&&r.manualPrice!==""&&!isNaN(mp)) ? mp : getPrice(w, qty, r.complexity||"std", r.cpxPct!==undefined?Number(r.cpxPct):undefined);
+        const price = (r.manualPrice!==undefined&&r.manualPrice!==""&&!isNaN(mp)) ? mp : getEstimateRowPrice(r, w, qty, r.complexity||"std", r.cpxPct!==undefined?Number(r.cpxPct):undefined);
         const c = w.cat||"—";
         if(!catFin[c]) catFin[c]={cat:c, revenue:0, cost:0};
         if(price) catFin[c].revenue += price*qty;
@@ -9273,6 +9298,9 @@ ${reqBlock}`;
         }
       }
       return html;
+Warning: truncated output (original token count: 18456)
+Total output lines: 300
+
     };
     const preambula = (role="Подрядчик") => {
       const tit = esc(ca?.name||"ТОО TITOVSTROY")+", БИН "+esc(ca?.bin||"231040002769")+" (далее — \""+role+"\"), в лице директора "+esc(ca?.director||"________")+", действующего на основании Устава";
@@ -9371,43 +9399,7 @@ ${reqBlock}`;
   <p>3.4.2. Требовать возмещения расходов, понесенных Подрядчиком в связи с установлением и устранением дефектов в проектно-сметной документации, предоставленной Заказчиком.</p>
   <p>3.4.3. Приостановить выполнение Работ в случаях, предусмотренных законами РК и условиями настоящего Договора, с уведомлением Заказчика за 2 дня и отнесением убытков на Заказчика.</p>
   <p>3.4.4. Отказаться от выполнения дополнительных работ в случае, когда они не входят в сферу профессиональной деятельности Подрядчика либо не могут быть выполнены Подрядчиком по независящим от него причинам, без ответственности за простои.</p>
-  <p>3.4.5. Привлекать к исполнению своих обязательств субподрядчиков без предварительного согласия Заказчика.</p>
-  <p>3.4.6. Расторгнуть Договор и требовать возмещения понесенных убытков в случае нарушения Заказчиком существенных условий настоящего Договора (включая просрочку оплаты более 3 дней), с уведомлением за 2 дня. А также и взыскать неустойку/штраф за просрочку оплаты.</p>
-  <p class="s">4. СТОИМОСТЬ, СРОКИ И ПОРЯДОК ОПЛАТЫ РАБОТ</p>
-  <p>4.1. Общая стоимость работ а также сроков и порядок оплаты, определяется в соответствии с Приложением №1 «Перечень видов и этапов работ».</p>
-  <p>4.2. Стоимость каждой единицы Работ, установленная в Приложении №1 «Перечень видов и этапов работ», является твердой и изменению не подлежит, за исключением случаев, предусмотренных п. 3.4.1.</p>
-  <p>4.3. Общая сумма Договора складывается из общей стоимости выполненных Подрядчиком и принятых Заказчиком Работ, включает все платежи Подрядчика в бюджет, все расходы Подрядчика, понесенные им в целях исполнения Договора, а также вознаграждение Подрядчика.</p>
-  <p>4.4. Заказчик оплачивает выполненные Работы по факту их завершения и подписания актов приемки в течение 2 банковских дней на основании подписанных Сторонами актов выполненных работ.</p>
-  <p>4.5. Все расчеты Сторон по Договору производятся в тенге, в безналичном порядке.</p>
-  <p>4.6. В случае, если фактические расходы Подрядчика оказались меньше тех, которые учитывались при определении стоимости Работ, Подрядчик сохраняет право на оплату работ по Стоимости, установленной настоящим Договором. Заказчик не вправе требовать снижения цены без доказательства снижения качества.</p>
-  <p>4.7. Подрядчик предоставляет Заказчику счет-фактуру, а также иные, требуемые правилами бухгалтерского учета, документы.</p>
-  <p class="s">5. СРОКИ ВЫПОЛНЕНИЯ РАБОТ</p>
-  <p>5.1. Подрядчик обязан выполнить Работы в соответствии с Приложением №1 «Перечень видов и этапов работ»</p>
-  <p>5.2. Сроки выполнения Работ могут быть изменены по соглашению Сторон до начала или в процессе производства Работ, с уведомлением. Задержки, вызванные Заказчиком (включая несвоевременную оплату или предоставление документации), продлевают сроки без ответственности Подрядчика.</p>
-  <p>5.3. Подрядчик несет ответственность за нарушение всех установленных в Договоре сроков выполнения Работ только в случае отсутствия вины Заказчика.</p>
-  <p class="s">6. ПОРЯДОК ВЫПОЛНЕНИЯ РАБОТ</p>
-  <p>6.1. Подрядчик выполняет работы поэтапно, в соответствии с Приложением №1 «Перечень видов и этапов работ».</p>
-  <p>6.2. Заказчик разрешает Подрядчику пользоваться всей территорией Объекта для выполнения Работ по настоящему Договору, включая хранение материалов и оборудования.</p>
-  <p>6.3. После завершения всех Работ, предусмотренных настоящим Договором, Подрядчик письменно Заказчика о завершении работ и вызывает его для участия в приемке Работ в течение 2 дней.</p>
-  <p class="s">7. ПОРЯДОК СДАЧИ-ПРИЕМКИ ВЫПОЛНЕННЫХ РАБОТ</p>
-  <p>7.1. Приемка выполненных Работ осуществляется после завершения Подрядчиком каждого этапа Работ, предусмотренных настоящим Договором.</p>
-  <p>7.2. Заказчик, получив сообщение Подрядчика о готовности к сдаче Работ, обязан немедленно приступить к приемке их результатов в течение 2 дней.</p>
-  <p>7.3. Заказчик организует и осуществляет приемку результатов Работ за свой счет.</p>
-  <p>7.4. Заказчик обязан с участием Подрядчика осмотреть и принять результаты выполненных Работ, а при обнаружении отступлений от Договора, ухудшающих Работы, или иных недостатков немедленно заявить Подрядчику об этом в письменной форме с обоснованием.</p>
-  <p>7.5. В случаях, когда это предусмотрено законодательными актами либо вытекает из характера Работ, приемке результатов Работ должны предшествовать предварительные испытания. В этих случаях приемка результатов Работ может осуществляться только при положительном результате предварительных испытаний. Испытания должны быть проведены в строгом соответствии с регламентирующими СНиП и ГОСТ РК.</p>
-  <p>7.6. Сдача результата Работ Подрядчиком и приемка его Заказчиком оформляются актом о приемке выполненных работ, подписываемым обеими Сторонами. При отказе одной из сторон от подписания акта, в нем делается отметка об этом и акт подписывается другой Стороной.</p>
-  <p>7.7. В случае приемки Заказчиком Работ без проверки, Заказчик лишается права ссылаться на недостатки Работ, которые могли быть установлены при обычном способе их приемки (явные недостатки).</p>
-  <p>7.8. Подрядчик обязан исправить все выявленные дефекты и недостатки Работ в разумный срок, установленный Подрядчиком и согласованный с Заказчиком.</p>
-  <p>7.9. Заказчик вправе полностью отказаться от приемки результата Работ в случае обнаружения недостатков, которые исключают возможность его дальнейшей целевой эксплуатации и не могут быть устранены Подрядчиком или Заказчиком (только при наличии заключения независимой экспертизы).</p>
-  <p>7.10. Заказчик обязан принять результаты Работ и подписать Акт выполненных работ в течение 2 дней, либо дать в те же сроки обоснованный письменный отказ с указанием конкретных недостатков.</p>
-  <p>7.11. В случае необоснованного отказа Заказчика от приемки результатов выполненных Работ или от подписания акта выполненных работ, либо просрочки Заказчиком подписания акта выполненных работ без уважительных причин более чем на 2 дней, Подрядчик вправе подписать Акт выполненных Работ в одностороннем порядке и приступить к взысканию оплаты (в таком случае акт будет иметь юридическую силу и является основанием для оплаты).</p>
-  <p>7.12. При возникновении между Сторонами спора по поводу недостатков выполненных Работ или их причин, по требованию любой из Сторон должна быть назначена экспертиза в аккредитованной организации. Расходы по проведению экспертизы несет Заказчик, за исключением случаев, когда экспертизой установлено наличие нарушений Договора или причинной связи между действиями Подрядчика и обнаруженными недостатками. В этих случаях расходы по экспертизе несет Подрядчик, а если экспертиза назначена по соглашению между Сторонами, - обе Стороны поровну.</p>
-  <p>7.13. Сдача и ввод завершенного строительством Объекта в эксплуатацию производится Сторонами в порядке, установленном законодательством Республики Казахстан об архитектурной, градостроительной и строительной деятельности. Подрядчик передает Заказчику исполнительную документацию в полном объеме.</p>
-  <p class="s">8. ГАРАНТИИ КАЧЕСТВА</p>
-  <p>8.1. Подрядчик гарантирует достижение указанных в проектно-сметной документации показателей и возможность эксплуатации результатов Работ на протяжении гарантийного срока. Гарантийный срок составляет 12 месяцев со дня подписания акта окончательной приемки результатов Работ Заказчиком в соответствии со ст. 666 ГК РК.</p>
-  <p>8.2. Гарантия качества распространяется на все элементы и детали выполненных Работ, включая предоставленные Подрядчиком материалы (если они были предоставлены подрядчиком, в ином случае подрядчик ответственность не несет).</p>
-  <p>8.3. Подрядчик несет ответственность за недостатки выполненных Работ, обнаруженные в пределах гарантийного срока, если не докажет, что они возникли вследствие нормального износа, неправильной эксплуатации или неправильности инструкций по эксплуатации, разработанных самим Заказчиком или привлеченными им третьими лицами, ненадлежащего ремонта, произведенного самим Заказчиком или привлеченными им третьими лицами, или форс-мажора.</p>
-  <p>8.4. В случае обнаружения в течение гарантийного срока отступлений в Работах от Договора, или иных недостатков, которые не могли быть установлены при обычном способе приемки (скрытые недостатки), в том числе такие, которые были умышленно скрыты Подрядчиком, Заказчик обязан известить об этом Подрядчика в разумный срок по их обнаружению (не позднее 5 дней).</p>
+  <p>3.4.5. Привлекать к исполнению своих обязательств субподрядчиков без …3456 tokens truncated…ней).</p>
   <p>8.5. Если Работы выполнены Подрядчиком с отступлениями от Договора, ухудшившими Работы, или с иными недостатками, которые делают их непригодными для использования, Заказчик вправе по своему выбору потребовать от Подрядчика:</p>
   <p>8.5.1. безвозмездного устранения недостатков Работ в разумный срок;</p>
   <p>8.5.2. соразмерного уменьшения установленной стоимости Работ.</p>
@@ -9678,7 +9670,7 @@ ${reqBlock}`;
         if (!w) return null;
         const qty = Number(r.qty || 0);
         const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
-        const raw = (r.manualPrice !== undefined && r.manualPrice !== "") ? Number(r.manualPrice) : getPrice(w, qty, r.complexity || "std", cpxPct);
+        const raw = getEstimateRowPrice(r, w, qty, r.complexity || "std", cpxPct);
         const price = Math.round((Number(raw) || 0) * mm);
         return { cat: w.cat || "Прочее", name: (r.manualName !== undefined ? r.manualName : w.name), unit: (r.manualUnit !== undefined ? r.manualUnit : (w.unit || "м²")), qty, price, sum: Math.round(price * qty) };
       }).filter(Boolean);
@@ -9765,7 +9757,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       if(!w) return null;
       const qty = Number(r.qty||0);
       const cpxPct = r.cpxPct!==undefined ? Number(r.cpxPct) : undefined;
-      const rawPrice = r.manualPrice!==undefined && r.manualPrice!=="" ? Number(r.manualPrice) : getPrice(w, qty, r.complexity||"std", cpxPct);
+      const rawPrice = getEstimateRowPrice(r, w, qty, r.complexity||"std", cpxPct);
       const price = rawPrice ? rawPrice*mm : 0;
       const displayName = r.manualName!==undefined ? r.manualName : w.name;
       const displayUnit = r.manualUnit!==undefined ? r.manualUnit : (w.unit||"м²");
@@ -10424,7 +10416,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       if (qty <= 0) continue;
       const w = catalog.find(x => x.name === key) || catalog.find(x => x.code === key);
       if (!w) continue;
-      const price = getPrice(w, qty, r.complexity || "std");
+      const price = getEstimateRowPrice(r, w, qty, r.complexity || "std", r.cpxPct !== undefined ? Number(r.cpxPct) : undefined);
       works.push({
         code: w.code || null,
         name: w.name,
@@ -11402,9 +11394,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                 const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
                                 const rawPrice = r.manualPrice !== undefined && r.manualPrice !== ""
                                   ? Number(r.manualPrice)
-                                  : getPrice(w, qty, r.complexity||"std", cpxPct);
+                                  : getEstimateRowPrice(r, w, qty, r.complexity||"std", cpxPct);
                                 const price = rawPrice ? rawPrice * mm : null;
-                                const ew = getEffectiveWork(w);
+                                const ew = resolveEstimateRowWork(getEffectiveWork(w), r);
                                 const pf = (!price && ew.priceFrom) ? Math.round(ew.priceFrom * mm) : null;
                                 const displayName = r.manualName !== undefined ? r.manualName : w.name;
                                 const displayUnit = r.manualUnit !== undefined ? r.manualUnit : (w.unit||"м²");
@@ -11620,8 +11612,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                 return (
                                   <div style={{display:"flex",flexWrap:"wrap",gap:"4px 12px",marginTop:3,fontSize:10,color:"#64748b",alignItems:"center"}}>
                                     <span style={{display:"inline-flex",alignItems:"center",gap:3}}>Себест/ед:
-                                      <input type="number" min="0" placeholder={String(Number(work.cost)||0)}
-                                        value={r.manualCost!==undefined?r.manualCost:(work.cost||"")}
+                                      <input type="number" min="0" placeholder={String(Number(resolveEstimateRowWork(getEffectiveWork(work), r).cost)||0)}
+                                        value={r.manualCost!==undefined?r.manualCost:(resolveEstimateRowWork(getEffectiveWork(work), r).cost||"")}
                                         onChange={e=>setRow(work.code || work.name,"manualCost",e.target.value===""?undefined:Number(e.target.value))}
                                         style={{width:64,border:"1px solid #e2e8f0",borderRadius:4,padding:"1px 5px",fontSize:11,textAlign:"right",fontFamily:"inherit",background:"#fff",color:r.manualCost!==undefined?"#2563eb":"#334155",fontWeight:r.manualCost!==undefined?700:400}}/>
                                       {r.manualCost!==undefined && <span onClick={()=>setRow(work.code || work.name,"manualCost",undefined)} title="Сбросить" style={{cursor:"pointer",color:"#ef4444"}}>✕</span>}
@@ -11752,8 +11744,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     const total = rowTotal(work);
                     const filled = qty > 0 && price;
                     const showBreadcrumb = isSearching;
-                    const tierHint = (work.tiers||[]).length > 1
-                      ? (work.tiers||[]).map(t=>`${t.min}–${t.max}: ${fmt(t.price)} ₸`).join(" · ")
+                    const resolvedRowWork = resolveEstimateRowWork(getEffectiveWork(work), r);
+                    const tierHint = (resolvedRowWork.tiers||[]).length > 1
+                      ? (resolvedRowWork.tiers||[]).map(t=>`${t.min}–${t.max}: ${fmt(t.price)} ₸`).join(" · ")
                       : null;
                     const isEditingThisPrice = editingPriceRow === work.name || editPrices;
                     const costPerUnit = rowCostPerUnit(r, work);
@@ -11822,8 +11815,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         {showFinancial && currentUser.role!=="viewer" && qty > 0 && (
                           <div style={{display:"flex",flexWrap:"wrap",gap:"4px 12px",marginTop:4,fontSize:10,color:"#64748b",alignItems:"center"}}>
                             <span style={{display:"inline-flex",alignItems:"center",gap:3}}>Себест/ед:
-                              <input type="number" min="0" placeholder={String(Number(work.cost)||0)}
-                                value={r.manualCost!==undefined?r.manualCost:(work.cost||"")}
+                              <input type="number" min="0" placeholder={String(Number(resolvedRowWork.cost)||0)}
+                                value={r.manualCost!==undefined?r.manualCost:(resolvedRowWork.cost||"")}
                                 onChange={e=>setRow(work.code || work.name,"manualCost",e.target.value===""?undefined:Number(e.target.value))}
                                 style={{width:64,border:"1px solid #e2e8f0",borderRadius:4,padding:"1px 5px",fontSize:11,textAlign:"right",fontFamily:"inherit",background:"#fff",color:r.manualCost!==undefined?"#2563eb":"#334155",fontWeight:r.manualCost!==undefined?700:400}}/>
                               {r.manualCost!==undefined && <span onClick={()=>setRow(work.code || work.name,"manualCost",undefined)} title="Сбросить" style={{cursor:"pointer",color:"#ef4444"}}>✕</span>}
@@ -14231,8 +14224,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         })()}
                       </>)}
                       {(()=>{
-                        const pq = finTxProjSearch.toLowerCase();
-                        const projRows = finProjects.filter(p=>!pq || (p.contractNo||"").toLowerCase().includes(pq) || (p.description||"").toLowerCase().includes(pq) || (p.comment||"").toLowerCase().includes(pq));
+                        const projRows = finProjects.map(project => {
+                          const directObject = project.objectId ? objects.find(o => o.id === project.objectId) : null;
+                          const link = project.contractNo ? linkForContractNo(project.contractNo) : null;
+                          const object = directObject || link?.object || null;
+                          const contract = directObject ? financeContractOf(project, directObject) : (link?.contract || null);
+                          return { project, object, contract };
+                        }).filter(({ project, object, contract }) =>
+                          financeProjectMatchesSearch(project, finTxProjSearch, { object, contract }));
                         return (
                           <div style={{position:"relative"}} onClick={e=>e.stopPropagation()}>
                             <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Проект / № договора</div>
@@ -14248,12 +14247,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                               <div style={{position:"absolute",zIndex:999,top:"100%",left:0,right:0,background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,.13)",maxHeight:220,overflowY:"auto",marginTop:2}}>
                                 <div onMouseDown={e=>{e.preventDefault();setFinTxProjSearch("");set("contractNo","");setFinTxProjOpen(false);}} style={{padding:"9px 14px",fontSize:12,color:"#94a3b8",cursor:"pointer",borderBottom:"1px solid #f1f5f9"}}
                                   onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background=""}>— без проекта —</div>
-                                {projRows.map((p,i)=>(
-                                  <div key={i} onMouseDown={e=>{e.preventDefault();setFinTxProjSearch(p.contractNo||"");set("contractNo",p.contractNo||"");setFinTxProjOpen(false);}}
+                                {projRows.map(({project:p, object, contract},i)=>(
+                                  <div key={p.id || p.contractNo || i} onMouseDown={e=>{ const resolvedNo=contract?.number||p.contractNo||""; e.preventDefault();setFinTxProjSearch(resolvedNo);set("contractNo",resolvedNo);setFinTxProjOpen(false);}}
                                     style={{padding:"9px 14px",fontSize:13,color:"#0f172a",cursor:"pointer",background:m.contractNo===p.contractNo?"#eff6ff":"transparent",borderBottom:"1px solid #f8fafc"}}
                                     onMouseEnter={e=>e.currentTarget.style.background="#f1f5f9"} onMouseLeave={e=>e.currentTarget.style.background=m.contractNo===p.contractNo?"#eff6ff":"transparent"}>
-                                    <span style={{fontWeight:700}}>{p.contractNo}</span>
-                                    {p.description&&<span style={{color:"#64748b",marginLeft:6,fontSize:12}}>{p.description.slice(0,50)}</span>}
+                                    <span style={{fontWeight:700}}>{p.contractNo || "Без номера"}</span>
+                                    {(()=>{ const label = [object?.clientName || contract?.customer || contract?.customerName || p.description, object?.address || contract?.address || contract?.objectAddress].filter(Boolean).join(" · "); return label ? <span style={{color:"#64748b",marginLeft:6,fontSize:12}}>{label.slice(0,80)}</span> : null; })()}
                                   </div>
                                 ))}
                               </div>
@@ -14346,9 +14345,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             if(!w) return null;
             const qty = Number(r.qty||0);
             const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
-            const rawPrice = r.manualPrice !== undefined && r.manualPrice !== "" ? Number(r.manualPrice) : getPrice(w, qty, r.complexity||"std", cpxPct);
+            const rawPrice = getEstimateRowPrice(r, w, qty, r.complexity||"std", cpxPct);
             const price = rawPrice ? rawPrice * mm : null;
-            const ew = getEffectiveWork(w);
+            const ew = resolveEstimateRowWork(getEffectiveWork(w), r);
             const pf = (!price && ew.priceFrom) ? Math.round(ew.priceFrom * mm) : null;
             const displayName = r.manualName !== undefined ? r.manualName : w.name;
             const displayUnit = r.manualUnit !== undefined ? r.manualUnit : (w.unit||"м²");
@@ -15786,6 +15785,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             contragents,
           }}
           fmt={fmt}
+          onBeforePriceChange={protectHistoricalEstimatePricing}
           onBackupWorkspace={openWorkspaceBackups}
           onExportAll={exportAllJSON}
           onImportAll={importAllJSON}
