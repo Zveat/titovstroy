@@ -5968,9 +5968,12 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   };
   const finProjDraftFromObject = (obj, contract) => {
     const main = mainContractOf(contract);
+    const estimateTotal = obj?.id
+      ? estimatesForObject(estimatesRef.current, obj.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0)
+      : 0;
     return {
       id:"", contractNo: main?.number||"",
-      budget: finBudgetOfContract(main)||0,
+      budget: estimateTotal || finBudgetOfContract(main) || 0,
       createdAt: main?.date || new Date().toISOString().slice(0,10),
       comment:"", objectId: obj?.id||"",
     };
@@ -5980,12 +5983,18 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   // (сохраняет), чтобы доп. работы отразились без ручного «Сохранить».
   const startFinProjFromObject = async (obj, contract) => {
     const main = mainContractOf(contract);
-    const existing = main ? finProjectsRef.current.find(p=>normCN(p.contractNo)===normCN(main.number)) : null;
+    const existing = (obj?.id ? finProjectsRef.current.find(p => p.objectId === obj.id) : null)
+      || (main ? finProjectsRef.current.find(p=>normCN(p.contractNo)===normCN(main.number)) : null);
     setScreen("finance"); setFinanceTab("projects");
     if (existing) {
-      const nb = finBudgetOfContract(main);
-      const upd = { ...existing, budget: nb };
-      if (Number(existing.budget) !== nb) { try { await saveFinanceProjects(finProjectsRef.current.map(p=>p.id===existing.id?upd:p)); } catch(e) {} }
+      const estimateTotal = obj?.id
+        ? estimatesForObject(estimatesRef.current, obj.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0)
+        : 0;
+      const nb = estimateTotal || finBudgetOfContract(main) || Number(existing.budget) || 0;
+      const upd = { ...existing, objectId:obj?.id || existing.objectId || "", contractNo:main?.number || existing.contractNo || "", budget: nb };
+      if (Number(existing.budget) !== nb || upd.objectId !== (existing.objectId || "") || upd.contractNo !== (existing.contractNo || "")) {
+        try { await saveFinanceProjects(finProjectsRef.current.map(p=>p.id===existing.id?upd:p)); } catch(e) {}
+      }
       setFinProjModal(upd);
     } else {
       setFinProjModal(finProjDraftFromObject(obj, contract));
@@ -6298,7 +6307,10 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       const tx = txByCN[cn] || [];
       const income = tx.filter(t => t.type === "income").reduce((s, t) => s + (Number(t.amount) || 0), 0);
       const expense = tx.filter(t => t.type === "expense").reduce((s, t) => s + (Number(t.amount) || 0), 0);
-      const budget = Number(fp.budget) || 0;
+      const estimateBudget = o
+        ? estimatesForObject(estimates, o.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0)
+        : 0;
+      const budget = estimateBudget > 0 ? estimateBudget : (Number(fp.budget) || 0);
       const finStatus = financeProjectStatusKeyOf(fp);
       entries.push({
         key: objectId || ("fp:" + fp.id), objectId, fpId: fp.id,
@@ -6341,8 +6353,18 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     const production = object ? (productions.find(p => p.objectId === object.id) || null) : null;
     const contract = financeContractOf(project, object);
     const status = object ? (DEAL_STATUSES.find(s => s.key === unifiedStatusOf(object)) || DEAL_STATUSES[0]) : null;
-    return buildFinanceProjectView({ project, object, production, contract, reports, status });
+    return buildFinanceProjectView({
+      project,
+      object,
+      production,
+      contract,
+      estimates,
+      contractTotal: finBudgetOfContract(contract),
+      reports,
+      status,
+    });
   };
+  const financeBudgetOf = project => financeProjectViewOf(project).budget;
   // Что «подсказывает» производство/финансы — используется только как рекомендация
   // в панели проверки статусов (не влияет на отображение автоматически).
   const suggestedStatusOf = useCallback((o) => {
@@ -7589,29 +7611,34 @@ ${reqBlock}`;
     return await saveListProtected(FINANCE_PROJECTS_KEY, FINANCE_PROJECTS_BACKUPS_KEY, list, (fl)=>{ finProjectsRef.current = fl; setFinProjects(fl); }, { loadedRef: _financeLoaded, ...opts });
   };
 
-  // БЫСТРОЕ ОБНОВЛЕНИЕ бюджета проектов: при любом изменении договоров (добавили/
-  // изменили/удалили доп. соглашение) бюджет связанного проекта пересчитывается сам:
-  // бюджет = основной договор + все его доп. соглашения. Проекты без договора в
-  // сервисе (импорт из Google-таблиц) не трогаются. Debounce, чтобы не спамить сейвы.
+  // БЫСТРОЕ ОБНОВЛЕНИЕ бюджета проектов: единый источник — все актуальные сметы
+  // связанного объекта; если смет нет, основной договор и его доп. соглашения.
+  // Это также исправляет старые импортированные проекты с устаревшим budget.
   const _budgetSyncTimer = useRef(null);
   useEffect(() => {
-    if (!_financeLoaded.current || !_contractsLoaded.current || !_productionsLoaded.current) return;
+    if (!_financeLoaded.current || !_contractsLoaded.current || !_estimatesLoaded.current || !_productionsLoaded.current) return;
     if (_budgetSyncTimer.current) clearTimeout(_budgetSyncTimer.current);
     _budgetSyncTimer.current = setTimeout(() => {
       const fps = finProjectsRef.current;
       let changed = false;
       let updated = fps.map(fp => {
-        if (!fp.contractNo) return fp;
-        const main = contractsRef.current.find(c => c.number && !c.deletedAt
+        const directObject = fp.objectId
+          ? objectsRef.current.find(o => o && !o.deletedAt && o.id === fp.objectId)
+          : null;
+        const mainByNumber = fp.contractNo ? contractsRef.current.find(c => c.number && !c.deletedAt
           && c.type !== "podryad" && c.type !== "podryad_annex" && c.type !== "annex" && c.type !== "design_add"
-          && normCN(c.number) === normCN(fp.contractNo));
-        if (!main) return fp;
-        // nb>=0 (не nb>0): удаление ВСЕХ позиций из договора/приложений — законный бюджет 0,
-        // а не признак «данные ещё не загрузились» (это уже отсечено гардом выше по _contractsLoaded).
-        // Раньше nb>0 не давал бюджету обнулиться, если из договора убрали все работы.
-        const nb = finBudgetOfContract(main);
-        const linkedObjectId = fp.objectId || main.objectId || "";
-        if ((nb >= 0 && Math.round(Number(fp.budget) || 0) !== Math.round(nb)) || linkedObjectId !== (fp.objectId || "")) {
+          && normCN(c.number) === normCN(fp.contractNo)) : null;
+        const linkedObjectId = directObject?.id || mainByNumber?.objectId || "";
+        if (!linkedObjectId && !mainByNumber) return fp;
+        const main = mainByNumber || contractsRef.current.find(c => c && !c.deletedAt && c.objectId === linkedObjectId
+          && c.type !== "podryad" && c.type !== "podryad_annex" && c.type !== "annex" && c.type !== "design_add") || null;
+        const objectEstimateTotal = linkedObjectId
+          ? estimatesForObject(estimatesRef.current, linkedObjectId).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0)
+          : 0;
+        const contractBudget = finBudgetOfContract(main);
+        const hasCurrentBudgetSource = objectEstimateTotal > 0 || !!main;
+        const nb = objectEstimateTotal > 0 ? objectEstimateTotal : contractBudget;
+        if ((hasCurrentBudgetSource && Math.round(Number(fp.budget) || 0) !== Math.round(nb)) || linkedObjectId !== (fp.objectId || "")) {
           changed = true;
           return { ...fp, budget: nb, objectId: linkedObjectId };
         }
@@ -7635,13 +7662,14 @@ ${reqBlock}`;
           || (main && updated.find(fp => fp.contractNo && normCN(fp.contractNo) === normCN(main.number)));
         if (existing) {
           if (!existing.objectId) {
-            updated = updated.map(fp => fp.id === existing.id ? { ...fp, objectId:object.id, budget:finBudgetOfContract(main) || Number(fp.budget) || 0 } : fp);
+            const estimateTotal = estimatesForObject(estimatesRef.current, object.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0);
+            updated = updated.map(fp => fp.id === existing.id ? { ...fp, objectId:object.id, budget:estimateTotal || finBudgetOfContract(main) || Number(fp.budget) || 0 } : fp);
             changed = true;
           }
           continue;
         }
         const estimateTotal = estimatesForObject(estimatesRef.current, object.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0);
-        const budget = finBudgetOfContract(main) || estimateTotal;
+        const budget = estimateTotal || finBudgetOfContract(main);
         if (!main && budget <= 0) continue;
         updated.push({ ...finProjDraftFromObject(object, main), id:genId(), objectId:object.id, budget });
         changed = true;
@@ -11000,8 +11028,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           const txMap = {}; for(const t of (financeTx||[])){if(t.deletedAt||t.included===false) continue; const cn=normCN(t.contractNo); if(!txMap[cn])txMap[cn]={inc:0,exp:0}; if(t.type==="income")txMap[cn].inc+=(Number(t.amount)||0); else txMap[cn].exp+=(Number(t.amount)||0); }
           const totalInc = active.reduce((s,p)=>s+(txMap[normCN(p.contractNo)]?.inc||0),0);
           const totalExp = active.reduce((s,p)=>s+(txMap[normCN(p.contractNo)]?.exp||0),0);
-          const totalBudget = active.reduce((s,p)=>s+(Number(p.budget)||0),0);
-          const totalDebt = active.reduce((s,p)=>{const inc=txMap[normCN(p.contractNo)]?.inc||0; return s+Math.max(0,(Number(p.budget)||0)-inc);},0);
+          const totalBudget = active.reduce((s,p)=>s+financeBudgetOf(p),0);
+          const totalDebt = active.reduce((s,p)=>{const inc=txMap[normCN(p.contractNo)]?.inc||0; return s+Math.max(0,financeBudgetOf(p)-inc);},0);
           const margin = totalBudget>0?Math.round((totalBudget-totalExp)/totalBudget*100):null;
           const incMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&_inMonth(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
           return {count:active.length,totalInc,totalDebt,totalBudget,margin,incMonth};
@@ -12485,10 +12513,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               const activeFp = (finProjects||[]).filter(isActiveFinanceProject);
               const txMap = {}; for(const t of (financeTx||[])){ if(t.deletedAt||t.included===false) continue; const cn=_norm(t.contractNo); if(!txMap[cn])txMap[cn]={inc:0,exp:0}; if(t.type==="income")txMap[cn].inc+=(Number(t.amount)||0); else txMap[cn].exp+=(Number(t.amount)||0); }
               // ВСЁ по АКТИВНЫМ проектам — числа сходятся: Бюджет = Получено + Дебиторка
-              const totalBudget = activeFp.reduce((s,p)=>s+(Number(p.budget)||0),0);
+              const totalBudget = activeFp.reduce((s,p)=>s+financeBudgetOf(p),0);
               const totalInc = activeFp.reduce((s,p)=>s+(txMap[_norm(p.contractNo)]?.inc||0),0);
               const totalExp = activeFp.reduce((s,p)=>s+(txMap[_norm(p.contractNo)]?.exp||0),0);
-              const totalDebt = activeFp.reduce((s,p)=>{const inc=txMap[_norm(p.contractNo)]?.inc||0; return s+Math.max(0,(Number(p.budget)||0)-inc);},0);
+              const totalDebt = activeFp.reduce((s,p)=>{const inc=txMap[_norm(p.contractNo)]?.inc||0; return s+Math.max(0,financeBudgetOf(p)-inc);},0);
               const recvPct = totalBudget>0?Math.round(totalInc/totalBudget*100):0;
               const planMargin = totalBudget>0?Math.round((totalBudget-totalExp)/totalBudget*100):null;
               const incMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&_inM(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
@@ -12856,7 +12884,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   {(()=>{
                     const projIncH={};
                     for(const t of financeTx){ if(t.deletedAt||t.included===false)continue; const cn=normCN(t.contractNo); if(!cn)continue; if(t.type==="income") projIncH[cn]=(projIncH[cn]||0)+(Number(t.amount)||0); }
-                    const debtH = finProjects.filter(isCountedFinanceProject).reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projIncH[normCN(p.contractNo)]||0)),0);
+                    const debtH = finProjects.filter(isCountedFinanceProject).reduce((s,p)=>s+Math.max(0,financeBudgetOf(p)-(projIncH[normCN(p.contractNo)]||0)),0);
                     return <>
                       <div style={{textAlign:"right"}}>
                         <div style={{fontSize:11,color:"rgba(255,255,255,.6)"}}>Дебиторка (по проектам)</div>
@@ -13180,7 +13208,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         if(!pMonthMap[k]) pMonthMap[k]={count:0,budget:0,inc:0,gross:0};
                         const cx = txByContract[_normCn(p.contractNo)] || {inc:0,cogs:0};
                         pMonthMap[k].count++;
-                        pMonthMap[k].budget+=(Number(p.budget)||0);
+                        pMonthMap[k].budget+=financeBudgetOf(p);
                         pMonthMap[k].inc+=cx.inc;
                         pMonthMap[k].gross+=Math.max(0,cx.inc-cx.cogs);
                       });
@@ -13532,7 +13560,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               accounts.forEach(a=>{ const tp=a.accType||"bank"; byType[tp]=(byType[tp]||0)+(balances[a.name]||0); });
               const cash = byType.cash+byType.bank+byType.card+byType.ewallet;
               // Дебиторка (денежная — клиенты должны оплатить деньгами по проектам)
-              const receivablesMoney = finProjects.filter(isCountedFinanceProject).reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projInc[normCN(p.contractNo)]||0)),0);
+              const receivablesMoney = finProjects.filter(isCountedFinanceProject).reduce((s,p)=>s+Math.max(0,financeBudgetOf(p)-(projInc[normCN(p.contractNo)]||0)),0);
               // Авансы клиентов (обязательство)
               const advances = financeTx.filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&t.isAdvance).reduce((s,t)=>s+(Number(t.amount)||0),0);
 
@@ -13808,10 +13836,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               const days = (a,b) => { if(!a||!b) return null; const d=Math.round((new Date(b)-new Date(a))/86400000); return d>=0?d:null; };
               const yesno = v => v==="да"||v==="yes"||v===true||v==="1"||v==="Да"||v==="ДА";
               // totals
-              const totBudget = filtered.reduce((s,p)=>s+(Number(p.budget)||0),0);
+              const totBudget = filtered.reduce((s,p)=>s+financeBudgetOf(p),0);
               const totIncome = filtered.reduce((s,p)=>s+(projStats[normCN(p.contractNo)]?.income||0),0);
               const totExpense = filtered.reduce((s,p)=>s+(projStats[normCN(p.contractNo)]?.expense||0),0);
-              const totDebt = filtered.reduce((s,p)=>s+Math.max(0,(Number(p.budget)||0)-(projStats[normCN(p.contractNo)]?.income||0)),0);
+              const totDebt = filtered.reduce((s,p)=>s+Math.max(0,financeBudgetOf(p)-(projStats[normCN(p.contractNo)]?.income||0)),0);
               const totMargin = totIncome>0 ? Math.round((totIncome-totExpense)/totIncome*100) : 0;
               return (
                 <div>
@@ -13860,15 +13888,16 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   <div className="fin-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>
                     {filtered.map(p=>{
                       const view = financeProjectViewOf(p);
+                      const budget = view.budget;
                       const st = projStats[normCN(p.contractNo)]||{income:0,expense:0};
                       const income = st.income;
                       const expense = st.expense;
-                      const debt = Math.max(0,(Number(p.budget)||0)-income);
+                      const debt = Math.max(0,budget-income);
                       const marginVal = income-expense;
                       const marginPct = income>0 ? Math.round(marginVal/income*100) : null;
                       const col = view.statusColor;
                       const dur = days(view.startDate, view.factEndDate);
-                      const budgetFill = p.budget>0 ? Math.min(100,Math.round(income/p.budget*100)) : 0;
+                      const budgetFill = budget>0 ? Math.min(100,Math.round(income/budget*100)) : 0;
                       const mCol = marginPct===null?"#94a3b8":marginPct>=30?"#059669":marginPct>=0?"#f59e0b":"#dc2626";
                       const mBg  = marginPct===null?"#f8fafc":marginPct>=30?"#f0fdf4":marginPct>=0?"#fffbeb":"#fef2f2";
                       return (
@@ -13899,9 +13928,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             </div>
                             {/* Прогресс оплаты */}
                             <div style={{marginBottom:12}}>
-                              {p.budget>0 ? <>
+                              {budget>0 ? <>
                                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
-                                  <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{fM(income)} <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>из {fM(p.budget)} ₸</span></span>
+                                  <span style={{fontSize:16,fontWeight:800,color:"#059669"}}>{fM(income)} <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>из {fM(budget)} ₸</span></span>
                                   <span style={{fontSize:12,fontWeight:800,color:budgetFill>=100?"#059669":"#2563eb"}}>{budgetFill}%</span>
                                 </div>
                                 <div style={{height:6,background:"#f1f5f9",borderRadius:4,overflow:"hidden"}}>
@@ -13955,7 +13984,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       if (mp.id ? !canFinanceEditRecord(mp) : !canFinanceCreate) return;
                       if (!mp.id && !mp.objectId) { window.alert("Сначала выберите объект. Новый финансовый проект без объекта создавать нельзя."); return; }
                         const { _virtual, ...mpClean } = mp; // служебный флаг виртуальной строки в базу не пишем
-                        const proj = {...mpClean, id: mp.id||genId(), budget:Number(mp.budget)||0, paidFact:Number(mp.paidFact)||0, expenses:Number(mp.expenses)||0, createdBy:mp.createdBy||currentUser.name, createdById:mp.createdById||currentUser.id, updatedAt:Date.now()};
+                        const proj = {...mpClean, id: mp.id||genId(), budget:view.linked?view.budget:(Number(mp.budget)||0), paidFact:Number(mp.paidFact)||0, expenses:Number(mp.expenses)||0, createdBy:mp.createdBy||currentUser.name, createdById:mp.createdById||currentUser.id, updatedAt:Date.now()};
                       const cur = finProjectsRef.current;
                       const list = mp.id ? cur.map(x=>x.id===mp.id?proj:x) : [proj,...cur];
                       await saveFinanceProjects(list);
@@ -13976,7 +14005,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             <button onClick={()=>setFinProjModal(null)} style={{background:"none",border:"none",fontSize:20,color:"#94a3b8",cursor:"pointer"}}>✕</button>
                           </div>
                           {/* показываем расчётные цифры если проект существует */}
-                          {mp.id && (()=>{ const st=projStats[normCN(mp.contractNo)]||{income:0,expense:0}; const debt=Math.max(0,(Number(mp.budget)||0)-st.income); const mrg=st.income>0?Math.round((st.income-st.expense)/st.income*100):null;
+                          {mp.id && (()=>{ const st=projStats[normCN(mp.contractNo)]||{income:0,expense:0}; const debt=Math.max(0,view.budget-st.income); const mrg=st.income>0?Math.round((st.income-st.expense)/st.income*100):null;
                             const link=view.contractNo ? linkForContractNo(view.contractNo) : null; const plan=link?.planTotal||0; const pCost=link?.planCost||0; const pMrgPct=link?.planMarginPct;
                             const Cell=({l,v,c})=><div><div style={{fontSize:10,color:"#94a3b8"}}>{l}</div><div style={{fontWeight:800,color:c}}>{v}</div></div>;
                             return <>
@@ -14048,7 +14077,11 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                               </div>
                               <div style={{fontSize:10.5,color:"#64748b",marginTop:9,lineHeight:1.4}}>Эти сведения меняются только в карточке объекта и сразу отображаются здесь.</div>
                             </div>
-                            <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Стоимость проекта, ₸</div><input type="number" className="fi" value={mp.budget||0} onChange={e=>setp("budget",e.target.value)}/></div>
+                            <div>
+                              <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>{view.linked?"Стоимость проекта · рассчитывается автоматически":"Стоимость проекта, ₸"}</div>
+                              <input type="number" className="fi" value={view.linked?view.budget:(mp.budget||0)} disabled={view.linked} onChange={e=>setp("budget",e.target.value)} style={view.linked?{background:"#f8fafc",color:"#334155"}:undefined}/>
+                              {view.linked&&<div style={{fontSize:10.5,color:"#64748b",marginTop:5}}>Источник: {view.budgetSource==="estimates"?`все актуальные сметы объекта (${view.estimateCount})`:view.budgetSource==="contracts"?"договор и доп. соглашения":"старые импортированные данные"}. Изменяется в объекте.</div>}
+                            </div>
                             <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Финансовый комментарий</div><input className="fi" value={mp.comment||""} onChange={e=>setp("comment",e.target.value)}/></div>
                           </div>
                           <div style={{display:"flex",gap:8,marginTop:18}}>
