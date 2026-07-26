@@ -11120,7 +11120,21 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         const profitMonth = signedRevMonth - signedCostMonth;
         const marginMonth = signedRevMonth>0 ? Math.round(profitMonth/signedRevMonth*100) : 0;
         const approvalObjs = liveObjects.filter(o=>unifiedStatusOf(o)==="approval");
-        const signedObjs = liveObjects.filter(o=>unifiedStatusOf(o)==="signed");
+        // Договоры считаем по самим документам. Статус объекта меняется после запуска
+        // производства, поэтому он не может быть источником факта подписания договора.
+        const visibleObjectIds = new Set(liveObjects.map(o=>o.id));
+        const signedContracts = contracts.filter(c=>{
+          if(!c || c.deletedAt || c.contractStatus!=="signed") return false;
+          if(["annex","design_add","podryad","podryad_annex"].includes(c.type)) return false;
+          return canSeeDoc(c) && (!c.objectId || visibleObjectIds.has(c.objectId));
+        });
+        const signedContractsMonth = signedContracts.filter(c=>{
+          if(/^\d{4}-\d{2}-\d{2}$/.test(String(c.date||""))){
+            const [year,month]=String(c.date).split("-").map(Number);
+            return year===thisYear && month===thisMonth+1;
+          }
+          return _inMonth(c.updatedAt||c.createdAt||0);
+        });
         const activeObjects = liveObjects.filter(o=>{ const status=unifiedStatusOf(o); return status==="work"||status==="signed"; });
         const pipelineSum = approvalObjs.reduce((s,o)=>s+_objVal(o), 0);
         const now = Date.now();
@@ -11192,7 +11206,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               {[
                 {label:"Активных объектов",  val:activeObjects.length},
                 {label:"В согласовании", val:approvalObjs.length},
-                {label:"Договоров",       val:signedObjs.length},
+                {label:"Договоров",       val:signedContracts.length},
               ].map((m,i)=>(
                 <div key={i} style={{textAlign:"center"}}>
                   <div style={{fontSize:26,fontWeight:900,color:"#fff",lineHeight:1}}>{m.val}</div>
@@ -11225,7 +11239,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 {label:"Маржа за "+monthName, value:marginMonth+"%", sub:"рентабельность", icon:"🎯", accent:marginMonth>=35?"#059669":marginMonth>=20?"#d97706":"#ef4444"},
               ] : []),
               {label:"Пайплайн (согласование)", value:fmt(Math.round(pipelineSum))+" ₸", sub:approvalObjs.length+" объектов", icon:"🔄", accent:"#d97706"},
-              {label:"Договоров подписано", value:signedObjs.length, sub:"из "+liveObjects.filter(o=>{ const us=unifiedStatusOf(o); return us==="work"||us==="signed"; }).length+" активных", icon:"✅", accent:"#059669"},
+              {label:"Подписано за "+monthName, value:signedContractsMonth.length, sub:"всего подписано "+signedContracts.length, icon:"✅", accent:"#059669"},
             ].map((s,i)=>(
               <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden"}}
                 onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
@@ -14901,6 +14915,44 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               let objectFinanceSummary = null;
               if (hasObjectFinanceSummary) {
                 const selectedObjectIds = new Set(usRows.map(o=>o.id));
+                // На согласовании фактических оплат и расходов ещё может не быть. Здесь
+                // показываем коммерческий план непосредственно из смет выбранных объектов.
+                if (objectFilterStatus === "approval") {
+                  const catalog = getEffectiveCatalog();
+                  const worksByKey = new Map();
+                  for (const w of catalog) {
+                    if (w?.code) worksByKey.set(w.code,w);
+                    if (w?.name) worksByKey.set(w.name,w);
+                  }
+                  let budget = 0;
+                  let planCost = 0;
+                  for (const object of usRows) {
+                    for (const estimate of estimatesForObject(estimates, object.id)) {
+                      let calculatedTotal = 0;
+                      let estimateCost = 0;
+                      for (const [key,row] of Object.entries(estimate.rows||{})) {
+                        const qty = Number(row?.qty||0);
+                        if (qty<=0) continue;
+                        const work = worksByKey.get(key)
+                          || (row?.manualName ? worksByKey.get(row.manualName) : null);
+                        const cpxPct = row?.cpxPct!==undefined ? Number(row.cpxPct) : undefined;
+                        const unitPrice = work
+                          ? getEstimateRowPrice(row,work,qty,row?.complexity||"std",cpxPct)
+                          : Number(row?.manualPrice ?? row?.price ?? row?.pricingSnapshot?.price ?? 0);
+                        calculatedTotal += (Number(unitPrice)||0)*qty;
+                        estimateCost += work
+                          ? rowCostPerUnit(row,work)*qty
+                          : (Number(row?.manualCost ?? row?.costPrice ?? row?.pricingSnapshot?.cost ?? 0)||0)*qty;
+                      }
+                      const markup = 1+(Number(estimate.markup)||0)/100;
+                      const discount = 1-(Number(estimate.discount)||0)/100;
+                      budget += Number(estimate.total)||calculatedTotal*markup*discount;
+                      planCost += estimateCost;
+                    }
+                  }
+                  const gross = budget-planCost;
+                  objectFinanceSummary={kind:"plan",budget,planCost,gross,margin:budget>0?Math.round(gross/budget*100):0,objects:usRows.length};
+                } else {
                 const linkedProjects = finProjects.filter(p=>selectedObjectIds.has(financeObjectOf(p)?.id));
                 const coveredObjectIds = new Set(linkedProjects.map(p=>financeObjectOf(p)?.id).filter(Boolean));
                 const virtualProjects = usRows
@@ -14926,7 +14978,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 const income=projects.reduce((sum,p)=>sum+(stats[normCN(p.contractNo)]?.income||0),0);
                 const expense=projects.reduce((sum,p)=>sum+(stats[normCN(p.contractNo)]?.expense||0),0);
                 const debt=projects.reduce((sum,p)=>sum+Math.max(0,financeBudgetOf(p)-(stats[normCN(p.contractNo)]?.income||0)),0);
-                objectFinanceSummary={budget,income,expense,debt,gross:income-expense,margin:income>0?Math.round((income-expense)/income*100):0,objects:usRows.length};
+                objectFinanceSummary={kind:"actual",budget,income,expense,debt,gross:income-expense,margin:income>0?Math.round((income-expense)/income*100):0,objects:usRows.length};
+                }
               }
               // Проекты из Финансов без объекта — тоже показываем (клик = создать объект, с подтверждением)
               const orphanFps = (objectAttentionFilter ? [] : prodEntries.filter(e=>!e.objectId)).filter(e=>{
@@ -14943,7 +14996,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               {objectFinanceSummary && objectFinanceSummary.objects>0 && (()=>{
                 const money=n=>new Intl.NumberFormat("ru-RU").format(Math.round(Number(n)||0))+" ₸";
                 const s=objectFinanceSummary;
-                const tiles=[
+                const tiles=s.kind==="plan" ? [
+                  ["Объём смет · план",money(s.budget),"#2563eb","#eff6ff"],
+                  ["Себестоимость · план",money(s.planCost),"#dc2626","#fef2f2"],
+                  ["Валовая прибыль · план",money(s.gross),s.gross>=0?"#059669":"#dc2626",s.gross>=0?"#f0fdf4":"#fef2f2"],
+                  ["Маржа · план",s.margin+"%",s.margin>=30?"#059669":s.margin>=0?"#f59e0b":"#dc2626","#fffbeb"],
+                ] : [
                   ["Объём продаж",money(s.budget),"#0f172a","#f1f5f9"],
                   ["Оплачено факт",money(s.income),"#059669","#f0fdf4"],
                   ["Дебиторка",s.debt>0?money(s.debt):"—",s.debt>0?"#dc2626":"#94a3b8","#fef2f2"],
@@ -14953,7 +15011,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 ];
                 return <div style={{margin:"2px 0 4px"}}>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:8}}>
-                    <div style={{fontSize:12,fontWeight:800,color:"#475569"}}>Финансы по выбранным объектам</div>
+                    <div style={{fontSize:12,fontWeight:800,color:"#475569"}}>{s.kind==="plan"?"План по сметам выбранных объектов":"Финансы по выбранным объектам"}</div>
                     <div style={{fontSize:10.5,color:"#94a3b8"}}>{s.objects} объектов</div>
                   </div>
                   <div className="fin-tiles" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:8}}>
