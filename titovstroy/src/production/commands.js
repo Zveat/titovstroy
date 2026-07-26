@@ -335,6 +335,56 @@ export function createTxnApplier(cmd) {
   return { mutate, state };
 }
 
+// Firebase может первый раз вызвать transaction-callback с холодным cache=[] и отменить
+// корректную команду как no-card. После подтверждённого облачного чтения повторяем транзакцию
+// сразу, а не заставляем пользователя ждать фонового интервала.
+export async function runVerifiedProductionTransaction(command, { transact, readFresh }) {
+  const runOnce = async () => {
+    const applier = createTxnApplier(command);
+    try {
+      const result = await transact(applier.mutate);
+      return { result: result || { committed: false }, notOk: applier.state.notOk, notOkList: applier.state.notOkList };
+    } catch (error) {
+      return { result: { committed: false, reason: error?.message || "transaction-failed" }, notOk: null, notOkList: null };
+    }
+  };
+
+  const first = await runOnce();
+  if (first.result.committed && !first.notOk) return { ...first.result, conflict: false };
+  // Promise.race в storage не отменяет ещё выполняющуюся Firebase-транзакцию. После таймаута
+  // нельзя запускать вторую: исходная может позднее закоммититься и получится две записи.
+  if (first.result.reason === "timeout") return { committed: false, conflict: false, reason: "timeout" };
+  if (!first.notOk) return { committed: false, conflict: false, reason: first.result.reason || "transaction-failed" };
+
+  let freshResult;
+  try { freshResult = await readFresh(); }
+  catch { return { committed: false, conflict: false, reason: "conflict-unverified" }; }
+  if (!freshResult || freshResult.status === "unavailable") {
+    return { committed: false, conflict: false, reason: "conflict-unverified" };
+  }
+
+  let fresh = [];
+  if (freshResult.status === "found" && freshResult.value) {
+    try { fresh = JSON.parse(freshResult.value); }
+    catch { return { committed: false, conflict: false, reason: "conflict-cloud-json" }; }
+  }
+  if (!Array.isArray(fresh)) return { committed: false, conflict: false, reason: "conflict-cloud-shape" };
+
+  const verified = applyProductionCommand(fresh, command);
+  if (!verified.ok) {
+    return { committed: false, conflict: true, reason: verified.reason || first.notOk, list: fresh };
+  }
+
+  const second = await runOnce();
+  if (second.result.committed && !second.notOk) return { ...second.result, conflict: false };
+  return {
+    committed: false,
+    conflict: false,
+    reason: second.notOk || second.result.reason || "transaction-retry-failed",
+    list: second.notOkList,
+  };
+}
+
 // ПЕРЕБАЗИРОВАНИЕ локальных правок на новую серверную карточку (конфликт: batch не прошёл,
 // потому что элемент, который правили локально, изменён/удалён с другого устройства, или
 // карточка создана там с другими id). Реплей диффа oldBase→local ПОВЕРХ серверной карточки:
