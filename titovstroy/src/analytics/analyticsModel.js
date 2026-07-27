@@ -851,6 +851,31 @@ function buildTrend(idx, financeTx, now, months = 6) {
   return keys.map(k => byMonth[k]);
 }
 
+// Воронка по стадиям — состояние ВСЕЙ базы сейчас (не за период). Нужна для
+// визуальной воронки на «Главной»: сколько объектов стоит на каждой стадии.
+const FUNNEL_STAGES = [
+  { key: "new",      label: "Новый" },
+  { key: "approval", label: "Согласование сметы" },
+  { key: "signed",   label: "Договор подписан" },
+  { key: "work",     label: "В работе" },
+  { key: "done",     label: "Выполнен" },
+];
+function buildStatusFunnel(idx) {
+  const { liveObjects, objectValue, contractByObject, prodByObject } = idx;
+  const dealValue = (o) => contractSum(contractByObject.get(o.id)) || objectValue(o);
+  const stages = FUNNEL_STAGES.map(st => {
+    const list = liveObjects.filter(o => statusOf(o, prodByObject) === st.key);
+    return { key: st.key, label: st.label, count: list.length, sum: list.reduce((s, o) => s + dealValue(o), 0) };
+  });
+  const lost = liveObjects.filter(o => statusOf(o, prodByObject) === "refuse");
+  const cancelled = liveObjects.filter(o => statusOf(o, prodByObject) === "cancel");
+  return {
+    stages,
+    lost: { count: lost.length, sum: lost.reduce((s, o) => s + objectValue(o), 0) },
+    cancelled: { count: cancelled.length, sum: cancelled.reduce((s, o) => s + dealValue(o), 0) },
+  };
+}
+
 // ─── Главная точка входа ─────────────────────────────────────────────────────
 export function buildAnalytics(data = {}, options = {}) {
   const { period = "all", from, to, now = Date.now(), manager = "", users = [] } = options;
@@ -873,6 +898,7 @@ export function buildAnalytics(data = {}, options = {}) {
   });
   current.dataQuality = buildDataQuality(idx, financeTx, resolveManager);
   current.trend = buildTrend(idx, financeTx, now);
+  current.statusFunnel = buildStatusFunnel(idx);
 
   // Сравнение с предыдущим периодом. «Портфель» и «Качество» — состояние на сейчас
   // (в базе нет дат закрытия замечаний), поэтому у них сравнения нет и быть не может.

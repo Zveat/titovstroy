@@ -105,6 +105,55 @@ function TrendChart({ trend = [], fmt, showMoney = true }) {
   );
 }
 
+
+// Настоящая воронка: каждая стадия уже предыдущей, ширина = доля от входа.
+// Так сразу видно, где отваливаются сделки, а не просто список статусов.
+function FunnelChart({ funnel, fmt, showMoney = true }) {
+  const stages = funnel?.stages || [];
+  const base = Math.max(stages[0]?.count || 0, 1);
+  const colors = ["#93c5fd", "#60a5fa", "#3b82f6", "#2563eb", "#1d4ed8"];
+  return (
+    <div style={card}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
+        <span style={{ fontSize: 13, fontWeight: 900, color: "#0f172a" }}>Воронка сделок</span>
+        <span style={{ fontSize: 11, color: "#94a3b8" }}>сейчас в работе по стадиям</span>
+      </div>
+      {stages.map((st, i) => {
+        // Ширина считается от самой массовой стадии, но не уже 18% — иначе
+        // подпись не читается, а стадия визуально «исчезает».
+        const maxCount = Math.max(...stages.map(x => x.count), 1);
+        const width = Math.max(18, Math.round((st.count / maxCount) * 100));
+        const conv = i === 0 ? null : pctOf(st.count, stages[i - 1].count);
+        return (
+          <div key={st.key} style={{ marginBottom: 6 }}>
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <div style={{
+                width: `${width}%`, background: colors[i] || "#2563eb", color: "#fff",
+                borderRadius: 8, padding: "8px 10px", textAlign: "center", minWidth: 0,
+                transition: "width .2s ease",
+              }}>
+                <div style={{ fontSize: 15, fontWeight: 900, lineHeight: 1 }}>{st.count}</div>
+                <div style={{ fontSize: 10, opacity: .9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {st.label}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#94a3b8", padding: "2px 2px 0" }}>
+              <span>{conv !== null ? `→ ${conv}% с прошлой стадии` : ""}</span>
+              <span>{showMoney && st.sum > 0 ? `${fmt(Math.round(st.sum / 1000))}k ₸` : ""}</span>
+            </div>
+          </div>
+        );
+      })}
+      <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 11, color: "#dc2626", flexWrap: "wrap" }}>
+        <span>Потеряно: <b>{funnel?.lost?.count || 0}</b></span>
+        {(funnel?.cancelled?.count || 0) > 0 && <span>Расторгнуто: <b>{funnel.cancelled.count}</b></span>}
+      </div>
+    </div>
+  );
+}
+const pctOf = (part, whole) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
+
 // Компактный список дел: просроченное, забытое, долги. Клик — переход к объекту.
 function ActionList({ title, items = [], empty, fmt, color = "#dc2626", onOpen, unit = "" }) {
   return (
@@ -148,19 +197,24 @@ function ActionList({ title, items = [], empty, fmt, color = "#dc2626", onOpen, 
 
 export function Dashboard({ data, fmt, financialDetails = true, permissions = {}, onOpenObject, onNavFinance }) {
   if (!data) return null;
-  const { sales, backlog, production, finance, cash, dataQuality, trend } = data;
-  // Что кому показывать. Опираемся на уже существующие права роли, чтобы не плодить
-  // отдельные настройки: деньги — financialDetails, стройка — доступ к производству,
-  // продажи — доступ к объектам, «пробелы в данных» — только тем, кто их и правит.
-  const canMoney = financialDetails;
-  const canProduction = permissions.production !== "none";
-  const canSales = permissions.objects !== "none";
-  const canDataQuality = permissions.admin === "full" || permissions.adminCatalog === "all";
+  const { sales, backlog, production, finance, cash, dataQuality, trend, statusFunnel } = data;
   const money = (v) => `${fmt(Math.round(v || 0))} ₸`;
   const short = (v) => `${fmt(Math.round((Number(v) || 0) / 1000))}k ₸`;
 
+  // Права. Важное разделение, на котором раньше ошиблись: СУММЫ ПРОДАЖ (сколько
+  // продали, средний чек) — это работа отдела продаж, их видит любой, кто работает
+  // с объектами. А вот СЕБЕСТОИМОСТЬ, ПРИБЫЛЬ и МАРЖА — только financialDetails,
+  // деньги на счетах и дебиторка — только с доступом к финансам.
+  const canSales = permissions.objects !== "none";
+  const canProduction = permissions.production !== "none";
+  const canProfit = financialDetails;
+  const canCash = permissions.finance !== "none" || financialDetails;
+  const canDataQuality = permissions.admin === "full" || permissions.adminCatalog === "all";
+
+  // Плитки собираются под роль: у продажника сверху продажи, у прораба — стройка,
+  // у руководителя — деньги. Никто не видит пустой экран «не для него».
   const heroes = [];
-  if (canMoney) {
+  if (canCash) {
     heroes.push({
       label: "Деньги на счетах", value: money(cash.total), sub: "остаток сейчас",
       accent: cash.total >= 0 ? "#059669" : "#dc2626", onClick: onNavFinance,
@@ -168,9 +222,8 @@ export function Dashboard({ data, fmt, financialDetails = true, permissions = {}
     });
     heroes.push({
       label: "Выручка за месяц", value: money(finance.income),
-      sub: `валовая ${money(finance.gross)} · ${finance.grossMarginPct}%`,
-      accent: "#0f172a", spark: trend.map(t => t.income), sparkColor: "#2563eb",
-      onClick: onNavFinance,
+      sub: canProfit ? `валовая ${money(finance.gross)} · ${finance.grossMarginPct}%` : "поступления факт",
+      accent: "#0f172a", spark: trend.map(t => t.income), sparkColor: "#2563eb", onClick: onNavFinance,
     });
     heroes.push({
       label: "Дебиторка", value: money(finance.receivables),
@@ -178,11 +231,62 @@ export function Dashboard({ data, fmt, financialDetails = true, permissions = {}
       accent: finance.receivablesOverdue ? "#dc2626" : "#d97706", onClick: onNavFinance,
     });
   }
-  if (canProduction) heroes.push({
-    label: "Объектов в работе", value: production.inWork,
-    sub: `${backlog.activeObjects} в портфеле · ${money(backlog.contracted)}`,
-    accent: "#0f172a", spark: trend.map(t => t.signed), sparkColor: "#7c3aed",
-  });
+  if (canSales) {
+    heroes.push({
+      label: "Подписано за месяц", value: sales.signedCount, sub: money(sales.signedSum),
+      accent: "#059669", spark: trend.map(t => t.signedSum), sparkColor: "#059669",
+    });
+    heroes.push({
+      label: "В согласовании", value: sales.inApprovalCount, sub: money(sales.inApprovalSum),
+      accent: "#d97706",
+    });
+    heroes.push({
+      label: "Конверсия", value: `${sales.convTotal}%`,
+      sub: `новых за месяц: ${sales.newObjects} · средний чек ${short(sales.avgCheck)}`,
+      accent: "#0f172a",
+    });
+  }
+  if (canProduction) {
+    heroes.push({
+      label: "Объектов в работе", value: production.inWork,
+      sub: `${backlog.activeObjects} в портфеле · ${money(backlog.contracted)}`,
+      accent: "#0f172a", spark: trend.map(t => t.signed), sparkColor: "#7c3aed",
+    });
+    heroes.push({
+      label: "Просрочено", value: production.overdueObjects,
+      sub: production.overdueObjects ? `в среднем ${production.overdueAvgDays} дн.` : "всё в срок",
+      accent: production.overdueObjects ? "#dc2626" : "#059669",
+    });
+  }
+
+  const nowRows = [
+    ...(canProduction ? [
+      ["Просроченных этапов", production.overdueStages, "", production.overdueStages ? "#dc2626" : "#059669"],
+      ["Сдаётся в этом месяце", backlog.closingThisMonthCount,
+        canSales ? money(backlog.closingThisMonthSum) : "", "#2563eb"],
+      ["Объектов без движения", production.staleObjects.length, "14+ дней тишины",
+        production.staleObjects.length ? "#d97706" : "#059669"],
+      ["Открытых замечаний", data.quality.openRemarks,
+        data.quality.openOverWeek ? `дольше недели: ${data.quality.openOverWeek}` : "",
+        data.quality.openRemarks ? "#dc2626" : "#059669"],
+    ] : []),
+    ...(canSales ? [
+      ["Срок сделки", sales.avgDealDays ? `${sales.avgDealDays} дн.` : "—",
+        sales.avgDealDaysSample ? `по ${sales.avgDealDaysSample} сделкам` : "нет дат подписания", "#0f172a"],
+      ["Отказов за месяц", sales.lostCount, canSales ? money(sales.lostSum) : "",
+        sales.lostCount ? "#dc2626" : "#059669"],
+    ] : []),
+    ...(canProfit && finance.marginSample > 0 ? [
+      ["Маржа план → факт", `${finance.marginPlanAvg}% → ${finance.marginFactAvg}%`,
+        finance.marginFactAvg < finance.marginPlanAvg
+          ? `теряем ${finance.marginPlanAvg - finance.marginFactAvg} п.` : "держим план",
+        finance.marginFactAvg < finance.marginPlanAvg ? "#dc2626" : "#059669"],
+    ] : []),
+    ...(canDataQuality ? [
+      ["Пробелов в данных", dataQuality.totalGaps, "мешают точности цифр",
+        dataQuality.totalGaps ? "#d97706" : "#059669"],
+    ] : []),
+  ];
 
   return (
     <div style={{ marginBottom: 24 }}>
@@ -190,51 +294,34 @@ export function Dashboard({ data, fmt, financialDetails = true, permissions = {}
         {heroes.map(h => <HeroTile key={h.label} {...h} />)}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.6fr) minmax(0, 1fr)", gap: 12, marginTop: 12 }}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr)", gap: 12, marginTop: 12 }}
         className="dash-main">
-        <TrendChart trend={trend} fmt={fmt} showMoney={financialDetails} />
-
-        <div style={{ display: "grid", gap: 12 }}>
-          <div style={card}>
-            <div style={{ fontSize: 13, fontWeight: 900, color: "#0f172a", marginBottom: 10 }}>Сейчас в компании</div>
-            {[
-              ...(canProduction ? [
-              ["Просрочено объектов", production.overdueObjects,
-                production.overdueObjects ? `в среднем ${production.overdueAvgDays} дн.` : "всё в срок",
-                production.overdueObjects ? "#dc2626" : "#059669"],
-              ["Просроченных этапов", production.overdueStages, "", production.overdueStages ? "#dc2626" : "#059669"],
-              ] : []),
-              ...(canProduction && canMoney ? [
-              ["Сдаётся в этом месяце", backlog.closingThisMonthCount, money(backlog.closingThisMonthSum), "#2563eb"],
-              ] : []),
-              ...(canSales ? [
-              ["В согласовании", sales.inApprovalCount, canMoney ? money(sales.inApprovalSum) : "", "#d97706"],
-              ] : []),
-              ...(canDataQuality ? [
-              ["Пробелов в данных", dataQuality.totalGaps, "мешают точности цифр",
-                dataQuality.totalGaps ? "#d97706" : "#059669"],
-              ] : []),
-            ].map(([label, value, sub, color]) => (
-              <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, padding: "7px 0", borderTop: "1px solid #f4f7fb" }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 12, color: "#334155" }}>{label}</div>
-                  {sub && <div style={{ fontSize: 10.5, color: "#94a3b8" }}>{sub}</div>}
-                </div>
-                <div style={{ fontSize: 16, fontWeight: 900, color }}>{value}</div>
+        <TrendChart trend={trend} fmt={fmt} showMoney={canCash} />
+        <div style={card}>
+          <div style={{ fontSize: 13, fontWeight: 900, color: "#0f172a", marginBottom: 4 }}>Сейчас в компании</div>
+          {nowRows.map(([label, value, sub, color]) => (
+            <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, padding: "7px 0", borderTop: "1px solid #f4f7fb" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12, color: "#334155" }}>{label}</div>
+                {sub && <div style={{ fontSize: 10.5, color: "#94a3b8" }}>{sub}</div>}
               </div>
-            ))}
-          </div>
+              <div style={{ fontSize: 15, fontWeight: 900, color, whiteSpace: "nowrap" }}>{value}</div>
+            </div>
+          ))}
         </div>
       </div>
 
-      {canProduction && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12, marginTop: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12, marginTop: 12 }}>
+        {canSales && <FunnelChart funnel={statusFunnel} fmt={fmt} showMoney={canSales} />}
+        {canProduction && (
           <ActionList title="Горят этапы" items={production.overdueStageList} fmt={fmt}
             empty="Просроченных этапов нет" unit=" просрочки" />
+        )}
+        {canProduction && (
           <ActionList title="Объекты без движения" items={production.staleObjects} fmt={fmt}
             empty="Все объекты в работе" color="#d97706" onOpen={onOpenObject} unit=" тишины" />
-        </div>
-      )}
+        )}
+      </div>
 
       <style>{`@media(max-width:900px){.dash-main{grid-template-columns:1fr!important}}`}</style>
     </div>
