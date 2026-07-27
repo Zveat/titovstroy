@@ -166,7 +166,14 @@ async function fillPhones(masters, phonesPerRun, citySlug, saveProgress) {
     masters.filter(m => m.active !== false && m.specialistId),
     { limit: cap },
   );
-  if (!targets.length) { console.log("телефоны: докапывать нечего"); return { got: 0, done: 0, authError: "" }; }
+  // Ничего не готово к запросу — это НЕ «номера кончились», а «ещё не отлежались»:
+  // мастера без номера ждут повтора (retry) после прошлой попытки. Помечаем прогон idle,
+  // чтобы он не засчитался в счётчик пустых и не выключил harvest раньше времени.
+  if (!targets.length) {
+    const waiting = masters.filter(m => m.active !== false && m.specialistId && !m.phone).length;
+    console.log(`телефоны: сейчас нечего запрашивать — ${waiting} ждут повтора (retry ещё не истёк)`);
+    return { got: 0, done: 0, authError: "", idle: true };
+  }
   console.log(`телефоны: цель ${targets.length} (потолок ${PHONES_HARD_CAP}, бюджет ${Math.round(PHONE_BUDGET_MS / 60e3)} мин)`);
 
   const deadline = Date.now() + PHONE_BUDGET_MS;
@@ -407,7 +414,12 @@ function decideRun(cfg) {
   freshCfg.lastGotPhones = phoneSummary.got;            // сколько собрано за прогон (для логов/диагностики)
   // Счётчик ПУСТЫХ прогонов подряд: >0 собрали → сброс в 0; 0 собрали → +1. harvest выключается,
   // только когда счётчик дорастёт до NAIMI_ZERO_GIVEUP (реальное исчерпание), а не с первого нуля.
-  freshCfg.naimiZeroStreak = phoneSummary.got > 0 ? 0 : (Number(freshCfg.naimiZeroStreak) || 0) + 1;
+  // idle-прогон (никого не было готово к запросу — все ждут retry) НЕ трогает счётчик: иначе
+  // harvest выключался бы просто потому, что заходили чаще, чем истекает retry, и номера
+  // «замерзали» бы навсегда при непустой базе.
+  if (!phoneSummary.idle) {
+    freshCfg.naimiZeroStreak = phoneSummary.got > 0 ? 0 : (Number(freshCfg.naimiZeroStreak) || 0) + 1;
+  }
   freshCfg.lastRunStatus = crawlComplete ? "ok" : "partial";
   freshCfg.lastPhoneError = phoneSummary.authError || "";
   if (availableCities.length) freshCfg.availableCities = availableCities;
