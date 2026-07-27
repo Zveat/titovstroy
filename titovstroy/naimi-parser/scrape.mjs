@@ -200,10 +200,16 @@ async function fillPhones(masters, phonesPerRun, citySlug, saveProgress) {
       } else {
         const c = j?.content || j || {};
         const phone = onlyDigits(c.phone || c.number || c.contact || c.phone_number || "");
-        result = phone ? { status: "found", phone } : { status: "unavailable" };
-        // Первые несколько «пусто» печатаем целиком — чтобы в логе была видна реальная причина
-        // (скрытый номер vs суточный лимит без явного message).
-        if (result.status === "unavailable" && failDumps < 3) { console.log("  · ответ без номера:", JSON.stringify(j).slice(0, 200)); failDumps++; }
+        if (phone) {
+          result = { status: "found", phone };
+        } else {
+          // На naimi у КАЖДОГО мастера есть номер (без него нет регистрации) и скрыть его нельзя.
+          // Значит «пусто» — это НЕ «номера нет», а скрытый лимит/временный сбой. Помечаем retry
+          // (кулдаун 6ч), НЕ unavailable (7 дней), иначе мастер надолго выпадает из очереди и база
+          // «застревает» намного ниже 100%. Первые «пусто» печатаем — видеть реальный ответ naimi.
+          result = { status: "retry", error: "пусто (вероятно скрытый лимит) — повтор" };
+          if (failDumps < 3) { console.log("  · ответ без номера:", JSON.stringify(j).slice(0, 200)); failDumps++; }
+        }
       }
     } catch (e) { result = { status: "retry", error: e.message || "network error" }; }
     Object.assign(m, applyPhoneAttempt(m, result));
@@ -255,14 +261,17 @@ async function writeJson(key, obj) {
 
 // ── Решение «парсить сейчас или нет» по настройкам из базы ─────────────────────
 const INTERVALS = { daily: 22 * 3600e3, twice: 11 * 3600e3, weekly: 6.5 * 24 * 3600e3 };
-// HARVEST-режим найми. Замер показал: лимит найми СКОЛЬЗЯЩИЙ, а не суточный — восстанавливает
-// ~5-6 раскрытий в ~час (прогоны в 15:53/16:53/18:27 дали 6/5/5). Значит хвост непокрытых номеров
-// собирается быстрее, если гонять найми не 2 раза в день, а каждые NAIMI_HARVEST_GAP_MS. Дёргает
-// его тот же внешний OLX-крон (каждые ~30 мин), но decideRun пропускает найми, пока не прошёл зазор.
-// ВАЖНО: каждый номер найми = ЗАЯВКА от РЕАЛЬНОГО аккаунта, поэтому зазор «средний» (2ч ≈ ~60/день),
-// не чаще. Настраивается env NAIMI_HARVEST_GAP_MS. Когда прогон перестаёт находить номера
-// (lastGotPhones===0) — harvest сам выключается, остаётся обычное расписание (freq).
+// HARVEST-режим найми. Лимит найми СКОЛЬЗЯЩИЙ (~5-6 раскрытий в ~час), а на naimi у КАЖДОГО
+// мастера есть номер (без него нет регистрации, скрыть нельзя) → пока есть непокрытые (pending>0),
+// это ВСЕГДА собираемая работа. Поэтому собираем каждые NAIMI_HARVEST_GAP_MS, пока не выберем всех.
+// Дёргает найми тот же внешний OLX-крон (каждые ~30 мин), decideRun пропускает, пока не прошёл зазор.
+// ВАЖНО (был баг): РАНЬШЕ harvest выключался после ОДНОГО прогона с 0 номеров (lastGotPhones===0) —
+// а 0 легко ловится, если прогон стартовал в момент исчерпанного окна лимита. Из-за этого найми
+// падал на расписание раз в 11ч и «застревал». ТЕПЕРЬ выключаем harvest только после
+// NAIMI_ZERO_GIVEUP ПОДРЯД пустых прогонов (реальное исчерпание), а один-два 0 переживаем.
+// Каждый номер найми = ЗАЯВКА от РЕАЛЬНОГО аккаунта, поэтому зазор «средний» (2ч). Настраивается env.
 const NAIMI_HARVEST_GAP_MS = num("NAIMI_HARVEST_GAP_MS", 2 * 3600e3); // «средний» темп: раз в 2 часа
+const NAIMI_ZERO_GIVEUP = num("NAIMI_ZERO_GIVEUP", 8);                // столько ПОДРЯД пустых прогонов → стоп harvest
 function decideRun(cfg) {
   const freq = ["off", "daily", "twice", "weekly"].includes(cfg.frequency) ? cfg.frequency : "daily";
   const runNow = Number(cfg.runNow) || 0;
@@ -275,12 +284,13 @@ function decideRun(cfg) {
   if (runNowPending)                 return { run: true, reason: "кнопка «Обновить сейчас» в CRM", runNow };
   if (freq === "off")                return { run: false, reason: "обновление выключено в настройках", runNow };
   const sinceLast = Date.now() - (Number(cfg.lastRunAt) || 0);
-  // HARVEST: пока есть непокрытые номера И прошлый прогон дал прогресс — собираем каждые ~2ч,
-  // а не 2 раза в день. Так скользящий лимит найми используется эффективнее (без риска перебора).
+  // HARVEST: пока есть непокрытые номера И harvest не «сдался» (мало пустых прогонов подряд) —
+  // собираем каждые ~2ч. Один-два 0-прогона (окно лимита) НЕ выключают harvest, в отличие от старой
+  // логики. Выключается только после NAIMI_ZERO_GIVEUP подряд пустых (реально всё выбрано/аккаунт лёг).
   const pending = Number(cfg.lastPendingPhone) || 0;
-  const progressed = cfg.lastGotPhones == null || Number(cfg.lastGotPhones) > 0; // null = ещё не мерили
-  if (pending > 0 && progressed && sinceLast >= NAIMI_HARVEST_GAP_MS) {
-    return { run: true, reason: `сбор номеров (осталось ~${pending}), темп ${Math.round(NAIMI_HARVEST_GAP_MS / 3600e3 * 10) / 10}ч`, runNow };
+  const zeroStreak = Number(cfg.naimiZeroStreak) || 0;
+  if (pending > 0 && zeroStreak < NAIMI_ZERO_GIVEUP && sinceLast >= NAIMI_HARVEST_GAP_MS) {
+    return { run: true, reason: `сбор номеров (осталось ~${pending}, пустых подряд ${zeroStreak}), темп ${Math.round(NAIMI_HARVEST_GAP_MS / 3600e3 * 10) / 10}ч`, runNow };
   }
   const iv = INTERVALS[freq] || INTERVALS.daily;
   const run = sinceLast >= iv;
@@ -394,7 +404,10 @@ function decideRun(cfg) {
   freshCfg.lastWithPhone = payload.withPhone;
   freshCfg.lastActiveCount = payload.activeCount;
   freshCfg.lastPendingPhone = payload.pendingPhone;
-  freshCfg.lastGotPhones = phoneSummary.got;            // прогресс за прогон — по нему harvest решает, гнать ли дальше
+  freshCfg.lastGotPhones = phoneSummary.got;            // сколько собрано за прогон (для логов/диагностики)
+  // Счётчик ПУСТЫХ прогонов подряд: >0 собрали → сброс в 0; 0 собрали → +1. harvest выключается,
+  // только когда счётчик дорастёт до NAIMI_ZERO_GIVEUP (реальное исчерпание), а не с первого нуля.
+  freshCfg.naimiZeroStreak = phoneSummary.got > 0 ? 0 : (Number(freshCfg.naimiZeroStreak) || 0) + 1;
   freshCfg.lastRunStatus = crawlComplete ? "ok" : "partial";
   freshCfg.lastPhoneError = phoneSummary.authError || "";
   if (availableCities.length) freshCfg.availableCities = availableCities;
