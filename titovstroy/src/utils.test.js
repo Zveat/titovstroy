@@ -849,6 +849,33 @@ describe("умные подсказки сметы", () => {
     expect(resolveEstimateSuggestionRules({ suggestionRules:[] }, catalog)).toEqual([]);
     expect(resolveEstimateSuggestionRules({ suggestionRules:null }, catalog).length).toBeGreaterThan(0);
   });
+
+  it("расширенный набор: сопутствующие работы появляются при наличии обоих кодов", () => {
+    const richCatalog = [
+      { code:"SN-008", name:"Монтаж радиатора отопления", unit:"шт" },
+      { code:"DEM-026", name:"Демонтаж радиатора отопления", unit:"шт" },
+      { code:"TL-002", name:"Укладка плитки на пол", unit:"м²" },
+      { code:"TL-005", name:"Затирка швов", unit:"м²" },
+      { code:"WALL-003", name:"Штукатурка стен (1–3 см)", unit:"м²" },
+      { code:"WALL-001", name:"Грунтовка основания стен", unit:"м²" },
+      { code:"FLOOR-004", name:"Стяжка ц/п до 80 мм (под керамзит)", unit:"м²" },
+      { code:"FLOOR-007", name:"Засыпка керамзита до 100 мм", unit:"м²" },
+    ];
+    const pairs = new Set(
+      createDefaultEstimateSuggestionRules(richCatalog).map(r => `${r.sourceCode}>${r.targetCode}`)
+    );
+    // монтаж радиатора ⇄ демонтаж (в обе стороны)
+    expect(pairs.has("SN-008>DEM-026")).toBe(true);
+    expect(pairs.has("DEM-026>SN-008")).toBe(true);
+    // плитка → затирка (тот же объём), штукатурка → грунтовка
+    expect(pairs.has("TL-002>TL-005")).toBe(true);
+    expect(pairs.has("WALL-003>WALL-001")).toBe(true);
+    // стяжка под керамзит ⇄ засыпка керамзита
+    expect(pairs.has("FLOOR-004>FLOOR-007")).toBe(true);
+    expect(pairs.has("FLOOR-007>FLOOR-004")).toBe(true);
+    // код без пары в прайсе не даёт правил (нет цели SN-009)
+    expect([...pairs].some(p => p.endsWith(">SN-009"))).toBe(false);
+  });
 });
 
 describe("groupData — группировка по категории/подкатегории", () => {
