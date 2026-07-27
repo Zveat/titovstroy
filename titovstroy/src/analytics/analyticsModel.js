@@ -230,7 +230,21 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
   const dealValue = (o) => contractSum(contractByObject.get(o.id)) || objectValue(o);
 
   const withEstimate = cohort.filter(o => objectValue(o) > 0);
-  const signed = cohort.filter(o => ["signed", "work", "done", "paused"].includes(statusOf(o, prodByObject)));
+  // Когорта (создан в периоде) — правильная база для притока и конверсии.
+  const signedFromCohort = cohort.filter(o => ["signed", "work", "done", "paused"].includes(statusOf(o, prodByObject)));
+
+  // А вот «Подписано за период» и срок сделки надо считать по ДАТЕ ПОДПИСАНИЯ,
+  // а не по дате создания объекта: договор, заключённый в июле по объекту с мая,
+  // — это июльская продажа. Раньше такие сделки выпадали, и средние считались
+  // по одной-двум записям.
+  const signedAt = (o) => ts(prodByObject.get(o.id)?.saleDate)
+    || ts(contractByObject.get(o.id)?.date || contractByObject.get(o.id)?.contractDate);
+  const signed = liveObjects
+    .filter(o => o.status !== "archive")
+    .filter(o => period === "all" || o.createdBy !== "migration")
+    .filter(o => !manager || resolveManager(o.manager) === resolveManager(manager))
+    .filter(o => ["signed", "work", "done", "paused"].includes(statusOf(o, prodByObject)))
+    .filter(o => (period === "all" ? true : inRange(signedAt(o), from, to)));
   const inApproval = cohort.filter(o => statusOf(o, prodByObject) === "approval");
   // «Потеряли» — это про отказ клиента ДО работ. Расторжение уже подписанного
   // договора — другая история, её сюда не мешаем.
@@ -248,11 +262,9 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
   // не заполнили, берём дату договора как запасной вариант.
   const dealDays = [];
   for (const o of signed) {
-    const prod = prodByObject.get(o.id);
-    const contract = contractByObject.get(o.id);
-    const signedAt = ts(prod?.saleDate) || ts(contract?.date || contract?.contractDate);
+    const closedAt = signedAt(o);
     const createdAt = ts(o.createdAt);
-    if (signedAt && createdAt && signedAt >= createdAt) dealDays.push(days(createdAt, signedAt));
+    if (closedAt && createdAt && closedAt >= createdAt) dealDays.push(days(createdAt, closedAt));
   }
 
   // Цена за м² — только по подписанным с указанной площадью.
@@ -268,7 +280,7 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
     lostByReason[key].sum += objectValue(o);
   }
 
-  const signedSet = new Set(signed.map(o => o.id));
+  const signedSet = new Set(signedFromCohort.map(o => o.id));
   const byManager = {};
   for (const o of cohort) {
     const key = resolveManager(o.manager);
@@ -315,8 +327,9 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
     avgCheck: signed.length ? Math.round(signedSum / signed.length) : 0,
     // Воронка по шагам: сколько дошло от предыдущего этапа.
     convToEstimate: pct(withEstimate.length, cohort.length),
-    convToSigned: pct(signed.length, withEstimate.length),
-    convTotal: pct(signed.length, cohort.length),
+    convToSigned: pct(signedFromCohort.length, withEstimate.length),
+    convTotal: pct(signedFromCohort.length, cohort.length),
+    signedFromCohortCount: signedFromCohort.length,
     avgDealDays: dealDays.length ? Math.round(dealDays.reduce((s, d) => s + d, 0) / dealDays.length) : 0,
     // Сколько сделок реально попало в среднее: срок считается только там, где есть
     // и дата создания объекта, и дата договора. Без этого числа среднее по 2 сделкам
@@ -805,6 +818,39 @@ function buildDataQuality(idx, financeTx, resolveManager) {
   };
 }
 
+// Тренд за последние 6 месяцев — для графика на «Главной». Считается всегда за
+// свой интервал, независимо от выбранного периода: график должен показывать
+// динамику, а не кусок выбранного фильтра.
+function buildTrend(idx, financeTx, now, months = 6) {
+  const { liveObjects, objectValue, contractByObject, prodByObject } = idx;
+  const keys = [];
+  const base = new Date(now);
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(base.getFullYear(), base.getMonth() - i, 1);
+    keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+  const byMonth = {};
+  for (const k of keys) byMonth[k] = { month: k, income: 0, expense: 0, signed: 0, signedSum: 0 };
+
+  for (const t of financeTx) {
+    if (!t || t.deletedAt || t.included === false) continue;
+    const k = monthKey(txDate(t));
+    if (!byMonth[k]) continue;
+    const amt = num(t.amount);
+    if (t.type === "income" && isPLIncome(t)) byMonth[k].income += amt;
+    else if (t.type === "expense" && isPLExpense(t)) byMonth[k].expense += amt;
+  }
+  for (const o of liveObjects) {
+    if (!["signed", "work", "done", "paused"].includes(statusOf(o, prodByObject))) continue;
+    const contract = contractByObject.get(o.id);
+    const k = monthKey(ts(prodByObject.get(o.id)?.saleDate) || ts(contract?.date || contract?.contractDate));
+    if (!byMonth[k]) continue;
+    byMonth[k].signed += 1;
+    byMonth[k].signedSum += contractSum(contract) || objectValue(o);
+  }
+  return keys.map(k => byMonth[k]);
+}
+
 // ─── Главная точка входа ─────────────────────────────────────────────────────
 export function buildAnalytics(data = {}, options = {}) {
   const { period = "all", from, to, now = Date.now(), manager = "", users = [] } = options;
@@ -826,6 +872,7 @@ export function buildAnalytics(data = {}, options = {}) {
       .reduce((s, r) => s + r.value, 0),
   });
   current.dataQuality = buildDataQuality(idx, financeTx, resolveManager);
+  current.trend = buildTrend(idx, financeTx, now);
 
   // Сравнение с предыдущим периодом. «Портфель» и «Качество» — состояние на сейчас
   // (в базе нет дат закрытия замечаний), поэтому у них сравнения нет и быть не может.

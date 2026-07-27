@@ -127,14 +127,14 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
           <Tile label="Объектов со сметой" value={sales.estimatedCount} sub={money(sales.estimatedSum)}
             delta={d(previous?.sales.estimatedSum, sales.estimatedSum)} />
           <Tile label="В согласовании" value={sales.inApprovalCount} sub={money(sales.inApprovalSum)} accent="#d97706" />
-          <Tile label="Подписано" value={sales.signedCount} sub={money(sales.signedSum)} accent="#059669"
-            delta={d(previous?.sales.signedSum, sales.signedSum)} />
+          <Tile label="Подписано" value={sales.signedCount} sub={`${money(sales.signedSum)} · по дате подписания`}
+            accent="#059669" delta={d(previous?.sales.signedSum, sales.signedSum)} />
           <Tile label="Средний чек" value={money(sales.avgCheck)} sub="на подписанный объект" />
           <Tile label="Конверсия" value={`${sales.convTotal}%`} sub="объект → договор"
             delta={d(previous?.sales.convTotal, sales.convTotal)} />
           <Tile label="Срок сделки" value={sales.avgDealDays ? `${sales.avgDealDays} дн.` : "—"}
             sub={sales.avgDealDaysSample
-              ? `от заявки до договора · по ${sales.avgDealDaysSample} сделкам`
+              ? `от заведения объекта до подписания · по ${sales.avgDealDaysSample} сделкам`
               : "нет сделок с датой договора"} />
           <Tile label="Цена за м²" value={sales.avgPricePerSqm ? money(sales.avgPricePerSqm) : "—"}
             sub={sales.avgPricePerSqmSample
@@ -155,7 +155,7 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
             {[
               ["Создано объектов", sales.newObjects, 100],
               ["Посчитана смета", sales.estimatedCount, sales.convToEstimate],
-              ["Подписан договор", sales.signedCount, sales.convTotal],
+              ["Подписан договор", sales.signedFromCohortCount, sales.convTotal],
             ].map(([label, count, percent]) => (
               <BarRow key={label} label={label} value={percent} max={100} note={`${count} · ${percent}%`} />
             ))}
