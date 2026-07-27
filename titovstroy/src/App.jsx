@@ -9151,9 +9151,10 @@ ${reqBlock}`;
   // без фильтра по менеджеру — главная показывает состояние компании, а не срез,
   // выбранный на экране аналитики.
   const dashboardStats = useMemo(() => buildAnalytics(
-    { objects, estimates, contracts, productions, financeTx, estimateCost: analyticsData.estCost },
+    { objects, estimates, contracts, productions, financeTx,
+      accounts: financeMeta?.accounts || [], estimateCost: analyticsData.estCost },
     { period: "month", users: allUsers },
-  ), [objects, estimates, contracts, productions, financeTx, analyticsData, allUsers]);
+  ), [objects, estimates, contracts, productions, financeTx, financeMeta, analyticsData, allUsers]);
 
   // Блоки аналитики (продажи / портфель / производство / финансы / качество).
   // Считает чистая функция buildAnalytics — те же числа доступны и для «Главной».
@@ -9166,6 +9167,7 @@ ${reqBlock}`;
       contracts,
       productions,
       financeTx,
+      accounts: financeMeta?.accounts || [],
       estimateCost: analyticsData.estCost,
     },
     {
@@ -9177,7 +9179,7 @@ ${reqBlock}`;
       // сотрудников: варианты («Сергей Ш.») сводятся к заведённому в системе.
       users: allUsers,
     },
-  ), [analyticsObjects, analyticsEstimates, contracts, productions, financeTx, analyticsData,
+  ), [analyticsObjects, analyticsEstimates, contracts, productions, financeTx, financeMeta, analyticsData,
       statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers]);
 
   // Защита от краша: если activeCat не в Gdyn — берём первый
@@ -11345,88 +11347,6 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 onDismiss={_isAdmin ? dismissDashboardIssue : undefined}
                 emptyText={_isUser ? "По вашим объектам всё в порядке" : "Всё под контролем — срочных задач нет"}
               />
-            </div>
-          )}
-
-          {/* KPI карточки */}
-          <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14,marginBottom:24}}>
-            {[
-              {label:"Объектов за "+monthName, value:objectsThisMonth.length, sub:"активность месяца", icon:"📋", accent:"#2563eb"},
-              {label:"Объём за "+monthName, value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма смет", icon:"💰", accent:"#059669"},
-              ...(hasFinancialDetails ? [
-                {label:"Прибыль за "+monthName, value:fmt(Math.round(profitMonth))+" ₸", sub:"по подписанным", icon:"📈", accent:profitMonth>0?"#059669":"#ef4444"},
-                {label:"Маржа за "+monthName, value:marginMonth+"%", sub:"рентабельность", icon:"🎯", accent:marginMonth>=35?"#059669":marginMonth>=20?"#d97706":"#ef4444"},
-              ] : []),
-              {label:"Пайплайн (согласование)", value:fmt(Math.round(pipelineSum))+" ₸", sub:approvalObjs.length+" объектов", icon:"🔄", accent:"#d97706"},
-              {label:"Подписано за "+monthName, value:signedContractsMonth.length, sub:"всего подписано "+signedContracts.length, icon:"✅", accent:"#059669"},
-            ].map((s,i)=>(
-              <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden"}}
-                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
-                onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)";}}>
-                <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:s.accent,opacity:.85}}/>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                  <div style={{fontSize:12,color:"#64748b",fontWeight:600,lineHeight:1.3,flex:1,paddingRight:8}}>{s.label}</div>
-                  <span style={{width:38,height:38,borderRadius:11,background:s.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{s.icon}</span>
-                </div>
-                <div className="kpi-val" style={{fontSize:26,fontWeight:800,color:"#0f172a",lineHeight:1,marginBottom:6,letterSpacing:-.5}}>{s.value}</div>
-                <div style={{fontSize:11.5,color:"#94a3b8",fontWeight:500}}>{s.sub}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* ── Finance KPIs (admin/manager) ── */}
-          {_finKpi&&(
-            <div style={{marginBottom:24}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#64748b",marginBottom:10,textTransform:"uppercase",letterSpacing:".05em"}}>💰 Финансы по проектам</div>
-              <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14}}>
-                {[
-                  {label:"Активных проектов", value:_finKpi.count, sub:"в работе + новые", icon:"📁", accent:"#2563eb"},
-                  {label:"Выручка за "+monthName, value:fmt(_finKpi.incMonth)+" ₸", sub:"оплачено факт", icon:"💵", accent:"#059669"},
-                  {label:"Дебиторка", value:fmt(_finKpi.totalDebt)+" ₸", sub:"долги клиентов", icon:"⏳", accent:_finKpi.totalDebt>0?"#dc2626":"#059669"},
-                  {label:"Маржа план", value:_finKpi.margin!=null?_finKpi.margin+"%":"—", sub:"бюджет минус расходы", icon:"📊", accent:_finKpi.margin!=null&&_finKpi.margin>=30?"#059669":_finKpi.margin!=null&&_finKpi.margin>=0?"#d97706":"#dc2626"},
-                ].map((s,i)=>(
-                  <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden",cursor:"pointer"}}
-                    onClick={()=>setScreen("finance")}
-                    onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
-                    onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)";}}>
-                    <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:s.accent,opacity:.85}}/>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                      <div style={{fontSize:12,color:"#64748b",fontWeight:600,lineHeight:1.3,flex:1,paddingRight:8}}>{s.label}</div>
-                      <span style={{width:38,height:38,borderRadius:11,background:s.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{s.icon}</span>
-                    </div>
-                    <div className="kpi-val" style={{fontSize:26,fontWeight:800,color:"#0f172a",lineHeight:1,marginBottom:6,letterSpacing:-.5}}>{s.value}</div>
-                    <div style={{fontSize:11.5,color:"#94a3b8",fontWeight:500}}>{s.sub}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* ── Production KPIs (admin/manager) ── */}
-          {_prodKpi&&(
-            <div style={{marginBottom:24}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#64748b",marginBottom:10,textTransform:"uppercase",letterSpacing:".05em"}}>🏗 Производство</div>
-              <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14}}>
-                {[
-                  {label:"В работе", value:_prodKpi.inWork, sub:"объектов в статусе «В работе»", icon:"🔨", accent:"#2563eb"},
-                  {label:"Просрочено", value:_prodKpi.overdue, sub:"плановый срок истёк", icon:"🚨", accent:_prodKpi.overdue>0?"#dc2626":"#059669"},
-                  {label:"Сдано за "+monthName, value:_prodKpi.doneMonth, sub:"объектов завершено", icon:"✅", accent:"#059669"},
-                  {label:"Открытых замечаний", value:_prodKpi.defects, sub:"незакрытые дефекты", icon:"⚠️", accent:_prodKpi.defects>0?"#d97706":"#059669"},
-                ].map((s,i)=>(
-                  <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden",cursor:"pointer"}}
-                    onClick={()=>setScreen("objects")}
-                    onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
-                    onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)";}}>
-                    <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:s.accent,opacity:.85}}/>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                      <div style={{fontSize:12,color:"#64748b",fontWeight:600,lineHeight:1.3,flex:1,paddingRight:8}}>{s.label}</div>
-                      <span style={{width:38,height:38,borderRadius:11,background:s.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{s.icon}</span>
-                    </div>
-                    <div className="kpi-val" style={{fontSize:26,fontWeight:800,color:"#0f172a",lineHeight:1,marginBottom:6,letterSpacing:-.5}}>{s.value}</div>
-                    <div style={{fontSize:11.5,color:"#94a3b8",fontWeight:500}}>{s.sub}</div>
-                  </div>
-                ))}
-              </div>
             </div>
           )}
 
