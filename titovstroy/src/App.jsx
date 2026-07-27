@@ -163,7 +163,7 @@ function IssuePanel({ issues, onNav, onDismiss, emptyText = "✓ Всё чист
                         {issue.detail && <span style={{ display:"block", fontSize:11.5, color:"#64748b", lineHeight:1.4, marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{issue.detail}</span>}
                       </span>
                       <span style={{ display:"flex", alignItems:"center", gap:5 }}>
-                        {onDismiss && issue.dismissable && <button type="button" title="Скрыть до завтра" onClick={e=>{e.stopPropagation();onDismiss(issue.id);}}
+                        {onDismiss && issue.dismissable && <button type="button" title={issue.dismissLabel || "Скрыть до завтра"} onClick={e=>{e.stopPropagation();onDismiss(issue);}}
                           style={{ width:28, height:28, border:"1px solid #e2e8f0", borderRadius:6, background:"#fff", color:"#94a3b8", cursor:"pointer", fontFamily:"inherit" }}>×</button>}
                         <span style={{ color:"#cbd5e1", fontSize:16 }}>›</span>
                       </span>
@@ -253,7 +253,7 @@ function OperationsPanel({ issues, onNav, onDismiss, emptyText = "Всё под 
             {group.issues.map((issue,index)=><div key={issue.id} onClick={()=>onNav&&onNav(issue.nav)}
               style={{minHeight:48,padding:"8px 14px 8px 0",borderBottom:index===group.issues.length-1?0:"1px solid #e8edf3",display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,alignItems:"center",cursor:onNav?"pointer":"default"}}>
               <div style={{minWidth:0}}><div style={{fontSize:12.5,fontWeight:700,color:"#1e293b"}}>{issue.title}</div>{issue.detail&&<div style={{fontSize:11,color:"#64748b",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{issue.detail}</div>}</div>
-              <div style={{display:"flex",alignItems:"center",gap:5}}>{onDismiss&&issue.dismissable&&<button type="button" title="Скрыть до завтра" onClick={event=>{event.stopPropagation();onDismiss(issue.id);}} style={{width:26,height:26,border:"1px solid #dbe3ec",borderRadius:6,background:"#fff",color:"#94a3b8",cursor:"pointer"}}>×</button>}<span style={{color:"#94a3b8",fontSize:16}}>›</span></div>
+              <div style={{display:"flex",alignItems:"center",gap:5}}>{onDismiss&&issue.dismissable&&<button type="button" title={issue.dismissLabel || "Скрыть до завтра"} onClick={event=>{event.stopPropagation();onDismiss(issue);}} style={{width:26,height:26,border:"1px solid #dbe3ec",borderRadius:6,background:"#fff",color:"#94a3b8",cursor:"pointer"}}>×</button>}<span style={{color:"#94a3b8",fontSize:16}}>›</span></div>
             </div>)}
           </div>}
         </div>;
@@ -6810,6 +6810,31 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     _prodQueue.current = next.then(() => {}, () => {});
     return next;
   }, [currentUser?.id, _refreshProdUnsynced, _clearCloudErrorIfAllClean]);
+
+  const dismissDashboardIssue = useCallback(async issue => {
+    if (!issue?.id) return;
+    if (issue.dismissAction?.type !== "client-remark") {
+      dismissIssueTomorrow(issue.id);
+      return;
+    }
+    const { objectId, itemId } = issue.dismissAction;
+    if (!objectId || !itemId) return;
+    const result = await mutateProductions({
+      type:"patch-item",
+      objectId,
+      field:"defects",
+      itemId,
+      patch:{
+        dashboardDismissedAt:Date.now(),
+        dashboardDismissedBy:currentUser?.id || currentUser?.name || "admin",
+      },
+      changeId:`bg_dismiss_remark_${objectId}_${itemId}`,
+    });
+    if (!result?.committed && !result?.conflict) {
+      alert("Не удалось убрать замечание с главной. Проверьте соединение и повторите.");
+    }
+  }, [currentUser?.id, currentUser?.name, dismissIssueTomorrow, mutateProductions]);
+
   // 2Б: связать module-scope очередь с App сразу после входа и поднять фоновые команды прошлого
   // запуска. Это работает даже если пользователь ещё не открыл ни одной карточки объекта.
   useEffect(() => {
@@ -11155,7 +11180,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>{new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"})} · <span style={{color:"#bfdbfe",fontWeight:600}}>{currentUser.name}</span></div>
           </div>
           <div style={{fontSize:16,fontWeight:900,color:"#0f172a",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>🔥 Что требует внимания по моим объектам</div>
-          <OperationsPanel issues={_myIssues} onNav={openIssue} onDismiss={_isAdmin ? dismissIssueTomorrow : undefined} emptyText="По вашим объектам всё в порядке" />
+          <OperationsPanel issues={_myIssues} onNav={openIssue} onDismiss={_isAdmin ? dismissDashboardIssue : undefined} emptyText="По вашим объектам всё в порядке" />
         </div>
       )}
       {effScreen === "dashboard" && currentPermissions.dashboard !== "none" && !_isForeman && (()=>{
@@ -11281,7 +11306,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               <OperationsPanel
                 issues={_isUser ? _myIssues : (hasFinancialDetails ? _todayIssues : _todayIssues.filter(i=>i.group!=="Финансы"))}
                 onNav={openIssue}
-                onDismiss={_isAdmin ? dismissIssueTomorrow : undefined}
+                onDismiss={_isAdmin ? dismissDashboardIssue : undefined}
                 emptyText={_isUser ? "По вашим объектам всё в порядке" : "Всё под контролем — срочных задач нет"}
               />
             </div>

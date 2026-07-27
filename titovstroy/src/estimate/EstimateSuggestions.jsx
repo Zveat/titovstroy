@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const inputStyle = {
   border: "1px solid #dbe4f0",
@@ -9,6 +9,69 @@ const inputStyle = {
   fontSize: 12,
   outline: "none",
 };
+
+function CatalogWorkPicker({ catalog, value, placeholder, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const rootRef = useRef(null);
+  const searchRef = useRef(null);
+  const selected = useMemo(() => catalog.find(item => item.code === value), [catalog, value]);
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase("ru");
+    if (!needle) return catalog;
+    return catalog.filter(item => [item.name, item.code, item.cat, item.sub]
+      .some(part => String(part || "").toLocaleLowerCase("ru").includes(needle)));
+  }, [catalog, query]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOutside = event => {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    };
+    const closeOnEscape = event => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    const timer = setTimeout(() => searchRef.current?.focus(), 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("mousedown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  const choose = code => {
+    onChange(code);
+    setQuery("");
+    setOpen(false);
+  };
+
+  return (
+    <div ref={rootRef} style={{ position:"relative", minWidth:0 }}>
+      <button type="button" onClick={() => setOpen(current => !current)} aria-expanded={open}
+        style={{ ...inputStyle, width:"100%", height:36, padding:"0 10px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, cursor:"pointer", textAlign:"left" }}>
+        <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", color:selected?"#0f172a":"#64748b" }}>{selected?.name || placeholder}</span>
+        <span aria-hidden="true" style={{ color:"#94a3b8", flexShrink:0 }}>{open ? "▲" : "▼"}</span>
+      </button>
+      {open && <div style={{ position:"absolute", top:"calc(100% + 5px)", left:0, right:0, zIndex:80, minWidth:300, background:"#fff", border:"1px solid #dbe4f0", borderRadius:7, boxShadow:"0 12px 30px rgba(15,23,42,.16)", overflow:"hidden" }}>
+        <div style={{ padding:8, borderBottom:"1px solid #eef2f7" }}>
+          <input ref={searchRef} value={query} onChange={event => setQuery(event.target.value)} placeholder="Поиск по названию или разделу..."
+            style={{ ...inputStyle, width:"100%", height:34, padding:"0 10px", boxSizing:"border-box" }}/>
+        </div>
+        <div style={{ maxHeight:270, overflowY:"auto", overscrollBehavior:"contain" }}>
+          {value && <button type="button" onClick={() => choose("")} style={{ width:"100%", border:0, borderBottom:"1px solid #f1f5f9", background:"#fff", color:"#64748b", padding:"9px 10px", textAlign:"left", cursor:"pointer", fontFamily:"inherit", fontSize:11.5 }}>Очистить выбор</button>}
+          {filtered.length === 0 && <div style={{ padding:"16px 10px", color:"#94a3b8", fontSize:11.5 }}>Ничего не найдено</div>}
+          {filtered.map(item => <button key={item.code} type="button" onClick={() => choose(item.code)}
+            style={{ width:"100%", border:0, borderBottom:"1px solid #f1f5f9", background:item.code===value?"#eff6ff":"#fff", padding:"8px 10px", textAlign:"left", cursor:"pointer", fontFamily:"inherit" }}>
+            <span style={{ display:"block", color:"#0f172a", fontSize:11.5, fontWeight:item.code===value?800:650, lineHeight:1.3 }}>{item.name}</span>
+            {(item.cat || item.sub) && <span style={{ display:"block", color:"#94a3b8", fontSize:9.5, marginTop:2 }}>{[item.cat, item.sub].filter(Boolean).join(" · ")}</span>}
+          </button>)}
+        </div>
+      </div>}
+    </div>
+  );
+}
 
 export function EstimateSuggestions({ estimateKey, suggestions = [], onAdd, fmt = n => n }) {
   const [open, setOpen] = useState(false);
@@ -148,7 +211,7 @@ export function EstimateSuggestionRulesEditor({ catalog = [], rules = [], usesDe
   };
 
   return (
-    <section style={{ marginBottom:12, border:"1px solid #e2e8f0", borderRadius:8, background:"#fff", overflow:"hidden" }}>
+    <section style={{ marginBottom:12, border:"1px solid #e2e8f0", borderRadius:8, background:"#fff", overflow:open?"visible":"hidden" }}>
       <button type="button" onClick={() => setOpen(value => !value)} style={{
         width:"100%", padding:"11px 13px", border:0, background:"#f8fafc", cursor:"pointer",
         display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, fontFamily:"inherit", textAlign:"left",
@@ -181,15 +244,9 @@ export function EstimateSuggestionRulesEditor({ catalog = [], rules = [], usesDe
 
           {!disabled && (
             <div style={{ display:"grid", gridTemplateColumns:"minmax(150px,1fr) 24px minmax(150px,1fr) 92px minmax(180px,1fr) auto", gap:7, alignItems:"center" }} className="suggestion-rule-form">
-              <select value={draft.sourceCode} onChange={e => setDraft(prev => ({ ...prev, sourceCode:e.target.value }))} style={{ ...inputStyle, padding:"7px 8px", minWidth:0 }}>
-                <option value="">Если выбрана работа…</option>
-                {sortedCatalog.map(item => <option key={item.code} value={item.code}>{item.name}</option>)}
-              </select>
+              <CatalogWorkPicker catalog={sortedCatalog} value={draft.sourceCode} placeholder="Если выбрана работа..." onChange={sourceCode => setDraft(prev => ({ ...prev, sourceCode }))}/>
               <span style={{ textAlign:"center", color:"#94a3b8" }}>→</span>
-              <select value={draft.targetCode} onChange={e => setDraft(prev => ({ ...prev, targetCode:e.target.value }))} style={{ ...inputStyle, padding:"7px 8px", minWidth:0 }}>
-                <option value="">Подсказать работу…</option>
-                {sortedCatalog.map(item => <option key={item.code} value={item.code}>{item.name}</option>)}
-              </select>
+              <CatalogWorkPicker catalog={sortedCatalog} value={draft.targetCode} placeholder="Подсказать работу..." onChange={targetCode => setDraft(prev => ({ ...prev, targetCode }))}/>
               <input type="number" min="0" step="0.01" value={draft.multiplier} onChange={e => setDraft(prev => ({ ...prev, multiplier:e.target.value }))} placeholder="× / вручную" title="Коэффициент объёма; оставьте пустым для ручного ввода" style={{ ...inputStyle, padding:"7px 8px", width:"100%" }}/>
               <input value={draft.reason} onChange={e => setDraft(prev => ({ ...prev, reason:e.target.value }))} placeholder="Почему рекомендуем" style={{ ...inputStyle, padding:"7px 8px", minWidth:0 }}/>
               <button type="button" onClick={addRule} className="btn btn-o" style={{ padding:"7px 10px", fontSize:11, whiteSpace:"nowrap" }}>＋ Правило</button>

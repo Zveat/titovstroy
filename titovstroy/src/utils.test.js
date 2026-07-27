@@ -1042,9 +1042,13 @@ describe("computeIssues — детектор «Что горит» / «Пров�
         { id:"d1", text:"Скол на плитке", source:"client", done:false },
         { id:"d2", text:"Своё внутреннее", source:"client", done:true },
         { id:"d3", text:"Не от клиента", source:"internal", done:false },
+        { id:"d4", text:"Убрано администратором с главной", source:"client", done:false, dashboardDismissedAt:now - 1 },
       ] }],
     }, { now });
-    expect(find(issues, "client-remark:o1").length).toBe(1);
+    const remarks = find(issues, "client-remark:o1");
+    expect(remarks.length).toBe(1);
+    expect(remarks[0].dismissAction).toEqual({ type:"client-remark", objectId:"o1", itemId:"d1" });
+    expect(remarks[0].dismissLabel).toBe("Убрать с главной");
   });
 
   it("дубли номеров договоров → red в check", () => {

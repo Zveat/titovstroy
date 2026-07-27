@@ -892,9 +892,12 @@ export function computeIssues(data = {}, opts = {}) {
   for (const o of objects) {
     const p = prodByObj[o.id]; if (!p) continue;
     for (const d of (p.defects||[])) {
-      if (!d || d.source!=="client" || d.done) continue;
-      out.push({ id:`client-remark:${o.id}:${d.id||d.clientRemarkId||d.ts}`, group:"Клиенты", sev:"red", scope:"today", dismissable:true,
+      if (!d || d.source!=="client" || d.done || d.dashboardDismissedAt) continue;
+      const itemId = d.id || "";
+      out.push({ id:`client-remark:${o.id}:${itemId||d.clientRemarkId||d.ts}`, group:"Клиенты", sev:"red", scope:"today", dismissable:Boolean(itemId),
         title:"Замечание клиента", detail:`${_objLabel(o)}: «${String(d.text||"").slice(0,80)}»`,
+        dismissAction:itemId ? { type:"client-remark", objectId:o.id, itemId } : null,
+        dismissLabel:"Убрать с главной",
         nav:{ object:o.id, tab:"defects" } });
     }
   }
