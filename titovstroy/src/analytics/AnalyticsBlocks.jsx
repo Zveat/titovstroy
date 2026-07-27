@@ -70,7 +70,7 @@ function BarRow({ label, value, max, note, color = "#2563eb" }) {
 
 // Раскрывающийся список «что именно посчиталось». Нужен, чтобы цифру можно было
 // проверить глазами, а не верить на слово.
-function AuditList({ items, fmt }) {
+function AuditList({ items, fmt, title = "Показать список" }) {
   const [open, setOpen] = useState(false);
   if (!items?.length) return null;
   const dt = (t) => (t ? new Date(t).toLocaleDateString("ru-RU") : "—");
@@ -79,7 +79,7 @@ function AuditList({ items, fmt }) {
       <button type="button" onClick={() => setOpen(v => !v)}
         style={{ border: 0, background: "transparent", color: "#2563eb", cursor: "pointer",
                  fontFamily: "inherit", fontSize: 11, padding: 0 }}>
-        {open ? "▲ скрыть список" : `▼ показать список (${items.length})`}
+        {open ? `▲ скрыть · ${title.toLowerCase()}` : `▼ ${title.toLowerCase()} (${items.length})`}
       </button>
       {open && (
         <div style={{ marginTop: 6, maxHeight: 260, overflow: "auto", border: "1px solid #eef2f7", borderRadius: 8 }}>
@@ -147,7 +147,7 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
           )}
         </div>
 
-        <AuditList items={sales.cohortList} fmt={fmt} />
+        <AuditList items={sales.cohortList} fmt={fmt} title="Какие объекты посчитаны" />
 
         <div style={{ ...grid(260), marginTop: 10 }}>
           <div style={card}>
@@ -197,18 +197,6 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
         <div style={grid()}>
           <Tile label="Объектов в портфеле" value={backlog.activeObjects} sub="подписаны и в работе" />
           <Tile label="Законтрактовано" value={money(backlog.contracted)} />
-          <Tile label="Выполнено"
-            value={backlog.objectsWithStagePrices ? money(backlog.doneValue) : "нет данных"}
-            sub={backlog.objectsWithStagePrices
-              ? `по закрытым этапам (${backlog.objectsWithStagePrices} об. с ценами этапов)`
-              : "у этапов не заполнены цены"}
-            accent="#059669" />
-          <Tile label="Осталось выполнить"
-            value={backlog.objectsWithStagePrices ? money(backlog.remaining) : "—"}
-            sub={backlog.objectsWithStagePrices
-              ? `из ${money(backlog.stagesValue)} по этапам · выполнено ${backlog.stagesProgressPct}%`
-              : "нужны цены этапов"}
-            accent="#2563eb" />
           <Tile label="Закрывается в этом месяце" value={backlog.closingThisMonthCount}
             sub={money(backlog.closingThisMonthSum)} accent="#d97706" />
         </div>
@@ -284,8 +272,6 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
               sub={`${money(finance.unlinkedSum)} — платежи сопоставить не с чем`} accent="#d97706" />
           )}
         </div>
-
-        <AuditList items={finance.receivableList} fmt={fmt} />
 
         <div style={{ ...grid(260), marginTop: 10 }}>
           <div style={card}>
@@ -391,3 +377,47 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
 }
 
 export default AnalyticsBlocks;
+
+// ─── Плитки для «Главной» ────────────────────────────────────────────────────
+// Не аналитика, а «что происходит прямо сейчас»: сколько в работе, что горит,
+// сколько денег ждём. Числа берутся из той же модели, что и аналитика, поэтому
+// сходятся с ней один в один.
+export function DashboardKpis({ data, fmt, financialDetails = true, onNav }) {
+  if (!data) return null;
+  const { sales, backlog, production, finance, quality } = data;
+  const money = (v) => `${fmt(Math.round(v || 0))} ₸`;
+
+  const tiles = [
+    { label: "Объектов в работе", value: production.inWork,
+      sub: production.paused ? `на паузе: ${production.paused}` : "без пауз" },
+    { label: "Просрочено", value: production.overdueObjects,
+      sub: production.overdueObjects ? `в среднем на ${production.overdueAvgDays} дн.` : "всё в срок",
+      accent: production.overdueObjects ? "#dc2626" : "#059669" },
+    { label: "Подписано за месяц", value: sales.signedCount, sub: money(sales.signedSum), accent: "#059669" },
+    { label: "Замечаний открыто", value: quality.openRemarks,
+      sub: quality.openOverWeek ? `дольше недели: ${quality.openOverWeek}` : "свежие",
+      accent: quality.openRemarks ? "#dc2626" : "#059669" },
+  ];
+  if (financialDetails) {
+    tiles.push(
+      { label: "Дебиторка", value: money(finance.receivables),
+        sub: finance.receivablesOverdue ? `просрочено: ${money(finance.receivablesOverdue)}` : "без просрочки",
+        accent: finance.receivablesOverdue ? "#dc2626" : "#d97706" },
+      { label: "Закрывается в этом месяце", value: backlog.closingThisMonthCount,
+        sub: money(backlog.closingThisMonthSum), accent: "#2563eb" },
+    );
+  }
+
+  return (
+    <div style={{ ...grid(150), marginBottom: 24 }}>
+      {tiles.map(t => (
+        <div key={t.label} onClick={onNav ? () => onNav(t.label) : undefined}
+          style={{ ...card, cursor: onNav ? "pointer" : "default" }}>
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>{t.label}</div>
+          <div style={{ fontSize: 22, fontWeight: 900, color: t.accent || "#0f172a", lineHeight: 1.15 }}>{t.value}</div>
+          {t.sub && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>{t.sub}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
