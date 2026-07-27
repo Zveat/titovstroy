@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  buildAnalytics, periodBounds, deltaPct, contractSum, ts,
+  buildAnalytics, periodBounds, deltaPct, contractSum, ts, makeManagerResolver,
   REFUSE_REASONS, refuseReasonLabel, ANALYTICS_BLOCKS,
 } from "./analyticsModel.js";
 
@@ -60,6 +60,10 @@ const fixture = () => ({
     { id:"t8", type:"income",  amount:50000,  date: dstr(-3), contractNo:"№12", isAdvance:true },
     // Без поля date — дата берётся из createdAt
     { id:"t9", type:"expense", amount:10000,  createdAt: NOW - 2*DAY, category:"Материалы" },
+    // Прямая себестоимость — вычитается из ВАЛОВОЙ прибыли
+    { id:"t10", type:"expense", amount:250000, date: dstr(-3), contractNo:"№12", category:"Прямые расходы (COGS / себестоимость)" },
+    // Дивиденды — распределение прибыли, в расходы P&L не входят
+    { id:"t11", type:"expense", amount:70000,  date: dstr(-3), category:"Прочее", subcategory:"Дивиденды учредителям" },
   ],
 });
 
@@ -146,12 +150,30 @@ describe("продажи и воронка", () => {
   it("срок сделки и цена за м² — по договору", () => {
     const { sales } = all();
     expect(sales.avgDealDays).toBe(5);               // создан -20д, договор -15д
+    expect(sales.avgDealDaysSample).toBe(1);         // среднее по ОДНОЙ сделке
     expect(sales.avgPricePerSqm).toBe(26000);        // 1 300 000 / 50
   });
 
-  it("по менеджерам — сумма тоже по договору", () => {
+  it("по менеджерам — считает и сметы, и подписанные", () => {
     const { sales } = all();
-    expect(sales.byManager["Иван"]).toMatchObject({ objects: 2, signed: 1, signedSum: 1300000 });
+    expect(sales.byManager["Иван"]).toMatchObject({ objects: 2, estimated: 2, signed: 1, signedSum: 1300000 });
+  });
+
+  it("варианты имени менеджера сводятся к сотруднику", () => {
+    const data = fixture();
+    data.objects[1].manager = "Иван Петров";        // заведён в системе
+    data.objects[0].manager = "Иван П.";            // тот же человек, другой формат
+    const res = buildAnalytics(data, {
+      period: "all", now: NOW, users: [{ name: "Иван Петров" }],
+    });
+    expect(res.sales.byManager["Иван Петров"]).toMatchObject({ objects: 2 });
+    expect(res.sales.byManager["Иван П."]).toBeUndefined();
+  });
+
+  it("список объектов для проверки — то же число, что в плитке", () => {
+    const { sales } = all();
+    expect(sales.cohortList).toHaveLength(sales.newObjects);
+    expect(sales.cohortList[0]).toHaveProperty("name");
   });
 });
 
@@ -176,9 +198,10 @@ describe("производство и сроки", () => {
     expect(production.overdueStages).toBe(1);
   });
 
-  it("долг бригадам по закрытым, но неоплаченным этапам", () => {
+  it("закрытые этапы без оплаты КЛИЕНТОМ считаются по цене клиенту", () => {
     expect(production.unpaidDoneStages).toBe(1);
-    expect(production.unpaidDoneSum).toBe(250000);
+    // priceClient закрытого этапа = 400 000 (не себестоимость 250 000)
+    expect(production.unpaidDoneSum).toBe(400000);
   });
 });
 
@@ -190,10 +213,16 @@ describe("финансы", () => {
     expect(finance.income).toBe(700000);             // аванс и заём в выручку не попали
   });
 
-  it("займы, возвраты и авансы исключены — как в ОПУ", () => {
+  it("займы, возвраты, авансы и дивиденды исключены — как в ОПУ", () => {
     expect(finance.income).toBe(700000);             // без 5 000 000 займа и 50 000 аванса
-    expect(finance.expense).toBe(410000);            // 300k + 100k + 10k, без 2 000 000 активов
-    expect(finance.gross).toBe(290000);
+    // расходы P&L: 300k + 100k + 10k + 250k(COGS); без активов и без дивидендов
+    expect(finance.expense).toBe(660000);
+  });
+
+  it("валовая прибыль вычитает ТОЛЬКО прямую себестоимость, как в финучёте", () => {
+    expect(finance.cogs).toBe(250000);
+    expect(finance.gross).toBe(450000);              // 700 000 − 250 000
+    expect(finance.net).toBe(40000);                 // 700 000 − 660 000
   });
 
   it("операция без даты берёт дату создания", () => {
@@ -206,6 +235,15 @@ describe("финансы", () => {
     expect(totalIn).toBe(700000 + 5000000 + 50000);
   });
 
+  it("объект без номера договора НЕ уходит в дебиторку целиком", () => {
+    const data = fixture();
+    data.contracts = [];                         // договора нет — сопоставлять не с чем
+    const res = buildAnalytics(data, { period: "all", now: NOW });
+    expect(res.finance.receivables).toBe(0);
+    expect(res.finance.unlinkedObjects).toBeGreaterThan(0);
+    expect(res.finance.unlinkedSum).toBeGreaterThan(0);
+  });
+
   it("дебиторка — по договору, аванс уменьшает долг", () => {
     // договор 1 300 000, получено 700 000 + аванс 50 000
     expect(finance.receivables).toBe(550000);
@@ -213,13 +251,13 @@ describe("финансы", () => {
   });
 
   it("перерасход считается к плановой себестоимости сметы", () => {
-    // план себестоимости o1 = 600k + 120k + 60k = 780 000, факт расход 400 000 → перерасхода нет
+    // план себестоимости o1 = 600k + 120k + 60k = 780 000, факт 650 000 → перерасхода нет
     expect(finance.overspendObjects).toEqual([]);
     const data = fixture();
     data.financeTx.push({ id:"tx", type:"expense", amount:500000, date: dstr(-2), contractNo:"№12", category:"Материалы" });
     const res = buildAnalytics(data, { period: "all", now: NOW });
-    // факт 400 000 + 500 000 = 900 000, план 780 000 → перерасход 120 000
-    expect(res.finance.overspendObjects[0]).toMatchObject({ objectId: "o1", overspend: 120000 });
+    // факт по договору: 300k + 100k + 250k(COGS) + 500k = 1 150 000, план 780 000
+    expect(res.finance.overspendObjects[0]).toMatchObject({ objectId: "o1", overspend: 370000 });
   });
 });
 
@@ -229,6 +267,9 @@ describe("портфель заказов", () => {
     expect(backlog.activeObjects).toBe(2);           // o1 + миграционный signed
     expect(backlog.contracted).toBe(1300000);        // сметы o1: 1000k + 200k + 100k(доп через parentId)
     expect(backlog.doneValue).toBe(400000);
+    expect(backlog.stagesValue).toBe(1200000);       // 400k + 800k
+    expect(backlog.remaining).toBe(800000);          // остаток по ТЕМ ЖЕ этапам
+    expect(backlog.stagesProgressPct).toBe(33);
     expect(backlog.objectsWithStagePrices).toBe(1);
     expect(backlog.byForeman["Прораб А"]).toMatchObject({ objects: 1 });
   });
@@ -277,6 +318,16 @@ describe("служебное", () => {
     expect(ANALYTICS_BLOCKS.map(b => b.permission)).toEqual([
       "analyticsSales", "analyticsBacklog", "analyticsProduction", "analyticsFinance", "analyticsQuality",
     ]);
+  });
+
+  it("резолвер менеджера не угадывает при неоднозначности", () => {
+    const resolve = makeManagerResolver([{ name: "Сергей Штанько" }, { name: "Сергей Шевчук" }]);
+    expect(resolve("Сергей Штанько")).toBe("Сергей Штанько");
+    expect(resolve("Сергей Ш.")).toBe("Сергей Ш.");   // двое подходят — не приписываем
+    expect(resolve("Пётр")).toBe("Пётр (нет в сотрудниках)"); // совпадений нет вовсе
+    expect(resolve("")).toBe("Без менеджера");
+    const one = makeManagerResolver([{ name: "Сергей Штанько" }]);
+    expect(one("Сергей Ш")).toBe("Сергей Штанько");
   });
 
   it("причина отказа", () => {

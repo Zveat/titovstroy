@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { ANALYTICS_BLOCKS, deltaPct, refuseReasonLabel } from "./analyticsModel.js";
 
 // Блоки аналитики. Компонент только рисует — все числа приходят готовыми из
@@ -68,6 +68,39 @@ function BarRow({ label, value, max, note, color = "#2563eb" }) {
   );
 }
 
+// Раскрывающийся список «что именно посчиталось». Нужен, чтобы цифру можно было
+// проверить глазами, а не верить на слово.
+function AuditList({ items, fmt }) {
+  const [open, setOpen] = useState(false);
+  if (!items?.length) return null;
+  const dt = (t) => (t ? new Date(t).toLocaleDateString("ru-RU") : "—");
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button type="button" onClick={() => setOpen(v => !v)}
+        style={{ border: 0, background: "transparent", color: "#2563eb", cursor: "pointer",
+                 fontFamily: "inherit", fontSize: 11, padding: 0 }}>
+        {open ? "▲ скрыть список" : `▼ показать список (${items.length})`}
+      </button>
+      {open && (
+        <div style={{ marginTop: 6, maxHeight: 260, overflow: "auto", border: "1px solid #eef2f7", borderRadius: 8 }}>
+          {items.map((it, i) => (
+            <div key={it.id || i} style={{ display: "grid", gridTemplateColumns: "78px minmax(0,1fr) auto",
+              gap: 8, padding: "6px 9px", fontSize: 11, borderTop: i ? "1px solid #f4f7fb" : 0 }}>
+              <span style={{ color: "#94a3b8" }}>{dt(it.createdAt)}</span>
+              <span style={{ color: "#334155", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {it.name}{it.manager ? ` · ${it.manager}` : ""}
+              </span>
+              <span style={{ color: "#64748b", whiteSpace: "nowrap" }}>
+                {it.value > 0 ? `${fmt(Math.round(it.value))} ₸` : "без сметы"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const EmptyNote = ({ text }) => (
   <div style={{ ...card, color: "#94a3b8", fontSize: 12 }}>{text}</div>
 );
@@ -91,7 +124,7 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
         <div style={grid()}>
           <Tile label="Новых объектов" value={sales.newObjects}
             delta={d(previous?.sales.newObjects, sales.newObjects)} />
-          <Tile label="Посчитано смет" value={sales.estimatedCount} sub={money(sales.estimatedSum)}
+          <Tile label="Объектов со сметой" value={sales.estimatedCount} sub={money(sales.estimatedSum)}
             delta={d(previous?.sales.estimatedSum, sales.estimatedSum)} />
           <Tile label="В согласовании" value={sales.inApprovalCount} sub={money(sales.inApprovalSum)} accent="#d97706" />
           <Tile label="Подписано" value={sales.signedCount} sub={money(sales.signedSum)} accent="#059669"
@@ -99,14 +132,22 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
           <Tile label="Средний чек" value={money(sales.avgCheck)} sub="на подписанный объект" />
           <Tile label="Конверсия" value={`${sales.convTotal}%`} sub="объект → договор"
             delta={d(previous?.sales.convTotal, sales.convTotal)} />
-          <Tile label="Срок сделки" value={sales.avgDealDays ? `${sales.avgDealDays} дн.` : "—"} sub="от заявки до договора" />
-          <Tile label="Цена за м²" value={sales.avgPricePerSqm ? money(sales.avgPricePerSqm) : "—"} sub="по подписанным" />
+          <Tile label="Срок сделки" value={sales.avgDealDays ? `${sales.avgDealDays} дн.` : "—"}
+            sub={sales.avgDealDaysSample
+              ? `от заявки до договора · по ${sales.avgDealDaysSample} сделкам`
+              : "нет сделок с датой договора"} />
+          <Tile label="Цена за м²" value={sales.avgPricePerSqm ? money(sales.avgPricePerSqm) : "—"}
+            sub={sales.avgPricePerSqmSample
+              ? `по ${sales.avgPricePerSqmSample} объектам с площадью`
+              : "не указана площадь"} />
           <Tile label="Отказов" value={sales.lostCount} sub={money(sales.lostSum)} accent="#dc2626"
             delta={d(previous?.sales.lostCount, sales.lostCount)} />
           {sales.cancelledCount > 0 && (
             <Tile label="Расторгнуто" value={sales.cancelledCount} sub="уже подписанных договоров" accent="#dc2626" />
           )}
         </div>
+
+        <AuditList items={sales.cohortList} fmt={fmt} />
 
         <div style={{ ...grid(260), marginTop: 10 }}>
           <div style={card}>
@@ -138,11 +179,12 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
             {Object.entries(sales.byManager).length === 0
               ? <div style={{ fontSize: 11.5, color: "#94a3b8" }}>Нет данных</div>
               : Object.entries(sales.byManager)
-                  .sort((a, b) => b[1].signedSum - a[1].signedSum)
+                  .sort((a, b) => b[1].estimatedSum - a[1].estimatedSum)
                   .map(([name, v]) => (
-                    <BarRow key={name} label={name} value={v.signedSum}
-                      max={Math.max(...Object.values(sales.byManager).map(x => x.signedSum), 1)}
-                      note={`${v.signed}/${v.objects} · ${money(v.signedSum)}`} color="#059669" />
+                    <BarRow key={name} label={name} value={v.estimatedSum}
+                      max={Math.max(...Object.values(sales.byManager).map(x => x.estimatedSum), 1)}
+                      note={`смет ${v.estimated} из ${v.objects} · ${money(v.estimatedSum)} · подписано ${v.signed}`}
+                      color="#059669" />
                   ))}
           </div>
         </div>
@@ -163,7 +205,10 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
             accent="#059669" />
           <Tile label="Осталось выполнить"
             value={backlog.objectsWithStagePrices ? money(backlog.remaining) : "—"}
-            sub="объём работ впереди" accent="#2563eb" />
+            sub={backlog.objectsWithStagePrices
+              ? `из ${money(backlog.stagesValue)} по этапам · выполнено ${backlog.stagesProgressPct}%`
+              : "нужны цены этапов"}
+            accent="#2563eb" />
           <Tile label="Закрывается в этом месяце" value={backlog.closingThisMonthCount}
             sub={money(backlog.closingThisMonthSum)} accent="#d97706" />
         </div>
@@ -204,8 +249,8 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
           <Tile label="Просроченных этапов" value={production.overdueStages}
             accent={production.overdueStages ? "#dc2626" : "#0f172a"} />
           {financialDetails && (
-            <Tile label="Не оплачено бригадам" value={money(production.unpaidDoneSum)}
-              sub={`${production.unpaidDoneStages} закрытых этапов`} accent="#d97706" />
+            <Tile label="Закрыто, но не оплачено клиентом" value={money(production.unpaidDoneSum)}
+              sub={`${production.unpaidDoneStages} закрытых этапов без галочки «оплачено»`} accent="#d97706" />
           )}
         </div>
       </Block>
@@ -221,14 +266,26 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
             delta={d(previous?.finance.expense, finance.expense)} />
           {financialDetails && (
             <Tile label="Валовая прибыль" value={money(finance.gross)}
+              sub={`выручка − прямая себестоимость · ${finance.grossMarginPct}%`}
               accent={finance.gross >= 0 ? "#059669" : "#dc2626"}
               delta={d(previous?.finance.gross, finance.gross)} />
           )}
-          {financialDetails && <Tile label="Маржа" value={`${finance.marginPct}%`} />}
+          {financialDetails && (
+            <Tile label="Чистая прибыль" value={money(finance.net)}
+              sub={`после всех расходов · ${finance.marginPct}%`}
+              accent={finance.net >= 0 ? "#059669" : "#dc2626"}
+              delta={d(previous?.finance.net, finance.net)} />
+          )}
           <Tile label="Дебиторка" value={money(finance.receivables)} sub="осталось получить" accent="#d97706" />
           <Tile label="Просроченная дебиторка" value={money(finance.receivablesOverdue)}
             sub="срок сдачи прошёл" accent={finance.receivablesOverdue ? "#dc2626" : "#0f172a"} />
+          {finance.unlinkedObjects > 0 && (
+            <Tile label="Без привязки к договору" value={finance.unlinkedObjects}
+              sub={`${money(finance.unlinkedSum)} — платежи сопоставить не с чем`} accent="#d97706" />
+          )}
         </div>
+
+        <AuditList items={finance.receivableList} fmt={fmt} />
 
         <div style={{ ...grid(260), marginTop: 10 }}>
           <div style={card}>

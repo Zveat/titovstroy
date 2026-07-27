@@ -170,8 +170,45 @@ function statusOf(o, prodByObject) {
   return PROD_TO_DEAL[prod?.prodStatus] || o.status || "new";
 }
 
+
+// Менеджер у объекта — СВОБОДНЫЙ ТЕКСТ (приходит из формы сметы), поэтому один и тот
+// же человек попадает в базу как «Сергей Штанько», «Сергей Ш.» и «Сергей Ш». Сводим
+// варианты к реальному сотруднику: точное совпадение, иначе — единственный сотрудник,
+// чьё имя начинается с введённого. Если подходящих несколько — не угадываем и
+// оставляем как есть, чтобы не приписать объекты чужому человеку.
+export function makeManagerResolver(users = []) {
+  const norm = (v) => String(v || "").trim().replace(/\s+/g, " ").replace(/\.+$/, "").toLowerCase();
+  const known = (users || [])
+    .map(u => (typeof u === "string" ? u : u?.name))
+    .filter(Boolean)
+    .map(name => ({ name, key: norm(name) }));
+  const cache = new Map();
+  return (raw) => {
+    const original = String(raw || "").trim();
+    if (!original) return "Без менеджера";
+    if (cache.has(original)) return cache.get(original);
+    const key = norm(original);
+    let result = original;
+    const exact = known.find(u => u.key === key);
+    if (exact) result = exact.name;
+    else {
+      const starts = known.filter(u => u.key.startsWith(key + " ") || u.key.startsWith(key));
+      // Сводим к сотруднику только если подходит ровно один. Если совпадений нет —
+      // это не заведённый сотрудник (уволенный, опечатка, чужое имя): показываем
+      // отдельной строкой, чтобы разрез строился по реальным людям.
+      if (starts.length === 1) result = starts[0].name;
+      // Совпадений нет вовсе — человек не заведён в сотрудниках (уволен, опечатка).
+      // Совпадений несколько — сокращение неоднозначно, оставляем как есть,
+      // чтобы не приписать объекты не тому человеку.
+      else if (starts.length === 0 && known.length) result = `${original} (нет в сотрудниках)`;
+    }
+    cache.set(original, result);
+    return result;
+  };
+}
+
 // ─── БЛОК 1. Продажи и воронка ───────────────────────────────────────────────
-function buildSales(idx, { from, to }, manager, period) {
+function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => (v || "Без менеджера")) {
   const { liveObjects, objectValue, contractByObject, prodByObject } = idx;
   const cohort = liveObjects
     .filter(o => o.status !== "archive")
@@ -179,7 +216,9 @@ function buildSales(idx, { from, to }, manager, period) {
     // в периодах они исказили бы приток. Учитываем их только во «Всё время»
     // (ровно так же, как считают старые плитки аналитики).
     .filter(o => period === "all" || o.createdBy !== "migration")
-    .filter(o => !manager || (o.manager || "") === manager)
+    // Фильтр по менеджеру тоже через канонизацию, иначе выбор «Сергей Штанько»
+    // потерял бы его объекты, записанные как «Сергей Ш.».
+    .filter(o => !manager || resolveManager(o.manager) === resolveManager(manager))
     .filter(o => inRange(o.createdAt, from, to));
 
   // Сумма сделки: если договор заведён — берём его сумму (это реальные деньги),
@@ -200,10 +239,14 @@ function buildSales(idx, { from, to }, manager, period) {
 
   // Срок сделки: от создания объекта до даты договора. Считаем только там,
   // где обе даты есть, иначе среднее врёт.
+  // Срок сделки = от заведения объекта до подписания договора. Дата подписания —
+  // это поле «Дата продажи (подписание договора)» в карточке производства; если его
+  // не заполнили, берём дату договора как запасной вариант.
   const dealDays = [];
   for (const o of signed) {
+    const prod = prodByObject.get(o.id);
     const contract = contractByObject.get(o.id);
-    const signedAt = ts(contract?.date || contract?.contractDate);
+    const signedAt = ts(prod?.saleDate) || ts(contract?.date || contract?.contractDate);
     const createdAt = ts(o.createdAt);
     if (signedAt && createdAt && signedAt >= createdAt) dealDays.push(days(createdAt, signedAt));
   }
@@ -224,10 +267,10 @@ function buildSales(idx, { from, to }, manager, period) {
   const signedSet = new Set(signed.map(o => o.id));
   const byManager = {};
   for (const o of cohort) {
-    const key = o.manager || "Без менеджера";
-    if (!byManager[key]) byManager[key] = { objects: 0, estimated: 0, signed: 0, signedSum: 0 };
+    const key = resolveManager(o.manager);
+    if (!byManager[key]) byManager[key] = { objects: 0, estimated: 0, estimatedSum: 0, signed: 0, signedSum: 0 };
     byManager[key].objects += 1;
-    if (objectValue(o) > 0) byManager[key].estimated += 1;
+    if (objectValue(o) > 0) { byManager[key].estimated += 1; byManager[key].estimatedSum += objectValue(o); }
     if (signedSet.has(o.id)) { byManager[key].signed += 1; byManager[key].signedSum += dealValue(o); }
   }
 
@@ -241,8 +284,22 @@ function buildSales(idx, { from, to }, manager, period) {
 
   return {
     newObjects: cohort.length,
+    // Список для проверки: по нему видно, ЧТО именно посчиталось в «Новых объектах».
+    cohortList: cohort
+      .map(o => ({
+        id: o.id,
+        name: o.clientName || o.address || "Без названия",
+        createdAt: ts(o.createdAt),
+        manager: resolveManager(o.manager),
+        status: statusOf(o, prodByObject),
+        value: objectValue(o),
+      }))
+      .sort((a, b) => b.createdAt - a.createdAt),
+    // Считаем объекты, а не сметы: у одного объекта смет может быть много (допы
+    // добавляются уже после подписания), и счётчик смет вводил бы в заблуждение.
     estimatedCount: withEstimate.length,
     estimatedSum,
+    estimatesTotalCount: cohort.reduce((s, o) => s + (idx.estByObject.get(o.id) || []).length, 0),
     inApprovalCount: inApproval.length,
     inApprovalSum: inApproval.reduce((s, o) => s + objectValue(o), 0),
     signedCount: signed.length,
@@ -253,6 +310,10 @@ function buildSales(idx, { from, to }, manager, period) {
     convToSigned: pct(signed.length, withEstimate.length),
     convTotal: pct(signed.length, cohort.length),
     avgDealDays: dealDays.length ? Math.round(dealDays.reduce((s, d) => s + d, 0) / dealDays.length) : 0,
+    // Сколько сделок реально попало в среднее: срок считается только там, где есть
+    // и дата создания объекта, и дата договора. Без этого числа среднее по 2 сделкам
+    // выглядит как вывод по всей компании.
+    avgDealDaysSample: dealDays.length,
     lostCount: lost.length,
     lostSum,
     cancelledCount: cancelled.length,
@@ -260,6 +321,7 @@ function buildSales(idx, { from, to }, manager, period) {
     avgPricePerSqm: sqmPrices.length
       ? Math.round(sqmPrices.reduce((s, v) => s + v, 0) / sqmPrices.length)
       : 0,
+    avgPricePerSqmSample: sqmPrices.length,
     byManager,
     byType,
   };
@@ -273,6 +335,7 @@ function buildBacklog(idx, { now }) {
   const contracted = active.reduce((s, o) => s + objectValue(o), 0);
   // Выполнено по этапам: доля закрытых этапов от суммы этапов объекта.
   let doneValue = 0;
+  let stagesValue = 0;
   let objectsWithStagePrices = 0;
   for (const o of active) {
     const stages = prodByObject.get(o.id)?.stages || [];
@@ -281,6 +344,7 @@ function buildBacklog(idx, { now }) {
     // занижает показатель — он просто не участвует (иначе всегда было бы 0 ₸).
     if (total <= 0) continue;
     objectsWithStagePrices += 1;
+    stagesValue += total;
     doneValue += stages
       .filter(st => st.status === "done")
       .reduce((s, st) => s + num(st.priceClient), 0);
@@ -302,8 +366,10 @@ function buildBacklog(idx, { now }) {
     activeObjects: active.length,
     contracted,
     doneValue,
+    stagesValue,
     objectsWithStagePrices,
-    remaining: Math.max(0, contracted - doneValue),
+    stagesProgressPct: pct(doneValue, stagesValue),
+    remaining: Math.max(0, stagesValue - doneValue),
     byForeman,
     closingThisMonthCount: closingThisMonth.length,
     closingThisMonthSum: closingThisMonth.reduce((s, o) => s + objectValue(o), 0),
@@ -356,7 +422,10 @@ function buildProduction(idx, { from, to, now }) {
       stagesTotal += 1;
       if (st.status === "done") {
         stagesDone += 1;
-        if (!st.paid) { unpaidDoneStages += 1; unpaidDoneSum += num(st.costPlan); }
+        // Галочка `paid` в карточке производства подписана «Оплачено клиентом»,
+        // поэтому это НЕ долг бригадам, а закрытые работы, за которые клиент ещё
+        // не заплатил. Сумма — цена клиенту, а не себестоимость.
+        if (!st.paid) { unpaidDoneStages += 1; unpaidDoneSum += num(st.priceClient); }
       } else if (ts(st.planEnd) && ts(st.planEnd) < now) {
         overdueStages += 1;
       }
@@ -396,8 +465,12 @@ const C_FINANCING_INC = "Финансирование (не выручка)";
 const C_ASSET_INC = "Возврат займов и активов";
 const C_FINACT = "Финансовая деятельность (не расход)";
 const C_ASSET_OUT = "Выданные займы и прочие активы";
+const C_COGS = "Прямые расходы (COGS / себестоимость)";   // прямая себестоимость объектов
+const S_DIV = "Дивиденды учредителям";                    // распределение прибыли, не расход
 const isPLIncome = (t) => !t.isAdvance && t.category !== C_FINANCING_INC && t.category !== C_ASSET_INC;
-const isPLExpense = (t) => t.category !== C_FINACT && t.category !== C_ASSET_OUT;
+// Расход P&L — как на экране «Финансы»: без дивидендов (это распределение прибыли),
+// без финансовой деятельности и без выданных займов/активов.
+const isPLExpense = (t) => t.category !== C_FINACT && t.category !== C_ASSET_OUT && t.subcategory !== S_DIV;
 // Дата операции: как в финансах — сначала дата операции, потом дата создания.
 const txDate = (t) => t.date || t.createdAt || 0;
 
@@ -408,6 +481,7 @@ function buildFinance(idx, { from, to, now }, financeTx) {
 
   let income = 0;
   let expense = 0;
+  let cogs = 0;
   const expenseByCategory = {};
   const cashflow = {};
   for (const t of inPeriod) {
@@ -423,6 +497,9 @@ function buildFinance(idx, { from, to, now }, financeTx) {
       cashflow[mk].expense += amount;
       if (isPLExpense(t)) {
         expense += amount;
+        // Валовая прибыль в финучёте вычитает ТОЛЬКО прямую себестоимость (COGS),
+        // а не все расходы — иначе получалась бы чистая прибыль.
+        if (t.category === C_COGS) cogs += amount;
         const cat = t.category || "Без категории";
         expenseByCategory[cat] = (expenseByCategory[cat] || 0) + amount;
       }
@@ -442,17 +519,39 @@ function buildFinance(idx, { from, to, now }, financeTx) {
   const activeObjects = liveObjects.filter(o => ["signed", "work", "paused", "done"].includes(statusOf(o, prodByObject)));
   let receivables = 0;
   let receivablesOverdue = 0;
+  // Объекты без номера договора: платежи сопоставить НЕ С ЧЕМ. Раньше такой объект
+  // целиком уходил в дебиторку («никто не платил»), из-за чего долг был раздут.
+  // Теперь считаем их отдельно и показываем как пробел в данных, а не как долг.
+  let unlinkedObjects = 0;
+  let unlinkedSum = 0;
   const objectProfit = [];
+  const receivableList = [];
   for (const o of activeObjects) {
     const contract = contractByObject.get(o.id);
+    const contractNo = normContract(contract?.number);
     const planValue = contractSum(contract) || objectValue(o);
     if (planValue <= 0) continue;
-    const fact = factByContract[normContract(contract?.number)] || { income: 0, expense: 0 };
+    if (!contractNo) {
+      unlinkedObjects += 1;
+      unlinkedSum += planValue;
+      continue;
+    }
+    const fact = factByContract[contractNo] || { income: 0, expense: 0 };
     const debt = Math.max(0, planValue - fact.income);
     receivables += debt;
     // Просроченной считаем дебиторку по объектам, у которых план-финиш уже прошёл.
     const planEnd = ts(prodByObject.get(o.id)?.planEndDate);
     if (debt > 0 && planEnd && planEnd < now) receivablesOverdue += debt;
+    if (debt > 0) {
+      receivableList.push({
+        id: o.id,
+        name: o.clientName || o.address || "Без названия",
+        createdAt: ts(o.createdAt),
+        manager: o.manager || "",
+        value: debt,
+        overdue: !!(planEnd && planEnd < now),
+      });
+    }
 
     const planCost = objectCost(o);
     objectProfit.push({
@@ -472,12 +571,20 @@ function buildFinance(idx, { from, to, now }, financeTx) {
   return {
     income,
     expense,
-    gross: income - expense,
+    cogs,
+    // Считаем ровно как экран «Финансы»: валовая = выручка − COGS,
+    // чистая = выручка − все расходы P&L, рентабельность = чистая / выручка.
+    gross: income - cogs,
+    grossMarginPct: pct(income - cogs, income),
+    net: income - expense,
     marginPct: pct(income - expense, income),
     cashflow,
     expenseByCategory,
     receivables,
     receivablesOverdue,
+    receivableList: receivableList.sort((a, b) => b.value - a.value),
+    unlinkedObjects,
+    unlinkedSum,
     topProfitable: objectProfit.slice(0, 5),
     topLoss: objectProfit.filter(x => x.profit < 0).slice(-5).reverse(),
     overspendObjects: objectProfit.filter(x => x.overspend > 0).sort((a, b) => b.overspend - a.overspend).slice(0, 5),
@@ -550,13 +657,14 @@ function buildQuality(idx, { now }) {
 
 // ─── Главная точка входа ─────────────────────────────────────────────────────
 export function buildAnalytics(data = {}, options = {}) {
-  const { period = "all", from, to, now = Date.now(), manager = "" } = options;
+  const { period = "all", from, to, now = Date.now(), manager = "", users = [] } = options;
+  const resolveManager = makeManagerResolver(users);
   const bounds = periodBounds(period, { from, to, now });
   const idx = buildIndex(data);
   const financeTx = data.financeTx || [];
 
   const current = {
-    sales: buildSales(idx, bounds, manager, period),
+    sales: buildSales(idx, bounds, manager, period, resolveManager),
     backlog: buildBacklog(idx, { now }),
     production: buildProduction(idx, { ...bounds, now }),
     finance: buildFinance(idx, { ...bounds, now }, financeTx),
@@ -569,7 +677,7 @@ export function buildAnalytics(data = {}, options = {}) {
   if (bounds.prevFrom !== null) {
     const prevBounds = { from: bounds.prevFrom, to: bounds.prevTo };
     previous = {
-      sales: buildSales(idx, prevBounds, manager, period),
+      sales: buildSales(idx, prevBounds, manager, period, resolveManager),
       production: buildProduction(idx, { ...prevBounds, now }),
       finance: buildFinance(idx, { ...prevBounds, now }, financeTx),
     };
