@@ -12,7 +12,7 @@ import { MasterCrmButton, MasterCrmDatabase, MasterCrmEditor } from "./masters/M
 import { interactionsForContact, masterSourceKey, normalizeMasterCrm } from "./masters/masterCrm.js";
 import { EstimateSuggestions, EstimateSuggestionRulesEditor } from "./estimate/EstimateSuggestions.jsx";
 import { AnalyticsBlocks } from "./analytics/AnalyticsBlocks.jsx";
-import { buildAnalytics, REFUSE_REASONS } from "./analytics/analyticsModel.js";
+import { buildAnalytics, makeManagerResolver, REFUSE_REASONS } from "./analytics/analyticsModel.js";
 import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
@@ -6129,6 +6129,12 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [statusConflictsOpen, setStatusConflictsOpen] = useState(false); // раскрыта ли панель «Проверка статусов»
   const [objectFilterType, setObjectFilterType] = useState("");
   const [objectFilterManager, setObjectFilterManager] = useState("");
+  // Имя менеджера копируется в объект при создании (снимок текста, а не ссылка на
+  // учётку), поэтому после переименования сотрудника в старых объектах остаётся
+  // прежнее написание — один человек выглядит как несколько. Сводим варианты к
+  // заведённому сотруднику ОДНИМ резолвером: он же используется в аналитике,
+  // поэтому фильтр «Объекты» и разрез по менеджерам показывают одни и те же цифры.
+  const resolveManagerName = useMemo(() => makeManagerResolver(allUsers), [allUsers]);
   const [objectAttentionFilter, setObjectAttentionFilter] = useState("");
   const [objectDateSort, setObjectDateSort] = useState("new"); // new = сначала новые, old = сначала старые
   const [objectDateFrom, setObjectDateFrom] = useState("");
@@ -6269,7 +6275,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       .filter(o=>{
         // фильтр по статусу применяется в рендере через unifiedStatusOf (единый статус)
         if(objectFilterType && (o.objType||"Вторичка")!==objectFilterType) return false;
-        if(objectFilterManager && (o.manager||"")!==objectFilterManager) return false;
+        if(objectFilterManager && resolveManagerName(o.manager)!==resolveManagerName(objectFilterManager)) return false;
         if(objectDateFrom && (o.createdAt||0) < new Date(objectDateFrom).getTime()) return false;
         if(objectDateTo && (o.createdAt||0) > new Date(objectDateTo).getTime()+86399999) return false;
         if(objectAttentionFilter === "stale-approval") {
@@ -6284,7 +6290,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
         return true;
       })
       .sort((a,b)=>{ const da=a.createdAt||0, db=b.createdAt||0; return objectDateSort==="old" ? da-db : db-da; });
-  }, [accessibleObjects, objectFilterStatus, objectFilterType, objectFilterManager, objectAttentionFilter, objectDateSort, objectDateFrom, objectDateTo, debouncedObjectSearch, productions, pendingObjectStatuses]);
+  }, [accessibleObjects, objectFilterStatus, objectFilterType, objectFilterManager, resolveManagerName, objectAttentionFilter, objectDateSort, objectDateFrom, objectDateTo, debouncedObjectSearch, productions, pendingObjectStatuses]);
 
   // Только «живые» (не удалённые) объекты — используется в дашборде, аналитике и всех расчётах
   const liveObjects = useMemo(() => accessibleObjects.filter(o=>!o.deletedAt), [accessibleObjects]);
@@ -9159,9 +9165,12 @@ ${reqBlock}`;
       from: statsDateFrom ? new Date(statsDateFrom).getTime() : null,
       to: statsDateTo ? new Date(statsDateTo).getTime() + 86399999 : null,
       manager: statsManager,
+      // Имя менеджера у объекта — свободный текст, поэтому передаём реальных
+      // сотрудников: варианты («Сергей Ш.») сводятся к заведённому в системе.
+      users: allUsers,
     },
   ), [analyticsObjects, analyticsEstimates, contracts, productions, financeTx, analyticsData,
-      statsPeriod, statsDateFrom, statsDateTo, statsManager]);
+      statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers]);
 
   // Защита от краша: если activeCat не в Gdyn — берём первый
   const safeCat = Gdyn[activeCat] ? activeCat : (Object.keys(Gdyn)[0]||"");
