@@ -10,11 +10,12 @@ import { SearchMultiSelect, SearchSelect as MasterSearchSelect } from "./masters
 import { parserRunMessage, triggerParserRun } from "./masters/parserTrigger.js";
 import { MasterCrmButton, MasterCrmDatabase, MasterCrmEditor } from "./masters/MasterCRM.jsx";
 import { interactionsForContact, masterSourceKey, normalizeMasterCrm } from "./masters/masterCrm.js";
+import { EstimateSuggestions, EstimateSuggestionRulesEditor } from "./estimate/EstimateSuggestions.jsx";
 import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, resolveEstimateSuggestionRules, buildEstimateSuggestions, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -156,7 +157,7 @@ function IssuePanel({ issues, onNav, onDismiss, emptyText = "✓ Всё чист
                         {issue.detail && <span style={{ display:"block", fontSize:11.5, color:"#64748b", lineHeight:1.4, marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{issue.detail}</span>}
                       </span>
                       <span style={{ display:"flex", alignItems:"center", gap:5 }}>
-                        {onDismiss && issue.dismissable && <button type="button" title="Скрыть до завтра" onClick={e=>{e.stopPropagation();onDismiss(issue.id);}}
+                        {onDismiss && issue.dismissable && <button type="button" title={issue.dismissLabel || "Скрыть до завтра"} onClick={e=>{e.stopPropagation();onDismiss(issue);}}
                           style={{ width:28, height:28, border:"1px solid #e2e8f0", borderRadius:6, background:"#fff", color:"#94a3b8", cursor:"pointer", fontFamily:"inherit" }}>×</button>}
                         <span style={{ color:"#cbd5e1", fontSize:16 }}>›</span>
                       </span>
@@ -246,7 +247,7 @@ function OperationsPanel({ issues, onNav, onDismiss, emptyText = "Всё под 
             {group.issues.map((issue,index)=><div key={issue.id} onClick={()=>onNav&&onNav(issue.nav)}
               style={{minHeight:48,padding:"8px 14px 8px 0",borderBottom:index===group.issues.length-1?0:"1px solid #e8edf3",display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,alignItems:"center",cursor:onNav?"pointer":"default"}}>
               <div style={{minWidth:0}}><div style={{fontSize:12.5,fontWeight:700,color:"#1e293b"}}>{issue.title}</div>{issue.detail&&<div style={{fontSize:11,color:"#64748b",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{issue.detail}</div>}</div>
-              <div style={{display:"flex",alignItems:"center",gap:5}}>{onDismiss&&issue.dismissable&&<button type="button" title="Скрыть до завтра" onClick={event=>{event.stopPropagation();onDismiss(issue.id);}} style={{width:26,height:26,border:"1px solid #dbe3ec",borderRadius:6,background:"#fff",color:"#94a3b8",cursor:"pointer"}}>×</button>}<span style={{color:"#94a3b8",fontSize:16}}>›</span></div>
+              <div style={{display:"flex",alignItems:"center",gap:5}}>{onDismiss&&issue.dismissable&&<button type="button" title={issue.dismissLabel || "Скрыть до завтра"} onClick={event=>{event.stopPropagation();onDismiss(issue);}} style={{width:26,height:26,border:"1px solid #dbe3ec",borderRadius:6,background:"#fff",color:"#94a3b8",cursor:"pointer"}}>×</button>}<span style={{color:"#94a3b8",fontSize:16}}>›</span></div>
             </div>)}
           </div>}
         </div>;
@@ -3805,6 +3806,14 @@ function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE
             </button>}
           </div>
 
+          <EstimateSuggestionRulesEditor
+            catalog={getEffectiveCatalog()}
+            rules={resolveEstimateSuggestionRules(localCatalog, getEffectiveCatalog())}
+            usesDefaults={localCatalog?.suggestionRules == null}
+            disabled={!hasAdminPermission("adminCatalog")}
+            onSave={rules => saveCatalog(withCatalogOverrides(localCatalog, { suggestionRules: rules }))}
+          />
+
           {/* Модал бэкапов каталога */}
           {catalogBackupsModal !== null && (
             <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:320,padding:16}} onClick={()=>setCatalogBackupsModal(null)}>
@@ -6779,6 +6788,31 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     _prodQueue.current = next.then(() => {}, () => {});
     return next;
   }, [currentUser?.id, _refreshProdUnsynced, _clearCloudErrorIfAllClean]);
+
+  const dismissDashboardIssue = useCallback(async issue => {
+    if (!issue?.id) return;
+    if (issue.dismissAction?.type !== "client-remark") {
+      dismissIssueTomorrow(issue.id);
+      return;
+    }
+    const { objectId, itemId } = issue.dismissAction;
+    if (!objectId || !itemId) return;
+    const result = await mutateProductions({
+      type:"patch-item",
+      objectId,
+      field:"defects",
+      itemId,
+      patch:{
+        dashboardDismissedAt:Date.now(),
+        dashboardDismissedBy:currentUser?.id || currentUser?.name || "admin",
+      },
+      changeId:`bg_dismiss_remark_${objectId}_${itemId}`,
+    });
+    if (!result?.committed && !result?.conflict) {
+      alert("Не удалось убрать замечание с главной. Проверьте соединение и повторите.");
+    }
+  }, [currentUser?.id, currentUser?.name, dismissIssueTomorrow, mutateProductions]);
+
   // 2Б: связать module-scope очередь с App сразу после входа и поднять фоновые команды прошлого
   // запуска. Это работает даже если пользователь ещё не открыл ни одной карточки объекта.
   useEffect(() => {
@@ -8783,6 +8817,33 @@ ${reqBlock}`;
     }
     return { ...prev, [name]: next };
   }), []);
+
+  // Подсказки только анализируют текущую смету. Добавление идёт через setRow,
+  // поэтому цена и себестоимость фиксируются тем же способом, что при ручном вводе.
+  const estimateSuggestionCatalog = useMemo(() => getEffectiveCatalog(), [catalogVersion]);
+  const estimateSuggestionRules = useMemo(
+    () => resolveEstimateSuggestionRules(_catalogOverrides, estimateSuggestionCatalog),
+    [catalogVersion, estimateSuggestionCatalog],
+  );
+  const estimateSuggestions = useMemo(() => buildEstimateSuggestions(
+    rows,
+    estimateSuggestionCatalog,
+    estimateSuggestionRules,
+  ).map(item => {
+    const targetWork = estimateSuggestionCatalog.find(work => work.code === item.targetCode);
+    return {
+      ...item,
+      targetPrice: targetWork ? getBasePrice(targetWork) : null,
+    };
+  }), [rows, estimateSuggestionCatalog, estimateSuggestionRules]);
+  const addEstimateSuggestions = useCallback(items => {
+    for (const item of items || []) {
+      const qty = Number(item?.qty);
+      if (item?.targetCode && Number.isFinite(qty) && qty > 0) {
+        setRow(item.targetCode, "qty", qty);
+      }
+    }
+  }, [setRow]);
 
   const rowPrice = (work) => {
     const r = rows[work.code] || rows[work.name] || {};
@@ -11097,7 +11158,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>{new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"})} · <span style={{color:"#bfdbfe",fontWeight:600}}>{currentUser.name}</span></div>
           </div>
           <div style={{fontSize:16,fontWeight:900,color:"#0f172a",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>🔥 Что требует внимания по моим объектам</div>
-          <OperationsPanel issues={_myIssues} onNav={openIssue} onDismiss={_isAdmin ? dismissIssueTomorrow : undefined} emptyText="По вашим объектам всё в порядке" />
+          <OperationsPanel issues={_myIssues} onNav={openIssue} onDismiss={_isAdmin ? dismissDashboardIssue : undefined} emptyText="По вашим объектам всё в порядке" />
         </div>
       )}
       {effScreen === "dashboard" && currentPermissions.dashboard !== "none" && !_isForeman && (()=>{
@@ -11223,7 +11284,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               <OperationsPanel
                 issues={_isUser ? _myIssues : (hasFinancialDetails ? _todayIssues : _todayIssues.filter(i=>i.group!=="Финансы"))}
                 onNav={openIssue}
-                onDismiss={_isAdmin ? dismissIssueTomorrow : undefined}
+                onDismiss={_isAdmin ? dismissDashboardIssue : undefined}
                 emptyText={_isUser ? "По вашим объектам всё в порядке" : "Всё под контролем — срочных задач нет"}
               />
             </div>
@@ -12101,6 +12162,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     </div>
                   ) : null;
                 })()}
+                {currentUser.role !== "viewer" && (
+                  <EstimateSuggestions
+                    estimateKey={`${currentId || "new"}:${currentObjectId || ""}`}
+                    suggestions={estimateSuggestions}
+                    onAdd={addEstimateSuggestions}
+                    fmt={fmt}
+                  />
+                )}
               </div>
 
               {/* ПРАВАЯ ПАНЕЛЬ */}

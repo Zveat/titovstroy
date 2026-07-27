@@ -632,9 +632,181 @@ export function buildFinanceProjectView({ project = {}, object = null, productio
   };
 }
 
-export const CATALOG_DEFAULTS = Object.freeze({ renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[] });
+export const CATALOG_DEFAULTS = Object.freeze({ renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], suggestionRules:null });
 // Дефолты + текущее состояние + патч, одним местом.
 export const withCatalogOverrides = (cur, patch = {}) => ({ ...CATALOG_DEFAULTS, ...(cur||{}), ...patch });
+
+const roundSuggestionQty = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return Math.round(n * 100) / 100;
+};
+
+// Правила хранят только стабильные коды работ. Названия, цены и единицы всегда берутся
+// из актуального прайса, поэтому удалённая/скрытая позиция физически не попадёт в подсказки.
+export function normalizeEstimateSuggestionRules(rawRules, catalog = []) {
+  if (!Array.isArray(rawRules)) return [];
+  const byCode = new Map((catalog || []).filter(w => w?.code).map(w => [String(w.code), w]));
+  const seen = new Set();
+  const result = [];
+  for (const raw of rawRules) {
+    if (!raw || typeof raw !== "object") continue;
+    const sourceCode = String(raw.sourceCode || "").trim();
+    const targetCode = String(raw.targetCode || "").trim();
+    const pairKey = `${sourceCode}>${targetCode}`;
+    if (!sourceCode || !targetCode || sourceCode === targetCode || seen.has(pairKey)) continue;
+    if (!byCode.has(sourceCode) || !byCode.has(targetCode)) continue;
+    const multiplierRaw = raw.multiplier;
+    const multiplier = multiplierRaw === null || multiplierRaw === ""
+      ? null
+      : Number(multiplierRaw);
+    if (multiplier !== null && (!Number.isFinite(multiplier) || multiplier <= 0)) continue;
+    seen.add(pairKey);
+    result.push({
+      id: String(raw.id || pairKey),
+      sourceCode,
+      targetCode,
+      multiplier,
+      reason: String(raw.reason || "Связанная работа").trim() || "Связанная работа",
+      defaultSelected: raw.defaultSelected !== false,
+    });
+  }
+  return result;
+}
+
+// Базовый набор сопутствующих работ (согласован с владельцем). Правило активируется только
+// если ОБЕ работы реально есть в текущем прайсе (add проверяет коды), поэтому удалённая/
+// переименованная позиция просто выпадет. multiplier: 1 — количество подставляется (тот же
+// объём); null — вводится вручную (разные единицы / необязательная проверка). defaultSelected
+// (последний аргумент) — стоит ли галочка по умолчанию. Администратор может заменить весь набор
+// своими правилами в «Админка → Каталог».
+export function createDefaultEstimateSuggestionRules(catalog = []) {
+  const codes = new Set((catalog || []).map(w => String(w?.code || "")).filter(Boolean));
+  const rules = [];
+  const add = (sourceCode, targetCode, multiplier, reason, defaultSelected = true) => {
+    if (codes.has(sourceCode) && codes.has(targetCode)) {
+      rules.push({ sourceCode, targetCode, multiplier, reason, defaultSelected });
+    }
+  };
+
+  // — Полы: стяжка / наливной пол —
+  for (const sourceCode of ["FLOOR-004", "FLOOR-005", "FLOOR-006"]) {
+    add(sourceCode, "PREP-007", 1, "Перед стяжкой обычно грунтуют основание", true);
+    add(sourceCode, "FLOOR-002", 1, "Проверьте, требуется ли армирование стяжки", false);
+    add(sourceCode, "FLOOR-003", null, "Проверьте монтаж маяков и укажите погонные метры", false);
+  }
+  add("FLOOR-008", "PREP-007", 1, "Перед наливным полом обычно грунтуют основание", true);
+  // Стяжка «под керамзит» ⇄ засыпка керамзита (в обе стороны)
+  add("FLOOR-004", "FLOOR-007", 1, "Эта стяжка идёт по керамзиту — нужна засыпка", true);
+  add("FLOOR-007", "FLOOR-004", 1, "Под керамзит сверху заливают стяжку", true);
+
+  // — Радиаторы: монтаж ⇄ демонтаж —
+  add("SN-008", "DEM-026", 1, "Ставите новый радиатор — старый нужно демонтировать", true);
+  add("SN-009", "DEM-026", 1, "Ставите новый радиатор — старый нужно демонтировать", true);
+  add("DEM-026", "SN-008", 1, "После демонтажа радиатора обычно ставят новый", true);
+  add("DEM-026", "SN-009", 1, "Вариант монтажа радиатора с заменой труб/подводки", false);
+
+  // — Плитка: затирка швов (тот же объём) —
+  add("TL-001", "TL-005", 1, "После укладки плитки затирают швы — тот же объём", true);
+  add("TL-002", "TL-005", 1, "После укладки плитки затирают швы — тот же объём", true);
+  add("FLR-007", "TL-005", 1, "После укладки плитки на пол затирают швы", true);
+  add("FLR-006", "TL-005", 1, "После укладки керамогранита затирают швы", true);
+  add("TL-006", "TL-005", 1, "После монтажа фартука затирают швы", true);
+  add("TL-007", "TL-005", null, "Затирка швов бордюров — объём вручную (разные единицы)", false);
+  // Плитка: раскладка под 45° и гидроизоляция (необязательно, объём вручную)
+  add("TL-001", "TL-003", null, "Уточните, есть ли запил/раскладка под 45°", false);
+  add("TL-002", "TL-003", null, "Уточните, есть ли запил/раскладка под 45°", false);
+  add("TL-002", "FLOOR-001", null, "Проверьте гидроизоляцию пола (санузел)", false);
+  add("TL-001", "GID-003", null, "Проверьте гидроизоляцию стен под ванной/душем", false);
+  add("FLR-006", "FLOOR-001", null, "Проверьте гидроизоляцию пола (санузел)", false);
+  add("FLR-007", "FLOOR-001", null, "Проверьте гидроизоляцию пола (санузел)", false);
+
+  // — Стены: штукатурка → грунтовка / маяки / армирование —
+  add("WALL-003", "WALL-001", 1, "Перед штукатуркой грунтуют основание стен", true);
+  add("WALL-003", "WALL-002", 1, "Если штукатурите по маякам", false);
+  add("WALL-003", "WALL-005", 1, "Проверьте, нужно ли армирование сеткой", false);
+  add("WALL-004", "WALL-001", 1, "Перед штукатуркой грунтуют основание стен", true);
+  add("WALL-004", "WALL-002", 1, "Толстый слой обычно кладут по маякам", true);
+  add("WALL-004", "WALL-005", 1, "Толстый слой армируют сеткой", true);
+  // Стены: шпаклёвка → ошкуривание
+  add("WALL-006", "WALL-007", 1, "После шпаклёвки стены ошкуривают — тот же объём", true);
+
+  // — Покраска / декор стен: грунтовка основания —
+  add("PA-003", "PA-001", 1, "Перед покраской стены грунтуют — тот же объём", true);
+  add("PA-002", "PA-001", 1, "Перед покраской стены грунтуют — тот же объём", true);
+  add("DEC-001", "WALL-001", 1, "Под декоративную штукатурку грунтуют основание", false);
+  add("DEC-002", "WALL-001", 1, "Под микробетон грунтуют основание", false);
+  add("DEC-003", "WALL-001", 1, "Под венецианку грунтуют основание", false);
+  add("DEC-004", "WALL-001", 1, "Под акцентные стены грунтуют основание", false);
+  // Откосы под окна/двери → окраска откосов
+  add("WALL-009", "PA-004", 1, "Откосы под окна/двери потом красят", false);
+
+  // — Потолок: покраска / шпаклёвка → грунтовка, ошкуривание —
+  add("CEIL-001", "PREP-008", 1, "Перед покраской потолок грунтуют", true);
+  add("CEIL-001", "PREP-003", 1, "Проверьте, нужна ли шпаклёвка потолка", false);
+  add("PREP-003", "PREP-008", 1, "Перед шпаклёвкой потолок грунтуют", true);
+  add("PREP-003", "PREP-006", 1, "После шпаклёвки потолок ошкуривают", true);
+
+  // — Обои: подготовка стен —
+  add("OB-001", "PREP-002", 1, "Под обои стены подготавливают — тот же объём", true);
+
+  // — Двери: наличники / доборы, замена старой —
+  add("DR-001", "DR-004", 1, "К двери устанавливают наличники", true);
+  add("DR-002", "DR-004", 1, "К двери устанавливают наличники", true);
+  add("DR-001", "DR-003", 1, "Проверьте, нужны ли доборы к двери", false);
+  add("DR-002", "DR-003", 1, "Проверьте, нужны ли доборы к двери", false);
+  add("DEM-016", "DR-001", 1, "Сняли старую дверь — ставят новую", false);
+  add("DEM-017", "DR-001", 1, "Сняли старую дверь — ставят новую", false);
+
+  // — Напольные покрытия: подложка —
+  add("FLR-002", "FLRA-001", 1, "Под ламинат укладывают подложку — тот же объём", true);
+  add("FLR-003", "FLRA-001", 1, "Под кварц-винил укладывают подложку", true);
+  add("FLR-004", "FLRA-001", 1, "Под паркетную доску укладывают подложку", true);
+  add("FLR-005", "FLRA-001", 1, "Под инженерную доску укладывают подложку", true);
+
+  return normalizeEstimateSuggestionRules(rules, catalog);
+}
+
+export function resolveEstimateSuggestionRules(catalogSettings, catalog = []) {
+  const configured = catalogSettings?.suggestionRules;
+  return configured === null || configured === undefined
+    ? createDefaultEstimateSuggestionRules(catalog)
+    : normalizeEstimateSuggestionRules(configured, catalog);
+}
+
+// Функция только читает rows/catalog и возвращает рекомендации. Исходная смета не мутируется.
+export function buildEstimateSuggestions(rows = {}, catalog = [], rules = []) {
+  const byCode = new Map((catalog || []).filter(w => w?.code).map(w => [String(w.code), w]));
+  const normalizedRules = normalizeEstimateSuggestionRules(rules, catalog);
+  const resultByTarget = new Map();
+  for (const rule of normalizedRules) {
+    const source = byCode.get(rule.sourceCode);
+    const target = byCode.get(rule.targetCode);
+    if (!source || !target) continue;
+    const sourceRow = rows?.[source.code] || rows?.[source.name] || {};
+    const sourceQty = Number(sourceRow?.qty || 0);
+    if (!Number.isFinite(sourceQty) || sourceQty <= 0) continue;
+    const targetRow = rows?.[target.code] || rows?.[target.name] || {};
+    if (Number(targetRow?.qty || 0) > 0) continue;
+    const qty = rule.multiplier === null ? "" : roundSuggestionQty(sourceQty * rule.multiplier);
+    const suggestion = {
+      id: rule.id,
+      sourceCode: source.code,
+      sourceName: source.name,
+      targetCode: target.code,
+      targetName: target.name,
+      targetUnit: target.unit || "",
+      reason: rule.reason,
+      qty,
+      defaultSelected: rule.defaultSelected && qty !== "",
+    };
+    const previous = resultByTarget.get(target.code);
+    if (!previous || Number(suggestion.qty || 0) > Number(previous.qty || 0)) {
+      resultByTarget.set(target.code, suggestion);
+    }
+  }
+  return [...resultByTarget.values()];
+}
 
 // Группировка строк по (cat, sub) — категория › подкатегория, с сохранением порядка появления.
 export function groupData(works) {
@@ -794,9 +966,12 @@ export function computeIssues(data = {}, opts = {}) {
   for (const o of objects) {
     const p = prodByObj[o.id]; if (!p) continue;
     for (const d of (p.defects||[])) {
-      if (!d || d.source!=="client" || d.done) continue;
-      out.push({ id:`client-remark:${o.id}:${d.id||d.clientRemarkId||d.ts}`, group:"Клиенты", sev:"red", scope:"today", dismissable:true,
+      if (!d || d.source!=="client" || d.done || d.dashboardDismissedAt) continue;
+      const itemId = d.id || "";
+      out.push({ id:`client-remark:${o.id}:${itemId||d.clientRemarkId||d.ts}`, group:"Клиенты", sev:"red", scope:"today", dismissable:Boolean(itemId),
         title:"Замечание клиента", detail:`${_objLabel(o)}: «${String(d.text||"").slice(0,80)}»`,
+        dismissAction:itemId ? { type:"client-remark", objectId:o.id, itemId } : null,
+        dismissLabel:"Убрать с главной",
         nav:{ object:o.id, tab:"defects" } });
     }
   }
