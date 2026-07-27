@@ -29,9 +29,13 @@ export const ANALYTICS_BLOCKS = Object.freeze([
   { id: "production", label: "Производство и сроки", icon: "🔨", permission: "analyticsProduction" },
   { id: "finance",    label: "Финансы",           icon: "💰", permission: "analyticsFinance" },
   { id: "quality",    label: "Качество и клиент", icon: "⭐", permission: "analyticsQuality" },
+  { id: "cash",       label: "Деньги",           icon: "🏦", permission: "analyticsFinance" },
+  { id: "dataQuality",label: "Качество данных",  icon: "🧹", permission: "analyticsQuality" },
 ]);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+// Сколько дней без правок считаем «объект забыли».
+const STALE_DAYS = 14;
 
 // Даты в базе живут в двух видах: миллисекунды (createdAt) и строка «ГГГГ-ММ-ДД»
 // (сроки этапов, дата договора). Приводим к числу одинаково во всех расчётах.
@@ -277,10 +281,14 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
   const byType = {};
   for (const o of cohort) {
     const key = o.objType || "—";
-    if (!byType[key]) byType[key] = { objects: 0, sum: 0 };
+    if (!byType[key]) byType[key] = { objects: 0, sum: 0, signed: 0, signedSum: 0, conv: 0 };
     byType[key].objects += 1;
     byType[key].sum += objectValue(o);
+    if (signedSet.has(o.id)) { byType[key].signed += 1; byType[key].signedSum += dealValue(o); }
   }
+  // Конверсия по типу: где мы реально сильнее — вторичка, новостройка или коммерция.
+  for (const v of Object.values(byType)) v.conv = pct(v.signed, v.objects);
+  for (const v of Object.values(byManager)) v.avgCheck = v.signed ? Math.round(v.signedSum / v.signed) : 0;
 
   return {
     newObjects: cohort.length,
@@ -373,6 +381,7 @@ function buildBacklog(idx, { now }) {
     byForeman,
     closingThisMonthCount: closingThisMonth.length,
     closingThisMonthSum: closingThisMonth.reduce((s, o) => s + objectValue(o), 0),
+    closingThisMonthIds: closingThisMonth.map(o => o.id),
   };
 }
 
@@ -389,6 +398,9 @@ function buildProduction(idx, { from, to, now }) {
   let unpaidDoneStages = 0;
   let unpaidDoneSum = 0;
   const planFact = [];
+  const startLagDays = [];
+  const staleObjects = [];
+  const overdueStageList = [];
 
   for (const o of liveObjects) {
     const status = statusOf(o, prodByObject);
@@ -417,6 +429,24 @@ function buildProduction(idx, { from, to, now }) {
         factDays: start ? days(start, factEnd) : null,
       });
     }
+    // Простой: подписали договор — когда реально вышли на объект.
+    const saleAt = ts(prod.saleDate);
+    const startAt = ts(prod.startDate);
+    if (saleAt && startAt && startAt >= saleAt) startLagDays.push(days(saleAt, startAt));
+    // Объекты без движения: карточку давно не трогали, а объект живой.
+    if ((status === "work" || status === "signed" || status === "paused")) {
+      const touched = ts(o.updatedAt) || ts(prod.updatedAt) || ts(o.createdAt);
+      if (touched && daysFull(touched, now) >= STALE_DAYS) {
+        staleObjects.push({
+          id: o.id,
+          name: o.clientName || o.address || "Без названия",
+          createdAt: touched,
+          manager: o.manager || "",
+          value: 0,
+          days: daysFull(touched, now),
+        });
+      }
+    }
     for (const st of prod.stages || []) {
       if (status !== "work" && status !== "paused") continue;
       stagesTotal += 1;
@@ -428,6 +458,15 @@ function buildProduction(idx, { from, to, now }) {
         if (!st.paid) { unpaidDoneStages += 1; unpaidDoneSum += num(st.priceClient); }
       } else if (ts(st.planEnd) && ts(st.planEnd) < now) {
         overdueStages += 1;
+        // Поимённо: какие именно этапы горят и на каком объекте.
+        overdueStageList.push({
+          id: `${o.id}:${st.id || st.name}`,
+          name: `${st.name || "Этап"} · ${o.clientName || o.address || "объект"}`,
+          createdAt: ts(st.planEnd),
+          manager: st.responsible || prod.responsible || "",
+          value: num(st.priceClient),
+          days: daysFull(ts(st.planEnd), now),
+        });
       }
     }
   }
@@ -450,8 +489,13 @@ function buildProduction(idx, { from, to, now }) {
     avgFactDays: factDaysArr.length ? Math.round(factDaysArr.reduce((s, v) => s + v, 0) / factDaysArr.length) : 0,
     stagesProgress: pct(stagesDone, stagesTotal),
     overdueStages,
+    overdueStageList: overdueStageList.sort((a, b) => b.days - a.days),
     unpaidDoneStages,
     unpaidDoneSum,
+    avgStartLagDays: startLagDays.length
+      ? Math.round(startLagDays.reduce((s, v) => s + v, 0) / startLagDays.length) : 0,
+    startLagSample: startLagDays.length,
+    staleObjects: staleObjects.sort((a, b) => b.days - a.days),
   };
 }
 
@@ -526,6 +570,7 @@ function buildFinance(idx, { from, to, now }, financeTx) {
   let unlinkedSum = 0;
   const objectProfit = [];
   const receivableList = [];
+  const marginPlanFact = [];
   for (const o of activeObjects) {
     const contract = contractByObject.get(o.id);
     const contractNo = normContract(contract?.number);
@@ -554,6 +599,23 @@ function buildFinance(idx, { from, to, now }, financeTx) {
     }
 
     const planCost = objectCost(o);
+    // План/факт маржи: сколько закладывали в смете и что получилось по деньгам.
+    // Факт считаем только там, где объект оплачен хотя бы частично и есть расходы,
+    // иначе «маржа» недостроенного объекта показывала бы ерунду.
+    if (planValue > 0 && planCost > 0 && fact.income > 0 && fact.expense > 0) {
+      const planMargin = pct(planValue - planCost, planValue);
+      const factMargin = pct(fact.income - fact.expense, fact.income);
+      marginPlanFact.push({
+        id: o.id,
+        name: o.clientName || o.address || "Без названия",
+        createdAt: ts(o.createdAt),
+        manager: o.manager || "",
+        planMargin,
+        factMargin,
+        drop: planMargin - factMargin,
+        value: planValue,
+      });
+    }
     objectProfit.push({
       objectId: o.id,
       name: o.clientName || o.address || "Без названия",
@@ -585,9 +647,43 @@ function buildFinance(idx, { from, to, now }, financeTx) {
     receivableList: receivableList.sort((a, b) => b.value - a.value),
     unlinkedObjects,
     unlinkedSum,
+    // Средневзвешенные план/факт маржи по компании — главный ответ на вопрос
+    // «где мы теряем деньги»: заложили столько, получилось столько.
+    marginPlanAvg: marginPlanFact.length
+      ? Math.round(marginPlanFact.reduce((s, x) => s + x.planMargin, 0) / marginPlanFact.length) : 0,
+    marginFactAvg: marginPlanFact.length
+      ? Math.round(marginPlanFact.reduce((s, x) => s + x.factMargin, 0) / marginPlanFact.length) : 0,
+    marginSample: marginPlanFact.length,
+    marginDrops: marginPlanFact.filter(x => x.drop >= 10).sort((a, b) => b.drop - a.drop),
     topProfitable: objectProfit.slice(0, 5),
     topLoss: objectProfit.filter(x => x.profit < 0).slice(-5).reverse(),
     overspendObjects: objectProfit.filter(x => x.overspend > 0).sort((a, b) => b.overspend - a.overspend).slice(0, 5),
+  };
+}
+
+// Остатки по счетам — считаются ровно как на экране «Финансы»: начальный остаток
+// счёта плюс приходы, минус расходы, переводы двигают деньги между счетами.
+function buildCash(financeTx, accounts, backlog) {
+  const balances = {};
+  for (const a of accounts || []) balances[a.name] = num(a.opening);
+  for (const t of financeTx) {
+    if (!t || t.deletedAt || t.included === false) continue;
+    const amt = num(t.amount);
+    if (t.type === "income") balances[t.account] = (balances[t.account] || 0) + amt;
+    else if (t.type === "expense") balances[t.account] = (balances[t.account] || 0) - amt;
+    else if (t.type === "transfer") {
+      balances[t.account] = (balances[t.account] || 0) - amt;
+      balances[t.accountTo] = (balances[t.accountTo] || 0) + amt;
+    }
+  }
+  const total = Object.values(balances).reduce((s, v) => s + v, 0);
+  return {
+    total,
+    byAccount: Object.entries(balances)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value),
+    // Ожидаемый приход — долг по объектам, которые должны закрыться в этом месяце.
+    expectedThisMonth: backlog.closingThisMonthDebt || 0,
   };
 }
 
@@ -608,6 +704,7 @@ function buildQuality(idx, { now }) {
   let handoverDone = 0;
   let handoverTotal = 0;
   let objectsInHandover = 0;
+  const byForeman = {};
 
   for (const o of liveObjects) {
     const prod = prodByObject.get(o.id);
@@ -615,11 +712,16 @@ function buildQuality(idx, { now }) {
     const status = statusOf(o, prodByObject);
     const defects = (prod.defects || []).filter(Boolean);
     if (defects.length) objectsWithRemarks += 1;
+    const foreman = prod.responsible || "Не назначен";
+    if (!byForeman[foreman]) byForeman[foreman] = { objects: 0, open: 0, total: 0 };
+    byForeman[foreman].objects += 1;
     for (const d of defects) {
       const isClient = d.source === "client";
       if (isClient) fromClient += 1;
+      byForeman[foreman].total += 1;
       if (d.done) { closed += 1; continue; }
       open += 1;
+      byForeman[foreman].open += 1;
       if (isClient) openFromClient += 1;
       const opened = ts(d.ts);
       if (opened) {
@@ -652,6 +754,54 @@ function buildQuality(idx, { now }) {
       : 0,
     handoverPct: pct(handoverDone, handoverTotal),
     objectsInHandover,
+    byForeman,
+  };
+}
+
+// Качество данных: почему показатели бывают пустыми. Не считает бизнес — считает,
+// насколько заполнена база. Одновременно это рабочий список «что дозаполнить».
+function buildDataQuality(idx, financeTx, resolveManager) {
+  const { liveObjects, objectValue, prodByObject, contractByObject } = idx;
+  const active = liveObjects.filter(o => !["archive", "refuse"].includes(statusOf(o, prodByObject)));
+  const signed = liveObjects.filter(o => ["signed", "work", "paused", "done"].includes(statusOf(o, prodByObject)));
+
+  const gaps = [
+    { key: "manager", label: "Без менеджера",
+      items: active.filter(o => !o.manager || resolveManager(o.manager).includes("нет в сотрудниках")) },
+    { key: "area", label: "Без площади", items: active.filter(o => !num(o.area)) },
+    { key: "estimate", label: "Без сметы", items: active.filter(o => objectValue(o) <= 0) },
+    { key: "contract", label: "Подписан, но нет договора", items: signed.filter(o => !contractByObject.get(o.id)) },
+    { key: "prodCard", label: "В работе без карточки производства",
+      items: liveObjects.filter(o => statusOf(o, prodByObject) === "work" && !prodByObject.get(o.id)) },
+    { key: "planEnd", label: "В работе без плановой даты сдачи",
+      items: liveObjects.filter(o => statusOf(o, prodByObject) === "work" && !ts(prodByObject.get(o.id)?.planEndDate)) },
+    { key: "saleDate", label: "Подписан без даты продажи",
+      items: signed.filter(o => !ts(prodByObject.get(o.id)?.saleDate)) },
+    { key: "foreman", label: "В работе без прораба",
+      items: liveObjects.filter(o => statusOf(o, prodByObject) === "work" && !prodByObject.get(o.id)?.responsible) },
+  ].map(g => ({
+    key: g.key,
+    label: g.label,
+    count: g.items.length,
+    list: g.items.slice(0, 50).map(o => ({
+      id: o.id,
+      name: o.clientName || o.address || "Без названия",
+      createdAt: ts(o.createdAt),
+      manager: o.manager || "",
+      value: objectValue(o),
+    })),
+  }));
+
+  const liveTx = financeTx.filter(t => t && !t.deletedAt && t.included !== false && t.type !== "transfer");
+  const txWithoutContract = liveTx.filter(t => !String(t.contractNo || "").trim()).length;
+
+  return {
+    gaps: gaps.filter(g => g.count > 0),
+    totalGaps: gaps.reduce((s, g) => s + g.count, 0),
+    activeObjects: active.length,
+    txTotal: liveTx.length,
+    txWithoutContract,
+    txWithoutContractPct: pct(txWithoutContract, liveTx.length),
   };
 }
 
@@ -670,6 +820,12 @@ export function buildAnalytics(data = {}, options = {}) {
     finance: buildFinance(idx, { ...bounds, now }, financeTx),
     quality: buildQuality(idx, { now }),
   };
+  current.cash = buildCash(financeTx, data.accounts || [], {
+    closingThisMonthDebt: (current.finance.receivableList || [])
+      .filter(r => (current.backlog.closingThisMonthIds || []).includes(r.id))
+      .reduce((s, r) => s + r.value, 0),
+  });
+  current.dataQuality = buildDataQuality(idx, financeTx, resolveManager);
 
   // Сравнение с предыдущим периодом. «Портфель» и «Качество» — состояние на сейчас
   // (в базе нет дат закрытия замечаний), поэтому у них сравнения нет и быть не может.

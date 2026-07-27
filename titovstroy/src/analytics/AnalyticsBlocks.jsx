@@ -107,7 +107,7 @@ const EmptyNote = ({ text }) => (
 
 export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails = true, catProfit = [] }) {
   if (!data) return null;
-  const { sales, backlog, production, finance, quality, previous } = data;
+  const { sales, backlog, production, finance, quality, cash, dataQuality, previous } = data;
   const money = (v) => `${fmt(Math.round(v || 0))} ₸`;
   const can = (block) => permissions[block.permission] !== false;
   const d = (path, current) => (previous ? deltaPct(current, path) : undefined);
@@ -183,9 +183,24 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
                   .map(([name, v]) => (
                     <BarRow key={name} label={name} value={v.estimatedSum}
                       max={Math.max(...Object.values(sales.byManager).map(x => x.estimatedSum), 1)}
-                      note={`смет ${v.estimated} из ${v.objects} · ${money(v.estimatedSum)} · подписано ${v.signed}`}
+                      note={`смет ${v.estimated}/${v.objects} · подписано ${v.signed}${v.avgCheck ? ` · чек ${money(v.avgCheck)}` : ""}`}
                       color="#059669" />
                   ))}
+          </div>
+          <div style={card}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>Конверсия по типу объекта</div>
+            {Object.entries(sales.byType).length === 0
+              ? <div style={{ fontSize: 11.5, color: "#94a3b8" }}>Нет данных</div>
+              : Object.entries(sales.byType)
+                  .sort((a, b) => b[1].objects - a[1].objects)
+                  .map(([type, v]) => (
+                    <BarRow key={type} label={type} value={v.conv} max={100}
+                      note={`${v.signed} из ${v.objects} · ${v.conv}%`}
+                      color={v.conv >= 30 ? "#059669" : v.conv >= 15 ? "#d97706" : "#dc2626"} />
+                  ))}
+            <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 8 }}>
+              Смет на объект в среднем: <b>{sales.estimatedCount ? Math.round(sales.estimatesTotalCount / sales.estimatedCount * 10) / 10 : 0}</b>
+            </div>
           </div>
         </div>
       </Block>
@@ -236,11 +251,21 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
           <Tile label="Прогресс по этапам" value={`${production.stagesProgress}%`} sub="закрыто на активных объектах" />
           <Tile label="Просроченных этапов" value={production.overdueStages}
             accent={production.overdueStages ? "#dc2626" : "#0f172a"} />
+          <Tile label="Простой до старта" value={production.avgStartLagDays ? `${production.avgStartLagDays} дн.` : "—"}
+            sub={production.startLagSample
+              ? `от подписания до выхода · по ${production.startLagSample} объектам`
+              : "нет дат продажи и старта"}
+            accent={production.avgStartLagDays > 14 ? "#dc2626" : "#0f172a"} />
+          <Tile label="Объектов без движения" value={production.staleObjects.length}
+            sub="карточку не трогали 14+ дней"
+            accent={production.staleObjects.length ? "#d97706" : "#059669"} />
           {financialDetails && (
             <Tile label="Закрыто, но не оплачено клиентом" value={money(production.unpaidDoneSum)}
               sub={`${production.unpaidDoneStages} закрытых этапов без галочки «оплачено»`} accent="#d97706" />
           )}
         </div>
+        <AuditList items={production.overdueStageList} fmt={fmt} title="Какие этапы просрочены" />
+        <AuditList items={production.staleObjects} fmt={fmt} title="Объекты без движения" />
       </Block>
     ),
 
@@ -319,6 +344,35 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
             </div>
           )}
 
+          {financialDetails && finance.marginSample > 0 && (
+            <div style={card}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>
+                Маржа: план → факт
+                <span style={{ fontWeight: 400, color: "#94a3b8" }}> · по {finance.marginSample} объектам</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 10 }}>
+                <span style={{ fontSize: 20, fontWeight: 900, color: "#64748b" }}>{finance.marginPlanAvg}%</span>
+                <span style={{ color: "#94a3b8" }}>→</span>
+                <span style={{ fontSize: 20, fontWeight: 900,
+                  color: finance.marginFactAvg >= finance.marginPlanAvg ? "#059669" : "#dc2626" }}>
+                  {finance.marginFactAvg}%
+                </span>
+                <span style={{ fontSize: 11, color: "#94a3b8" }}>
+                  {finance.marginFactAvg < finance.marginPlanAvg
+                    ? `теряем ${finance.marginPlanAvg - finance.marginFactAvg} пунктов`
+                    : "держим план"}
+                </span>
+              </div>
+              {finance.marginDrops.length === 0
+                ? <div style={{ fontSize: 11.5, color: "#94a3b8" }}>Объектов с просадкой больше 10 пунктов нет</div>
+                : finance.marginDrops.slice(0, 6).map(o => (
+                    <BarRow key={o.id} label={o.name} value={o.drop}
+                      max={Math.max(...finance.marginDrops.map(x => x.drop))}
+                      note={`${o.planMargin}% → ${o.factMargin}% · −${o.drop} п.`} color="#dc2626" />
+                  ))}
+            </div>
+          )}
+
           {financialDetails && catProfit.length > 0 && (
             <div style={card}>
               <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>
@@ -369,11 +423,80 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
           <Tile label="Чек-лист сдачи" value={`${quality.handoverPct}%`}
             sub={quality.objectsInHandover ? `по ${quality.objectsInHandover} объектам в работе и сданным` : "нет объектов в работе"} />
         </div>
+        <div style={{ ...grid(260), marginTop: 10 }}>
+          <div style={card}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>Замечания по прорабам</div>
+            {Object.entries(quality.byForeman).length === 0
+              ? <div style={{ fontSize: 11.5, color: "#94a3b8" }}>Нет данных</div>
+              : Object.entries(quality.byForeman)
+                  .sort((a, b) => b[1].total - a[1].total)
+                  .map(([name, v]) => (
+                    <BarRow key={name} label={name} value={v.total}
+                      max={Math.max(...Object.values(quality.byForeman).map(x => x.total), 1)}
+                      note={`${v.total} всего · открыто ${v.open} · объектов ${v.objects}`}
+                      color={v.open ? "#dc2626" : "#059669"} />
+                  ))}
+          </div>
+        </div>
+      </Block>
+    ),
+
+    // ── Деньги: остатки на счетах и ближайший приход ──
+    cash: financialDetails ? (
+      <Block key="cash" icon="🏦" title="Деньги" hint="остатки как в разделе «Финансы»">
+        <div style={grid()}>
+          <Tile label="Всего на счетах" value={money(cash.total)}
+            accent={cash.total >= 0 ? "#059669" : "#dc2626"} />
+          <Tile label="Ждём в этом месяце" value={money(cash.expectedThisMonth)}
+            sub="долг по объектам, что закрываются" accent="#2563eb" />
+          <Tile label="Вся дебиторка" value={money(finance.receivables)} accent="#d97706"
+            sub={finance.receivablesOverdue ? `просрочено ${money(finance.receivablesOverdue)}` : "без просрочки"} />
+        </div>
+        <div style={{ ...grid(260), marginTop: 10 }}>
+          <div style={card}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>Остатки по счетам</div>
+            {cash.byAccount.length === 0
+              ? <div style={{ fontSize: 11.5, color: "#94a3b8" }}>Счета не заведены</div>
+              : cash.byAccount.map(a => (
+                  <BarRow key={a.name} label={a.name} value={Math.abs(a.value)}
+                    max={Math.max(...cash.byAccount.map(x => Math.abs(x.value)), 1)}
+                    note={money(a.value)} color={a.value >= 0 ? "#059669" : "#dc2626"} />
+                ))}
+          </div>
+        </div>
+      </Block>
+    ) : null,
+
+    // ── Качество данных: почему цифры бывают пустыми ──
+    dataQuality: (
+      <Block key="dataQuality" icon="🧹" title="Качество данных"
+        hint="что дозаполнить, чтобы показателям можно было верить">
+        <div style={grid()}>
+          <Tile label="Пробелов в объектах" value={dataQuality.totalGaps}
+            sub={`активных объектов: ${dataQuality.activeObjects}`}
+            accent={dataQuality.totalGaps ? "#d97706" : "#059669"} />
+          <Tile label="Операций без договора" value={dataQuality.txWithoutContract}
+            sub={`${dataQuality.txWithoutContractPct}% от всех операций`}
+            accent={dataQuality.txWithoutContractPct > 20 ? "#dc2626" : "#0f172a"} />
+        </div>
+        <div style={{ marginTop: 10 }}>
+          {dataQuality.gaps.length === 0 ? (
+            <div style={{ ...card, fontSize: 12, color: "#059669" }}>Всё заполнено — данные полные.</div>
+          ) : dataQuality.gaps.map(g => (
+            <div key={g.key} style={{ ...card, marginBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12 }}>
+                <span style={{ color: "#334155", fontWeight: 700 }}>{g.label}</span>
+                <span style={{ color: "#dc2626", fontWeight: 700 }}>{g.count}</span>
+              </div>
+              <AuditList items={g.list} fmt={fmt} title="Показать объекты" />
+            </div>
+          ))}
+        </div>
       </Block>
     ),
   };
 
-  return <div>{visible.map(b => blockById[b.id])}</div>;
+  return <div>{visible.map(b => blockById[b.id]).filter(Boolean)}</div>;
 }
 
 export default AnalyticsBlocks;
@@ -382,42 +505,55 @@ export default AnalyticsBlocks;
 // Не аналитика, а «что происходит прямо сейчас»: сколько в работе, что горит,
 // сколько денег ждём. Числа берутся из той же модели, что и аналитика, поэтому
 // сходятся с ней один в один.
-export function DashboardKpis({ data, fmt, financialDetails = true, onNav }) {
+export function DashboardKpis({ data, fmt, financialDetails = true }) {
   if (!data) return null;
-  const { sales, backlog, production, finance, quality } = data;
+  const { sales, backlog, production, finance, cash: cashData } = data;
   const money = (v) => `${fmt(Math.round(v || 0))} ₸`;
 
-  const tiles = [
+  // Две группы: сверху «что происходит» (объекты и сроки), ниже «деньги».
+  // Namely: одна цифра — один смысл, дублей между строками быть не должно.
+  const work = [
     { label: "Объектов в работе", value: production.inWork,
       sub: production.paused ? `на паузе: ${production.paused}` : "без пауз" },
     { label: "Просрочено", value: production.overdueObjects,
       sub: production.overdueObjects ? `в среднем на ${production.overdueAvgDays} дн.` : "всё в срок",
       accent: production.overdueObjects ? "#dc2626" : "#059669" },
+    { label: "Сдано за месяц", value: production.doneInPeriod, accent: "#059669",
+      sub: production.onTimeRate ? `в срок: ${production.onTimeRate}%` : "" },
+    { label: "В согласовании", value: sales.inApprovalCount, accent: "#d97706",
+      sub: money(sales.inApprovalSum) },
     { label: "Подписано за месяц", value: sales.signedCount, sub: money(sales.signedSum), accent: "#059669" },
-    { label: "Замечаний открыто", value: quality.openRemarks,
-      sub: quality.openOverWeek ? `дольше недели: ${quality.openOverWeek}` : "свежие",
-      accent: quality.openRemarks ? "#dc2626" : "#059669" },
+    { label: "Объектов без движения", value: production.staleObjects.length,
+      sub: "не трогали 14+ дней",
+      accent: production.staleObjects.length ? "#d97706" : "#059669" },
   ];
-  if (financialDetails) {
-    tiles.push(
-      { label: "Дебиторка", value: money(finance.receivables),
-        sub: finance.receivablesOverdue ? `просрочено: ${money(finance.receivablesOverdue)}` : "без просрочки",
-        accent: finance.receivablesOverdue ? "#dc2626" : "#d97706" },
-      { label: "Закрывается в этом месяце", value: backlog.closingThisMonthCount,
-        sub: money(backlog.closingThisMonthSum), accent: "#2563eb" },
-    );
-  }
+  const cash = financialDetails ? [
+    { label: "Деньги на счетах", value: money(cashData.total),
+      accent: cashData.total >= 0 ? "#059669" : "#dc2626", sub: "сейчас" },
+    { label: "Выручка за месяц", value: money(finance.income), accent: "#059669", sub: "поступления факт" },
+    { label: "Валовая прибыль", value: money(finance.gross), sub: `маржа ${finance.grossMarginPct}%`,
+      accent: finance.gross >= 0 ? "#059669" : "#dc2626" },
+    { label: "Дебиторка", value: money(finance.receivables),
+      sub: finance.receivablesOverdue ? `просрочено: ${money(finance.receivablesOverdue)}` : "без просрочки",
+      accent: finance.receivablesOverdue ? "#dc2626" : "#d97706" },
+    { label: "Закрывается в этом месяце", value: backlog.closingThisMonthCount,
+      sub: money(backlog.closingThisMonthSum), accent: "#2563eb" },
+  ] : [];
+
+  const renderTile = (t) => (
+    <div key={t.label} style={card}>
+      <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>{t.label}</div>
+      <div style={{ fontSize: 22, fontWeight: 900, color: t.accent || "#0f172a", lineHeight: 1.15 }}>{t.value}</div>
+      {t.sub && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>{t.sub}</div>}
+    </div>
+  );
 
   return (
-    <div style={{ ...grid(150), marginBottom: 24 }}>
-      {tiles.map(t => (
-        <div key={t.label} onClick={onNav ? () => onNav(t.label) : undefined}
-          style={{ ...card, cursor: onNav ? "pointer" : "default" }}>
-          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>{t.label}</div>
-          <div style={{ fontSize: 22, fontWeight: 900, color: t.accent || "#0f172a", lineHeight: 1.15 }}>{t.value}</div>
-          {t.sub && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>{t.sub}</div>}
-        </div>
-      ))}
+    <div style={{ marginBottom: 24 }}>
+      <div style={grid(150)}>{work.map(renderTile)}</div>
+      {cash.length > 0 && (
+        <div style={{ ...grid(150), marginTop: 10 }}>{cash.map(renderTile)}</div>
+      )}
     </div>
   );
 }

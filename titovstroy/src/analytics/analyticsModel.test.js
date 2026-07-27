@@ -47,6 +47,10 @@ const fixture = () => ({
       checklistHandover:[{ id:"h1", done:true }, { id:"h2", done:false }],
     },
   ],
+  accounts: [
+    { id:"a1", name:"Каспи", opening: 100000 },
+    { id:"a2", name:"Наличные", opening: 0 },
+  ],
   financeTx: [
     { id:"t1", type:"income",  amount:700000, date: dstr(-8), contractNo:"№12" },
     { id:"t2", type:"expense", amount:300000, date: dstr(-6), contractNo:"№ 12", category:"Материалы" },
@@ -64,6 +68,8 @@ const fixture = () => ({
     { id:"t10", type:"expense", amount:250000, date: dstr(-3), contractNo:"№12", category:"Прямые расходы (COGS / себестоимость)" },
     // Дивиденды — распределение прибыли, в расходы P&L не входят
     { id:"t11", type:"expense", amount:70000,  date: dstr(-3), category:"Прочее", subcategory:"Дивиденды учредителям" },
+    // движение между счетами — на общий остаток не влияет
+    { id:"t12", type:"transfer", amount:30000, date: dstr(-2), account:"Каспи", accountTo:"Наличные" },
   ],
 });
 
@@ -306,6 +312,49 @@ describe("качество", () => {
   });
 });
 
+describe("деньги на счетах", () => {
+  it("остаток = начальный + приходы − расходы, перевод общий остаток не меняет", () => {
+    const data = fixture();
+    // все операции без account попадут в «undefined», поэтому проставим счёт
+    data.financeTx.forEach(t => { if (!t.account && t.type !== "transfer") t.account = "Каспи"; });
+    const { cash } = buildAnalytics(data, { period: "all", now: NOW });
+    // 100 000 начальный + приходы (700k+5000k+50k) − расходы (300+100+10+250+70+2000 тыс)
+    const income = 700000 + 5000000 + 50000;
+    const expense = 300000 + 100000 + 10000 + 250000 + 70000 + 2000000;
+    expect(cash.total).toBe(100000 + income - expense);
+    expect(cash.byAccount.length).toBe(2);
+  });
+});
+
+describe("качество данных", () => {
+  const { dataQuality } = all();
+
+  it("находит пробелы и считает операции без договора", () => {
+    expect(dataQuality.totalGaps).toBeGreaterThan(0);
+    const areaGap = dataQuality.gaps.find(g => g.key === "area");
+    expect(areaGap.count).toBeGreaterThan(0);
+    expect(dataQuality.txWithoutContract).toBeGreaterThan(0);
+  });
+
+  it("у каждого пробела есть список объектов для дозаполнения", () => {
+    for (const g of dataQuality.gaps) {
+      expect(g.list.length).toBeGreaterThan(0);
+      expect(g.list[0]).toHaveProperty("name");
+    }
+  });
+});
+
+describe("план vs факт маржи", () => {
+  it("считает просадку маржи по объекту", () => {
+    const { finance } = all();
+    // o1: план (1 300 000 − 780 000)/1 300 000 = 40%; факт (750 000 − 650 000)/750 000 = 13%
+    expect(finance.marginSample).toBe(1);
+    expect(finance.marginPlanAvg).toBe(40);
+    expect(finance.marginFactAvg).toBe(13);
+    expect(finance.marginDrops[0]).toMatchObject({ id: "o1", drop: 27 });
+  });
+});
+
 describe("служебное", () => {
   it("сумма договора: работы → цена за м² → итог", () => {
     expect(contractSum({ works:[{quantity:2, price:100}] })).toBe(200);
@@ -316,7 +365,8 @@ describe("служебное", () => {
 
   it("у каждого блока своё право доступа", () => {
     expect(ANALYTICS_BLOCKS.map(b => b.permission)).toEqual([
-      "analyticsSales", "analyticsBacklog", "analyticsProduction", "analyticsFinance", "analyticsQuality",
+      "analyticsSales", "analyticsBacklog", "analyticsProduction", "analyticsFinance",
+      "analyticsQuality", "analyticsFinance", "analyticsQuality",
     ]);
   });
 
