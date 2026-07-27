@@ -238,7 +238,15 @@ const FULL_ADMIN_ACCESS = Object.freeze({
   adminCatalog:"all", adminPrices:"all", adminBackups:"all", adminRestore:"all",
   adminAudit:"all", adminDbCheck:"all",
   financialDetails:true, objectFinanceSummary:true, showLocked:false,
+  analyticsSales:true, analyticsBacklog:true, analyticsProduction:true,
+  analyticsFinance:true, analyticsQuality:true,
 });
+
+// Блоки аналитики — отдельные галочки видимости. Позволяют показать роли,
+// например, воронку и производство, но скрыть финансовый блок.
+const ANALYTICS_BLOCK_KEYS = [
+  "analyticsSales", "analyticsBacklog", "analyticsProduction", "analyticsFinance", "analyticsQuality",
+];
 
 const NO_TEMPLATE_ACCESS = Object.freeze({
   templateView:"none", templateEdit:"none", templatePublish:"none", templateRollback:"none",
@@ -266,6 +274,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
     adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
     adminAudit:"none", adminDbCheck:"none",
+    analyticsSales:true, analyticsBacklog:true, analyticsProduction:true, analyticsFinance:true, analyticsQuality:true,
     showLocked:false,
   },
   sales_head: {
@@ -285,6 +294,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
     adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
     adminAudit:"none", adminDbCheck:"none",
+    analyticsSales:true, analyticsBacklog:true, analyticsProduction:true, analyticsFinance:false, analyticsQuality:true,
     showLocked:true,
   },
   foreman: {
@@ -304,6 +314,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
     adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
     adminAudit:"none", adminDbCheck:"none",
+    analyticsSales:false, analyticsBacklog:false, analyticsProduction:true, analyticsFinance:false, analyticsQuality:true,
     showLocked:false,
   },
   user: {
@@ -323,6 +334,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
     adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
     adminAudit:"none", adminDbCheck:"none",
+    analyticsSales:true, analyticsBacklog:false, analyticsProduction:false, analyticsFinance:false, analyticsQuality:false,
     showLocked:true,
   },
   viewer: {
@@ -342,6 +354,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
     adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
     adminAudit:"none", adminDbCheck:"none",
+    analyticsSales:true, analyticsBacklog:false, analyticsProduction:false, analyticsFinance:false, analyticsQuality:false,
     showLocked:false,
   },
 });
@@ -435,6 +448,12 @@ export function normalizeRolePermissions(saved = {}) {
     merged.financialDetails = merged.financialDetails === true;
     merged.objectFinanceSummary = merged.objectFinanceSummary === true;
     merged.showLocked = merged.showLocked === true;
+    // Блоки аналитики: в старых сохранённых матрицах этих ключей нет. Берём значение
+    // из пресета роли, а не гасим в false — иначе после обновления у всех пропала бы
+    // вся аналитика, хотя право «Аналитика: просмотр» осталось.
+    for (const key of ANALYTICS_BLOCK_KEYS) {
+      merged[key] = (key in patch ? patch[key] : base[key]) === true;
+    }
     result[role.key] = merged;
   }
   // Главного администратора нельзя случайно лишить доступа к матрице и данным.

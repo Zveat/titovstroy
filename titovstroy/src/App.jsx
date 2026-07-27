@@ -11,6 +11,8 @@ import { parserRunMessage, triggerParserRun } from "./masters/parserTrigger.js";
 import { MasterCrmButton, MasterCrmDatabase, MasterCrmEditor } from "./masters/MasterCRM.jsx";
 import { interactionsForContact, masterSourceKey, normalizeMasterCrm } from "./masters/masterCrm.js";
 import { EstimateSuggestions, EstimateSuggestionRulesEditor } from "./estimate/EstimateSuggestions.jsx";
+import { AnalyticsBlocks } from "./analytics/AnalyticsBlocks.jsx";
+import { buildAnalytics, REFUSE_REASONS } from "./analytics/analyticsModel.js";
 import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
@@ -54,12 +56,6 @@ const _FB_ENV = {
 // Признак dev-окружения: конфиг взят из переменных (значит база — не боевая)
 const IS_DEV_ENV = !!_FB_ENV.databaseURL;
 const firebaseConfig = IS_DEV_ENV ? _FB_ENV : _FB_PROD;
-// Временный пользователь для проверки preview-сборок. Он доступен только если сам
-// Firebase-проект явно тестовый; одного наличия Vercel env недостаточно, чтобы случайно
-// открыть такой вход на боевой базе.
-const IS_PREVIEW_TEST_ENV = IS_DEV_ENV && /(?:dev|test)/i.test(
-  `${_FB_ENV.projectId || ""} ${_FB_ENV.databaseURL || ""}`,
-);
 // Обёртка над window.confirm для опасных массовых операций (восстановление бэкапа,
 // импорт JSON и т.п.): на боевой базе добавляет явное предупреждение перед вопросом,
 // чтобы не восстановить/импортировать что-то не туда по рассеянности.
@@ -1487,13 +1483,6 @@ const DEFAULT_USERS = [
   { id:"1", login:"admin",    password:"titov2024", name:"Василий Титов",   role:"admin"  },
   { id:"2", login:"zamer1",   password:"zamer1",    name:"Замерщик 1",      role:"user"   },
 ];
-const PREVIEW_TEST_USER = Object.freeze({
-  id:"preview-test-admin",
-  login:"test-admin",
-  password:"Test2026!",
-  name:"Тестовый администратор",
-  role:"admin",
-});
 
 // Старый "хэш" — на деле обратимая обфускация (base64 + реверс), не защищает пароль
 // при доступе к базе. Оставлен только для проверки паролей, созданных до перехода
@@ -2348,15 +2337,6 @@ function LoginScreen({ onLogin }) {
       return;
     }
 
-    // Не записываем тестового пользователя в Firebase: он существует только внутри
-    // preview-сборки и не меняет импортированную копию списка сотрудников.
-    if (IS_PREVIEW_TEST_ENV) {
-      users = [
-        ...users.filter(user => user?.id !== PREVIEW_TEST_USER.id && user?.login?.toLowerCase() !== PREVIEW_TEST_USER.login),
-        PREVIEW_TEST_USER,
-      ];
-    }
-
     const candidate = users.find(u => u.login.toLowerCase() === login.trim().toLowerCase());
     const ok = candidate ? await verifyPassword(password, candidate.password) : false;
 
@@ -2873,6 +2853,11 @@ const ROLE_PERMISSION_GROUPS = [
     actions:[
       { key:"analytics", label:"Просмотр", hint:"Воронка, показатели и сотрудники", type:"scope" },
       { key:"analyticsExport", label:"Экспорт", hint:"Выгрузка аналитики", type:"scope" },
+      { key:"analyticsSales", label:"Блок «Продажи и воронка»", hint:"Заявки, сметы, договоры, конверсия, причины отказа", type:"boolean" },
+      { key:"analyticsBacklog", label:"Блок «Портфель заказов»", hint:"Законтрактовано, остаток работ и загрузка прорабов", type:"boolean" },
+      { key:"analyticsProduction", label:"Блок «Производство и сроки»", hint:"Просрочки, сдача в срок, прогресс по этапам", type:"boolean" },
+      { key:"analyticsFinance", label:"Блок «Финансы»", hint:"Поступления, расходы, дебиторка и прибыль по объектам", type:"boolean" },
+      { key:"analyticsQuality", label:"Блок «Качество и клиент»", hint:"Замечания, сроки закрытия, чек-лист сдачи", type:"boolean" },
     ],
   },
   {
@@ -9144,8 +9129,30 @@ ${reqBlock}`;
     return { baseEst: baseObjs, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType, TYPE_L2,
       wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin,
       funnel, winRateOverall, winRateSent, signedB, refuseB, catProfit, monthly, staleSent,
-      avgDealDays, avgApprovalDays, signedObjsCount: signedObjs.length, convByType, topObjects, objVal };
+      avgDealDays, avgApprovalDays, signedObjsCount: signedObjs.length, convByType, topObjects, objVal, estCost };
   }, [analyticsObjects, analyticsEstimates, contracts, statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers, catalogVersion]);
+
+  // Блоки аналитики (продажи / портфель / производство / финансы / качество).
+  // Считает чистая функция buildAnalytics — те же числа доступны и для «Главной».
+  // Себестоимость сметы берём тем же estCost, что и остальная аналитика, иначе
+  // «перерасход к смете» разошёлся бы с блоком прибыли.
+  const analyticsBlocks = useMemo(() => buildAnalytics(
+    {
+      objects: analyticsObjects,
+      estimates: analyticsEstimates,
+      contracts,
+      productions,
+      financeTx,
+      estimateCost: analyticsData.estCost,
+    },
+    {
+      period: statsPeriod,
+      from: statsDateFrom ? new Date(statsDateFrom).getTime() : null,
+      to: statsDateTo ? new Date(statsDateTo).getTime() + 86399999 : null,
+      manager: statsManager,
+    },
+  ), [analyticsObjects, analyticsEstimates, contracts, productions, financeTx, analyticsData,
+      statsPeriod, statsDateFrom, statsDateTo, statsManager]);
 
   // Защита от краша: если activeCat не в Gdyn — берём первый
   const safeCat = Gdyn[activeCat] ? activeCat : (Object.keys(Gdyn)[0]||"");
@@ -12651,6 +12658,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 </div>
               </div>}
             </div>
+            {/* Блоки бизнес-показателей. Видимость каждого блока — своя галочка в правах роли,
+                финансовые цифры внутри дополнительно скрыты без financialDetails. */}
+            <AnalyticsBlocks
+              data={analyticsBlocks}
+              permissions={currentPermissions}
+              fmt={fmt}
+              financialDetails={hasFinancialDetails}
+            />
+
             <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14,marginBottom:20}}>
               {[["Создано объектов",totalEst,"в периоде, без архива","#2563eb","📋"],["Объём объектов",fmt(totalSumEst)+" ₸","сумма смет","#2563eb","💰"],["Ср. чек",fmt(avgEst)+" ₸","на объект","#059669","🎯"],["Договоров",totalCon,"по объектам","#2563eb","📄"],["Объём договоров",fmt(totalSumCon)+" ₸","сумма договоров","#2563eb","🧾"],["Средний договор",fmt(avgCon)+" ₸","на договор","#059669","📊"]].map(([l,v,s,c,ic],i)=>(
                 <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"16px 18px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",position:"relative",overflow:"hidden",transition:"transform .18s ease,box-shadow .18s ease"}}
@@ -15386,6 +15402,21 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       );
                     }); })()}
                   </div>
+
+                  {/* Причина отказа — появляется только у потерянных объектов.
+                      Нужна для аналитики: без неё видно «сколько потеряли», но не видно «почему». */}
+                  {["refuse","cancel"].includes(unifiedStatusOf(obj)) && (
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <span style={{fontSize:11,color:"#dc2626",fontWeight:700}}>Причина отказа</span>
+                      <select className="fi" style={{width:"auto",minWidth:180,fontSize:12}}
+                        disabled={!canChangeStatus}
+                        value={obj.refuseReason||""}
+                        onChange={e=>saveObjField(obj,{refuseReason:e.target.value})}>
+                        <option value="">— не указана —</option>
+                        {REFUSE_REASONS.map(r=><option key={r.key} value={r.key}>{r.label}</option>)}
+                      </select>
+                    </div>
+                  )}
 
                   {/* Сводка клиента/объекта + сворачивание */}
                   <div onClick={()=>setObjInfoCollapsed(v=>!v)} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",padding:"2px 0",userSelect:"none"}}>
