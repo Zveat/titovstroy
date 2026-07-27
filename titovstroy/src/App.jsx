@@ -11,7 +11,7 @@ import { parserRunMessage, triggerParserRun } from "./masters/parserTrigger.js";
 import { MasterCrmButton, MasterCrmDatabase, MasterCrmEditor } from "./masters/MasterCRM.jsx";
 import { interactionsForContact, masterSourceKey, normalizeMasterCrm } from "./masters/masterCrm.js";
 import { EstimateSuggestions, EstimateSuggestionRulesEditor } from "./estimate/EstimateSuggestions.jsx";
-import { AnalyticsBlocks } from "./analytics/AnalyticsBlocks.jsx";
+import { AnalyticsBlocks, DashboardKpis } from "./analytics/AnalyticsBlocks.jsx";
 import { buildAnalytics, makeManagerResolver, REFUSE_REASONS } from "./analytics/analyticsModel.js";
 import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
@@ -9147,6 +9147,14 @@ ${reqBlock}`;
       avgDealDays, avgApprovalDays, signedObjsCount: signedObjs.length, convByType, topObjects, objVal, estCost };
   }, [analyticsObjects, analyticsEstimates, contracts, productions, statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers, catalogVersion]);
 
+  // Показатели «Главной» считаются той же моделью, но всегда за текущий месяц и
+  // без фильтра по менеджеру — главная показывает состояние компании, а не срез,
+  // выбранный на экране аналитики.
+  const dashboardStats = useMemo(() => buildAnalytics(
+    { objects, estimates, contracts, productions, financeTx, estimateCost: analyticsData.estCost },
+    { period: "month", users: allUsers },
+  ), [objects, estimates, contracts, productions, financeTx, analyticsData, allUsers]);
+
   // Блоки аналитики (продажи / портфель / производство / финансы / качество).
   // Считает чистая функция buildAnalytics — те же числа доступны и для «Главной».
   // Себестоимость сметы берём тем же estCost, что и остальная аналитика, иначе
@@ -11323,6 +11331,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               ))}
             </div>
           </div>
+
+          {/* Ключевые цифры компании: сколько в работе, что просрочено, деньги. */}
+          <DashboardKpis data={dashboardStats} fmt={fmt} financialDetails={hasFinancialDetails} />
 
           {/* ── ЧТО ГОРИТ СЕГОДНЯ ── */}
           {currentPermissions.dashboard !== "none" && (
@@ -15212,9 +15223,20 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         placeholder="Площадь, м²" />
                     </div>
                     <div>
-                      <input className="fi" style={{fontSize:12}} value={obj.manager||""} readOnly={!canAssignObject}
-                        onChange={e=>setObjLocal({manager:e.target.value})} onBlur={persistObj}
-                        placeholder="Менеджер" />
+                      {/* Менеджер — ТОЛЬКО выбор из сотрудников. Свободный ввод убран: раньше
+                          сюда попадал произвольный текст, и один человек дробился на несколько
+                          вариантов написания, ломая фильтр по сотруднику и аналитику.
+                          Старое значение, которого нет в списке, показываем отдельным пунктом,
+                          чтобы оно не потерялось молча при первом же открытии карточки. */}
+                      <select className="fi" style={{fontSize:12}} disabled={!canAssignObject}
+                        value={obj.manager||""}
+                        onChange={e=>{ setObjLocal({manager:e.target.value}); persistObj(); }}>
+                        <option value="">— менеджер не назначен —</option>
+                        {nonViewerUsers.map(u=>(<option key={u.id} value={u.name}>{u.name}</option>))}
+                        {obj.manager && !nonViewerUsers.some(u=>u.name===obj.manager) && (
+                          <option value={obj.manager}>{obj.manager} (нет в сотрудниках)</option>
+                        )}
+                      </select>
                     </div>
                     <div style={{gridColumn:"1 / -1"}}>
                       <textarea className="fi" rows={2} style={{fontSize:12,resize:"vertical",minHeight:44}} value={obj.note||""} readOnly={!canEdit}
