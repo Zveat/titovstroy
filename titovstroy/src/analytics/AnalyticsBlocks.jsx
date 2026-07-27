@@ -72,7 +72,7 @@ const EmptyNote = ({ text }) => (
   <div style={{ ...card, color: "#94a3b8", fontSize: 12 }}>{text}</div>
 );
 
-export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails = true }) {
+export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails = true, catProfit = [] }) {
   if (!data) return null;
   const { sales, backlog, production, finance, quality, previous } = data;
   const money = (v) => `${fmt(Math.round(v || 0))} ₸`;
@@ -101,8 +101,11 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
             delta={d(previous?.sales.convTotal, sales.convTotal)} />
           <Tile label="Срок сделки" value={sales.avgDealDays ? `${sales.avgDealDays} дн.` : "—"} sub="от заявки до договора" />
           <Tile label="Цена за м²" value={sales.avgPricePerSqm ? money(sales.avgPricePerSqm) : "—"} sub="по подписанным" />
-          <Tile label="Потеряно" value={sales.lostCount} sub={money(sales.lostSum)} accent="#dc2626"
+          <Tile label="Отказов" value={sales.lostCount} sub={money(sales.lostSum)} accent="#dc2626"
             delta={d(previous?.sales.lostCount, sales.lostCount)} />
+          {sales.cancelledCount > 0 && (
+            <Tile label="Расторгнуто" value={sales.cancelledCount} sub="уже подписанных договоров" accent="#dc2626" />
+          )}
         </div>
 
         <div style={{ ...grid(260), marginTop: 10 }}>
@@ -152,8 +155,15 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
         <div style={grid()}>
           <Tile label="Объектов в портфеле" value={backlog.activeObjects} sub="подписаны и в работе" />
           <Tile label="Законтрактовано" value={money(backlog.contracted)} />
-          <Tile label="Выполнено" value={money(backlog.doneValue)} sub="по закрытым этапам" accent="#059669" />
-          <Tile label="Осталось выполнить" value={money(backlog.remaining)} sub="объём работ впереди" accent="#2563eb" />
+          <Tile label="Выполнено"
+            value={backlog.objectsWithStagePrices ? money(backlog.doneValue) : "нет данных"}
+            sub={backlog.objectsWithStagePrices
+              ? `по закрытым этапам (${backlog.objectsWithStagePrices} об. с ценами этапов)`
+              : "у этапов не заполнены цены"}
+            accent="#059669" />
+          <Tile label="Осталось выполнить"
+            value={backlog.objectsWithStagePrices ? money(backlog.remaining) : "—"}
+            sub="объём работ впереди" accent="#2563eb" />
           <Tile label="Закрывается в этом месяце" value={backlog.closingThisMonthCount}
             sub={money(backlog.closingThisMonthSum)} accent="#d97706" />
         </div>
@@ -203,7 +213,7 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
 
     // ── Финансы ──
     finance: (
-      <Block key="finance" icon="💰" title="Финансы" hint="факт по операциям, привязка по номеру договора">
+      <Block key="finance" icon="💰" title="Финансы" hint="как в ОПУ: без займов, вкладов и авансов; привязка по номеру договора">
         <div style={grid()}>
           <Tile label="Поступления" value={money(finance.income)} accent="#059669"
             delta={d(previous?.finance.income, finance.income)} />
@@ -266,9 +276,27 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
             </div>
           )}
 
+          {financialDetails && catProfit.length > 0 && (
+            <div style={card}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>
+                Рентабельность по видам работ
+                <span style={{ fontWeight: 400, color: "#94a3b8" }}> · по сметам периода</span>
+              </div>
+              {catProfit.map(c => (
+                <BarRow key={c.cat} label={c.cat} value={Math.max(0, c.profit)}
+                  max={Math.max(...catProfit.map(x => Math.max(0, x.profit)), 1)}
+                  note={`${money(c.profit)} · ${c.margin}%`}
+                  color={c.margin >= 35 ? "#059669" : c.margin >= 20 ? "#d97706" : "#dc2626"} />
+              ))}
+            </div>
+          )}
+
           {financialDetails && (
             <div style={card}>
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>Прибыль по объектам</div>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>
+                Прибыль по объектам
+                <span style={{ fontWeight: 400, color: "#94a3b8" }}> · получено − потрачено</span>
+              </div>
               {finance.topProfitable.length === 0
                 ? <div style={{ fontSize: 11.5, color: "#94a3b8" }}>Нет данных</div>
                 : finance.topProfitable.map(o => (
@@ -284,17 +312,19 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
 
     // ── Качество и клиент ──
     quality: (
-      <Block key="quality" icon="⭐" title="Качество и клиент">
+      <Block key="quality" icon="⭐" title="Качество и клиент" hint="состояние сейчас — у замечаний в базе нет даты закрытия">
         <div style={grid()}>
           <Tile label="Открытых замечаний" value={quality.openRemarks}
+            sub={quality.openFromClient ? `из них от клиента: ${quality.openFromClient}` : "от клиента нет"}
             accent={quality.openRemarks ? "#dc2626" : "#059669"} />
-          <Tile label="Закрыто за период" value={quality.closedInPeriod} accent="#059669"
-            delta={d(previous?.quality.closedInPeriod, quality.closedInPeriod)} />
-          <Tile label="От клиента" value={quality.fromClient} sub="всего замечаний клиента" />
-          <Tile label="Срок закрытия" value={quality.avgCloseDays ? `${quality.avgCloseDays} дн.` : "—"}
-            sub="в среднем" />
-          <Tile label="Замечаний на объект" value={quality.remarksPerObject || "—"} />
-          <Tile label="Чек-лист сдачи" value={`${quality.handoverPct}%`} sub="заполнено пунктов" />
+          <Tile label="Висят дольше недели" value={quality.openOverWeek}
+            sub={quality.oldestOpenDays ? `самое старое — ${quality.oldestOpenDays} дн.` : ""}
+            accent={quality.openOverWeek ? "#dc2626" : "#059669"} />
+          <Tile label="Закрыто всего" value={quality.closedRemarks} accent="#059669" />
+          <Tile label="Замечаний от клиента" value={quality.fromClient} sub="за всё время" />
+          <Tile label="Замечаний на объект" value={quality.remarksPerObject || "—"} sub="в среднем" />
+          <Tile label="Чек-лист сдачи" value={`${quality.handoverPct}%`}
+            sub={quality.objectsInHandover ? `по ${quality.objectsInHandover} объектам в работе и сданным` : "нет объектов в работе"} />
         </div>
       </Block>
     ),

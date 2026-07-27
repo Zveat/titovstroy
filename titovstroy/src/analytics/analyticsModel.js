@@ -55,23 +55,41 @@ const monthKey = (value) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 };
 
-// Границы периода + ЗЕРКАЛЬНЫЙ предыдущий период такой же длины (для сравнения ↑/↓).
+// Границы периода + предыдущий период для сравнения ↑/↓.
+// ВАЖНО: границы обязаны совпадать с теми, что считает экран «Аналитика» для старых
+// плиток (месяц = с 1-го числа, 3 месяца = с 1-го числа минус 2 месяца, неделя =
+// последние 7 дней). Иначе один и тот же показатель на одном экране покажет два
+// разных числа — на этом уже обожглись.
 export function periodBounds(period, { from, to, now = Date.now() } = {}) {
-  const end = ts(to) || now;
-  let start;
-  if (period === "week") start = end - 7 * DAY_MS;
-  else if (period === "month") start = end - 30 * DAY_MS;
-  else if (period === "3month") start = end - 90 * DAY_MS;
-  else if (period === "custom") start = ts(from) || 0;
-  else start = 0; // «всё время»
-  const length = Math.max(0, end - start);
-  return {
-    from: start,
-    to: end,
-    // Для «всего времени» сравнивать не с чем — предыдущего окна нет.
-    prevFrom: period === "all" || !length ? null : start - length,
-    prevTo: period === "all" || !length ? null : start,
-  };
+  const nowDate = new Date(now);
+  let start = 0;
+  let end = now;
+  let prevFrom = null;
+  let prevTo = null;
+
+  if (period === "custom") {
+    start = ts(from) || 0;
+    end = ts(to) || now;
+    const length = Math.max(0, end - start);
+    if (length) { prevFrom = start - length; prevTo = start; }
+  } else if (period === "week") {
+    const d = new Date(now);
+    d.setDate(d.getDate() - 6);
+    start = d.getTime();
+    prevFrom = start - 7 * DAY_MS;
+    prevTo = start;
+  } else if (period === "month" || period === "3month") {
+    const d = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1);
+    if (period === "3month") d.setMonth(d.getMonth() - 2);
+    start = d.getTime();
+    // Предыдущий период — столько же КАЛЕНДАРНЫХ месяцев перед началом текущего.
+    const prev = new Date(d);
+    prev.setMonth(prev.getMonth() - (period === "3month" ? 3 : 1));
+    prevFrom = prev.getTime();
+    prevTo = start;
+  }
+  // «Всё время» — сравнивать не с чем, prevFrom/prevTo остаются null.
+  return { from: start, to: end, prevFrom, prevTo };
 }
 
 const inRange = (value, from, to) => {
@@ -85,11 +103,36 @@ function buildIndex({ objects = [], estimates = [], contracts = [], productions 
   const liveObjects = objects.filter(o => o && !o.deletedAt);
   const objectIds = new Set(liveObjects.map(o => o.id));
 
+  // Смета может быть привязана к объекту напрямую (objectId) ИЛИ висеть на родителе
+  // через parentId — так заводятся доп. сметы. Если считать только по objectId,
+  // допы теряются и объект стоит дешевле, чем в финансах (там связка по родителю).
+  // Поднимаемся по цепочке родителей до сметы, у которой objectId есть.
+  const liveEstimates = (estimates || []).filter(e => e && !e.deletedAt);
+  const estById = new Map(liveEstimates.filter(e => e.id).map(e => [e.id, e]));
+  const ownerCache = new Map();
+  const ownerObjectOf = (estimate) => {
+    let current = estimate;
+    const seen = new Set();
+    const chain = [];
+    while (current) {
+      if (current.objectId) break;
+      if (!current.id || seen.has(current.id)) { current = null; break; }
+      seen.add(current.id);
+      if (ownerCache.has(current.id)) { current = { objectId: ownerCache.get(current.id) }; break; }
+      chain.push(current.id);
+      current = current.parentId ? estById.get(current.parentId) : null;
+    }
+    const objectId = current?.objectId || "";
+    for (const id of chain) ownerCache.set(id, objectId);
+    return objectId;
+  };
+
   const estByObject = new Map();
-  for (const e of estimates) {
-    if (!e || e.deletedAt || !e.objectId || !objectIds.has(e.objectId)) continue;
-    if (!estByObject.has(e.objectId)) estByObject.set(e.objectId, []);
-    estByObject.get(e.objectId).push(e);
+  for (const e of liveEstimates) {
+    const objectId = ownerObjectOf(e);
+    if (!objectId || !objectIds.has(objectId)) continue;
+    if (!estByObject.has(objectId)) estByObject.set(objectId, []);
+    estByObject.get(objectId).push(e);
   }
   const prodByObject = new Map();
   for (const p of productions) {
@@ -128,20 +171,31 @@ function statusOf(o, prodByObject) {
 }
 
 // ─── БЛОК 1. Продажи и воронка ───────────────────────────────────────────────
-function buildSales(idx, { from, to }, manager) {
+function buildSales(idx, { from, to }, manager, period) {
   const { liveObjects, objectValue, contractByObject, prodByObject } = idx;
   const cohort = liveObjects
     .filter(o => o.status !== "archive")
+    // Объекты, залитые миграцией из финансов, не имеют настоящей даты создания —
+    // в периодах они исказили бы приток. Учитываем их только во «Всё время»
+    // (ровно так же, как считают старые плитки аналитики).
+    .filter(o => period === "all" || o.createdBy !== "migration")
     .filter(o => !manager || (o.manager || "") === manager)
     .filter(o => inRange(o.createdAt, from, to));
+
+  // Сумма сделки: если договор заведён — берём его сумму (это реальные деньги),
+  // иначе сумму смет объекта. Так же считает финансовый блок, поэтому цифры сходятся.
+  const dealValue = (o) => contractSum(contractByObject.get(o.id)) || objectValue(o);
 
   const withEstimate = cohort.filter(o => objectValue(o) > 0);
   const signed = cohort.filter(o => ["signed", "work", "done", "paused"].includes(statusOf(o, prodByObject)));
   const inApproval = cohort.filter(o => statusOf(o, prodByObject) === "approval");
-  const lost = cohort.filter(o => ["refuse", "cancel"].includes(statusOf(o, prodByObject)));
+  // «Потеряли» — это про отказ клиента ДО работ. Расторжение уже подписанного
+  // договора — другая история, её сюда не мешаем.
+  const lost = cohort.filter(o => statusOf(o, prodByObject) === "refuse");
+  const cancelled = cohort.filter(o => statusOf(o, prodByObject) === "cancel");
 
   const estimatedSum = withEstimate.reduce((s, o) => s + objectValue(o), 0);
-  const signedSum = signed.reduce((s, o) => s + objectValue(o), 0);
+  const signedSum = signed.reduce((s, o) => s + dealValue(o), 0);
   const lostSum = lost.reduce((s, o) => s + objectValue(o), 0);
 
   // Срок сделки: от создания объекта до даты договора. Считаем только там,
@@ -156,8 +210,8 @@ function buildSales(idx, { from, to }, manager) {
 
   // Цена за м² — только по подписанным с указанной площадью.
   const sqmPrices = signed
-    .filter(o => num(o.area) > 0 && objectValue(o) > 0)
-    .map(o => objectValue(o) / num(o.area));
+    .filter(o => num(o.area) > 0 && dealValue(o) > 0)
+    .map(o => dealValue(o) / num(o.area));
 
   const lostByReason = {};
   for (const o of lost) {
@@ -167,13 +221,14 @@ function buildSales(idx, { from, to }, manager) {
     lostByReason[key].sum += objectValue(o);
   }
 
+  const signedSet = new Set(signed.map(o => o.id));
   const byManager = {};
   for (const o of cohort) {
     const key = o.manager || "Без менеджера";
     if (!byManager[key]) byManager[key] = { objects: 0, estimated: 0, signed: 0, signedSum: 0 };
     byManager[key].objects += 1;
     if (objectValue(o) > 0) byManager[key].estimated += 1;
-    if (signed.includes(o)) { byManager[key].signed += 1; byManager[key].signedSum += objectValue(o); }
+    if (signedSet.has(o.id)) { byManager[key].signed += 1; byManager[key].signedSum += dealValue(o); }
   }
 
   const byType = {};
@@ -200,6 +255,7 @@ function buildSales(idx, { from, to }, manager) {
     avgDealDays: dealDays.length ? Math.round(dealDays.reduce((s, d) => s + d, 0) / dealDays.length) : 0,
     lostCount: lost.length,
     lostSum,
+    cancelledCount: cancelled.length,
     lostByReason,
     avgPricePerSqm: sqmPrices.length
       ? Math.round(sqmPrices.reduce((s, v) => s + v, 0) / sqmPrices.length)
@@ -217,10 +273,14 @@ function buildBacklog(idx, { now }) {
   const contracted = active.reduce((s, o) => s + objectValue(o), 0);
   // Выполнено по этапам: доля закрытых этапов от суммы этапов объекта.
   let doneValue = 0;
+  let objectsWithStagePrices = 0;
   for (const o of active) {
     const stages = prodByObject.get(o.id)?.stages || [];
     const total = stages.reduce((s, st) => s + num(st.priceClient), 0);
+    // Без заполненных цен этапов «выполнено» посчитать нечем. Такой объект не
+    // занижает показатель — он просто не участвует (иначе всегда было бы 0 ₸).
     if (total <= 0) continue;
+    objectsWithStagePrices += 1;
     doneValue += stages
       .filter(st => st.status === "done")
       .reduce((s, st) => s + num(st.priceClient), 0);
@@ -242,6 +302,7 @@ function buildBacklog(idx, { now }) {
     activeObjects: active.length,
     contracted,
     doneValue,
+    objectsWithStagePrices,
     remaining: Math.max(0, contracted - doneValue),
     byForeman,
     closingThisMonthCount: closingThisMonth.length,
@@ -273,7 +334,9 @@ function buildProduction(idx, { from, to, now }) {
     const factEnd = ts(prod.factEndDate);
 
     // Просрочка — только у незакрытых объектов с проставленным план-финишем.
-    if (planEnd && !factEnd && status !== "done" && planEnd < now) {
+    // Просрочка только у живых объектов: расторгнутый или архивный «просроченным» не бывает.
+    const alive = status === "work" || status === "paused" || status === "signed";
+    if (planEnd && !factEnd && alive && planEnd < now) {
       const late = daysFull(planEnd, now);
       overdueObjects += 1;
       overdueDaysTotal += late;
@@ -326,10 +389,22 @@ function buildProduction(idx, { from, to, now }) {
 // ─── БЛОК 4. Финансы (факт — из транзакций, привязка по номеру договора) ─────
 const normContract = (v) => String(v || "").replace(/[№#\s]/g, "").toLowerCase();
 
+// Те же категории-исключения, что в ОПУ на экране «Финансы». Займы, вклады, возвраты
+// и покупка активов — это НЕ выручка и НЕ расход периода. Без этих исключений
+// «Поступления» в аналитике не сходились бы с ОПУ.
+const C_FINANCING_INC = "Финансирование (не выручка)";
+const C_ASSET_INC = "Возврат займов и активов";
+const C_FINACT = "Финансовая деятельность (не расход)";
+const C_ASSET_OUT = "Выданные займы и прочие активы";
+const isPLIncome = (t) => !t.isAdvance && t.category !== C_FINANCING_INC && t.category !== C_ASSET_INC;
+const isPLExpense = (t) => t.category !== C_FINACT && t.category !== C_ASSET_OUT;
+// Дата операции: как в финансах — сначала дата операции, потом дата создания.
+const txDate = (t) => t.date || t.createdAt || 0;
+
 function buildFinance(idx, { from, to, now }, financeTx) {
   const { liveObjects, objectValue, objectCost, contractByObject, prodByObject } = idx;
   const live = financeTx.filter(t => t && !t.deletedAt && t.included !== false);
-  const inPeriod = live.filter(t => inRange(t.date, from, to));
+  const inPeriod = live.filter(t => inRange(txDate(t), from, to));
 
   let income = 0;
   let expense = 0;
@@ -337,14 +412,20 @@ function buildFinance(idx, { from, to, now }, financeTx) {
   const cashflow = {};
   for (const t of inPeriod) {
     const amount = num(t.amount);
-    const mk = monthKey(t.date);
+    const mk = monthKey(txDate(t));
     if (!cashflow[mk]) cashflow[mk] = { income: 0, expense: 0 };
-    if (t.type === "income") { income += amount; cashflow[mk].income += amount; }
-    else if (t.type === "expense") {
-      expense += amount;
+    // Денежный поток показывает ВСЕ движения (это касса), а выручка/расход —
+    // только то, что попадает в прибыль. Поэтому фильтры разные и это намеренно.
+    if (t.type === "income") {
+      cashflow[mk].income += amount;
+      if (isPLIncome(t)) income += amount;
+    } else if (t.type === "expense") {
       cashflow[mk].expense += amount;
-      const cat = t.category || "Без категории";
-      expenseByCategory[cat] = (expenseByCategory[cat] || 0) + amount;
+      if (isPLExpense(t)) {
+        expense += amount;
+        const cat = t.category || "Без категории";
+        expenseByCategory[cat] = (expenseByCategory[cat] || 0) + amount;
+      }
     }
   }
 
@@ -404,49 +485,66 @@ function buildFinance(idx, { from, to, now }, financeTx) {
 }
 
 // ─── БЛОК 5. Качество и клиент ───────────────────────────────────────────────
-function buildQuality(idx, { from, to }) {
+// ВАЖНО про даты: у замечания в базе есть только `ts` (когда завели) и флаг `done`.
+// Даты ЗАКРЫТИЯ не существует, поэтому «закрыто за период» и «средний срок закрытия»
+// посчитать физически нечем — такие показатели здесь не выдумываем. Считаем то, что
+// есть: сколько открыто, сколько всего, и сколько висит дольше недели.
+function buildQuality(idx, { now }) {
   const { liveObjects, prodByObject } = idx;
   let open = 0;
-  let closedInPeriod = 0;
+  let closed = 0;
   let fromClient = 0;
+  let openFromClient = 0;
+  let openOverWeek = 0;
+  let oldestOpenDays = 0;
   let objectsWithRemarks = 0;
-  const closeDays = [];
   let handoverDone = 0;
   let handoverTotal = 0;
+  let objectsInHandover = 0;
 
   for (const o of liveObjects) {
     const prod = prodByObject.get(o.id);
     if (!prod) continue;
-    const defects = prod.defects || [];
+    const status = statusOf(o, prodByObject);
+    const defects = (prod.defects || []).filter(Boolean);
     if (defects.length) objectsWithRemarks += 1;
     for (const d of defects) {
-      if (!d) continue;
-      if (d.source === "client") fromClient += 1;
-      if (d.done) {
-        if (inRange(d.doneAt || d.updatedAt, from, to)) closedInPeriod += 1;
-        const opened = ts(d.ts);
-        const closed = ts(d.doneAt || d.updatedAt);
-        if (opened && closed && closed >= opened) closeDays.push(days(opened, closed));
-      } else {
-        open += 1;
+      const isClient = d.source === "client";
+      if (isClient) fromClient += 1;
+      if (d.done) { closed += 1; continue; }
+      open += 1;
+      if (isClient) openFromClient += 1;
+      const opened = ts(d.ts);
+      if (opened) {
+        const age = daysFull(opened, now);
+        if (age >= 7) openOverWeek += 1;
+        oldestOpenDays = Math.max(oldestOpenDays, age);
       }
     }
-    const handover = prod.checklistHandover || [];
-    if (handover.length) {
-      handoverTotal += handover.length;
-      handoverDone += handover.filter(i => i?.done).length;
+    // Чек-лист сдачи имеет смысл только у объектов в работе и сданных: у новых он
+    // всегда пустой и занижал бы процент по всей компании.
+    if (status === "work" || status === "done") {
+      const handover = prod.checklistHandover || [];
+      if (handover.length) {
+        objectsInHandover += 1;
+        handoverTotal += handover.length;
+        handoverDone += handover.filter(i => i?.done).length;
+      }
     }
   }
 
   return {
     openRemarks: open,
-    closedInPeriod,
+    closedRemarks: closed,
     fromClient,
-    avgCloseDays: closeDays.length ? Math.round(closeDays.reduce((s, v) => s + v, 0) / closeDays.length) : 0,
+    openFromClient,
+    openOverWeek,
+    oldestOpenDays,
     remarksPerObject: objectsWithRemarks
-      ? Math.round(((open + closedInPeriod) / objectsWithRemarks) * 10) / 10
+      ? Math.round(((open + closed) / objectsWithRemarks) * 10) / 10
       : 0,
     handoverPct: pct(handoverDone, handoverTotal),
+    objectsInHandover,
   };
 }
 
@@ -458,23 +556,22 @@ export function buildAnalytics(data = {}, options = {}) {
   const financeTx = data.financeTx || [];
 
   const current = {
-    sales: buildSales(idx, bounds, manager),
+    sales: buildSales(idx, bounds, manager, period),
     backlog: buildBacklog(idx, { now }),
     production: buildProduction(idx, { ...bounds, now }),
     finance: buildFinance(idx, { ...bounds, now }, financeTx),
-    quality: buildQuality(idx, bounds),
+    quality: buildQuality(idx, { now }),
   };
 
-  // Сравнение с предыдущим периодом такой же длины. «Портфель» — состояние на
-  // сейчас, его сравнивать не с чем, поэтому в дельты не попадает.
+  // Сравнение с предыдущим периодом. «Портфель» и «Качество» — состояние на сейчас
+  // (в базе нет дат закрытия замечаний), поэтому у них сравнения нет и быть не может.
   let previous = null;
   if (bounds.prevFrom !== null) {
     const prevBounds = { from: bounds.prevFrom, to: bounds.prevTo };
     previous = {
-      sales: buildSales(idx, prevBounds, manager),
+      sales: buildSales(idx, prevBounds, manager, period),
       production: buildProduction(idx, { ...prevBounds, now }),
       finance: buildFinance(idx, { ...prevBounds, now }, financeTx),
-      quality: buildQuality(idx, prevBounds),
     };
   }
 
