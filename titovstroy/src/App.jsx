@@ -11,7 +11,8 @@ import { parserRunMessage, triggerParserRun } from "./masters/parserTrigger.js";
 import { MasterCrmButton, MasterCrmDatabase, MasterCrmEditor } from "./masters/MasterCRM.jsx";
 import { interactionsForContact, masterSourceKey, normalizeMasterCrm } from "./masters/masterCrm.js";
 import { EstimateSuggestions, EstimateSuggestionRulesEditor } from "./estimate/EstimateSuggestions.jsx";
-import { AnalyticsBlocks, DashboardKpis } from "./analytics/AnalyticsBlocks.jsx";
+import { AnalyticsBlocks } from "./analytics/AnalyticsBlocks.jsx";
+import { Dashboard } from "./analytics/Dashboard.jsx";
 import { buildAnalytics, makeManagerResolver, REFUSE_REASONS } from "./analytics/analyticsModel.js";
 import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
@@ -11335,7 +11336,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           </div>
 
           {/* Ключевые цифры компании: сколько в работе, что просрочено, деньги. */}
-          <DashboardKpis data={dashboardStats} fmt={fmt} financialDetails={hasFinancialDetails} />
+          <Dashboard
+            data={dashboardStats}
+            fmt={fmt}
+            financialDetails={hasFinancialDetails}
+            permissions={currentPermissions}
+            onNavFinance={currentPermissions.finance !== "none" ? () => setScreen("finance") : undefined}
+            onOpenObject={item => { const o = objects.find(x => x.id === item.id); if (o) { setCurrentObject({ ...o }); setObjectTab("workspace"); setScreen("objects"); } }}
+          />
 
           {/* ── ЧТО ГОРИТ СЕГОДНЯ ── */}
           {currentPermissions.dashboard !== "none" && (
