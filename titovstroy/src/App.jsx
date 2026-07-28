@@ -14406,16 +14406,43 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     .then(fpRes => { if (!fpRes) throw new Error("saveFinanceProjects заблокирован"); }),
                 );
               }
+              // «Дата продажи (подписание договора)» — по ней считаются срок сделки и
+              // простой до старта. Проставляем её из даты договора, чтобы не заполнять
+              // руками. Это НЕ авто-миграция: запись происходит только по явному
+              // действию владельца — клику по статусу «Договор подписан».
+              // Берём ОСНОВНОЙ клиентский договор: доп. соглашения (annex) подписываются
+              // позже и дали бы поздний срок сделки, подряд — это себестоимость.
+              const saleDateFromContract = contractsRef.current
+                .filter(c => c && !c.deletedAt && c.objectId === obj.id && c.date
+                  && c.type !== "annex" && c.type !== "podryad" && c.type !== "podryad_annex")
+                .map(c => String(c.date).slice(0, 10))
+                .sort()[0] || "";
+
               const hasProd = productionsRef.current.some(p => p.objectId === obj.id);
               if (!hasProd) {
                 const prod = emptyProduction(obj.id, genId);
                 prod.prodStatus = "new";
+                if (saleDateFromContract) prod.saleDate = saleDateFromContract;
                 // create-if-missing — команда идемпотентна: если карточка уже появилась (гонка),
                 // не перезапишет её.
                 dependencyWrites.push(
                   mutateProductions({ type: "create-if-missing", objectId: obj.id, record: prod })
                     .then(prodRes => { if (!prodRes.committed) throw new Error("mutateProductions(create) не подтверждён"); }),
                 );
+              } else if (saleDateFromContract) {
+                // Карточка уже есть: заполняем дату продажи ТОЛЬКО если она пустая —
+                // выставленную вручную не перетираем.
+                const existingProd = productionsRef.current.find(p => p.objectId === obj.id);
+                if (existingProd && !existingProd.saleDate) {
+                  dependencyWrites.push(
+                    mutateProductions({
+                      type: "patch-card",
+                      objectId: obj.id,
+                      patch: { saleDate: saleDateFromContract },
+                      changeId: `bg_saledate_${obj.id}`,
+                    }).catch(e => console.warn("saleDate patch err", e)),
+                  );
+                }
               }
               // Финансовый проект и production-карточка независимы, поэтому создаём их
               // параллельно. Это заметно сокращает ожидание статуса «Договор подписан».
@@ -15420,6 +15447,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     buildStagesFromEstimate={buildStagesFromEstimate}
                     finProjects={finProjects}
                     financeTx={financeTx}
+                    staffOptions={nonViewerUsers}
                     fmt={fmt}
                     genId={genId}
                     currentUser={currentUser}

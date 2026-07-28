@@ -314,7 +314,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
     adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
     adminAudit:"none", adminDbCheck:"none",
-    analyticsSales:false, analyticsBacklog:false, analyticsProduction:true, analyticsFinance:false, analyticsQuality:true,
+    analyticsSales:false, analyticsBacklog:true, analyticsProduction:true, analyticsFinance:false, analyticsQuality:true,
     showLocked:false,
   },
   user: {
@@ -334,7 +334,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
     adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
     adminAudit:"none", adminDbCheck:"none",
-    analyticsSales:true, analyticsBacklog:false, analyticsProduction:false, analyticsFinance:false, analyticsQuality:false,
+    analyticsSales:true, analyticsBacklog:false, analyticsProduction:true, analyticsFinance:false, analyticsQuality:true,
     showLocked:true,
   },
   viewer: {
