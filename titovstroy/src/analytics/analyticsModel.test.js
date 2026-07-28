@@ -618,6 +618,73 @@ describe("ноль и «нет данных» — разные вещи", () => 
   });
 });
 
+// Главный урок этой серии правок: тесты стояли на «идеальной» базе, где заполнено
+// всё, и не ловили целый класс ошибок. В боевой базе половина полей пустая — там
+// каждое среднее и каждый процент рискуют показать «0» вместо «нет данных».
+// Этот блок проходит ПО ВСЕМ числам модели на пустой базе и требует, чтобы ни один
+// показатель-отношение не притворился настоящим нулём.
+describe("тощая база — ни один процент не врёт нулём", () => {
+  const thin = () => ({
+    objects: [
+      { id:"t1", clientName:"Подписан, пусто", status:"signed", createdAt: NOW - 5*DAY },
+      { id:"t2", clientName:"В работе, пусто", status:"work",   createdAt: NOW - 6*DAY },
+      { id:"t3", clientName:"Сдан, пусто",     status:"done",   createdAt: NOW - 7*DAY },
+    ],
+    estimates: [], contracts: [],
+    productions: [
+      { objectId:"t2", prodStatus:"active" },
+      { objectId:"t3", prodStatus:"done" },
+    ],
+    financeTx: [], accounts: [],
+  });
+
+  // Каждое поле-отношение: как называется и почему на пустой базе оно обязано быть null.
+  const RATIOS = [
+    ["sales.avgCheck", "нет ни одной суммы"],
+    ["sales.avgPricePerSqm", "нет площадей"],
+    ["sales.avgDealDays", "нет дат договора"],
+    ["production.onTimeRate", "нет плановых дат"],
+    ["production.avgPlanDays", "нет плановых дат"],
+    ["production.avgFactDays", "нет факт-дат"],
+    ["production.stagesProgress", "нет этапов"],
+    ["production.avgStartLagDays", "нет дат старта"],
+    ["finance.grossMarginPct", "нет выручки"],
+    ["finance.marginPct", "нет выручки"],
+    ["finance.marginPlanAvg", "нет объектов с планом и фактом"],
+    ["finance.marginFactAvg", "нет объектов с планом и фактом"],
+    ["quality.handoverPct", "нет чек-листов"],
+    ["quality.remarksPerObject", "нет замечаний"],
+    ["dataQuality.txWithoutContractPct", "нет операций"],
+  ];
+  const get = (obj, path) => path.split(".").reduce((o, k) => o?.[k], obj);
+
+  it.each(RATIOS)("%s → null (%s)", (path) => {
+    const a = buildAnalytics(thin(), { period: "month", now: NOW });
+    expect(get(a, path)).toBeNull();
+  });
+
+  it("конверсия равна null только когда в период НИКТО не зашёл", () => {
+    // На тощей базе объекты есть — значит 0% и 100% там честные, а не «нет данных».
+    const withCohort = buildAnalytics(thin(), { period: "month", now: NOW }).sales;
+    expect(withCohort.newObjects).toBe(3);
+    expect(withCohort.convToEstimate).toBe(0);     // зашли, но смет никому не посчитали
+    expect(withCohort.convTotal).toBe(100);        // все трое дошли до договора
+    // А вот в месяце, где не зашло ни одного объекта, делить не на что.
+    const empty = buildAnalytics({ ...thin(), objects: [] }, { period: "month", now: NOW }).sales;
+    expect(empty.newObjects).toBe(0);
+    expect(empty.convToEstimate).toBeNull();
+    expect(empty.convTotal).toBeNull();
+  });
+
+  it("а счётчики и суммы остаются нулями — их ноль настоящий", () => {
+    const a = buildAnalytics(thin(), { period: "month", now: NOW });
+    expect(a.sales.newObjects).toBe(3);
+    expect(a.sales.signedSum).toBe(0);
+    expect(a.finance.income).toBe(0);
+    expect(a.production.overdueObjects).toBe(0);
+  });
+});
+
 describe("границы периода", () => {
   it("месяц заканчивается КОНЦОМ месяца, а не текущим моментом", () => {
     const b = periodBounds("month", { now: NOW });     // NOW = 15 июня

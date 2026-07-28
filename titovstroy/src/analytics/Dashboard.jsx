@@ -256,7 +256,7 @@ export function Dashboard({ data, fmt, financialDetails = true, permissions = {}
     });
     heroes.push({
       label: "Выручка за месяц", value: money(finance.income),
-      sub: canProfit ? `валовая ${money(finance.gross)} · ${finance.grossMarginPct}%` : "поступления факт",
+      sub: canProfit ? `валовая ${money(finance.gross)}${finance.grossMarginPct === null ? "" : ` · ${finance.grossMarginPct}%`}` : "поступления факт",
       accent: "#0f172a", spark: trend.map(t => t.income), sparkColor: "#2563eb", onClick: onNavFinance,
     });
     heroes.push({
@@ -275,7 +275,7 @@ export function Dashboard({ data, fmt, financialDetails = true, permissions = {}
       accent: "#d97706",
     });
     heroes.push({
-      label: "Конверсия", value: `${sales.convTotal}%`,
+      label: "Конверсия", value: sales.convTotal === null ? "—" : `${sales.convTotal}%`,
       sub: `новых за месяц: ${sales.newObjects}${sales.avgCheck === null ? "" : ` · средний чек ${short(sales.avgCheck)}`}`,
       accent: "#0f172a",
     });

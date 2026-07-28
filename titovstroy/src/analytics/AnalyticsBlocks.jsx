@@ -149,8 +149,10 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
           {/* База конверсии — КОГОРТА (зашли в периоде), а «Подписано» рядом считается
               по дате подписания и включает сделки прошлых месяцев. Числа разные
               законно, поэтому у конверсии подписана её база. */}
-          <Tile label="Конверсия" value={`${sales.convTotal}%`}
-            sub={`${sales.signedFromCohortCount} из ${sales.newObjects} зашедших в периоде`}
+          <Tile label="Конверсия" value={sales.convTotal === null ? "—" : `${sales.convTotal}%`}
+            sub={sales.convTotal === null
+              ? "в периоде не зашло ни одного объекта"
+              : `${sales.signedFromCohortCount} из ${sales.newObjects} зашедших в периоде`}
             delta={d(previous?.sales.convTotal, sales.convTotal)} />
           <Tile label="Срок сделки" value={sales.avgDealDays ? `${sales.avgDealDays} дн.` : "—"}
             sub={sales.avgDealDaysSample
@@ -320,13 +322,13 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
             delta={d(previous?.finance.expense, finance.expense)} />
           {financialDetails && (
             <Tile label="Валовая прибыль" value={money(finance.gross)}
-              sub={`выручка − прямая себестоимость · ${finance.grossMarginPct}%`}
+              sub={`выручка − прямая себестоимость${finance.grossMarginPct === null ? "" : ` · ${finance.grossMarginPct}%`}`}
               accent={finance.gross >= 0 ? "#059669" : "#dc2626"}
               delta={d(previous?.finance.gross, finance.gross)} />
           )}
           {financialDetails && (
             <Tile label="Чистая прибыль" value={money(finance.net)}
-              sub={`после всех расходов · ${finance.marginPct}%`}
+              sub={`после всех расходов${finance.marginPct === null ? "" : ` · ${finance.marginPct}%`}`}
               accent={finance.net >= 0 ? "#059669" : "#dc2626"}
               delta={d(previous?.finance.net, finance.net)} />
           )}
@@ -461,8 +463,13 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
           <Tile label="Закрыто всего" value={quality.closedRemarks} accent="#059669" />
           <Tile label="Замечаний от клиента" value={quality.fromClient} sub="за всё время" />
           <Tile label="Замечаний на объект" value={quality.remarksPerObject || "—"} sub="в среднем" />
-          <Tile label="Чек-лист сдачи" value={`${quality.handoverPct}%`}
-            sub={quality.objectsInHandover ? `по ${quality.objectsInHandover} объектам в работе и сданным` : "нет объектов в работе"} />
+          <Tile label="Чек-лист сдачи"
+            value={quality.handoverPct === null ? "—" : `${quality.handoverPct}%`}
+            sub={quality.handoverPct === null
+              ? "чек-листы не заполняются"
+              /* Показываем базу: 1 закрытый пункт из 580 округляется в «0%», и без
+                 базы этот ноль не отличить от «чек-листов вообще нет». */
+              : `${quality.handoverDone} из ${quality.handoverTotal} пунктов · по ${quality.objectsInHandover} объектам`} />
         </div>
         <div style={{ ...grid(260), marginTop: 10 }}>
           <div style={card}>
@@ -517,7 +524,7 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
             sub={`активных объектов: ${dataQuality.activeObjects}`}
             accent={dataQuality.totalGaps ? "#d97706" : "#059669"} />
           <Tile label="Операций без договора" value={dataQuality.txWithoutContract}
-            sub={`${dataQuality.txWithoutContractPct}% от всех операций`}
+            sub={dataQuality.txWithoutContractPct === null ? "операций нет" : `${dataQuality.txWithoutContractPct}% от всех операций`}
             accent={dataQuality.txWithoutContractPct > 20 ? "#dc2626" : "#0f172a"} />
         </div>
         <div style={{ marginTop: 10 }}>
@@ -572,7 +579,7 @@ export function DashboardKpis({ data, fmt, financialDetails = true }) {
     { label: "Деньги на счетах", value: money(cashData.total),
       accent: cashData.total >= 0 ? "#059669" : "#dc2626", sub: "сейчас" },
     { label: "Выручка за месяц", value: money(finance.income), accent: "#059669", sub: "поступления факт" },
-    { label: "Валовая прибыль", value: money(finance.gross), sub: `маржа ${finance.grossMarginPct}%`,
+    { label: "Валовая прибыль", value: money(finance.gross), sub: finance.grossMarginPct === null ? "нет поступлений" : `маржа ${finance.grossMarginPct}%`,
       accent: finance.gross >= 0 ? "#059669" : "#dc2626" },
     { label: "Дебиторка", value: money(finance.receivables),
       sub: finance.receivablesOverdue ? `просрочено: ${money(finance.receivablesOverdue)}` : "без просрочки",

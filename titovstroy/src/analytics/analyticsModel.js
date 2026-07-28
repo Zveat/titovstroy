@@ -404,9 +404,11 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
     avgCheckSample: signedValued.length,
     signedWithoutValue: signed.length - signedValued.length,
     // Воронка по шагам: сколько дошло от предыдущего этапа.
-    convToEstimate: pct(withEstimate.length, cohort.length),
-    convToSigned: pct(signedFromCohort.length, withEstimate.length),
-    convTotal: pct(signedFromCohort.length, cohort.length),
+    // Конверсия без единого зашедшего объекта — это «—», а не «0%»: делить не на что,
+    // а «0%» читается как «ни одна сделка не дошла».
+    convToEstimate: cohort.length ? pct(withEstimate.length, cohort.length) : null,
+    convToSigned: withEstimate.length ? pct(signedFromCohort.length, withEstimate.length) : null,
+    convTotal: cohort.length ? pct(signedFromCohort.length, cohort.length) : null,
     signedFromCohortCount: signedFromCohort.length,
     avgDealDays: dealDays.length ? Math.round(dealDays.reduce((s, d) => s + d, 0) / dealDays.length) : null,
     // Сколько сделок реально попало в среднее: срок считается только там, где есть
@@ -754,9 +756,10 @@ function buildFinance(idx, { from, to, now }, financeTx) {
     // Считаем ровно как экран «Финансы»: валовая = выручка − COGS,
     // чистая = выручка − все расходы P&L, рентабельность = чистая / выручка.
     gross: income - cogs,
-    grossMarginPct: pct(income - cogs, income),
+    // Маржа считается ОТ ВЫРУЧКИ. Нет поступлений — процента не существует.
+    grossMarginPct: income > 0 ? pct(income - cogs, income) : null,
     net: income - expense,
-    marginPct: pct(income - expense, income),
+    marginPct: income > 0 ? pct(income - expense, income) : null,
     cashflow,
     expenseByCategory,
     receivables,
@@ -870,8 +873,12 @@ function buildQuality(idx, { now }) {
     oldestOpenDays,
     remarksPerObject: objectsWithRemarks
       ? Math.round(((open + closed) / objectsWithRemarks) * 10) / 10
-      : 0,
-    handoverPct: pct(handoverDone, handoverTotal),
+      : null,
+    // Отдаём и базу: 1 закрытый пункт из 580 округляется в «0%», и без базы этот
+    // ноль не отличить от «чек-листов вообще нет».
+    handoverPct: handoverTotal ? pct(handoverDone, handoverTotal) : null,
+    handoverDone,
+    handoverTotal,
     objectsInHandover,
     byForeman,
   };
@@ -930,7 +937,7 @@ function buildDataQuality(idx, financeTx, resolveManager) {
     activeObjects: active.length,
     txTotal: liveTx.length,
     txWithoutContract,
-    txWithoutContractPct: pct(txWithoutContract, liveTx.length),
+    txWithoutContractPct: liveTx.length ? pct(txWithoutContract, liveTx.length) : null,
   };
 }
 
