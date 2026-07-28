@@ -50,53 +50,62 @@ function HeroTile({ label, value, sub, accent = "#0f172a", spark, sparkColor, on
   );
 }
 
-// Столбчатый график прихода/расхода по месяцам + линия подписанных договоров.
+// График динамики. Две версии, потому что «нет доступа к деньгам» не должно
+// означать «пустой график»: продажнику показываем суммы подписанных договоров,
+// финансисту — приход/расход. Линия подписанных договоров есть в обеих.
 function TrendChart({ trend = [], fmt, showMoney = true }) {
   if (!trend.length) return null;
-  const max = Math.max(...trend.flatMap(t => [t.income, t.expense]), 1);
-  const barW = 100 / (trend.length * 3);
+  const bars = showMoney
+    ? [{ key: "income", color: "#059669", label: "приход" }, { key: "expense", color: "#f87171", label: "расход" }]
+    : [{ key: "signedSum", color: "#059669", label: "сумма договоров" }];
+  const max = Math.max(...trend.flatMap(t => bars.map(b => t[b.key] || 0)), 1);
+  const slot = 100 / trend.length;
+  const barW = (slot * 0.62) / bars.length;
+  const maxSigned = Math.max(...trend.map(t => t.signed), 1);
+
   return (
     <div style={card}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
         <div style={{ fontSize: 13, fontWeight: 900, color: "#0f172a" }}>Динамика за 6 месяцев</div>
-        <div style={{ display: "flex", gap: 12, fontSize: 10.5, color: "#64748b" }}>
-          <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "#059669", marginRight: 4 }} />приход</span>
-          <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "#f87171", marginRight: 4 }} />расход</span>
-          <span><span style={{ display: "inline-block", width: 9, height: 2, background: "#2563eb", marginRight: 4, verticalAlign: "middle" }} />подписано</span>
+        <div style={{ display: "flex", gap: 12, fontSize: 10.5, color: "#64748b", flexWrap: "wrap" }}>
+          {bars.map(b => (
+            <span key={b.key}>
+              <span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: b.color, marginRight: 4 }} />
+              {b.label}
+            </span>
+          ))}
+          <span><span style={{ display: "inline-block", width: 9, height: 2, background: "#2563eb", marginRight: 4, verticalAlign: "middle" }} />договоров, шт</span>
         </div>
       </div>
 
-      <svg viewBox="0 0 100 46" preserveAspectRatio="none" style={{ width: "100%", height: 150, marginTop: 12, display: "block" }}>
+      <svg viewBox="0 0 100 44" preserveAspectRatio="none" style={{ width: "100%", height: 160, marginTop: 12, display: "block" }}>
         {[0.25, 0.5, 0.75].map(p => (
           <line key={p} x1="0" x2="100" y1={40 * p} y2={40 * p} stroke="#f1f5f9" strokeWidth="0.4" />
         ))}
-        {trend.map((t, i) => {
-          const x = i * (100 / trend.length) + barW * 0.5;
-          const hIn = (t.income / max) * 38;
-          const hOut = (t.expense / max) * 38;
-          return (
-            <g key={t.month}>
-              <rect x={x} y={40 - hIn} width={barW} height={Math.max(hIn, 0.4)} fill="#059669" rx="0.4" />
-              <rect x={x + barW * 1.15} y={40 - hOut} width={barW} height={Math.max(hOut, 0.4)} fill="#f87171" rx="0.4" />
-            </g>
-          );
-        })}
-        {(() => {
-          const maxSigned = Math.max(...trend.map(t => t.signed), 1);
-          const pts = trend.map((t, i) => {
-            const x = i * (100 / trend.length) + (100 / trend.length) / 2;
-            return `${x},${40 - (t.signed / maxSigned) * 34}`;
-          }).join(" ");
-          return <polyline points={pts} fill="none" stroke="#2563eb" strokeWidth="1.6"
-            vectorEffect="non-scaling-stroke" strokeLinejoin="round" />;
-        })()}
+        {trend.map((t, i) => (
+          <g key={t.month}>
+            {bars.map((b, bi) => {
+              const h = ((t[b.key] || 0) / max) * 37;
+              const x = i * slot + slot * 0.19 + bi * barW;
+              return <rect key={b.key} x={x} y={40 - h} width={barW * 0.9}
+                height={Math.max(h, 0.5)} fill={b.color} rx="0.4" />;
+            })}
+          </g>
+        ))}
+        <polyline
+          points={trend.map((t, i) => `${i * slot + slot / 2},${40 - (t.signed / maxSigned) * 33}`).join(" ")}
+          fill="none" stroke="#2563eb" strokeWidth="1.8" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+        {trend.map((t, i) => (
+          <circle key={t.month} cx={i * slot + slot / 2} cy={40 - (t.signed / maxSigned) * 33} r="0.7" fill="#2563eb" />
+        ))}
       </svg>
 
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${trend.length}, 1fr)`, gap: 2, marginTop: 4 }}>
         {trend.map(t => (
           <div key={t.month} style={{ textAlign: "center", fontSize: 10, color: "#94a3b8" }}>
             <div style={{ fontWeight: 700, color: "#64748b" }}>{monthLabel(t.month)}</div>
-            {showMoney && <div>{fmt(Math.round(t.income / 1000))}k</div>}
+            <div>{(showMoney ? t.income : t.signedSum) > 0
+              ? `${fmt(Math.round((showMoney ? t.income : t.signedSum) / 1000))}k` : "—"}</div>
             <div style={{ color: "#2563eb" }}>{t.signed ? `${t.signed} дог.` : "—"}</div>
           </div>
         ))}
@@ -108,34 +117,32 @@ function TrendChart({ trend = [], fmt, showMoney = true }) {
 
 // Настоящая воронка: каждая стадия уже предыдущей, ширина = доля от входа.
 // Так сразу видно, где отваливаются сделки, а не просто список статусов.
-function FunnelChart({ funnel, fmt, showMoney = true }) {
+function FunnelChart({ funnel, fmt, showMoney = true, title, hint, colors }) {
   const stages = funnel?.stages || [];
-  const base = Math.max(stages[0]?.count || 0, 1);
-  const colors = ["#93c5fd", "#60a5fa", "#3b82f6", "#2563eb", "#1d4ed8"];
+  const terminal = funnel?.terminal;
   return (
     <div style={card}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
-        <span style={{ fontSize: 13, fontWeight: 900, color: "#0f172a" }}>Воронка сделок</span>
-        <span style={{ fontSize: 11, color: "#94a3b8" }}>сейчас в работе по стадиям</span>
+        <span style={{ fontSize: 13, fontWeight: 900, color: "#0f172a" }}>{title}</span>
+        <span style={{ fontSize: 11, color: "#94a3b8" }}>{hint}</span>
       </div>
       {stages.map((st, i) => {
         // Ширина считается от самой массовой стадии, но не уже 18% — иначе
         // подпись не читается, а стадия визуально «исчезает».
         const maxCount = Math.max(...stages.map(x => x.count), 1);
-        const width = Math.max(18, Math.round((st.count / maxCount) * 100));
+        const width = Math.max(38, Math.round((st.count / maxCount) * 100));
         const conv = i === 0 ? null : pctOf(st.count, stages[i - 1].count);
         return (
           <div key={st.key} style={{ marginBottom: 6 }}>
             <div style={{ display: "flex", justifyContent: "center" }}>
               <div style={{
-                width: `${width}%`, background: colors[i] || "#2563eb", color: "#fff",
-                borderRadius: 8, padding: "8px 10px", textAlign: "center", minWidth: 0,
+                width: `${width}%`, background: (colors || [])[i] || "#2563eb", color: "#fff",
+                borderRadius: 8, padding: "9px 12px", textAlign: "center", minWidth: 130,
+                display: "flex", alignItems: "baseline", justifyContent: "center", gap: 7,
                 transition: "width .2s ease",
               }}>
-                <div style={{ fontSize: 15, fontWeight: 900, lineHeight: 1 }}>{st.count}</div>
-                <div style={{ fontSize: 10, opacity: .9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {st.label}
-                </div>
+                <span style={{ fontSize: 16, fontWeight: 900, lineHeight: 1 }}>{st.count}</span>
+                <span style={{ fontSize: 11, opacity: .95 }}>{st.label}</span>
               </div>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#94a3b8", padding: "2px 2px 0" }}>
@@ -145,10 +152,13 @@ function FunnelChart({ funnel, fmt, showMoney = true }) {
           </div>
         );
       })}
-      <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 11, color: "#dc2626", flexWrap: "wrap" }}>
-        <span>Потеряно: <b>{funnel?.lost?.count || 0}</b></span>
-        {(funnel?.cancelled?.count || 0) > 0 && <span>Расторгнуто: <b>{funnel.cancelled.count}</b></span>}
-      </div>
+      {terminal && (
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, paddingTop: 8,
+          borderTop: "1px dashed #fecaca", fontSize: 11.5, color: "#dc2626" }}>
+          <span>{terminal.label}: <b>{terminal.count}</b></span>
+          {showMoney && terminal.sum > 0 && <span>{fmt(Math.round(terminal.sum / 1000))}k ₸</span>}
+        </div>
+      )}
     </div>
   );
 }
@@ -197,7 +207,7 @@ function ActionList({ title, items = [], empty, fmt, color = "#dc2626", onOpen, 
 
 export function Dashboard({ data, fmt, financialDetails = true, permissions = {}, onOpenObject, onNavFinance }) {
   if (!data) return null;
-  const { sales, backlog, production, finance, cash, dataQuality, trend, statusFunnel } = data;
+  const { sales, backlog, production, finance, cash, dataQuality, trend, funnels } = data;
   const money = (v) => `${fmt(Math.round(v || 0))} ₸`;
   const short = (v) => `${fmt(Math.round((Number(v) || 0) / 1000))}k ₸`;
 
@@ -312,7 +322,16 @@ export function Dashboard({ data, fmt, financialDetails = true, permissions = {}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12, marginTop: 12 }}>
-        {canSales && <FunnelChart funnel={statusFunnel} fmt={fmt} showMoney={canSales} />}
+        {canSales && (
+          <FunnelChart funnel={funnels.sales} fmt={fmt} showMoney={canSales}
+            title="Воронка продаж" hint="путь до договора"
+            colors={["#93c5fd", "#60a5fa", "#2563eb"]} />
+        )}
+        {canProduction && (
+          <FunnelChart funnel={funnels.production} fmt={fmt} showMoney={canSales}
+            title="Воронка производства" hint="путь подписанного объекта"
+            colors={["#a78bfa", "#f59e0b", "#059669"]} />
+        )}
         {canProduction && (
           <ActionList title="Горят этапы" items={production.overdueStageList} fmt={fmt}
             empty="Просроченных этапов нет" unit=" просрочки" />

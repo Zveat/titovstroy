@@ -851,28 +851,47 @@ function buildTrend(idx, financeTx, now, months = 6) {
   return keys.map(k => byMonth[k]);
 }
 
-// Воронка по стадиям — состояние ВСЕЙ базы сейчас (не за период). Нужна для
-// визуальной воронки на «Главной»: сколько объектов стоит на каждой стадии.
-const FUNNEL_STAGES = [
+// Две воронки — они про разное и мешать их нельзя:
+//   ПРОДАЖИ    — путь сделки до договора, терминал «Потерян».
+//   ПРОИЗВОДСТВО — путь уже подписанного объекта, терминал «Расторгнут».
+const SALES_STAGES = [
   { key: "new",      label: "Новый" },
   { key: "approval", label: "Согласование сметы" },
   { key: "signed",   label: "Договор подписан" },
-  { key: "work",     label: "В работе" },
-  { key: "done",     label: "Выполнен" },
 ];
-function buildStatusFunnel(idx) {
+const PRODUCTION_STAGES = [
+  { key: "work",   label: "В работе" },
+  { key: "paused", label: "Приостановлен" },
+  { key: "done",   label: "Выполнен" },
+];
+function buildFunnels(idx) {
   const { liveObjects, objectValue, contractByObject, prodByObject } = idx;
   const dealValue = (o) => contractSum(contractByObject.get(o.id)) || objectValue(o);
-  const stages = FUNNEL_STAGES.map(st => {
-    const list = liveObjects.filter(o => statusOf(o, prodByObject) === st.key);
+  const byStatus = (key) => liveObjects.filter(o => statusOf(o, prodByObject) === key);
+  const stage = (st) => {
+    const list = byStatus(st.key);
     return { key: st.key, label: st.label, count: list.length, sum: list.reduce((s, o) => s + dealValue(o), 0) };
-  });
-  const lost = liveObjects.filter(o => statusOf(o, prodByObject) === "refuse");
-  const cancelled = liveObjects.filter(o => statusOf(o, prodByObject) === "cancel");
+  };
+  // «Договор подписан» в воронке продаж — это ВСЕ, кто дошёл до договора, включая
+  // ушедших в работу и сданных. Иначе стадия схлопывается в ноль, как только
+  // объект стартовал, и воронка врёт про конверсию.
+  const reachedContract = liveObjects.filter(o =>
+    ["signed", "work", "paused", "done"].includes(statusOf(o, prodByObject)));
+  const salesStages = SALES_STAGES.map(st => (st.key === "signed"
+    ? { key: st.key, label: st.label, count: reachedContract.length,
+        sum: reachedContract.reduce((s, o) => s + dealValue(o), 0) }
+    : stage(st)));
+  const lost = byStatus("refuse");
+  const cancelled = byStatus("cancel");
   return {
-    stages,
-    lost: { count: lost.length, sum: lost.reduce((s, o) => s + objectValue(o), 0) },
-    cancelled: { count: cancelled.length, sum: cancelled.reduce((s, o) => s + dealValue(o), 0) },
+    sales: {
+      stages: salesStages,
+      terminal: { label: "Потерян", count: lost.length, sum: lost.reduce((s, o) => s + objectValue(o), 0) },
+    },
+    production: {
+      stages: PRODUCTION_STAGES.map(stage),
+      terminal: { label: "Расторгнут", count: cancelled.length, sum: cancelled.reduce((s, o) => s + dealValue(o), 0) },
+    },
   };
 }
 
@@ -898,7 +917,7 @@ export function buildAnalytics(data = {}, options = {}) {
   });
   current.dataQuality = buildDataQuality(idx, financeTx, resolveManager);
   current.trend = buildTrend(idx, financeTx, now);
-  current.statusFunnel = buildStatusFunnel(idx);
+  current.funnels = buildFunnels(idx);
 
   // Сравнение с предыдущим периодом. «Портфель» и «Качество» — состояние на сейчас
   // (в базе нет дат закрытия замечаний), поэтому у них сравнения нет и быть не может.
