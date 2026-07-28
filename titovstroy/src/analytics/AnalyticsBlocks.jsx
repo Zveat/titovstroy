@@ -139,7 +139,11 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
           <Tile label="Подписано" value={sales.signedCount} sub={`${money(sales.signedSum)} · по дате подписания`}
             accent="#059669" delta={d(previous?.sales.signedSum, sales.signedSum)} />
           <Tile label="Средний чек" value={money(sales.avgCheck)} sub="на подписанный объект" />
-          <Tile label="Конверсия" value={`${sales.convTotal}%`} sub="объект → договор"
+          {/* База конверсии — КОГОРТА (зашли в периоде), а «Подписано» рядом считается
+              по дате подписания и включает сделки прошлых месяцев. Числа разные
+              законно, поэтому у конверсии подписана её база. */}
+          <Tile label="Конверсия" value={`${sales.convTotal}%`}
+            sub={`${sales.signedFromCohortCount} из ${sales.newObjects} зашедших в периоде`}
             delta={d(previous?.sales.convTotal, sales.convTotal)} />
           <Tile label="Срок сделки" value={sales.avgDealDays ? `${sales.avgDealDays} дн.` : "—"}
             sub={sales.avgDealDaysSample
@@ -247,12 +251,27 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
           <Tile label="Просрочено объектов" value={production.overdueObjects}
             sub={production.overdueObjects ? `в среднем на ${production.overdueAvgDays} дн., макс. ${production.overdueMaxDays}` : "всё в срок"}
             accent={production.overdueObjects ? "#dc2626" : "#059669"} />
-          <Tile label="Сдача в срок" value={`${production.onTimeRate}%`} sub="из сданных за период"
-            accent={production.onTimeRate >= 80 ? "#059669" : "#d97706"}
+          {/* Ноль и «нет данных» — разные вещи. «Сдача в срок 0%» читается как
+              «сорвали все сроки», хотя на деле сравнивать не с чем: плановую дату
+              просто не заполнили. Поэтому при пустой выборке — прочерк и причина. */}
+          <Tile label="Сдача в срок"
+            value={production.onTimeRate === null ? "—" : `${production.onTimeRate}%`}
+            sub={production.onTimeRate === null
+              ? "не с чем сравнить: нет плановых дат сдачи"
+              : `по ${production.onTimeSample} объектам из сданных за период`}
+            accent={production.onTimeRate === null ? "#94a3b8"
+              : production.onTimeRate >= 80 ? "#059669" : "#d97706"}
             delta={d(previous?.production.onTimeRate, production.onTimeRate)} />
-          <Tile label="План / факт срока" value={`${production.avgPlanDays} / ${production.avgFactDays} дн.`}
-            sub="средняя длительность объекта" />
-          <Tile label="Прогресс по этапам" value={`${production.stagesProgress}%`} sub="закрыто на активных объектах" />
+          <Tile label="План / факт срока"
+            value={`${production.avgPlanDays ?? "—"} / ${production.avgFactDays ?? "—"} дн.`}
+            sub={production.avgPlanDays === null
+              ? "плановых дат нет — известен только факт"
+              : "средняя длительность объекта"} />
+          <Tile label="Этапов закрыто"
+            value={production.stagesProgress === null ? "—" : `${production.stagesProgress}%`}
+            sub={production.stagesProgress === null
+              ? "на объектах в работе нет этапов"
+              : `${production.stagesDone} из ${production.stagesTotal} этапов на объектах в работе`} />
           <Tile label="Просроченных этапов" value={production.overdueStages}
             accent={production.overdueStages ? "#dc2626" : "#0f172a"} />
           <Tile label="Простой до старта" value={production.avgStartLagDays ? `${production.avgStartLagDays} дн.` : "—"}

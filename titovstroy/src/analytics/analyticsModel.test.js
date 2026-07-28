@@ -504,6 +504,21 @@ describe("производство за период — поток событи
     expect(f.signedList.length).toBe(f.stages[0].count);
   });
 
+  it("расторгнутый объект не считается сданным", () => {
+    // У расторгнутого в факт-дате стоит день ПРЕКРАЩЕНИЯ работ, а не сдачи.
+    // Если его засчитать, он и в сдачи попадёт, и «сдачу в срок» испортит.
+    const f = prodFixture();
+    f.objects.push({ id:"pc", clientName:"Расторгли в этом месяце", status:"cancel", createdAt: NOW - 60*DAY });
+    f.contracts.push({ id:"cpc", objectId:"pc", number:"№ 106", date: dstr(-20), works:[{quantity:1, price:700000}] });
+    f.productions.push({ objectId:"pc", prodStatus:"cancel", startDate: dstr(-18), factEndDate: dstr(-2) });
+    const a = buildAnalytics(f, { period: "month", now: NOW });
+    expect(a.funnels.production.doneList.map(x => x.id)).not.toContain("pc");
+    expect(a.production.doneInPeriod).toBe(4);              // без расторгнутого
+    // но расторжение видно отдельной строкой — за период, по той же дате
+    expect(a.funnels.production.terminal.label).toBe("Расторгли");
+    expect(a.funnels.production.terminal.count).toBe(1);
+  });
+
   it("пустой дубль карточки не отменяет сдачу", () => {
     // Две карточки на один объект: пустой дубль создан позже по порядку в массиве.
     // Раньше побеждала последняя, и объект выглядел несданным.
@@ -518,6 +533,59 @@ describe("производство за период — поток событи
   it("во «всё время» попадают все события, включая прошлогодние", () => {
     const allTime = buildAnalytics(prodFixture(), { period: "all", now: NOW }).funnels.production;
     expect(allTime.stages[2].count).toBe(5);           // + p2
+  });
+});
+
+describe("ноль и «нет данных» — разные вещи", () => {
+  // На боевой базе ни у одного сданного объекта не было плановой даты, и «Сдача в
+  // срок» показывала 0% — то есть «сорвали все сроки». Пустая выборка обязана
+  // возвращать null, чтобы экран нарисовал «—» и написал, чего не хватает.
+  const noPlans = () => {
+    const f = fixture();
+    f.objects.push({ id:"n1", clientName:"Сдан без плановой даты", status:"done", createdAt: NOW - 60*DAY });
+    f.productions.push({ objectId:"n1", prodStatus:"done", startDate: dstr(-20), factEndDate: dstr(-2) });
+    // у o1 из базовой базы план есть — убираем, чтобы плановых дат не осталось вовсе
+    f.productions[0].planEndDate = "";
+    return buildAnalytics(f, { period: "month", now: NOW });
+  };
+
+  it("«сдача в срок» без плановых дат — null, а не 0%", () => {
+    const p = noPlans().production;
+    expect(p.doneInPeriod).toBe(1);       // сдача есть
+    expect(p.onTimeRate).toBeNull();      // а сравнивать не с чем
+    expect(p.onTimeSample).toBe(0);
+    expect(p.avgPlanDays).toBeNull();
+    expect(p.avgFactDays).toBe(18);       // факт известен: старт -20д, сдача -2д
+  });
+
+  it("«цена за м²» без площадей — null, а не 0 ₸", () => {
+    const f = fixture();
+    for (const o of f.objects) delete o.area;
+    const { sales } = buildAnalytics(f, { period: "all", now: NOW });
+    expect(sales.avgPricePerSqm).toBeNull();
+    expect(sales.avgPricePerSqmSample).toBe(0);
+  });
+
+  it("«срок сделки» без дат — null", () => {
+    const f = fixture();
+    f.contracts = [];
+    f.productions = f.productions.map(p => ({ ...p, saleDate: "" }));
+    const { sales } = buildAnalytics(f, { period: "all", now: NOW });
+    expect(sales.avgDealDays).toBeNull();
+  });
+
+  it("«этапов закрыто» без этапов — null", () => {
+    const f = fixture();
+    f.productions = f.productions.map(p => ({ ...p, stages: [] }));
+    const { production } = buildAnalytics(f, { period: "month", now: NOW });
+    expect(production.stagesProgress).toBeNull();
+  });
+
+  it("а настоящий ноль остаётся нулём", () => {
+    // Этапы есть, но ни один не закрыт — это честные 0%, не «нет данных».
+    const { production } = buildAnalytics(fixture(), { period: "month", now: NOW });
+    expect(production.stagesTotal).toBeGreaterThan(0);
+    expect(production.stagesProgress).toBe(50);   // 1 из 2 этапов закрыт
   });
 });
 

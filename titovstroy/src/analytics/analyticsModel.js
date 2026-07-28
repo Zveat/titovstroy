@@ -389,7 +389,7 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
     convToSigned: pct(signedFromCohort.length, withEstimate.length),
     convTotal: pct(signedFromCohort.length, cohort.length),
     signedFromCohortCount: signedFromCohort.length,
-    avgDealDays: dealDays.length ? Math.round(dealDays.reduce((s, d) => s + d, 0) / dealDays.length) : 0,
+    avgDealDays: dealDays.length ? Math.round(dealDays.reduce((s, d) => s + d, 0) / dealDays.length) : null,
     // Сколько сделок реально попало в среднее: срок считается только там, где есть
     // и дата создания объекта, и дата договора. Без этого числа среднее по 2 сделкам
     // выглядит как вывод по всей компании.
@@ -398,9 +398,11 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
     lostSum,
     cancelledCount: cancelled.length,
     lostByReason,
+    // Площадь заполняют не всегда. Пустая выборка — это «—», а не «0 ₸ за м²»:
+    // ноль читался бы как «работаем бесплатно».
     avgPricePerSqm: sqmPrices.length
       ? Math.round(sqmPrices.reduce((s, v) => s + v, 0) / sqmPrices.length)
-      : 0,
+      : null,
     avgPricePerSqmSample: sqmPrices.length,
     byManager,
     byType,
@@ -448,7 +450,7 @@ function buildBacklog(idx, { now }) {
     doneValue,
     stagesValue,
     objectsWithStagePrices,
-    stagesProgressPct: pct(doneValue, stagesValue),
+    stagesProgressPct: stagesValue > 0 ? pct(doneValue, stagesValue) : null,
     remaining: Math.max(0, stagesValue - doneValue),
     byForeman,
     closingThisMonthCount: closingThisMonth.length,
@@ -500,7 +502,10 @@ function buildProduction(idx, { from, to, now }) {
     // Никаких доп. фильтров (архив, объекты из миграции) тут нет намеренно: факт-дата
     // реальная, и объект, сданный в этом месяце, обязан посчитаться независимо от
     // того, как он попал в базу и убрали ли его потом в архив.
-    if (factEnd && inRange(prod.factEndDate, from, to)) {
+    // А вот РАСТОРГНУТЫЕ исключаем: у них в факт-дате стоит день, когда работы
+    // прекратили, а не сдали объект. Иначе расторжение попадало бы в сдачи и заодно
+    // портило «сдачу в срок» и среднюю длительность.
+    if (factEnd && status !== "cancel" && inRange(prod.factEndDate, from, to)) {
       const start = ts(prod.startDate);
       planFact.push({
         onTime: planEnd ? factEnd <= planEnd : null,
@@ -567,16 +572,26 @@ function buildProduction(idx, { from, to, now }) {
     overdueObjects,
     overdueAvgDays: overdueObjects ? Math.round(overdueDaysTotal / overdueObjects) : 0,
     overdueMaxDays,
-    onTimeRate: pct(onTime, withPlan),
-    avgPlanDays: planDaysArr.length ? Math.round(planDaysArr.reduce((s, v) => s + v, 0) / planDaysArr.length) : 0,
-    avgFactDays: factDaysArr.length ? Math.round(factDaysArr.reduce((s, v) => s + v, 0) / factDaysArr.length) : 0,
-    stagesProgress: pct(stagesDone, stagesTotal),
+    // НОЛЬ И «НЕТ ДАННЫХ» — РАЗНЫЕ ВЕЩИ. Если ни у одного сданного объекта не
+    // проставлена ПЛАНОВАЯ дата, «сдача в срок» показывала 0% — то есть «сорвали
+    // все сроки», хотя на самом деле сравнивать не с чем. Возвращаем null, экран
+    // рисует «—» и пишет, чего не хватает. Так же с планом/фактом длительности.
+    onTimeRate: withPlan ? pct(onTime, withPlan) : null,
+    onTimeSample: withPlan,
+    avgPlanDays: planDaysArr.length ? Math.round(planDaysArr.reduce((s, v) => s + v, 0) / planDaysArr.length) : null,
+    avgFactDays: factDaysArr.length ? Math.round(factDaysArr.reduce((s, v) => s + v, 0) / factDaysArr.length) : null,
+    // Это доля ЭТАПОВ ПО КОЛИЧЕСТВУ на объектах в работе. Рядом в портфеле живёт
+    // похожий показатель, но он считается ПО ДЕНЬГАМ и даёт другое число —
+    // подписи развели, чтобы они не выглядели противоречием.
+    stagesProgress: stagesTotal ? pct(stagesDone, stagesTotal) : null,
+    stagesTotal,
+    stagesDone,
     overdueStages,
     overdueStageList: overdueStageList.sort((a, b) => b.days - a.days),
     unpaidDoneStages,
     unpaidDoneSum,
     avgStartLagDays: startLagDays.length
-      ? Math.round(startLagDays.reduce((s, v) => s + v, 0) / startLagDays.length) : 0,
+      ? Math.round(startLagDays.reduce((s, v) => s + v, 0) / startLagDays.length) : null,
     startLagSample: startLagDays.length,
     staleObjects: staleObjects.sort((a, b) => b.days - a.days),
   };
@@ -732,10 +747,12 @@ function buildFinance(idx, { from, to, now }, financeTx) {
     unlinkedSum,
     // Средневзвешенные план/факт маржи по компании — главный ответ на вопрос
     // «где мы теряем деньги»: заложили столько, получилось столько.
+    // Нет ни одного объекта, где известны и план, и факт, — показывать «0% / 0%»
+    // нельзя: это выглядит как «вся маржа потеряна».
     marginPlanAvg: marginPlanFact.length
-      ? Math.round(marginPlanFact.reduce((s, x) => s + x.planMargin, 0) / marginPlanFact.length) : 0,
+      ? Math.round(marginPlanFact.reduce((s, x) => s + x.planMargin, 0) / marginPlanFact.length) : null,
     marginFactAvg: marginPlanFact.length
-      ? Math.round(marginPlanFact.reduce((s, x) => s + x.factMargin, 0) / marginPlanFact.length) : 0,
+      ? Math.round(marginPlanFact.reduce((s, x) => s + x.factMargin, 0) / marginPlanFact.length) : null,
     marginSample: marginPlanFact.length,
     marginDrops: marginPlanFact.filter(x => x.drop >= 10).sort((a, b) => b.drop - a.drop),
     topProfitable: objectProfit.slice(0, 5),
@@ -983,9 +1000,12 @@ function buildFunnels(idx, { from, to }, period, manager, resolveManager = (v) =
 
   const inWork = scope.filter(o => statusIn(o, "work"));
   const paused = scope.filter(o => statusIn(o, "paused"));
-  // Даты расторжения в карточке нет, поэтому к периоду это число не привязать —
-  // показываем как есть, «всего», и отдельно от потока.
   const cancelled = scope.filter(o => statusIn(o, "cancel"));
+  // Отдельного поля «дата расторжения» в карточке нет, но у расторгнутого объекта в
+  // факт-дате окончания стоит день, когда работы прекратили. По нему и привязываем
+  // расторжение к периоду. У кого даты нет — в период не попадёт, поэтому рядом
+  // остаётся строка «Расторгнуто всего».
+  const cancelledNow = cancelled.filter(o => happened(prodByObject.get(o.id)?.factEndDate));
 
   return {
     production: {
@@ -995,6 +1015,8 @@ function buildFunnels(idx, { from, to }, period, manager, resolveManager = (v) =
         { key: "start", label: "Вышли на объект", count: startedNow.length, sum: sum(startedNow) },
         { key: "done", label: "Сдали", count: doneNow.length, sum: sum(doneNow) },
       ],
+      // Расторжения периода — исход потока, поэтому идут вместе со стадиями.
+      terminal: { label: "Расторгли", count: cancelledNow.length, sum: sum(cancelledNow) },
       // Срез «сейчас» — он про другое, поэтому и подписан отдельно.
       current: [
         { label: "Сейчас в работе", count: inWork.length, sum: sum(inWork), color: "#0f766e" },
