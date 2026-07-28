@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
 import { ANALYTICS_BLOCKS, deltaPct, refuseReasonLabel } from "./analyticsModel.js";
+import { FunnelChart } from "./Dashboard.jsx";
 
 // Блоки аналитики. Компонент только рисует — все числа приходят готовыми из
 // buildAnalytics (чистая функция с тестами). Каждый блок скрывается своим правом,
@@ -57,9 +58,17 @@ function BarRow({ label, value, max, note, color = "#2563eb" }) {
   const width = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
   return (
     <div style={{ marginBottom: 7 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 11.5, marginBottom: 3 }}>
-        <span style={{ color: "#334155", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
-        <span style={{ color: "#64748b", whiteSpace: "nowrap" }}>{note}</span>
+      {/* Подпись и цифры переносятся на две строки, если в одну не влезают.
+          Раньше строка была неразрывной: у цифр стоял nowrap, у названия — overflow
+          hidden, поэтому сжималось всегда название. От «Сергей Штанько» оставалось
+          «С.», и было не понять, чей это результат. Теперь при нехватке места вниз
+          уезжают цифры, а имя показывается целиком. */}
+      <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap",
+        gap: "0 10px", fontSize: 11.5, marginBottom: 3 }}>
+        <span title={typeof label === "string" ? label : undefined}
+          style={{ color: "#334155", fontWeight: 600, minWidth: 0,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+        <span style={{ color: "#64748b", whiteSpace: "nowrap", flexShrink: 0 }}>{note}</span>
       </div>
       <div style={{ height: 6, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}>
         <div style={{ width: `${width}%`, height: "100%", background: color, borderRadius: 4 }} />
@@ -68,13 +77,46 @@ function BarRow({ label, value, max, note, color = "#2563eb" }) {
   );
 }
 
+// Раскрывающийся список «что именно посчиталось». Нужен, чтобы цифру можно было
+// проверить глазами, а не верить на слово.
+function AuditList({ items, fmt, title = "Показать список" }) {
+  const [open, setOpen] = useState(false);
+  if (!items?.length) return null;
+  const dt = (t) => (t ? new Date(t).toLocaleDateString("ru-RU") : "—");
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button type="button" onClick={() => setOpen(v => !v)}
+        style={{ border: 0, background: "transparent", color: "#2563eb", cursor: "pointer",
+                 fontFamily: "inherit", fontSize: 11, padding: 0 }}>
+        {open ? `▲ скрыть · ${title.toLowerCase()}` : `▼ ${title.toLowerCase()} (${items.length})`}
+      </button>
+      {open && (
+        <div style={{ marginTop: 6, maxHeight: 260, overflow: "auto", border: "1px solid #eef2f7", borderRadius: 8 }}>
+          {items.map((it, i) => (
+            <div key={it.id || i} style={{ display: "grid", gridTemplateColumns: "78px minmax(0,1fr) auto",
+              gap: 8, padding: "6px 9px", fontSize: 11, borderTop: i ? "1px solid #f4f7fb" : 0 }}>
+              <span style={{ color: "#94a3b8" }}>{dt(it.createdAt)}</span>
+              <span style={{ color: "#334155", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {it.name}{it.manager ? ` · ${it.manager}` : ""}
+              </span>
+              <span style={{ color: "#64748b", whiteSpace: "nowrap" }}>
+                {it.value > 0 ? `${fmt(Math.round(it.value))} ₸` : "без сметы"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const EmptyNote = ({ text }) => (
   <div style={{ ...card, color: "#94a3b8", fontSize: 12 }}>{text}</div>
 );
 
-export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails = true }) {
+export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails = true, catProfit = [] }) {
   if (!data) return null;
-  const { sales, backlog, production, finance, quality, previous } = data;
+  const { sales, backlog, production, finance, quality, cash, dataQuality, previous, funnels } = data;
   const money = (v) => `${fmt(Math.round(v || 0))} ₸`;
   const can = (block) => permissions[block.permission] !== false;
   const d = (path, current) => (previous ? deltaPct(current, path) : undefined);
@@ -91,31 +133,50 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
         <div style={grid()}>
           <Tile label="Новых объектов" value={sales.newObjects}
             delta={d(previous?.sales.newObjects, sales.newObjects)} />
-          <Tile label="Посчитано смет" value={sales.estimatedCount} sub={money(sales.estimatedSum)}
+          <Tile label="Объектов со сметой" value={sales.estimatedCount} sub={money(sales.estimatedSum)}
             delta={d(previous?.sales.estimatedSum, sales.estimatedSum)} />
           <Tile label="В согласовании" value={sales.inApprovalCount} sub={money(sales.inApprovalSum)} accent="#d97706" />
-          <Tile label="Подписано" value={sales.signedCount} sub={money(sales.signedSum)} accent="#059669"
-            delta={d(previous?.sales.signedSum, sales.signedSum)} />
-          <Tile label="Средний чек" value={money(sales.avgCheck)} sub="на подписанный объект" />
-          <Tile label="Конверсия" value={`${sales.convTotal}%`} sub="объект → договор"
+          <Tile label="Подписано" value={sales.signedCount} sub={`${money(sales.signedSum)} · по дате подписания`}
+            accent="#059669" delta={d(previous?.sales.signedSum, sales.signedSum)} />
+          {/* Чек считается только по объектам с известной суммой: у старых объектов
+              нет ни договора, ни сметы, и «0 ₸» там означает «не заполнено». */}
+          <Tile label="Средний чек"
+            value={sales.avgCheck === null ? "—" : money(sales.avgCheck)}
+            sub={sales.avgCheck === null
+              ? "ни у одного подписанного нет суммы"
+              : `по ${sales.avgCheckSample} объектам${sales.signedWithoutValue
+                  ? ` · ещё ${sales.signedWithoutValue} без сметы и договора` : ""}`} />
+          {/* База конверсии — КОГОРТА (зашли в периоде), а «Подписано» рядом считается
+              по дате подписания и включает сделки прошлых месяцев. Числа разные
+              законно, поэтому у конверсии подписана её база. */}
+          <Tile label="Конверсия" value={sales.convTotal === null ? "—" : `${sales.convTotal}%`}
+            sub={sales.convTotal === null
+              ? "в периоде не зашло ни одного объекта"
+              : `${sales.signedFromCohortCount} из ${sales.newObjects} зашедших в периоде`}
             delta={d(previous?.sales.convTotal, sales.convTotal)} />
-          <Tile label="Срок сделки" value={sales.avgDealDays ? `${sales.avgDealDays} дн.` : "—"} sub="от заявки до договора" />
-          <Tile label="Цена за м²" value={sales.avgPricePerSqm ? money(sales.avgPricePerSqm) : "—"} sub="по подписанным" />
-          <Tile label="Потеряно" value={sales.lostCount} sub={money(sales.lostSum)} accent="#dc2626"
+          <Tile label="Срок сделки" value={sales.avgDealDays ? `${sales.avgDealDays} дн.` : "—"}
+            sub={sales.avgDealDaysSample
+              ? `от заведения объекта до подписания · по ${sales.avgDealDaysSample} сделкам`
+              : "нет сделок с датой договора"} />
+          <Tile label="Цена за м²" value={sales.avgPricePerSqm ? money(sales.avgPricePerSqm) : "—"}
+            sub={sales.avgPricePerSqmSample
+              ? `по ${sales.avgPricePerSqmSample} объектам с площадью`
+              : "не указана площадь"} />
+          <Tile label="Отказов" value={sales.lostCount} sub={money(sales.lostSum)} accent="#dc2626"
             delta={d(previous?.sales.lostCount, sales.lostCount)} />
+          {sales.cancelledCount > 0 && (
+            <Tile label="Расторгнуто" value={sales.cancelledCount} sub="уже подписанных договоров" accent="#dc2626" />
+          )}
         </div>
 
+        <AuditList items={sales.cohortList} fmt={fmt} title="Какие объекты посчитаны" />
+
         <div style={{ ...grid(260), marginTop: 10 }}>
-          <div style={card}>
-            <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>Воронка по шагам</div>
-            {[
-              ["Создано объектов", sales.newObjects, 100],
-              ["Посчитана смета", sales.estimatedCount, sales.convToEstimate],
-              ["Подписан договор", sales.signedCount, sales.convTotal],
-            ].map(([label, count, percent]) => (
-              <BarRow key={label} label={label} value={percent} max={100} note={`${count} · ${percent}%`} />
-            ))}
-          </div>
+          {/* Когортная воронка: движение объектов, зашедших в выбранном периоде.
+              Отвечает на «как отработали месяц», а не «кто где стоит сейчас». */}
+          <FunnelChart funnel={sales.cohortFunnel} fmt={fmt} showMoney
+            title="Движение по воронке" hint="зашли в периоде — докуда дошли"
+            colors={["#93c5fd", "#60a5fa", "#2563eb"]} />
 
           <div style={card}>
             <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>Причины отказа</div>
@@ -135,12 +196,28 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
             {Object.entries(sales.byManager).length === 0
               ? <div style={{ fontSize: 11.5, color: "#94a3b8" }}>Нет данных</div>
               : Object.entries(sales.byManager)
-                  .sort((a, b) => b[1].signedSum - a[1].signedSum)
+                  .sort((a, b) => b[1].estimatedSum - a[1].estimatedSum)
                   .map(([name, v]) => (
-                    <BarRow key={name} label={name} value={v.signedSum}
-                      max={Math.max(...Object.values(sales.byManager).map(x => x.signedSum), 1)}
-                      note={`${v.signed}/${v.objects} · ${money(v.signedSum)}`} color="#059669" />
+                    <BarRow key={name} label={name} value={v.estimatedSum}
+                      max={Math.max(...Object.values(sales.byManager).map(x => x.estimatedSum), 1)}
+                      note={`смет ${v.estimated}/${v.objects} · подписано ${v.signed}${v.avgCheck !== null ? ` · чек ${money(v.avgCheck)}` : ""}`}
+                      color="#059669" />
                   ))}
+          </div>
+          <div style={card}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>Конверсия по типу объекта</div>
+            {Object.entries(sales.byType).length === 0
+              ? <div style={{ fontSize: 11.5, color: "#94a3b8" }}>Нет данных</div>
+              : Object.entries(sales.byType)
+                  .sort((a, b) => b[1].objects - a[1].objects)
+                  .map(([type, v]) => (
+                    <BarRow key={type} label={type} value={v.conv} max={100}
+                      note={`${v.signed} из ${v.objects} · ${v.conv}%`}
+                      color={v.conv >= 30 ? "#059669" : v.conv >= 15 ? "#d97706" : "#dc2626"} />
+                  ))}
+            <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 8 }}>
+              Смет на объект в среднем: <b>{sales.estimatedCount ? Math.round(sales.estimatesTotalCount / sales.estimatedCount * 10) / 10 : 0}</b>
+            </div>
           </div>
         </div>
       </Block>
@@ -152,8 +229,6 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
         <div style={grid()}>
           <Tile label="Объектов в портфеле" value={backlog.activeObjects} sub="подписаны и в работе" />
           <Tile label="Законтрактовано" value={money(backlog.contracted)} />
-          <Tile label="Выполнено" value={money(backlog.doneValue)} sub="по закрытым этапам" accent="#059669" />
-          <Tile label="Осталось выполнить" value={money(backlog.remaining)} sub="объём работ впереди" accent="#2563eb" />
           <Tile label="Закрывается в этом месяце" value={backlog.closingThisMonthCount}
             sub={money(backlog.closingThisMonthSum)} accent="#d97706" />
         </div>
@@ -185,25 +260,61 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
           <Tile label="Просрочено объектов" value={production.overdueObjects}
             sub={production.overdueObjects ? `в среднем на ${production.overdueAvgDays} дн., макс. ${production.overdueMaxDays}` : "всё в срок"}
             accent={production.overdueObjects ? "#dc2626" : "#059669"} />
-          <Tile label="Сдача в срок" value={`${production.onTimeRate}%`} sub="из сданных за период"
-            accent={production.onTimeRate >= 80 ? "#059669" : "#d97706"}
+          {/* Ноль и «нет данных» — разные вещи. «Сдача в срок 0%» читается как
+              «сорвали все сроки», хотя на деле сравнивать не с чем: плановую дату
+              просто не заполнили. Поэтому при пустой выборке — прочерк и причина. */}
+          <Tile label="Сдача в срок"
+            value={production.onTimeRate === null ? "—" : `${production.onTimeRate}%`}
+            sub={production.onTimeRate === null
+              ? "не с чем сравнить: нет плановых дат сдачи"
+              : `по ${production.onTimeSample} объектам из сданных за период`}
+            accent={production.onTimeRate === null ? "#94a3b8"
+              : production.onTimeRate >= 80 ? "#059669" : "#d97706"}
             delta={d(previous?.production.onTimeRate, production.onTimeRate)} />
-          <Tile label="План / факт срока" value={`${production.avgPlanDays} / ${production.avgFactDays} дн.`}
-            sub="средняя длительность объекта" />
-          <Tile label="Прогресс по этапам" value={`${production.stagesProgress}%`} sub="закрыто на активных объектах" />
+          <Tile label="План / факт срока"
+            value={`${production.avgPlanDays ?? "—"} / ${production.avgFactDays ?? "—"} дн.`}
+            sub={production.avgPlanDays === null
+              ? "плановых дат нет — известен только факт"
+              : "средняя длительность объекта"} />
+          <Tile label="Этапов закрыто"
+            value={production.stagesProgress === null ? "—" : `${production.stagesProgress}%`}
+            sub={production.stagesProgress === null
+              ? "на объектах в работе нет этапов"
+              : `${production.stagesDone} из ${production.stagesTotal} этапов на объектах в работе`} />
           <Tile label="Просроченных этапов" value={production.overdueStages}
             accent={production.overdueStages ? "#dc2626" : "#0f172a"} />
+          <Tile label="Простой до старта" value={production.avgStartLagDays ? `${production.avgStartLagDays} дн.` : "—"}
+            sub={production.startLagSample
+              ? `от подписания до выхода · по ${production.startLagSample} объектам`
+              : "нет дат продажи и старта"}
+            accent={production.avgStartLagDays > 14 ? "#dc2626" : "#0f172a"} />
+          <Tile label="Объектов без движения" value={production.staleObjects.length}
+            sub="карточку не трогали 14+ дней"
+            accent={production.staleObjects.length ? "#d97706" : "#059669"} />
           {financialDetails && (
-            <Tile label="Не оплачено бригадам" value={money(production.unpaidDoneSum)}
-              sub={`${production.unpaidDoneStages} закрытых этапов`} accent="#d97706" />
+            <Tile label="Закрыто, но не оплачено клиентом" value={money(production.unpaidDoneSum)}
+              sub={`${production.unpaidDoneStages} закрытых этапов без галочки «оплачено»`} accent="#d97706" />
           )}
         </div>
+        <div style={{ ...grid(260), marginTop: 10 }}>
+          {/* Вторая воронка — производственная. Когорта другая: не «кто зашёл», а
+              «кто подписал договор в периоде» и докуда доехал по стройке. */}
+          <FunnelChart funnel={funnels.production} fmt={fmt} showMoney
+            title="Движение по производству" hint="события периода: зашло / стартовало / сдано"
+            colors={["#a78bfa", "#f59e0b", "#059669"]} />
+        </div>
+        {/* Поимённо, чтобы цифры можно было сверить с объектами, а не верить на слово. */}
+        <AuditList items={funnels.production.doneList} fmt={fmt} title="Кого сдали за период" />
+        <AuditList items={funnels.production.startedList} fmt={fmt} title="Кто вышел на объект за период" />
+        <AuditList items={funnels.production.signedList} fmt={fmt} title="Кто подписал договор за период" />
+        <AuditList items={production.overdueStageList} fmt={fmt} title="Какие этапы просрочены" />
+        <AuditList items={production.staleObjects} fmt={fmt} title="Объекты без движения" />
       </Block>
     ),
 
     // ── Финансы ──
     finance: (
-      <Block key="finance" icon="💰" title="Финансы" hint="факт по операциям, привязка по номеру договора">
+      <Block key="finance" icon="💰" title="Финансы" hint="как в ОПУ: без займов, вкладов и авансов; привязка по номеру договора">
         <div style={grid()}>
           <Tile label="Поступления" value={money(finance.income)} accent="#059669"
             delta={d(previous?.finance.income, finance.income)} />
@@ -211,13 +322,23 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
             delta={d(previous?.finance.expense, finance.expense)} />
           {financialDetails && (
             <Tile label="Валовая прибыль" value={money(finance.gross)}
+              sub={`выручка − прямая себестоимость${finance.grossMarginPct === null ? "" : ` · ${finance.grossMarginPct}%`}`}
               accent={finance.gross >= 0 ? "#059669" : "#dc2626"}
               delta={d(previous?.finance.gross, finance.gross)} />
           )}
-          {financialDetails && <Tile label="Маржа" value={`${finance.marginPct}%`} />}
+          {financialDetails && (
+            <Tile label="Чистая прибыль" value={money(finance.net)}
+              sub={`после всех расходов${finance.marginPct === null ? "" : ` · ${finance.marginPct}%`}`}
+              accent={finance.net >= 0 ? "#059669" : "#dc2626"}
+              delta={d(previous?.finance.net, finance.net)} />
+          )}
           <Tile label="Дебиторка" value={money(finance.receivables)} sub="осталось получить" accent="#d97706" />
           <Tile label="Просроченная дебиторка" value={money(finance.receivablesOverdue)}
             sub="срок сдачи прошёл" accent={finance.receivablesOverdue ? "#dc2626" : "#0f172a"} />
+          {finance.unlinkedObjects > 0 && (
+            <Tile label="Без привязки к договору" value={finance.unlinkedObjects}
+              sub={`${money(finance.unlinkedSum)} — платежи сопоставить не с чем`} accent="#d97706" />
+          )}
         </div>
 
         <div style={{ ...grid(260), marginTop: 10 }}>
@@ -266,9 +387,56 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
             </div>
           )}
 
+          {financialDetails && finance.marginSample > 0 && (
+            <div style={card}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>
+                Маржа: план → факт
+                <span style={{ fontWeight: 400, color: "#94a3b8" }}> · по {finance.marginSample} объектам</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 10 }}>
+                <span style={{ fontSize: 20, fontWeight: 900, color: "#64748b" }}>{finance.marginPlanAvg}%</span>
+                <span style={{ color: "#94a3b8" }}>→</span>
+                <span style={{ fontSize: 20, fontWeight: 900,
+                  color: finance.marginFactAvg >= finance.marginPlanAvg ? "#059669" : "#dc2626" }}>
+                  {finance.marginFactAvg}%
+                </span>
+                <span style={{ fontSize: 11, color: "#94a3b8" }}>
+                  {finance.marginFactAvg < finance.marginPlanAvg
+                    ? `теряем ${finance.marginPlanAvg - finance.marginFactAvg} пунктов`
+                    : "держим план"}
+                </span>
+              </div>
+              {finance.marginDrops.length === 0
+                ? <div style={{ fontSize: 11.5, color: "#94a3b8" }}>Объектов с просадкой больше 10 пунктов нет</div>
+                : finance.marginDrops.slice(0, 6).map(o => (
+                    <BarRow key={o.id} label={o.name} value={o.drop}
+                      max={Math.max(...finance.marginDrops.map(x => x.drop))}
+                      note={`${o.planMargin}% → ${o.factMargin}% · −${o.drop} п.`} color="#dc2626" />
+                  ))}
+            </div>
+          )}
+
+          {financialDetails && catProfit.length > 0 && (
+            <div style={card}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>
+                Рентабельность по видам работ
+                <span style={{ fontWeight: 400, color: "#94a3b8" }}> · по сметам периода</span>
+              </div>
+              {catProfit.map(c => (
+                <BarRow key={c.cat} label={c.cat} value={Math.max(0, c.profit)}
+                  max={Math.max(...catProfit.map(x => Math.max(0, x.profit)), 1)}
+                  note={`${money(c.profit)} · ${c.margin}%`}
+                  color={c.margin >= 35 ? "#059669" : c.margin >= 20 ? "#d97706" : "#dc2626"} />
+              ))}
+            </div>
+          )}
+
           {financialDetails && (
             <div style={card}>
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>Прибыль по объектам</div>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>
+                Прибыль по объектам
+                <span style={{ fontWeight: 400, color: "#94a3b8" }}> · получено − потрачено</span>
+              </div>
               {finance.topProfitable.length === 0
                 ? <div style={{ fontSize: 11.5, color: "#94a3b8" }}>Нет данных</div>
                 : finance.topProfitable.map(o => (
@@ -284,23 +452,156 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
 
     // ── Качество и клиент ──
     quality: (
-      <Block key="quality" icon="⭐" title="Качество и клиент">
+      <Block key="quality" icon="⭐" title="Качество и клиент" hint="состояние сейчас — у замечаний в базе нет даты закрытия">
         <div style={grid()}>
           <Tile label="Открытых замечаний" value={quality.openRemarks}
+            sub={quality.openFromClient ? `из них от клиента: ${quality.openFromClient}` : "от клиента нет"}
             accent={quality.openRemarks ? "#dc2626" : "#059669"} />
-          <Tile label="Закрыто за период" value={quality.closedInPeriod} accent="#059669"
-            delta={d(previous?.quality.closedInPeriod, quality.closedInPeriod)} />
-          <Tile label="От клиента" value={quality.fromClient} sub="всего замечаний клиента" />
-          <Tile label="Срок закрытия" value={quality.avgCloseDays ? `${quality.avgCloseDays} дн.` : "—"}
-            sub="в среднем" />
-          <Tile label="Замечаний на объект" value={quality.remarksPerObject || "—"} />
-          <Tile label="Чек-лист сдачи" value={`${quality.handoverPct}%`} sub="заполнено пунктов" />
+          <Tile label="Висят дольше недели" value={quality.openOverWeek}
+            sub={quality.oldestOpenDays ? `самое старое — ${quality.oldestOpenDays} дн.` : ""}
+            accent={quality.openOverWeek ? "#dc2626" : "#059669"} />
+          <Tile label="Закрыто всего" value={quality.closedRemarks} accent="#059669" />
+          <Tile label="Замечаний от клиента" value={quality.fromClient} sub="за всё время" />
+          <Tile label="Замечаний на объект" value={quality.remarksPerObject || "—"} sub="в среднем" />
+          <Tile label="Чек-лист сдачи"
+            value={quality.handoverPct === null ? "—" : `${quality.handoverPct}%`}
+            sub={quality.handoverPct === null
+              ? "чек-листы не заполняются"
+              /* Показываем базу: 1 закрытый пункт из 580 округляется в «0%», и без
+                 базы этот ноль не отличить от «чек-листов вообще нет». */
+              : `${quality.handoverDone} из ${quality.handoverTotal} пунктов · по ${quality.objectsInHandover} объектам`} />
+        </div>
+        <div style={{ ...grid(260), marginTop: 10 }}>
+          <div style={card}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>Замечания по прорабам</div>
+            {Object.entries(quality.byForeman).length === 0
+              ? <div style={{ fontSize: 11.5, color: "#94a3b8" }}>Нет данных</div>
+              : Object.entries(quality.byForeman)
+                  .sort((a, b) => b[1].total - a[1].total)
+                  .map(([name, v]) => (
+                    <BarRow key={name} label={name} value={v.total}
+                      max={Math.max(...Object.values(quality.byForeman).map(x => x.total), 1)}
+                      note={`${v.total} всего · открыто ${v.open} · объектов ${v.objects}`}
+                      color={v.open ? "#dc2626" : "#059669"} />
+                  ))}
+          </div>
+        </div>
+      </Block>
+    ),
+
+    // ── Деньги: остатки на счетах и ближайший приход ──
+    cash: financialDetails ? (
+      <Block key="cash" icon="🏦" title="Деньги" hint="остатки как в разделе «Финансы»">
+        <div style={grid()}>
+          <Tile label="Всего на счетах" value={money(cash.total)}
+            accent={cash.total >= 0 ? "#059669" : "#dc2626"} />
+          <Tile label="Ждём в этом месяце" value={money(cash.expectedThisMonth)}
+            sub="долг по объектам, что закрываются" accent="#2563eb" />
+          <Tile label="Вся дебиторка" value={money(finance.receivables)} accent="#d97706"
+            sub={finance.receivablesOverdue ? `просрочено ${money(finance.receivablesOverdue)}` : "без просрочки"} />
+        </div>
+        <div style={{ ...grid(260), marginTop: 10 }}>
+          <div style={card}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>Остатки по счетам</div>
+            {cash.byAccount.length === 0
+              ? <div style={{ fontSize: 11.5, color: "#94a3b8" }}>Счета не заведены</div>
+              : cash.byAccount.map(a => (
+                  <BarRow key={a.name} label={a.name} value={Math.abs(a.value)}
+                    max={Math.max(...cash.byAccount.map(x => Math.abs(x.value)), 1)}
+                    note={money(a.value)} color={a.value >= 0 ? "#059669" : "#dc2626"} />
+                ))}
+          </div>
+        </div>
+      </Block>
+    ) : null,
+
+    // ── Качество данных: почему цифры бывают пустыми ──
+    dataQuality: (
+      <Block key="dataQuality" icon="🧹" title="Качество данных"
+        hint="что дозаполнить, чтобы показателям можно было верить">
+        <div style={grid()}>
+          <Tile label="Пробелов в объектах" value={dataQuality.totalGaps}
+            sub={`активных объектов: ${dataQuality.activeObjects}`}
+            accent={dataQuality.totalGaps ? "#d97706" : "#059669"} />
+          <Tile label="Операций без договора" value={dataQuality.txWithoutContract}
+            sub={dataQuality.txWithoutContractPct === null ? "операций нет" : `${dataQuality.txWithoutContractPct}% от всех операций`}
+            accent={dataQuality.txWithoutContractPct > 20 ? "#dc2626" : "#0f172a"} />
+        </div>
+        <div style={{ marginTop: 10 }}>
+          {dataQuality.gaps.length === 0 ? (
+            <div style={{ ...card, fontSize: 12, color: "#059669" }}>Всё заполнено — данные полные.</div>
+          ) : dataQuality.gaps.map(g => (
+            <div key={g.key} style={{ ...card, marginBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12 }}>
+                <span style={{ color: "#334155", fontWeight: 700 }}>{g.label}</span>
+                <span style={{ color: "#dc2626", fontWeight: 700 }}>{g.count}</span>
+              </div>
+              <AuditList items={g.list} fmt={fmt} title="Показать объекты" />
+            </div>
+          ))}
         </div>
       </Block>
     ),
   };
 
-  return <div>{visible.map(b => blockById[b.id])}</div>;
+  return <div>{visible.map(b => blockById[b.id]).filter(Boolean)}</div>;
 }
 
 export default AnalyticsBlocks;
+
+// ─── Плитки для «Главной» ────────────────────────────────────────────────────
+// Не аналитика, а «что происходит прямо сейчас»: сколько в работе, что горит,
+// сколько денег ждём. Числа берутся из той же модели, что и аналитика, поэтому
+// сходятся с ней один в один.
+export function DashboardKpis({ data, fmt, financialDetails = true }) {
+  if (!data) return null;
+  const { sales, backlog, production, finance, cash: cashData } = data;
+  const money = (v) => `${fmt(Math.round(v || 0))} ₸`;
+
+  // Две группы: сверху «что происходит» (объекты и сроки), ниже «деньги».
+  // Namely: одна цифра — один смысл, дублей между строками быть не должно.
+  const work = [
+    { label: "Объектов в работе", value: production.inWork,
+      sub: production.paused ? `на паузе: ${production.paused}` : "без пауз" },
+    { label: "Просрочено", value: production.overdueObjects,
+      sub: production.overdueObjects ? `в среднем на ${production.overdueAvgDays} дн.` : "всё в срок",
+      accent: production.overdueObjects ? "#dc2626" : "#059669" },
+    { label: "Сдано за месяц", value: production.doneInPeriod, accent: "#059669",
+      sub: production.onTimeRate ? `в срок: ${production.onTimeRate}%` : "" },
+    { label: "В согласовании", value: sales.inApprovalCount, accent: "#d97706",
+      sub: money(sales.inApprovalSum) },
+    { label: "Подписано за месяц", value: sales.signedCount, sub: money(sales.signedSum), accent: "#059669" },
+    { label: "Объектов без движения", value: production.staleObjects.length,
+      sub: "не трогали 14+ дней",
+      accent: production.staleObjects.length ? "#d97706" : "#059669" },
+  ];
+  const cash = financialDetails ? [
+    { label: "Деньги на счетах", value: money(cashData.total),
+      accent: cashData.total >= 0 ? "#059669" : "#dc2626", sub: "сейчас" },
+    { label: "Выручка за месяц", value: money(finance.income), accent: "#059669", sub: "поступления факт" },
+    { label: "Валовая прибыль", value: money(finance.gross), sub: finance.grossMarginPct === null ? "нет поступлений" : `маржа ${finance.grossMarginPct}%`,
+      accent: finance.gross >= 0 ? "#059669" : "#dc2626" },
+    { label: "Дебиторка", value: money(finance.receivables),
+      sub: finance.receivablesOverdue ? `просрочено: ${money(finance.receivablesOverdue)}` : "без просрочки",
+      accent: finance.receivablesOverdue ? "#dc2626" : "#d97706" },
+    { label: "Закрывается в этом месяце", value: backlog.closingThisMonthCount,
+      sub: money(backlog.closingThisMonthSum), accent: "#2563eb" },
+  ] : [];
+
+  const renderTile = (t) => (
+    <div key={t.label} style={card}>
+      <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>{t.label}</div>
+      <div style={{ fontSize: 22, fontWeight: 900, color: t.accent || "#0f172a", lineHeight: 1.15 }}>{t.value}</div>
+      {t.sub && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>{t.sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={grid(150)}>{work.map(renderTile)}</div>
+      {cash.length > 0 && (
+        <div style={{ ...grid(150), marginTop: 10 }}>{cash.map(renderTile)}</div>
+      )}
+    </div>
+  );
+}
