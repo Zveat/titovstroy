@@ -58,9 +58,17 @@ function BarRow({ label, value, max, note, color = "#2563eb" }) {
   const width = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
   return (
     <div style={{ marginBottom: 7 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 11.5, marginBottom: 3 }}>
-        <span style={{ color: "#334155", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
-        <span style={{ color: "#64748b", whiteSpace: "nowrap" }}>{note}</span>
+      {/* Подпись и цифры переносятся на две строки, если в одну не влезают.
+          Раньше строка была неразрывной: у цифр стоял nowrap, у названия — overflow
+          hidden, поэтому сжималось всегда название. От «Сергей Штанько» оставалось
+          «С.», и было не понять, чей это результат. Теперь при нехватке места вниз
+          уезжают цифры, а имя показывается целиком. */}
+      <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap",
+        gap: "0 10px", fontSize: 11.5, marginBottom: 3 }}>
+        <span title={typeof label === "string" ? label : undefined}
+          style={{ color: "#334155", fontWeight: 600, minWidth: 0,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+        <span style={{ color: "#64748b", whiteSpace: "nowrap", flexShrink: 0 }}>{note}</span>
       </div>
       <div style={{ height: 6, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}>
         <div style={{ width: `${width}%`, height: "100%", background: color, borderRadius: 4 }} />
