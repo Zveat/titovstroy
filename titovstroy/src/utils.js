@@ -567,16 +567,27 @@ export function resolveFinanceProjectBudget({ project = {}, object = null, estim
     ? estimatesForObject((estimates || []).filter(e => e && !e.deletedAt), object.id)
     : [];
   const estimateTotal = linkedEstimates.reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0);
-  const calcMode = object?.financeCalcMode || project?.financeCalcMode || "estimates-v1";
+  // contracts-v2 is an irreversible opt-in for future objects. Keep it if either
+  // side of an already-linked pair has received the marker during synchronization.
+  const calcMode = object?.financeCalcMode === "contracts-v2" || project?.financeCalcMode === "contracts-v2"
+    ? "contracts-v2"
+    : "estimates-v1";
   const safeContractTotal = Math.max(0, Number(contractTotal) || 0);
   if (calcMode === "contracts-v2") {
     return { budget: safeContractTotal, source: "contracts-v2", estimateCount: linkedEstimates.length, calcMode };
   }
-  if (estimateTotal > 0) return { budget: estimateTotal, source: "estimates", estimateCount: linkedEstimates.length };
+  if (estimateTotal > 0) return { budget: estimateTotal, source: "estimates", estimateCount: linkedEstimates.length, calcMode };
 
-  if (safeContractTotal > 0) return { budget: safeContractTotal, source: "contracts", estimateCount: linkedEstimates.length };
+  if (safeContractTotal > 0) return { budget: safeContractTotal, source: "contracts", estimateCount: linkedEstimates.length, calcMode };
 
-  return { budget: Number(project?.budget) || 0, source: "legacy", estimateCount: linkedEstimates.length };
+  return { budget: Number(project?.budget) || 0, source: "legacy", estimateCount: linkedEstimates.length, calcMode };
+}
+
+export function hasInvalidFinanceProjectDate(value, now = Date.now()) {
+  if (value == null || value === "") return false;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return true;
+  return date.getUTCFullYear() > new Date(now).getUTCFullYear() + 1;
 }
 
 export function sortProductionStages(stages = []) {
@@ -947,6 +958,15 @@ export function computeIssues(data = {}, opts = {}) {
   // затем только однозначное совпадение по полному имени или телефону.
   const finProjForObject = (o) => findFinanceProjectForObject(o, contracts, finProjects);
   const objIsActive = (o) => !["done","cancel","archive","refuse"].includes(o.status);
+
+  for (const project of finProjects) {
+    if (!project || !hasInvalidFinanceProjectDate(project.createdAt, now)) continue;
+    const projectId = project.id || normCN(project.contractNo) || "unknown";
+    out.push({ id:`finproject-date:${projectId}`, group:"Данные", sev:"red", scope:"check", dismissable:false,
+      title:"Некорректная дата финпроекта",
+      detail:`${project.name || project.clientName || project.contractNo || "Финансовый проект"} · ${project.createdAt}`,
+      nav:{ screen:"finance", tab:"projects" } });
+  }
 
   // ─────────── TODAY: операционные (что разрулить сегодня) ───────────
   // 1. Просроченные этапы производства

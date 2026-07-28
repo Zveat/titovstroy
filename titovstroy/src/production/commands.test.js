@@ -1,9 +1,31 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { applyProductionCommand, syncEstimateStages, isUntouchedLegacyEstimateStage, isRegenerableProductionCommand, _stageKey, diffProductionToCommands, buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, createTxnApplier, runVerifiedProductionTransaction, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled } from "./commands.js";
+import { applyProductionCommand, syncEstimateStages, isUntouchedLegacyEstimateStage, isRegenerableProductionCommand, _stageKey, diffProductionToCommands, buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, createTxnApplier, runVerifiedProductionTransaction, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, productionCommandObjectIds } from "./commands.js";
 import { flushPendingProduction, stopProductionSession, hasPendingProduction, productionDraftsAreDurable, startProductionSession, __prodQueueTesting } from "./ProductionModule.jsx";
 import { countAllProductionRecovery, listProductionDrafts, listProductionRetries, productionDraftKey, saveProductionDraft, saveProductionRetry, removeProductionDraft, removeProductionRetry } from "./drafts.js";
 
 const card = (over = {}) => ({ objectId: "o1", prodStatus: "active", stages: [], journal: [], defects: [], updatedAt: 1, ...over });
+
+describe("productionCommandObjectIds", () => {
+  it("возвращает объект обычной команды", () => {
+    expect(productionCommandObjectIds({ type:"patch-stage", objectId:"o1", id:"s1", patch:{ status:"done" } })).toEqual(["o1"]);
+  });
+
+  it("собирает уникальные объекты batch, но игнорирует служебный resolve-change", () => {
+    expect(productionCommandObjectIds({
+      type:"batch",
+      objectId:"o1",
+      commands:[
+        { type:"patch-stage", objectId:"o2", id:"s2", patch:{ status:"done" } },
+        { type:"patch-card", objectId:"o1", patch:{ note:"ok" } },
+        { type:"resolve-change", objectId:"o3" },
+      ],
+    })).toEqual(["o1", "o2"]);
+  });
+
+  it("не считает resolve-change изменением карточки", () => {
+    expect(productionCommandObjectIds({ type:"resolve-change", objectId:"o1" })).toEqual([]);
+  });
+});
 
 const fakeStore = () => {
   const data = new Map();

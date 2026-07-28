@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as utils from "./utils.js";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, normalizeEstimateSuggestionRules, createDefaultEstimateSuggestionRules, resolveEstimateSuggestionRules, buildEstimateSuggestions } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, hasInvalidFinanceProjectDate, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, normalizeEstimateSuggestionRules, createDefaultEstimateSuggestionRules, resolveEstimateSuggestionRules, buildEstimateSuggestions } from "./utils.js";
 import { documentTemplateBackupSpecs } from "./documents/documentTemplateBackup.js";
 
 describe("поиск финансового проекта по связанному объекту", () => {
@@ -373,7 +373,7 @@ describe("объекты без движения и единый источни�
       ],
       contractTotal:2_436_000,
     });
-    expect(result).toEqual({ budget:2_436_000, source:"estimates", estimateCount:2 });
+    expect(result).toEqual({ budget:2_436_000, source:"estimates", estimateCount:2, calcMode:"estimates-v1" });
   });
 
   it("после удаления допсметы немедленно пересчитывает сумму, не сохраняя старый итог", () => {
@@ -409,6 +409,15 @@ describe("объекты без движения и единый источни�
     expect(resolveFinanceProjectBudget({
       project:{ budget:333 }, object:{ id:"o1", financeCalcMode:"contracts-v2" },
       estimates:[{ id:"e1", objectId:"o1", total:9_999_999 }], contractTotal:2_436_000,
+    })).toMatchObject({ budget:2_436_000, source:"contracts-v2", calcMode:"contracts-v2" });
+  });
+
+  it("не откатывает contracts-v2, если метка уже сохранена только у проекта", () => {
+    expect(resolveFinanceProjectBudget({
+      project:{ budget:333, financeCalcMode:"contracts-v2" },
+      object:{ id:"o1", financeCalcMode:"estimates-v1" },
+      estimates:[{ id:"e1", objectId:"o1", total:9_999_999 }],
+      contractTotal:2_436_000,
     })).toMatchObject({ budget:2_436_000, source:"contracts-v2", calcMode:"contracts-v2" });
   });
 
@@ -985,6 +994,18 @@ describe("computeIssues — детектор «Что горит» / «Пров�
   it("пустые данные не падают и дают пустой список", () => {
     expect(computeIssues({}, { now })).toEqual([]);
     expect(computeIssues({ objects: null, productions: undefined }, { now })).toEqual([]);
+  });
+
+  it("некорректная дата финпроекта показывается как проблема и не переписывается", () => {
+    const project = { id:"fp-date", name:"Старый проект", createdAt:"2099-01-01" };
+    expect(hasInvalidFinanceProjectDate(project.createdAt, now)).toBe(true);
+    expect(hasInvalidFinanceProjectDate("не-дата", now)).toBe(true);
+    expect(hasInvalidFinanceProjectDate("2026-07-01", now)).toBe(false);
+    expect(hasInvalidFinanceProjectDate("", now)).toBe(false);
+
+    const issues = computeIssues({ finProjects:[project] }, { now });
+    expect(project.createdAt).toBe("2099-01-01");
+    expect(issues.some(i => i.id === "finproject-date:fp-date" && i.sev === "red")).toBe(true);
   });
 
   it("удалённые объекты игнорируются", () => {

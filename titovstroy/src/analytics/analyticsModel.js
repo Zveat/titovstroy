@@ -83,17 +83,16 @@ export function periodBounds(period, { from, to, now = Date.now() } = {}) {
     prevFrom = start - 7 * DAY_MS;
     prevTo = start;
   } else if (period === "month" || period === "3month") {
-    const d = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1);
-    if (period === "3month") d.setMonth(d.getMonth() - 2);
-    start = d.getTime();
+    const year = nowDate.getUTCFullYear();
+    const month = nowDate.getUTCMonth();
+    const span = period === "3month" ? 3 : 1;
+    start = Date.UTC(year, month - (span - 1), 1);
     // Верхняя граница — КОНЕЦ месяца, а не «сейчас». Иначе объект, сданный
     // 30 числа, 28-го в «сдано за месяц» не попадал: дата в будущем относительно
     // текущего момента, хотя месяц тот же. То же самое с операциями и стартами.
-    end = new Date(nowDate.getFullYear(), nowDate.getMonth() + 1, 1).getTime() - 1;
+    end = Date.UTC(year, month + 1, 1) - 1;
     // Предыдущий период — столько же КАЛЕНДАРНЫХ месяцев перед началом текущего.
-    const prev = new Date(d);
-    prev.setMonth(prev.getMonth() - (period === "3month" ? 3 : 1));
-    prevFrom = prev.getTime();
+    prevFrom = Date.UTC(year, month - (span - 1) - span, 1);
     prevTo = start;
   } else {
     // «Всё время» — значит всё: верхнюю границу не ставим вообще. Иначе объект с
@@ -105,7 +104,7 @@ export function periodBounds(period, { from, to, now = Date.now() } = {}) {
   // выпадало бы из периода. Поэтому минимум — конец текущих суток. У «своего»
   // периода границы задаёт владелец, их не трогаем.
   if (period !== "custom") {
-    const endOfToday = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + 1).getTime() - 1;
+    const endOfToday = Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth(), nowDate.getUTCDate() + 1) - 1;
     if (end < endOfToday) end = endOfToday;
   }
   // «Всё время» — сравнивать не с чем, prevFrom/prevTo остаются null.

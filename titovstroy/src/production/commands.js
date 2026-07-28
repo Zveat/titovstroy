@@ -486,3 +486,20 @@ export function normalizeProductionIds(list) {
   });
   return { changed, list: out };
 }
+
+// Объекты, состояние которых реально затрагивает команда. Нужны для немедленной
+// публикации клиентского кабинета после подтверждённой транзакции.
+export function productionCommandObjectIds(command) {
+  const ids = [];
+  const seen = new Set();
+  const visit = cmd => {
+    if (!cmd || typeof cmd !== "object" || cmd.type === "resolve-change") return;
+    if (cmd.objectId != null && String(cmd.objectId).trim()) {
+      const id = String(cmd.objectId);
+      if (!seen.has(id)) { seen.add(id); ids.push(id); }
+    }
+    if (cmd.type === "batch" && Array.isArray(cmd.commands)) cmd.commands.forEach(visit);
+  };
+  visit(command);
+  return ids;
+}

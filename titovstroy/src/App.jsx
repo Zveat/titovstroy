@@ -3,7 +3,7 @@ import { initializeApp } from "firebase/app";
 import { getDatabase, ref, get, set, runTransaction } from "firebase/database";
 import ProductionModule, { flushPendingProduction, stopProductionSession, hasPendingProduction, productionDraftsAreDurable, startProductionSession, setProductionCommandHandler } from "./production/ProductionModule.jsx";
 import { emptyProduction } from "./production/constants.js";
-import { applyProductionCommand, runVerifiedProductionTransaction, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, isRegenerableProductionCommand, _stageKey, normalizeProductionIds } from "./production/commands.js";
+import { applyProductionCommand, runVerifiedProductionTransaction, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, isRegenerableProductionCommand, productionCommandObjectIds, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { MASTER_CATEGORIES, NAIMI_CITY_FALLBACK, OLX_REPAIR_CATEGORIES } from "./masters/catalog.mjs";
 import { SearchMultiSelect, SearchSelect as MasterSearchSelect } from "./masters/MasterSelects.jsx";
@@ -18,7 +18,7 @@ import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restore
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, resolveEstimateSuggestionRules, buildEstimateSuggestions, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -6678,6 +6678,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   // Локальная очередь (_prodQueue) упорядочивает команды одной вкладки; транзакция защищает между
   // вкладками/устройствами. REST/обычный set для производства НЕ используем.
   const _prodQueue = useRef(Promise.resolve());
+  const publishProgressRef = useRef(null);
   // Множество НЕподтверждённых правок производства по changeId. Ошибка добавляет id, успешный
   // повтор ТОГО ЖЕ changeId удаляет его. Баннер «ожидают синхронизации» — пока множество не пусто.
   // changeId соглашение: "cm_*" — правки карточки из ProductionModule (его очередь сама повторяет
@@ -6794,6 +6795,13 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
           if (_prodUnsyncedIds.current.delete(changeId)) _refreshProdUnsynced();
         }
         _clearCloudErrorIfAllClean();
+        // Обновляем публичный кабинет сразу после подтвержденной записи статуса/этапов.
+        // Не ждём публикацию здесь: внутреннее сохранение уже завершено, а кнопки остаются быстрыми.
+        for (const objectId of productionCommandObjectIds(command)) {
+          Promise.resolve()
+            .then(() => publishProgressRef.current?.(objectId))
+            .catch(error => console.warn("publishProgress after production save", error));
+        }
         return { committed: true, list: next };
       }
       return _fail(res.reason, !!res.conflict, res.list);
@@ -7426,7 +7434,7 @@ ${reqBlock}`;
     }
     try { await storage.set(PROGRESS_NODE(obj.progressToken), JSON.stringify(snap)); } catch (e) { console.warn("publishProgress err", e); }
   }, [buildProgressSnapshot]);
-  const publishProgressRef = useRef(); publishProgressRef.current = publishProgress;
+  publishProgressRef.current = publishProgress;
   const _publishDocsRef = useRef(null); // назначается ниже (после генераторов договоров/актов)
   // Забрать замечания клиента из ноды прогресса и завести их в «Замечания» производства (с пометкой «от клиента»)
   const syncClientRemarks = useCallback(async (objectId) => {
@@ -7632,9 +7640,6 @@ ${reqBlock}`;
         // сопоставляет этапы по estimateKey, а НЕ по названию: ручной этап с именем как в смете
         // (без estimateKey) не будет ни обновлён, ни удалён.
         const built = buildStagesFromEstimate(p.objectId).map(b => ({ id: genId(), estimateKey: _stageKey(b), ...b }));
-        // Никогда не очищаем существующие этапы автоматически, если связанная смета
-        // временно не прочиталась или действительно пуста. Удаление всех этапов — только явно.
-        if (built.length === 0) continue;
         const command = { type: "sync-estimate-stages", objectId: p.objectId, estimateStages: built, changeId: "bg_sync_" + p.objectId, __ephemeral: true };
         // Главное исправление скорости/мигающего баннера: раньше при каждом входе отправляли
         // транзакцию для КАЖДОЙ карточки, даже когда менять нечего. Команды копились в локальном
@@ -7723,17 +7728,9 @@ ${reqBlock}`;
       else ok = false;
       if (mt.status === "found" && mt.value) { try { const p = JSON.parse(mt.value); if (p && p.accounts) { const m = mergeFinMeta(p); setFinanceMeta(m); financeMetaRef.current = m; } } catch {} }
       if (pj.status === "found" && pj.value) { try { const p = JSON.parse(pj.value); if (Array.isArray(p)) {
-        const curY = new Date().getFullYear();
-        const fixed = p.map(proj => {
-          if (!proj.createdAt) return proj;
-          const d = new Date(proj.createdAt);
-          if (isNaN(d.getTime()) || d.getFullYear() <= curY + 1) return proj;
-          // год явно неверный — заменяем на текущий, день/месяц сохраняем
-          const corrected = new Date(proj.createdAt);
-          corrected.setFullYear(curY);
-          return { ...proj, createdAt: corrected.toISOString().slice(0, 10) };
-        });
-        setFinProjects(fixed); finProjectsRef.current = fixed;
+        // Загрузка не должна молча переписывать бизнес-данные. Некорректные даты показывает
+        // «Проверка базы», а исправляет их только пользователь в исходной карточке.
+        setFinProjects(p); finProjectsRef.current = p;
       } } catch {} }
       _financeLoaded.current = ok;
     } catch(e) { console.error(e); }
@@ -7782,13 +7779,16 @@ ${reqBlock}`;
         if (!linkedObjectId && !mainByNumber) return fp;
         const main = mainByNumber || contractsRef.current.find(c => c && !c.deletedAt && c.objectId === linkedObjectId
           && c.type !== "podryad" && c.type !== "podryad_annex" && c.type !== "annex" && c.type !== "design_add") || null;
-        const objectEstimateTotal = linkedObjectId
-          ? estimatesForObject(estimatesRef.current, linkedObjectId).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0)
-          : 0;
-        const contractBudget = finBudgetOfContract(main);
-        const contractsV2 = directObject?.financeCalcMode === "contracts-v2" || fp.financeCalcMode === "contracts-v2";
-        const hasCurrentBudgetSource = contractsV2 || objectEstimateTotal > 0 || !!main;
-        const nb = contractsV2 ? contractBudget : (objectEstimateTotal > 0 ? objectEstimateTotal : contractBudget);
+        const linkedObject = directObject || objectsRef.current.find(o => o && !o.deletedAt && o.id === linkedObjectId) || null;
+        const budgetView = resolveFinanceProjectBudget({
+          project: fp,
+          object: linkedObject,
+          estimates: estimatesRef.current,
+          contractTotal: finBudgetOfContract(main),
+        });
+        const nb = budgetView.budget;
+        const contractsV2 = budgetView.calcMode === "contracts-v2";
+        const hasCurrentBudgetSource = budgetView.source !== "legacy";
         if ((hasCurrentBudgetSource && Math.round(Number(fp.budget) || 0) !== Math.round(nb)) || linkedObjectId !== (fp.objectId || "") || (contractsV2 && fp.financeCalcMode !== "contracts-v2")) {
           changed = true;
           return { ...fp, budget: nb, objectId: linkedObjectId, ...(contractsV2 ? { financeCalcMode:"contracts-v2" } : {}) };
@@ -7813,18 +7813,16 @@ ${reqBlock}`;
           || (main && updated.find(fp => fp.contractNo && normCN(fp.contractNo) === normCN(main.number)));
         if (existing) {
           if (!existing.objectId) {
-            const estimateTotal = estimatesForObject(estimatesRef.current, object.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0);
-            const contractsV2 = object.financeCalcMode === "contracts-v2" || existing.financeCalcMode === "contracts-v2";
-            const budget = contractsV2 ? finBudgetOfContract(main) : (estimateTotal || finBudgetOfContract(main) || Number(existing.budget) || 0);
-            updated = updated.map(fp => fp.id === existing.id ? { ...fp, objectId:object.id, budget, ...(contractsV2 ? { financeCalcMode:"contracts-v2" } : {}) } : fp);
+            const budgetView = resolveFinanceProjectBudget({ project:existing, object, estimates:estimatesRef.current, contractTotal:finBudgetOfContract(main) });
+            updated = updated.map(fp => fp.id === existing.id ? { ...fp, objectId:object.id, budget:budgetView.budget, ...(budgetView.calcMode === "contracts-v2" ? { financeCalcMode:"contracts-v2" } : {}) } : fp);
             changed = true;
           }
           continue;
         }
-        const estimateTotal = estimatesForObject(estimatesRef.current, object.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0);
-        const budget = object.financeCalcMode === "contracts-v2" ? finBudgetOfContract(main) : (estimateTotal || finBudgetOfContract(main));
-        if (!main && budget <= 0) continue;
-        updated.push({ ...finProjDraftFromObject(object, main), id:genId(), objectId:object.id, budget });
+        const projectDraft = finProjDraftFromObject(object, main);
+        const budgetView = resolveFinanceProjectBudget({ project:projectDraft, object, estimates:estimatesRef.current, contractTotal:finBudgetOfContract(main) });
+        if (!main && budgetView.budget <= 0) continue;
+        updated.push({ ...projectDraft, id:genId(), objectId:object.id, budget:budgetView.budget });
         changed = true;
       }
       if (changed) saveFinanceProjects(updated);
