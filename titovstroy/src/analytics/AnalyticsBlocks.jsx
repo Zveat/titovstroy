@@ -275,6 +275,10 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
             title="Движение по производству" hint="события периода: зашло / стартовало / сдано"
             colors={["#a78bfa", "#f59e0b", "#059669"]} />
         </div>
+        {/* Поимённо, чтобы цифры можно было сверить с объектами, а не верить на слово. */}
+        <AuditList items={funnels.production.doneList} fmt={fmt} title="Кого сдали за период" />
+        <AuditList items={funnels.production.startedList} fmt={fmt} title="Кто вышел на объект за период" />
+        <AuditList items={funnels.production.signedList} fmt={fmt} title="Кто подписал договор за период" />
         <AuditList items={production.overdueStageList} fmt={fmt} title="Какие этапы просрочены" />
         <AuditList items={production.staleObjects} fmt={fmt} title="Объекты без движения" />
       </Block>

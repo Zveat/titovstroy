@@ -86,11 +86,27 @@ export function periodBounds(period, { from, to, now = Date.now() } = {}) {
     const d = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1);
     if (period === "3month") d.setMonth(d.getMonth() - 2);
     start = d.getTime();
+    // Верхняя граница — КОНЕЦ месяца, а не «сейчас». Иначе объект, сданный
+    // 30 числа, 28-го в «сдано за месяц» не попадал: дата в будущем относительно
+    // текущего момента, хотя месяц тот же. То же самое с операциями и стартами.
+    end = new Date(nowDate.getFullYear(), nowDate.getMonth() + 1, 1).getTime() - 1;
     // Предыдущий период — столько же КАЛЕНДАРНЫХ месяцев перед началом текущего.
     const prev = new Date(d);
     prev.setMonth(prev.getMonth() - (period === "3month" ? 3 : 1));
     prevFrom = prev.getTime();
     prevTo = start;
+  } else {
+    // «Всё время» — значит всё: верхнюю границу не ставим вообще. Иначе объект с
+    // датой сдачи вперёд по календарю не попадал даже сюда.
+    end = Number.MAX_SAFE_INTEGER;
+  }
+  // Дата без времени («2026-07-28») парсится в полночь. Если верхняя граница —
+  // «сейчас», то всё, что помечено сегодняшним днём, но позже текущего часа,
+  // выпадало бы из периода. Поэтому минимум — конец текущих суток. У «своего»
+  // периода границы задаёт владелец, их не трогаем.
+  if (period !== "custom") {
+    const endOfToday = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + 1).getTime() - 1;
+    if (end < endOfToday) end = endOfToday;
   }
   // «Всё время» — сравнивать не с чем, prevFrom/prevTo остаются null.
   return { from: start, to: end, prevFrom, prevTo };
@@ -138,9 +154,24 @@ function buildIndex({ objects = [], estimates = [], contracts = [], productions 
     if (!estByObject.has(objectId)) estByObject.set(objectId, []);
     estByObject.get(objectId).push(e);
   }
+  // Карточек производства на один объект может оказаться несколько (гонка создания на
+  // двух устройствах). Раньше побеждала просто ПОСЛЕДНЯЯ в массиве — и если это была
+  // пустая карточка-дубль, объект терял и дату сдачи, и старт, и прораба: в аналитике
+  // он выглядел несданным. Берём самую свежую по updatedAt, а при равенстве — ту, где
+  // реально заполнены даты.
+  const prodFilled = (p) => (ts(p?.factEndDate) ? 1 : 0) + (ts(p?.startDate) ? 1 : 0)
+    + (ts(p?.saleDate) ? 1 : 0) + ((p?.stages || []).length ? 1 : 0);
   const prodByObject = new Map();
+  const prodDuplicates = new Map();
   for (const p of productions) {
-    if (p && p.objectId) prodByObject.set(p.objectId, p);
+    if (!p || !p.objectId) continue;
+    const prev = prodByObject.get(p.objectId);
+    if (!prev) { prodByObject.set(p.objectId, p); continue; }
+    prodDuplicates.set(p.objectId, (prodDuplicates.get(p.objectId) || 1) + 1);
+    const better = ts(p.updatedAt) !== ts(prev.updatedAt)
+      ? ts(p.updatedAt) > ts(prev.updatedAt)
+      : prodFilled(p) > prodFilled(prev);
+    if (better) prodByObject.set(p.objectId, p);
   }
   const contractByObject = new Map();
   for (const c of contracts) {
@@ -159,7 +190,7 @@ function buildIndex({ objects = [], estimates = [], contracts = [], productions 
     0,
   );
 
-  return { liveObjects, estByObject, prodByObject, contractByObject, objectValue, objectCost };
+  return { liveObjects, estByObject, prodByObject, prodDuplicates, contractByObject, objectValue, objectCost };
 }
 
 export function contractSum(c) {
@@ -242,9 +273,12 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
   // по одной-двум записям.
   const signedAt = (o) => ts(prodByObject.get(o.id)?.saleDate)
     || ts(contractByObject.get(o.id)?.date || contractByObject.get(o.id)?.contractDate);
+  // Отсева архивных и «миграционных» здесь НЕТ намеренно, в отличие от когорты выше.
+  // Когорта отбирается по дате СОЗДАНИЯ объекта, а у мигрированных её фактически нет —
+  // они бы исказили приток. Тут же отбор идёт по дате ПОДПИСАНИЯ, она настоящая:
+  // договор, заключённый в июле, — июльская продажа, кем бы объект ни был заведён и
+  // убрали ли его потом в архив. Из-за лишнего отсева такие сделки пропадали.
   const signed = liveObjects
-    .filter(o => o.status !== "archive")
-    .filter(o => period === "all" || o.createdBy !== "migration")
     .filter(o => !manager || resolveManager(o.manager) === resolveManager(manager))
     .filter(o => ["signed", "work", "done", "paused"].includes(statusOf(o, prodByObject)))
     .filter(o => (period === "all" ? true : inRange(signedAt(o), from, to)));
@@ -439,6 +473,8 @@ function buildProduction(idx, { from, to, now }) {
   const startLagDays = [];
   const staleObjects = [];
   const overdueStageList = [];
+  const doneList = [];       // сдали в периоде (факт-дата окончания попала в окно)
+  const startedList = [];    // вышли на объект в периоде
 
   for (const o of liveObjects) {
     const status = statusOf(o, prodByObject);
@@ -458,7 +494,12 @@ function buildProduction(idx, { from, to, now }) {
       overdueDaysTotal += late;
       overdueMaxDays = Math.max(overdueMaxDays, late);
     }
-    // План/факт длительности — по сданным в периоде.
+    // СДАЧА за период — по факт-дате окончания. Считаем ЗДЕСЬ один раз и отдаём
+    // список наружу: воронка производства берёт его же, поэтому «Сдали» на графике
+    // и плитка «Сдано за период» физически не могут разойтись.
+    // Никаких доп. фильтров (архив, объекты из миграции) тут нет намеренно: факт-дата
+    // реальная, и объект, сданный в этом месяце, обязан посчитаться независимо от
+    // того, как он попал в базу и убрали ли его потом в архив.
     if (factEnd && inRange(prod.factEndDate, from, to)) {
       const start = ts(prod.startDate);
       planFact.push({
@@ -466,7 +507,9 @@ function buildProduction(idx, { from, to, now }) {
         planDays: start && planEnd ? days(start, planEnd) : null,
         factDays: start ? days(start, factEnd) : null,
       });
+      doneList.push(o);
     }
+    if (inRange(prod.startDate, from, to)) startedList.push(o);
     // Простой: подписали договор — когда реально вышли на объект.
     const saleAt = ts(prod.saleDate);
     const startAt = ts(prod.startDate);
@@ -519,6 +562,8 @@ function buildProduction(idx, { from, to, now }) {
     inWork: byStatus.work,
     paused: byStatus.paused,
     doneInPeriod: closedInPeriod,
+    doneList,
+    startedList,
     overdueObjects,
     overdueAvgDays: overdueObjects ? Math.round(overdueDaysTotal / overdueObjects) : 0,
     overdueMaxDays,
@@ -799,7 +844,7 @@ function buildQuality(idx, { now }) {
 // Качество данных: почему показатели бывают пустыми. Не считает бизнес — считает,
 // насколько заполнена база. Одновременно это рабочий список «что дозаполнить».
 function buildDataQuality(idx, financeTx, resolveManager) {
-  const { liveObjects, objectValue, prodByObject, contractByObject } = idx;
+  const { liveObjects, objectValue, prodByObject, prodDuplicates, contractByObject } = idx;
   const active = liveObjects.filter(o => !["archive", "refuse"].includes(statusOf(o, prodByObject)));
   const signed = liveObjects.filter(o => ["signed", "work", "paused", "done"].includes(statusOf(o, prodByObject)));
 
@@ -823,6 +868,10 @@ function buildDataQuality(idx, financeTx, resolveManager) {
     { key: "factEnd", label: "Выполнен без даты окончания",
       items: liveObjects.filter(o => statusOf(o, prodByObject) === "done"
         && !ts(prodByObject.get(o.id)?.factEndDate)) },
+    // Дубль карточки производства: аналитика берёт одну (самую свежую), поэтому
+    // правки, внесённые во вторую, в цифры не попадут. Это надо чинить руками.
+    { key: "prodDup", label: "Несколько карточек производства",
+      items: liveObjects.filter(o => (prodDuplicates?.get(o.id) || 0) > 1) },
   ].map(g => ({
     key: g.key,
     label: g.label,
@@ -900,28 +949,37 @@ function buildTrend(idx, financeTx, now, months = 6) {
 // Даты берём те же, что и остальная аналитика, чтобы цифры сходились:
 // подписание — saleDate (запасной вариант дата договора), выход на объект —
 // startDate, сдача — factEndDate (по ней же считается плитка «Сдано за период»).
-function buildFunnels(idx, { from, to }, period, manager, resolveManager = (v) => (v || "Без менеджера")) {
+function buildFunnels(idx, { from, to }, period, manager, resolveManager = (v) => (v || "Без менеджера"), prod = {}) {
   const { liveObjects, objectValue, contractByObject, prodByObject } = idx;
   const dealValue = (o) => contractSum(contractByObject.get(o.id)) || objectValue(o);
   const signedAt = (o) => ts(prodByObject.get(o.id)?.saleDate)
     || ts(contractByObject.get(o.id)?.date || contractByObject.get(o.id)?.contractDate);
   const sum = (list) => list.reduce((s, o) => s + dealValue(o), 0);
+  const brief = (list) => list.slice(0, 50).map(o => ({
+    id: o.id,
+    name: o.clientName || o.address || "Без названия",
+    createdAt: ts(prodByObject.get(o.id)?.factEndDate) || ts(o.createdAt),
+    manager: o.manager || "",
+    value: dealValue(o),
+  }));
 
-  const scope = liveObjects
-    .filter(o => o.status !== "archive")
-    .filter(o => period === "all" || o.createdBy !== "migration")
-    .filter(o => !manager || resolveManager(o.manager) === resolveManager(manager));
+  // ВАЖНО: здесь НЕТ отсева архивных и объектов из миграции. Он есть в продажах,
+  // и там он к месту: у мигрированных объектов нет настоящей даты создания, они
+  // исказили бы приток. Но сдача, старт и подписание — события с РЕАЛЬНЫМИ датами.
+  // Из-за этого отсева объекты, заведённые миграцией или убранные потом в архив,
+  // пропадали из «Сдали», хотя в плитке «Сдано за период» считались, — два разных
+  // числа про одно и то же.
+  const byManager = (o) => !manager || resolveManager(o.manager) === resolveManager(manager);
+  const scope = liveObjects.filter(byManager);
 
   const statusIn = (o, ...keys) => keys.includes(statusOf(o, prodByObject));
-  const prodOf = (o) => prodByObject.get(o.id);
-  // Во «Всё время» окно не ограничиваем — иначе объекты без даты выпали бы совсем.
-  const happened = (value) => (period === "all" ? !!ts(value) : inRange(value, from, to));
+  const happened = (value) => inRange(value, from, to);
 
   const signedNow = scope.filter(o => statusIn(o, "signed", "work", "paused", "done", "cancel")
     && happened(signedAt(o)));
-  const startedNow = scope.filter(o => happened(prodOf(o)?.startDate));
-  // Сдача — строго по факт-дате окончания, ровно как в плитке «Сдано за период».
-  const doneNow = scope.filter(o => happened(prodOf(o)?.factEndDate));
+  // Старт и сдача берутся ИЗ buildProduction — один расчёт на оба экрана.
+  const startedNow = (prod.startedList || []).filter(byManager);
+  const doneNow = (prod.doneList || []).filter(byManager);
 
   const inWork = scope.filter(o => statusIn(o, "work"));
   const paused = scope.filter(o => statusIn(o, "paused"));
@@ -943,6 +1001,10 @@ function buildFunnels(idx, { from, to }, period, manager, resolveManager = (v) =
         { label: "Сейчас на паузе", count: paused.length, sum: sum(paused), color: "#b45309" },
         { label: "Расторгнуто всего", count: cancelled.length, sum: sum(cancelled), color: "#dc2626" },
       ],
+      // Списки «что именно посчиталось» — чтобы цифру можно было проверить глазами.
+      signedList: brief(signedNow),
+      startedList: brief(startedNow),
+      doneList: brief(doneNow),
     },
   };
 }
@@ -969,7 +1031,7 @@ export function buildAnalytics(data = {}, options = {}) {
   });
   current.dataQuality = buildDataQuality(idx, financeTx, resolveManager);
   current.trend = buildTrend(idx, financeTx, now);
-  current.funnels = buildFunnels(idx, bounds, period, manager, resolveManager);
+  current.funnels = buildFunnels(idx, bounds, period, manager, resolveManager, current.production);
 
   // Сравнение с предыдущим периодом. «Портфель» и «Качество» — состояние на сейчас
   // (в базе нет дат закрытия замечаний), поэтому у них сравнения нет и быть не может.

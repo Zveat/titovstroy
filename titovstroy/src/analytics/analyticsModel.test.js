@@ -143,6 +143,27 @@ describe("продажи и воронка", () => {
     expect(sales.signedSum).toBe(1300000);
   });
 
+  it("«Подписано за период» не теряет объекты из миграции и архива", () => {
+    // Отбор идёт по дате ПОДПИСАНИЯ — она настоящая у любого объекта. Раньше
+    // лишний отсев выбрасывал такие сделки, и «подписано» занижалось.
+    const f = fixture();
+    f.objects.push(
+      { id:"sm", clientName:"Из миграции, подписан в июне", status:"signed",
+        createdAt: NOW - 300*DAY, createdBy:"migration" },
+      { id:"sa", clientName:"Подписан в июне и в архиве",   status:"archive",
+        createdAt: NOW - 150*DAY },
+    );
+    f.contracts.push(
+      { id:"csm", objectId:"sm", number:"№ 201", date: dstr(-6), works:[{quantity:1, price:100000}] },
+      { id:"csa", objectId:"sa", number:"№ 202", date: dstr(-5), works:[{quantity:1, price:200000}] },
+    );
+    f.productions.push({ objectId:"sa", prodStatus:"done", factEndDate: dstr(-1) });
+    const { sales } = buildAnalytics(f, { period: "month", now: NOW });
+    // o1 подписан 31 мая — не в июне. Значит июньские подписания: sm и sa.
+    expect(sales.signedCount).toBe(2);
+    expect(sales.signedSum).toBe(300000);
+  });
+
   it("доп.смета через parentId попадает в стоимость объекта", () => {
     const { backlog } = all();
     // o1: 1 000 000 + 200 000 + 100 000 (доп через parentId)
@@ -385,10 +406,13 @@ describe("план vs факт маржи", () => {
 });
 
 describe("производство за период — поток событий", () => {
-  // Ключевой случай владельца: объект подписали ВЕСНОЙ, а сдали в текущем месяце.
-  // При когортной воронке (когорта = подписанные в периоде) он в месяц не попадал
-  // вообще, и «Сдали» показывало 0, хотя сдача была. Цикл стройки длиннее месяца,
-  // поэтому производство считаем по событиям периода, а не по когорте.
+  // Случаи, из-за которых «Сдали» показывало 1 вместо реального числа:
+  //   p1 — подписан весной, сдан в этом месяце (когорта его не видела вовсе);
+  //   pm — объект из МИГРАЦИИ: раньше отсеивался в любом периоде, хотя факт-дата у
+  //        него настоящая, и в плитке «Сдано за период» он при этом считался;
+  //   pa — сдан и убран в АРХИВ: сдача была, а из воронки объект пропадал;
+  //   pl — сдан 30-го числа: верхняя граница месяца стояла «сейчас», поэтому
+  //        сегодняшним числом сдача ещё считалась, а завтрашним — уже нет.
   const prodFixture = () => {
     const f = fixture();
     f.objects.push(
@@ -397,6 +421,9 @@ describe("производство за период — поток событи
       { id:"p3", clientName:"Вышли на объект в этом месяце",       status:"paused", createdAt: NOW - 30*DAY },
       { id:"p4", clientName:"Расторгнут",                          status:"cancel", createdAt: NOW - 25*DAY },
       { id:"p5", clientName:"Подписан в этом месяце, не начат",    status:"signed", createdAt: NOW - 20*DAY },
+      { id:"pm", clientName:"Из миграции, сдан в этом месяце",     status:"done",   createdAt: NOW - 300*DAY, createdBy:"migration" },
+      { id:"pa", clientName:"Сдан и убран в архив",                status:"archive", createdAt: NOW - 150*DAY },
+      { id:"pl", clientName:"Сдан 30-го, в конце месяца",          status:"done",   createdAt: NOW - 100*DAY },
     );
     f.contracts.push(
       { id:"cp1", objectId:"p1", number:"№ 101", date: "2026-02-10", works:[{quantity:1, price:500000}] },
@@ -410,22 +437,41 @@ describe("производство за период — поток событи
       { objectId:"p2", prodStatus:"done",   startDate:"2024-03-10", factEndDate:"2024-09-01" },
       { objectId:"p3", prodStatus:"paused", startDate: dstr(-8) },
       { objectId:"p4", prodStatus:"cancel", startDate: dstr(-7) },
+      { objectId:"pm", prodStatus:"done",   startDate:"2026-05-01", factEndDate: dstr(-3) },
+      { objectId:"pa", prodStatus:"done",   startDate:"2026-04-01", factEndDate: dstr(-2) },
+      { objectId:"pl", prodStatus:"done",   startDate:"2026-05-05", factEndDate:"2026-06-30" },
     );
     return f;
   };
   const monthProd = () => buildAnalytics(prodFixture(), { period: "month", now: NOW }).funnels.production;
+  const doneIds = () => monthProd().doneList.map(x => x.id).sort();
 
   it("сдача считается по ФАКТ-дате окончания, даже если договор был давно", () => {
-    const f = monthProd();
+    expect(monthProd().stages[2].label).toBe("Сдали");
     // p1 подписан в феврале, сдан 4 дня назад — обязан попасть в «Сдали» за месяц.
-    expect(f.stages[2].label).toBe("Сдали");
-    expect(f.stages[2].count).toBe(1);
+    expect(doneIds()).toContain("p1");
     // p2 сдан в 2024-м — в текущий месяц не лезет.
+    expect(doneIds()).not.toContain("p2");
   });
 
-  it("«Сдали» сходится с плиткой «Сдано за период»", () => {
+  it("объект из миграции со сдачей в периоде НЕ выбрасывается", () => {
+    expect(doneIds()).toContain("pm");
+  });
+
+  it("сданный и убранный в архив объект всё равно считается сданным", () => {
+    expect(doneIds()).toContain("pa");
+  });
+
+  it("сдача 30-го числа попадает в месяц, хотя «сейчас» — 15-е", () => {
+    // NOW = 15 июня; факт-дата 30 июня. Пока верхней границей был текущий момент,
+    // такая сдача молча выпадала из месяца.
+    expect(doneIds()).toContain("pl");
+  });
+
+  it("«Сдали» и плитка «Сдано за период» — одно и то же число", () => {
     const a = buildAnalytics(prodFixture(), { period: "month", now: NOW });
     expect(a.funnels.production.stages[2].count).toBe(a.production.doneInPeriod);
+    expect(a.production.doneInPeriod).toBe(4);        // p1, pm, pa, pl
   });
 
   it("начинается с договора, дальше выход на объект и сдача", () => {
@@ -436,26 +482,55 @@ describe("производство за период — поток событи
   it("каждая стадия — события своего периода, а не подмножество прошлой", () => {
     const f = monthProd();
     // Подписали в этом месяце: p3, p4, p5 (p1 — февраль, поэтому не здесь).
-    // Вышли на объект: p3, p4 и o1 из базовой базы (старт 1 июня) — состав другой.
     expect(f.stages[0].count).toBe(3);
-    expect(f.stages[1].count).toBe(3);
-    // Сдали — вообще другой объект (p1), поэтому сдач может быть больше, чем
+    // Сдали — вообще другие объекты, поэтому сдач может быть больше, чем
     // подписаний, и это не ошибка. Конверсию между стадиями считать нельзя.
+    expect(f.stages[2].count).toBeGreaterThan(f.stages[0].count);
     expect(f.flow).toBe(true);
   });
 
   it("срез «сейчас» отделён от потока и не привязан к периоду", () => {
-    const labels = monthProd().current.map(r => r.label);
-    expect(labels).toEqual(["Сейчас в работе", "Сейчас на паузе", "Расторгнуто всего"]);
     const byLabel = Object.fromEntries(monthProd().current.map(r => [r.label, r.count]));
+    expect(Object.keys(byLabel)).toEqual(["Сейчас в работе", "Сейчас на паузе", "Расторгнуто всего"]);
     expect(byLabel["Сейчас на паузе"]).toBe(1);        // p3
     expect(byLabel["Расторгнуто всего"]).toBe(1);      // p4
     expect(byLabel["Сейчас в работе"]).toBe(1);        // o1 из базовой базы
   });
 
+  it("список «кого сдали» совпадает со счётчиком — цифру можно проверить глазами", () => {
+    const f = monthProd();
+    expect(f.doneList.length).toBe(f.stages[2].count);
+    expect(f.startedList.length).toBe(f.stages[1].count);
+    expect(f.signedList.length).toBe(f.stages[0].count);
+  });
+
+  it("пустой дубль карточки не отменяет сдачу", () => {
+    // Две карточки на один объект: пустой дубль создан позже по порядку в массиве.
+    // Раньше побеждала последняя, и объект выглядел несданным.
+    const f = prodFixture();
+    f.productions.push({ objectId:"p1", prodStatus:"done", updatedAt: 0 });
+    const a = buildAnalytics(f, { period: "month", now: NOW });
+    expect(a.funnels.production.doneList.map(x => x.id)).toContain("p1");
+    const dup = a.dataQuality.gaps.find(g => g.key === "prodDup");
+    expect(dup.count).toBe(1);   // и сам дубль показан в «Качестве данных»
+  });
+
   it("во «всё время» попадают все события, включая прошлогодние", () => {
     const allTime = buildAnalytics(prodFixture(), { period: "all", now: NOW }).funnels.production;
-    expect(allTime.stages[2].count).toBe(2);           // p1 + p2
+    expect(allTime.stages[2].count).toBe(5);           // + p2
+  });
+});
+
+describe("границы периода", () => {
+  it("месяц заканчивается КОНЦОМ месяца, а не текущим моментом", () => {
+    const b = periodBounds("month", { now: NOW });     // NOW = 15 июня
+    expect(new Date(b.to).toISOString().slice(0, 10)).toBe("2026-06-30");
+    expect(b.to).toBeGreaterThan(NOW);
+  });
+
+  it("у «своего» периода границы владельца не переписываются", () => {
+    const b = periodBounds("custom", { from: "2026-01-01", to: "2026-01-31", now: NOW });
+    expect(new Date(b.to).toISOString().slice(0, 10)).toBe("2026-01-31");
   });
 });
 
