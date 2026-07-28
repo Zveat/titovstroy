@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as utils from "./utils.js";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, normalizeEstimateSuggestionRules, createDefaultEstimateSuggestionRules, resolveEstimateSuggestionRules, buildEstimateSuggestions } from "./utils.js";
+import { contractNoOfObject, normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, normalizeEstimateSuggestionRules, createDefaultEstimateSuggestionRules, resolveEstimateSuggestionRules, buildEstimateSuggestions } from "./utils.js";
 import { documentTemplateBackupSpecs } from "./documents/documentTemplateBackup.js";
 
 describe("поиск финансового проекта по связанному объекту", () => {
@@ -974,6 +974,41 @@ describe("findFinanceProjectForObject — строгая связь по ID", ()
   it("objectId имеет высший приоритет", () => {
     const linked = [{ id:"direct", objectId:object.id, contractNo:"other" }, ...projects];
     expect(findFinanceProjectForObject(object, [], linked)?.id).toBe("direct");
+  });
+});
+
+describe("contractNoOfObject — по нему деньги цепляются к объекту", () => {
+  const obj = { id: "o1" };
+  const doc = { id: "c1", objectId: "o1", number: "№ 1013" };
+  const proj = { id: "p1", objectId: "o1", contractNo: "0919#154" };
+
+  it("своё поле объекта главнее договора и финпроекта", () => {
+    const r = contractNoOfObject({ ...obj, contractNo: "ручной-1" }, [doc], [proj]);
+    expect(r).toEqual({ number: "ручной-1", source: "object" });
+  });
+
+  it("нет своего — берём основной договор-документ", () => {
+    expect(contractNoOfObject(obj, [doc], [proj])).toEqual({ number: "№ 1013", source: "contract" });
+  });
+
+  it("нет документа — берём финпроект (на боевой базе так у 23 объектов)", () => {
+    expect(contractNoOfObject(obj, [], [proj])).toEqual({ number: "0919#154", source: "project" });
+  });
+
+  it("доп. соглашение и подряд номером объекта не считаются", () => {
+    const annex = { id: "c2", objectId: "o1", number: "№ 2", type: "annex" };
+    const podryad = { id: "c3", objectId: "o1", number: "№ 1012", type: "podryad" };
+    expect(contractNoOfObject(obj, [annex, podryad], []).source).toBe("none");
+    expect(contractNoOfObject(obj, [annex, podryad], [proj]).source).toBe("project");
+  });
+
+  it("удалённый договор не берётся", () => {
+    expect(contractNoOfObject(obj, [{ ...doc, deletedAt: 1 }], []).source).toBe("none");
+  });
+
+  it("пусто везде — источник «none», а не пустая строка молча", () => {
+    expect(contractNoOfObject(obj, [], [])).toEqual({ number: "", source: "none" });
+    expect(contractNoOfObject(null, [], [])).toEqual({ number: "", source: "none" });
   });
 });
 

@@ -106,6 +106,37 @@ export function isDashboardActiveObject(object) {
   return !!object && !object.deletedAt && (object.status === "work" || object.status === "signed");
 }
 
+// НОМЕР ДОГОВОРА ОБЪЕКТА — единая точка правды для связи «объект ↔ деньги».
+//
+// Операция в финансах цепляется к объекту по номеру договора (t.contractNo), а сам
+// номер исторически лежит в трёх разных местах. На боевой базе: у 9 объектов он есть
+// и в документе-договоре, и в финпроекте; у 23 — ТОЛЬКО в финпроекте (документ так и
+// не завели), и на них висит ~18,5 млн ₸ операций. Поэтому порядок поиска именно
+// такой и убирать из него финпроект нельзя, пока номера не перенесены на объекты.
+//
+//   1) собственное поле объекта — заполняется владельцем, главнее всего;
+//   2) основной клиентский договор-документ (доп. соглашения и подряд не в счёт);
+//   3) финпроект объекта — исторический носитель номера.
+//
+// source говорит, ОТКУДА взяли: по нему видно, какие объекты ещё держатся на
+// финпроекте, и он же нужен инструменту переноса.
+export function contractNoOfObject(object, contracts = [], finProjects = []) {
+  const empty = { number: "", source: "none" };
+  if (!object) return empty;
+
+  const own = String(object.contractNo || "").trim();
+  if (own) return { number: own, source: "object" };
+
+  const doc = (contracts || []).find(c => c && !c.deletedAt && c.objectId === object.id
+    && c.number && c.type !== "annex" && c.type !== "podryad" && c.type !== "podryad_annex");
+  if (doc) return { number: String(doc.number).trim(), source: "contract" };
+
+  const project = (finProjects || []).find(p => p && p.objectId === object.id && p.contractNo);
+  if (project) return { number: String(project.contractNo).trim(), source: "project" };
+
+  return empty;
+}
+
 export function findFinanceProjectForObject(object, contracts = [], finProjects = []) {
   if (!object) return null;
   const direct = finProjects.find(fp => fp?.objectId === object.id);
@@ -314,7 +345,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
     adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
     adminAudit:"none", adminDbCheck:"none",
-    analyticsSales:false, analyticsBacklog:false, analyticsProduction:true, analyticsFinance:false, analyticsQuality:true,
+    analyticsSales:false, analyticsBacklog:true, analyticsProduction:true, analyticsFinance:false, analyticsQuality:true,
     showLocked:false,
   },
   user: {
@@ -334,7 +365,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
     adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
     adminAudit:"none", adminDbCheck:"none",
-    analyticsSales:true, analyticsBacklog:false, analyticsProduction:false, analyticsFinance:false, analyticsQuality:false,
+    analyticsSales:true, analyticsBacklog:false, analyticsProduction:true, analyticsFinance:false, analyticsQuality:true,
     showLocked:true,
   },
   viewer: {

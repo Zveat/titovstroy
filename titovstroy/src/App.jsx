@@ -12,12 +12,13 @@ import { MasterCrmButton, MasterCrmDatabase, MasterCrmEditor } from "./masters/M
 import { interactionsForContact, masterSourceKey, normalizeMasterCrm } from "./masters/masterCrm.js";
 import { EstimateSuggestions, EstimateSuggestionRulesEditor } from "./estimate/EstimateSuggestions.jsx";
 import { AnalyticsBlocks } from "./analytics/AnalyticsBlocks.jsx";
-import { buildAnalytics, REFUSE_REASONS } from "./analytics/analyticsModel.js";
+import { Dashboard } from "./analytics/Dashboard.jsx";
+import { buildAnalytics, makeManagerResolver, REFUSE_REASONS } from "./analytics/analyticsModel.js";
 import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, resolveEstimateSuggestionRules, buildEstimateSuggestions, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { contractNoOfObject, normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, resolveEstimateSuggestionRules, buildEstimateSuggestions, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -3138,7 +3139,7 @@ function RolePermissionsEditor({ rolePermissions, onSaveRolePermissions }) {
 }
 
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
-function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE_PERMISSIONS.admin, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], documentTemplateEnabled=false, documentTemplateService=null, documentTemplateData={}, fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBeforePriceChange=async()=>true, onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
+function AdminPageContent({ currentUser, presence = {}, contractMigrationPlan = [], onApplyContractMigration = async()=>false, permissions=DEFAULT_ROLE_PERMISSIONS.admin, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], documentTemplateEnabled=false, documentTemplateService=null, documentTemplateData={}, fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBeforePriceChange=async()=>true, onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
   const [tab, setTab] = useState("users");
   const hasAdminPermission = (key) => accessAllows(permissions[key], true);
   const adminTabs = [
@@ -4205,6 +4206,47 @@ function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE
               </div>
             </div>
             <IssuePanel issues={checkIssues} onNav={onNavIssue} emptyText="✓ База чистая — связи и целостность в порядке" />
+
+            {/* ПЕРЕНОС «финпроект → объект». Гейт жёсткий: на боевой базе блок не
+                отрисовывается вообще (IS_DEV_ENV), плюс та же проверка продублирована
+                внутри самого действия. Правило владельца: никаких автомиграций на бою. */}
+            {IS_DEV_ENV && (
+              <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:12,padding:"14px 18px"}}>
+                <div style={{fontSize:13,fontWeight:800,color:"#92610f"}}>🧪 Перенос данных из финпроектов в объекты</div>
+                <div style={{fontSize:12,color:"#92610f",opacity:.9,marginTop:6,lineHeight:1.5}}>
+                  Деньги цепляются к объекту по номеру договора. Сейчас у части объектов этот номер
+                  и плановая сумма живут только в финпроекте — пока это так, раздел «Проекты» нельзя
+                  убрать. Кнопка переносит их в сами объекты. Финпроекты при этом не меняются и не
+                  удаляются, объекты со своим заполненным номером пропускаются.
+                </div>
+                {contractMigrationPlan.length === 0 ? (
+                  <div style={{fontSize:12.5,color:"#059669",fontWeight:700,marginTop:10}}>✓ Переносить нечего — всё уже в объектах</div>
+                ) : (
+                  <>
+                    <div style={{fontSize:12.5,color:"#0f172a",fontWeight:700,margin:"10px 0 6px"}}>
+                      К переносу: {contractMigrationPlan.length} объектов ·
+                      номеров {contractMigrationPlan.filter(r=>r.number).length} ·
+                      бюджетов {contractMigrationPlan.filter(r=>r.budget>0).length}
+                    </div>
+                    <div style={{maxHeight:220,overflow:"auto",border:"1px solid #fde68a",borderRadius:8,background:"#fff"}}>
+                      {contractMigrationPlan.map((r,i)=>(
+                        <div key={r.id} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto auto",gap:10,
+                          padding:"6px 10px",fontSize:11.5,borderTop:i?"1px solid #fef3c7":0}}>
+                          <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</span>
+                          <span style={{color:"#64748b",whiteSpace:"nowrap"}}>{r.number ? `№ ${r.number}` : "—"}</span>
+                          <span style={{color:"#64748b",whiteSpace:"nowrap"}}>{r.budget>0 ? `${fmt(r.budget)} ₸` : "—"}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <button type="button" onClick={onApplyContractMigration}
+                      style={{marginTop:10,background:"#92610f",color:"#fff",border:0,borderRadius:9,
+                        padding:"9px 16px",fontSize:12.5,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>
+                      Перенести в объекты
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         );
       })()}
@@ -6129,6 +6171,12 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [statusConflictsOpen, setStatusConflictsOpen] = useState(false); // раскрыта ли панель «Проверка статусов»
   const [objectFilterType, setObjectFilterType] = useState("");
   const [objectFilterManager, setObjectFilterManager] = useState("");
+  // Имя менеджера копируется в объект при создании (снимок текста, а не ссылка на
+  // учётку), поэтому после переименования сотрудника в старых объектах остаётся
+  // прежнее написание — один человек выглядит как несколько. Сводим варианты к
+  // заведённому сотруднику ОДНИМ резолвером: он же используется в аналитике,
+  // поэтому фильтр «Объекты» и разрез по менеджерам показывают одни и те же цифры.
+  const resolveManagerName = useMemo(() => makeManagerResolver(allUsers), [allUsers]);
   const [objectAttentionFilter, setObjectAttentionFilter] = useState("");
   const [objectDateSort, setObjectDateSort] = useState("new"); // new = сначала новые, old = сначала старые
   const [objectDateFrom, setObjectDateFrom] = useState("");
@@ -6269,7 +6317,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       .filter(o=>{
         // фильтр по статусу применяется в рендере через unifiedStatusOf (единый статус)
         if(objectFilterType && (o.objType||"Вторичка")!==objectFilterType) return false;
-        if(objectFilterManager && (o.manager||"")!==objectFilterManager) return false;
+        if(objectFilterManager && resolveManagerName(o.manager)!==resolveManagerName(objectFilterManager)) return false;
         if(objectDateFrom && (o.createdAt||0) < new Date(objectDateFrom).getTime()) return false;
         if(objectDateTo && (o.createdAt||0) > new Date(objectDateTo).getTime()+86399999) return false;
         if(objectAttentionFilter === "stale-approval") {
@@ -6284,7 +6332,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
         return true;
       })
       .sort((a,b)=>{ const da=a.createdAt||0, db=b.createdAt||0; return objectDateSort==="old" ? da-db : db-da; });
-  }, [accessibleObjects, objectFilterStatus, objectFilterType, objectFilterManager, objectAttentionFilter, objectDateSort, objectDateFrom, objectDateTo, debouncedObjectSearch, productions, pendingObjectStatuses]);
+  }, [accessibleObjects, objectFilterStatus, objectFilterType, objectFilterManager, resolveManagerName, objectAttentionFilter, objectDateSort, objectDateFrom, objectDateTo, debouncedObjectSearch, productions, pendingObjectStatuses]);
 
   // Только «живые» (не удалённые) объекты — используется в дашборде, аналитике и всех расчётах
   const liveObjects = useMemo(() => accessibleObjects.filter(o=>!o.deletedAt), [accessibleObjects]);
@@ -6663,6 +6711,63 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     const r = await saveListProtected(OBJECTS_KEY, OBJECTS_BACKUPS_KEY, list, (fl)=>{ objectsRef.current = fl; setObjects(fl); }, { loadedRef: _contractsLoaded, ...opts });
     return r;
   };
+  // ── ПЕРЕНОС «финпроект → объект» (номер договора и бюджет) ──
+  // Зачем: деньги цепляются к объекту по номеру договора, и у большей части базы этот
+  // номер (а также плановая сумма) физически лежит только в финпроекте. Пока это так,
+  // раздел «Проекты» — не витрина, а хранилище, и убрать его нельзя.
+  //
+  // ТАБУ владельца: никакой автомиграции. Это разовое действие ТОЛЬКО по явному клику,
+  // и кнопка вообще не отрисовывается вне dev-базы (см. IS_DEV_ENV в админке).
+  // Идемпотентно: объект, у которого своё поле уже заполнено, пропускается.
+  const contractMigrationPlan = useMemo(() => {
+    const rows = [];
+    for (const o of objects) {
+      if (!o || o.deletedAt) continue;
+      if (String(o.contractNo || "").trim()) continue;   // уже перенесён — не трогаем
+      const project = finProjects.find(p => p && p.objectId === o.id);
+      if (!project) continue;
+      const number = String(project.contractNo || "").trim();
+      const budget = Number(project.budget) || 0;
+      // Номер берём, только если своего документа-договора нет: документ надёжнее.
+      const fromDoc = contracts.some(c => c && !c.deletedAt && c.objectId === o.id && c.number
+        && c.type !== "annex" && c.type !== "podryad" && c.type !== "podryad_annex");
+      const needNumber = !!number && !fromDoc;
+      const needBudget = budget > 0 && !(Number(o.planBudget) > 0);
+      if (!needNumber && !needBudget) continue;
+      rows.push({
+        id: o.id,
+        name: o.clientName || o.address || "Без названия",
+        number: needNumber ? number : "",
+        budget: needBudget ? budget : 0,
+      });
+    }
+    return rows;
+  }, [objects, finProjects, contracts]);
+
+  const applyContractMigration = async () => {
+    if (!IS_DEV_ENV) return false;                       // страховка помимо гейта в UI
+    if (!contractMigrationPlan.length) return false;
+    if (!confirmDangerous(`Перенести данные из финпроектов в объекты?\n\nОбъектов: ${contractMigrationPlan.length}\nНомеров договоров: ${contractMigrationPlan.filter(r => r.number).length}\nБюджетов: ${contractMigrationPlan.filter(r => r.budget > 0).length}\n\nСами финпроекты не меняются и не удаляются.`)) return false;
+    const byId = new Map(contractMigrationPlan.map(r => [r.id, r]));
+    const next = objectsRef.current.map(o => {
+      const row = byId.get(o?.id);
+      if (!row) return o;
+      return {
+        ...o,
+        ...(row.number ? { contractNo: row.number } : {}),
+        ...(row.budget > 0 ? { planBudget: row.budget } : {}),
+        updatedAt: Date.now(),
+      };
+    });
+    const res = await saveObjects(next);
+    if (res) {
+      logChange(currentUser, { entity: "object", field: "перенос из финпроектов", action: "заполнил",
+        old: "", new: `${contractMigrationPlan.length} объектов`, source: "migration" });
+      window.alert(`Перенесено ✓\nОбъектов: ${contractMigrationPlan.length}`);
+    }
+    return !!res;
+  };
+
   // ── ЕДИНАЯ АТОМАРНАЯ ЗАПИСЬ ПРОИЗВОДСТВА (этап 2А) ──
   // saveProductions(готовыйМассив) удалён: все изменения производства идут строго командами.
   // Все изменения производства идут ТОЛЬКО через команды: mutateProductions(command). Команда
@@ -8989,13 +9094,22 @@ ${reqBlock}`;
       .filter(o => !statsManager || (o.manager||"")===statsManager);
     // Рабочее множество — БЕЗ архива (как на дашборде); архив виден только в разбивке «по статусам»
     const baseObjs = baseObjsAll.filter(o => o.status!=="archive");
+    // Статус для аналитики берём ЕДИНЫЙ (как на экране объектов): карточка производства
+    // перевешивает статус сделки. Иначе подписанный объект, ушедший в работу, пропадал
+    // из выручки и из воронки — цифры занижались, как только начинались работы.
+    const _prodByObjAn = new Map((productions||[]).filter(p=>p&&p.objectId).map(p=>[p.objectId,p]));
+    const uStatus = (o) => PROD_TO_DEAL[_prodByObjAn.get(o.id)?.prodStatus] || o.status || "new";
+    // Подписанным считаем всё, что дошло до договора и дальше (в работе, на паузе, сдано).
+    const SIGNED_SET = new Set(["signed","work","paused","done"]);
     // Договора, сформированные ВНУТРИ объектов (привязаны к объекту), без «Прочих договоров»
     const baseCon = contracts
       .filter(c => !c.deletedAt)
       .filter(c => c.objectId)
       .filter(c => accessibleObjectIds.has(c.objectId))
       .filter(c => inRange(new Date(c.date||0).getTime()))
-      .filter(c => (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0)>0)
+      // Раньше брали только договоры, где заполнены «работы». Договор с ценой за м²
+      // или с общей суммой выпадал из счётчика и из объёма — теперь считаем все.
+      .filter(c => contractAmount(c) > 0)
       .filter(c => !statsManager || (c.manager||"")=== statsManager);
 
     // Сводка по объектам (заменяет старые «сметы»)
@@ -9004,19 +9118,19 @@ ${reqBlock}`;
     const totalSumEst = withSumEst.reduce((s,o)=>s+objVal(o),0);
     const avgEst = withSumEst.length ? Math.round(totalSumEst/withSumEst.length) : 0;
     const totalCon = baseCon.length;
-    const totalSumCon = baseCon.reduce((s,c)=>s+(c.works||[]).reduce((ss,w)=>ss+(w.quantity*w.price||0),0),0);
+    const totalSumCon = baseCon.reduce((s,c)=>s+contractAmount(c),0);
     const avgCon = totalCon ? Math.round(totalSumCon/totalCon) : 0;
-    const byStatus = {}; for(const s of DEAL_STATUSES) byStatus[s.key]=baseObjsAll.filter(o=>(o.status||"new")===s.key).length;
+    const byStatus = {}; for(const s of DEAL_STATUSES) byStatus[s.key]=baseObjsAll.filter(o=>uStatus(o)===s.key).length;
     const byType = {}; for(const o of baseObjs){ const t=objType(o); byType[t]=(byType[t]||0)+1; }
 
     // ── A. Финансовый обзор — по ПОДПИСАННЫМ объектам (статус объекта = источник правды) ──
-    const signedObjsFin = baseObjs.filter(o=>o.status==="signed"&&objVal(o)>0);
+    const signedObjsFin = baseObjs.filter(o=>SIGNED_SET.has(uStatus(o))&&objVal(o)>0);
     const wonRevenue  = signedObjsFin.reduce((s,o)=>s+objVal(o),0);
     const wonCost     = signedObjsFin.reduce((s,o)=>s+objCost(o),0);
     const wonProfit   = wonRevenue - wonCost;
     const wonMargin   = wonRevenue>0 ? Math.round(wonProfit/wonRevenue*100) : 0;
     // Потенциал — все активные объекты с суммой (кроме архива)
-    const potentialObjs = baseObjs.filter(o=>o.status!=="archive"&&objVal(o)>0);
+    const potentialObjs = baseObjs.filter(o=>!["refuse","cancel"].includes(uStatus(o))&&objVal(o)>0);
     const allRevenue  = potentialObjs.reduce((s,o)=>s+objVal(o),0);
     const allCost     = potentialObjs.reduce((s,o)=>s+objCost(o),0);
     const allProfit   = allRevenue - allCost;
@@ -9025,7 +9139,7 @@ ${reqBlock}`;
     // ── B. Воронка сделок по статусам ОБЪЕКТОВ (архив — терминал, не стадия) ──
     const funnelStatusesAn = DEAL_STATUSES.filter(s=>s.key!=="archive");
     const funnel = funnelStatusesAn.map(s=>{
-      const list = baseObjs.filter(o=>(o.status||"new")===s.key);
+      const list = baseObjs.filter(o=>uStatus(o)===s.key);
       const sum  = list.reduce((a,o)=>a+objVal(o),0);
       const cost = list.reduce((a,o)=>a+objCost(o),0);
       return { key:s.key, label:s.label, color:s.color, bg:s.bg, count:list.length, sum, profit:sum-cost };
@@ -9130,7 +9244,16 @@ ${reqBlock}`;
       wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin,
       funnel, winRateOverall, winRateSent, signedB, refuseB, catProfit, monthly, staleSent,
       avgDealDays, avgApprovalDays, signedObjsCount: signedObjs.length, convByType, topObjects, objVal, estCost };
-  }, [analyticsObjects, analyticsEstimates, contracts, statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers, catalogVersion]);
+  }, [analyticsObjects, analyticsEstimates, contracts, productions, statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers, catalogVersion]);
+
+  // Показатели «Главной» считаются той же моделью, но всегда за текущий месяц и
+  // без фильтра по менеджеру — главная показывает состояние компании, а не срез,
+  // выбранный на экране аналитики.
+  const dashboardStats = useMemo(() => buildAnalytics(
+    { objects, estimates, contracts, productions, financeTx,
+      accounts: financeMeta?.accounts || [], finProjects, estimateCost: analyticsData.estCost },
+    { period: "month", users: allUsers },
+  ), [objects, estimates, contracts, productions, financeTx, financeMeta, finProjects, analyticsData, allUsers]);
 
   // Блоки аналитики (продажи / портфель / производство / финансы / качество).
   // Считает чистая функция buildAnalytics — те же числа доступны и для «Главной».
@@ -9143,6 +9266,8 @@ ${reqBlock}`;
       contracts,
       productions,
       financeTx,
+      accounts: financeMeta?.accounts || [],
+      finProjects,
       estimateCost: analyticsData.estCost,
     },
     {
@@ -9150,9 +9275,12 @@ ${reqBlock}`;
       from: statsDateFrom ? new Date(statsDateFrom).getTime() : null,
       to: statsDateTo ? new Date(statsDateTo).getTime() + 86399999 : null,
       manager: statsManager,
+      // Имя менеджера у объекта — свободный текст, поэтому передаём реальных
+      // сотрудников: варианты («Сергей Ш.») сводятся к заведённому в системе.
+      users: allUsers,
     },
-  ), [analyticsObjects, analyticsEstimates, contracts, productions, financeTx, analyticsData,
-      statsPeriod, statsDateFrom, statsDateTo, statsManager]);
+  ), [analyticsObjects, analyticsEstimates, contracts, productions, financeTx, financeMeta, finProjects, analyticsData,
+      statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers]);
 
   // Защита от краша: если activeCat не в Gdyn — берём первый
   const safeCat = Gdyn[activeCat] ? activeCat : (Object.keys(Gdyn)[0]||"");
@@ -11296,7 +11424,13 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               {[
                 {label:"Активных объектов",  val:activeObjects.length},
                 {label:"В согласовании", val:approvalObjs.length},
-                {label:"Договоров",       val:signedContracts.length},
+                // Здесь стояло число ДОКУМЕНТОВ-договоров со статусом «подписан» за
+                // всё время. Как показатель оно вводило в заблуждение: договор-документ
+                // заводят далеко не на каждую сделку, поэтому цифра была в разы меньше
+                // числа реально подписанных объектов и противоречила аналитике.
+                // Берём те же числа, что и аналитика, — они считаются одной моделью.
+                {label:"Подписано за месяц", val:dashboardStats.sales.signedCount},
+                {label:"Сдано за месяц", val:dashboardStats.production.doneInPeriod},
               ].map((m,i)=>(
                 <div key={i} style={{textAlign:"center"}}>
                   <div style={{fontSize:26,fontWeight:900,color:"#fff",lineHeight:1}}>{m.val}</div>
@@ -11305,6 +11439,16 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               ))}
             </div>
           </div>
+
+          {/* Ключевые цифры компании: сколько в работе, что просрочено, деньги. */}
+          <Dashboard
+            data={dashboardStats}
+            fmt={fmt}
+            financialDetails={hasFinancialDetails}
+            permissions={currentPermissions}
+            onNavFinance={currentPermissions.finance !== "none" ? () => setScreen("finance") : undefined}
+            onOpenObject={item => { const o = objects.find(x => x.id === item.id); if (o) { setCurrentObject({ ...o }); setObjectTab("workspace"); setScreen("objects"); } }}
+          />
 
           {/* ── ЧТО ГОРИТ СЕГОДНЯ ── */}
           {currentPermissions.dashboard !== "none" && (
@@ -11319,88 +11463,6 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             </div>
           )}
 
-          {/* KPI карточки */}
-          <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14,marginBottom:24}}>
-            {[
-              {label:"Объектов за "+monthName, value:objectsThisMonth.length, sub:"активность месяца", icon:"📋", accent:"#2563eb"},
-              {label:"Объём за "+monthName, value:fmt(Math.round(totalSumMonth))+" ₸", sub:"сумма смет", icon:"💰", accent:"#059669"},
-              ...(hasFinancialDetails ? [
-                {label:"Прибыль за "+monthName, value:fmt(Math.round(profitMonth))+" ₸", sub:"по подписанным", icon:"📈", accent:profitMonth>0?"#059669":"#ef4444"},
-                {label:"Маржа за "+monthName, value:marginMonth+"%", sub:"рентабельность", icon:"🎯", accent:marginMonth>=35?"#059669":marginMonth>=20?"#d97706":"#ef4444"},
-              ] : []),
-              {label:"Пайплайн (согласование)", value:fmt(Math.round(pipelineSum))+" ₸", sub:approvalObjs.length+" объектов", icon:"🔄", accent:"#d97706"},
-              {label:"Подписано за "+monthName, value:signedContractsMonth.length, sub:"всего подписано "+signedContracts.length, icon:"✅", accent:"#059669"},
-            ].map((s,i)=>(
-              <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden"}}
-                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
-                onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)";}}>
-                <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:s.accent,opacity:.85}}/>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                  <div style={{fontSize:12,color:"#64748b",fontWeight:600,lineHeight:1.3,flex:1,paddingRight:8}}>{s.label}</div>
-                  <span style={{width:38,height:38,borderRadius:11,background:s.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{s.icon}</span>
-                </div>
-                <div className="kpi-val" style={{fontSize:26,fontWeight:800,color:"#0f172a",lineHeight:1,marginBottom:6,letterSpacing:-.5}}>{s.value}</div>
-                <div style={{fontSize:11.5,color:"#94a3b8",fontWeight:500}}>{s.sub}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* ── Finance KPIs (admin/manager) ── */}
-          {_finKpi&&(
-            <div style={{marginBottom:24}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#64748b",marginBottom:10,textTransform:"uppercase",letterSpacing:".05em"}}>💰 Финансы по проектам</div>
-              <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14}}>
-                {[
-                  {label:"Активных проектов", value:_finKpi.count, sub:"в работе + новые", icon:"📁", accent:"#2563eb"},
-                  {label:"Выручка за "+monthName, value:fmt(_finKpi.incMonth)+" ₸", sub:"оплачено факт", icon:"💵", accent:"#059669"},
-                  {label:"Дебиторка", value:fmt(_finKpi.totalDebt)+" ₸", sub:"долги клиентов", icon:"⏳", accent:_finKpi.totalDebt>0?"#dc2626":"#059669"},
-                  {label:"Маржа план", value:_finKpi.margin!=null?_finKpi.margin+"%":"—", sub:"бюджет минус расходы", icon:"📊", accent:_finKpi.margin!=null&&_finKpi.margin>=30?"#059669":_finKpi.margin!=null&&_finKpi.margin>=0?"#d97706":"#dc2626"},
-                ].map((s,i)=>(
-                  <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden",cursor:"pointer"}}
-                    onClick={()=>setScreen("finance")}
-                    onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
-                    onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)";}}>
-                    <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:s.accent,opacity:.85}}/>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                      <div style={{fontSize:12,color:"#64748b",fontWeight:600,lineHeight:1.3,flex:1,paddingRight:8}}>{s.label}</div>
-                      <span style={{width:38,height:38,borderRadius:11,background:s.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{s.icon}</span>
-                    </div>
-                    <div className="kpi-val" style={{fontSize:26,fontWeight:800,color:"#0f172a",lineHeight:1,marginBottom:6,letterSpacing:-.5}}>{s.value}</div>
-                    <div style={{fontSize:11.5,color:"#94a3b8",fontWeight:500}}>{s.sub}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* ── Production KPIs (admin/manager) ── */}
-          {_prodKpi&&(
-            <div style={{marginBottom:24}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#64748b",marginBottom:10,textTransform:"uppercase",letterSpacing:".05em"}}>🏗 Производство</div>
-              <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14}}>
-                {[
-                  {label:"В работе", value:_prodKpi.inWork, sub:"объектов в статусе «В работе»", icon:"🔨", accent:"#2563eb"},
-                  {label:"Просрочено", value:_prodKpi.overdue, sub:"плановый срок истёк", icon:"🚨", accent:_prodKpi.overdue>0?"#dc2626":"#059669"},
-                  {label:"Сдано за "+monthName, value:_prodKpi.doneMonth, sub:"объектов завершено", icon:"✅", accent:"#059669"},
-                  {label:"Открытых замечаний", value:_prodKpi.defects, sub:"незакрытые дефекты", icon:"⚠️", accent:_prodKpi.defects>0?"#d97706":"#059669"},
-                ].map((s,i)=>(
-                  <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"18px 20px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",transition:"transform .18s ease,box-shadow .18s ease",position:"relative",overflow:"hidden",cursor:"pointer"}}
-                    onClick={()=>setScreen("objects")}
-                    onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
-                    onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)";}}>
-                    <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:s.accent,opacity:.85}}/>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                      <div style={{fontSize:12,color:"#64748b",fontWeight:600,lineHeight:1.3,flex:1,paddingRight:8}}>{s.label}</div>
-                      <span style={{width:38,height:38,borderRadius:11,background:s.accent+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{s.icon}</span>
-                    </div>
-                    <div className="kpi-val" style={{fontSize:26,fontWeight:800,color:"#0f172a",lineHeight:1,marginBottom:6,letterSpacing:-.5}}>{s.value}</div>
-                    <div style={{fontSize:11.5,color:"#94a3b8",fontWeight:500}}>{s.sub}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Требуют внимания */}
           <StaleObjectsPanel
             items={staleObjs.map(o=>({id:o.id,name:o.clientName||"Без клиента",address:o.address,days:Math.floor((now-(o.updatedAt||o.createdAt||0))/864e5),total:_objVal(o),object:o}))}
@@ -11409,82 +11471,6 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             fmt={fmt}
           />
 
-          {/* Воронка + Последние объекты */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:16,marginBottom:24}}>
-
-            {/* Воронка по статусам */}
-            {liveObjects.length>0&&(()=>{
-              // Архив — терминальное хранилище, не стадия воронки; не показываем его баром
-              const funnelStatuses = DEAL_STATUSES.filter(s=>s.key!=="archive");
-              const maxCount = Math.max(1,...funnelStatuses.map(s=>liveObjects.filter(o=>(o.status||"new")===s.key).length));
-              const signedCount = liveObjects.filter(o=>o.status==="signed").length;
-              const nonArchive = liveObjects.filter(o=>o.status!=="archive").length;
-              const convToSigned = nonArchive>0?Math.round(signedCount/nonArchive*100):0;
-              return (
-                <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:"20px 22px",boxShadow:"0 1px 3px rgba(15,23,42,.07),0 4px 12px rgba(15,23,42,.04)"}}>
-                  <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:16}}>
-                    <span style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>📊 Воронка объектов</span>
-                    <span style={{fontSize:12,color:"#64748b"}}>
-                      <b style={{color:"#059669"}}>{convToSigned}%</b> подписано
-                    </span>
-                  </div>
-                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                    {funnelStatuses.map(s=>{
-                      const list = liveObjects.filter(o=>(o.status||"new")===s.key);
-                      const sum = list.reduce((acc,o)=>acc+(_estByObjId[o.id]||[]).reduce((ss,e)=>ss+(e.total||0),0),0);
-                      const w = Math.round((list.length/maxCount)*100);
-                      return (
-                        <div key={s.key} onClick={()=>{ setObjectFilterStatus(s.key); setScreen("objects"); }}
-                          style={{cursor:"pointer"}}
-                          title={"Показать: "+s.label}>
-                          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
-                            <span style={{fontSize:11,fontWeight:700,color:s.color,width:130,flexShrink:0}}>{s.label}</span>
-                            <span style={{fontSize:11,color:"#94a3b8",flex:1,textAlign:"right"}}>{sum>0?fmt(Math.round(sum))+" ₸":"—"}</span>
-                          </div>
-                          <div style={{background:"#f8fafc",borderRadius:8,height:22,position:"relative",overflow:"hidden"}}>
-                            <div style={{width:`${w}%`,minWidth:list.length>0?32:0,height:"100%",background:s.bg,borderLeft:`3px solid ${s.color}`,transition:"width .3s",borderRadius:"0 4px 4px 0"}}/>
-                            <span style={{position:"absolute",left:10,top:0,height:"100%",display:"flex",alignItems:"center",fontSize:12,fontWeight:800,color:s.color}}>{list.length}</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Последние объекты */}
-            {recentObjects.length>0&&(
-              <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,padding:"20px 22px",boxShadow:"0 1px 3px rgba(15,23,42,.07),0 4px 12px rgba(15,23,42,.04)"}}>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
-                  <span style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>🕐 Последние объекты</span>
-                  <button onClick={()=>{ setObjectAttentionFilter(""); setCurrentObject(null); setObjectTab("list"); setScreen("objects"); }} style={{background:"none",border:"none",padding:0,color:"#2563eb",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>все →</button>
-                </div>
-                <div style={{display:"flex",flexDirection:"column",gap:1}}>
-                  {recentObjects.map((o,i,arr)=>{
-                    const st = DEAL_STATUSES.find(s=>s.key===unifiedStatusOf(o))||DEAL_STATUSES[0];
-                    const val = _objVal(o);
-                    return (
-                      <div key={o.id} onClick={()=>{ setCurrentObject({...o}); setObjectTab("workspace"); setObjWsTab("info"); setScreen("objects"); }}
-                        style={{display:"flex",alignItems:"center",gap:10,padding:"9px 10px",borderRadius:8,cursor:"pointer",transition:"background .1s",borderBottom:i<arr.length-1?"1px solid #f3f4f6":"none"}}
-                        onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"}
-                        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                        <div style={{width:6,height:6,borderRadius:"50%",background:st.color,flexShrink:0}}/>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontWeight:600,fontSize:13,color:"#0f172a",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{o.clientName||"Без клиента"}</div>
-                          <div style={{fontSize:11,color:"#94a3b8",display:"flex",gap:6,alignItems:"center",marginTop:1}}>
-                            <span style={{color:st.color,fontWeight:600}}>{st.label}</span>
-                            {o.address&&<span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.address}</span>}
-                          </div>
-                        </div>
-                        {val>0&&<div style={{fontSize:12,fontWeight:700,color:"#0f172a",flexShrink:0}}>{fmt(Math.round(val))} ₸</div>}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
 
         </div>
         );
@@ -12665,323 +12651,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               permissions={currentPermissions}
               fmt={fmt}
               financialDetails={hasFinancialDetails}
+              catProfit={catProfit}
             />
 
-            <div className="kpi-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14,marginBottom:20}}>
-              {[["Создано объектов",totalEst,"в периоде, без архива","#2563eb","📋"],["Объём объектов",fmt(totalSumEst)+" ₸","сумма смет","#2563eb","💰"],["Ср. чек",fmt(avgEst)+" ₸","на объект","#059669","🎯"],["Договоров",totalCon,"по объектам","#2563eb","📄"],["Объём договоров",fmt(totalSumCon)+" ₸","сумма договоров","#2563eb","🧾"],["Средний договор",fmt(avgCon)+" ₸","на договор","#059669","📊"]].map(([l,v,s,c,ic],i)=>(
-                <div key={i} style={{background:"#ffffff",border:"1px solid #eef2f7",borderRadius:16,padding:"16px 18px",boxShadow:"0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)",position:"relative",overflow:"hidden",transition:"transform .18s ease,box-shadow .18s ease"}}
-                  onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 18px 40px -14px rgba(15,23,42,.22)";}}
-                  onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 2px rgba(15,23,42,.04),0 10px 30px -12px rgba(15,23,42,.12)";}}>
-                  <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:c,opacity:.85}}/>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                    <div style={{fontSize:11.5,color:"#64748b",fontWeight:600,lineHeight:1.3,flex:1,paddingRight:8}}>{l}</div>
-                    <span style={{width:34,height:34,borderRadius:10,background:c+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{ic}</span>
-                  </div>
-                  <div className="kpi-val" style={{fontSize:21,fontWeight:800,color:"#0f172a",lineHeight:1,marginBottom:5,letterSpacing:-.5}}>{v}</div>
-                  <div style={{fontSize:11,color:"#94a3b8",fontWeight:500}}>{s}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* ── A. Финансовый обзор ── */}
-            {hasFinancialDetails && <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
-              <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
-                <span style={{fontSize:11,color:"#059669",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>💰 Финансы — подписанные договоры (заработано)</span>
-                <span style={{fontSize:11,color:"#94a3b8"}}>в выбранном периоде</span>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
-                {[
-                  ["Выручка", fmt(Math.round(wonRevenue))+" ₸", "#2563eb"],
-                  ["Себестоимость", fmt(Math.round(wonCost))+" ₸", "#64748b"],
-                  ["Валовая прибыль", fmt(Math.round(wonProfit))+" ₸", "#059669"],
-                  ["Средняя маржа", wonMargin+"%", wonMargin>=35?"#059669":wonMargin>=20?"#d97706":"#ef4444"],
-                ].map(([l,v,c],i)=>(
-                  <div key={i} style={{padding:"12px 14px",background:"#f9fafb",borderRadius:8,borderLeft:`3px solid ${c}`}}>
-                    <div style={{fontSize:9,color:"#94a3b8",textTransform:"uppercase",letterSpacing:.8,marginBottom:6}}>{l}</div>
-                    <div style={{fontSize:19,fontWeight:900,color:c,lineHeight:1}}>{v}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{marginTop:12,paddingTop:12,borderTop:"1px dashed #e5e7eb",display:"flex",gap:18,flexWrap:"wrap",fontSize:12,color:"#64748b"}}>
-                <span>Потенциал (все активные объекты с суммой): <b style={{color:"#334155"}}>{fmt(Math.round(allRevenue))} ₸</b> выручка · прибыль <b style={{color:"#059669"}}>{fmt(Math.round(allProfit))} ₸</b> · маржа <b style={{color:"#334155"}}>{allMargin}%</b></span>
-              </div>
-            </div>}
-
-            {/* ── B. Воронка с деньгами и конверсией ── */}
-            <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
-              <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
-                <span style={{fontSize:11,color:"#7c3aed",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>🪜 Воронка сделок (объекты)</span>
-                <span style={{fontSize:12,color:"#64748b"}}>Конверсия: <b style={{color:"#059669"}}>{winRateOverall}%</b> от всех · <b style={{color:"#7c3aed"}}>{winRateSent}%</b> из решённых</span>
-              </div>
-              {(() => {
-                const maxSum = Math.max(1, ...funnel.map(f=>f.sum));
-                return (
-                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                    {funnel.map(f=>(
-                      <div key={f.key} style={{display:"flex",alignItems:"center",gap:12}}>
-                        <span className="an-bar-label" style={{fontSize:12,fontWeight:600,color:f.color,width:140,flexShrink:0}}>{f.label}</span>
-                        <div style={{flex:1,minWidth:60,background:"rgba(0,0,0,.04)",borderRadius:8,height:26,position:"relative",overflow:"hidden"}}>
-                          <div style={{width:`${Math.round(f.sum/maxSum*100)}%`,minWidth:f.count>0?2:0,height:"100%",background:f.bg,borderLeft:`3px solid ${f.color}`}}/>
-                          <span style={{position:"absolute",left:10,top:0,height:"100%",display:"flex",alignItems:"center",gap:8,fontSize:11,fontWeight:700,color:f.color}}>{f.count} шт · {fmt(Math.round(f.sum))} ₸</span>
-                        </div>
-                        {hasFinancialDetails && <span className="an-bar-right" style={{fontSize:11,color:"#059669",width:130,textAlign:"right",flexShrink:0}}>{f.profit>0?"приб. "+fmt(Math.round(f.profit))+" ₸":"—"}</span>}
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* ── B2. Финансы и производство — текущий снимок (по всей компании) ── */}
-            {(()=>{
-              const _norm = s => String(s||"").replace(/[№#\s]/g,"").toLowerCase();
-              const _inM = ts => { const d=new Date(ts||0); const n=new Date(); return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear(); };
-              const _ds = d => { const x=new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
-              // Активные = НЕ отменён и НЕ выполнен (в работе + новые)
-              const activeFp = (finProjects||[]).filter(isActiveFinanceProject);
-              const txMap = {}; for(const t of (financeTx||[])){ if(t.deletedAt||t.included===false) continue; const cn=_norm(t.contractNo); if(!txMap[cn])txMap[cn]={inc:0,exp:0}; if(t.type==="income")txMap[cn].inc+=(Number(t.amount)||0); else txMap[cn].exp+=(Number(t.amount)||0); }
-              // ВСЁ по АКТИВНЫМ проектам — числа сходятся: Бюджет = Получено + Дебиторка
-              const totalBudget = activeFp.reduce((s,p)=>s+financeBudgetOf(p),0);
-              const totalInc = activeFp.reduce((s,p)=>s+(txMap[_norm(p.contractNo)]?.inc||0),0);
-              const totalExp = activeFp.reduce((s,p)=>s+(txMap[_norm(p.contractNo)]?.exp||0),0);
-              const totalDebt = activeFp.reduce((s,p)=>{const inc=txMap[_norm(p.contractNo)]?.inc||0; return s+Math.max(0,financeBudgetOf(p)-inc);},0);
-              const recvPct = totalBudget>0?Math.round(totalInc/totalBudget*100):0;
-              const planMargin = totalBudget>0?Math.round((totalBudget-totalExp)/totalBudget*100):null;
-              const incMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="income"&&_inM(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
-              const expMonth = (financeTx||[]).filter(t=>!t.deletedAt&&t.included!==false&&t.type==="expense"&&_inM(t.date?new Date(t.date).getTime():0)).reduce((s,t)=>s+(Number(t.amount)||0),0);
-              const today = _ds(new Date());
-              // Производство — состояние через unifiedStatusOf (production перевешивает сырой
-              // object.status, как и везде), иначе счётчики занижены на объектах-исключениях.
-              const _pbk = {}; for(const p of (productions||[])) _pbk[p.objectId]=p;
-              const prodActive = liveObjects.filter(o=>unifiedStatusOf(o)==="work").length;
-              const prodOverdue = liveObjects.filter(o=>{ if(unifiedStatusOf(o)!=="work") return false; const p=_pbk[o.id]; return p?.planEndDate&&_ds(p.planEndDate)<today&&!p?.factEndDate; }).length;
-              const prodDoneMonth = liveObjects.filter(o=>{ if(unifiedStatusOf(o)!=="done") return false; const p=_pbk[o.id]; const dt=p?.factEndDate?new Date(p.factEndDate).getTime():(o.updatedAt||0); return dt&&_inM(dt); }).length;
-              const prodDefects = liveObjects.reduce((s,o)=>s+((_pbk[o.id]?.defects||[]).filter(d=>!d.done).length),0);
-              const prodAnyCount = liveObjects.filter(o=>{ const us=unifiedStatusOf(o); return us==="work"||us==="paused"||us==="done"; }).length;
-              if(activeFp.length===0 && prodAnyCount===0) return null;
-              const finCards = [
-                ["Сумма контрактов", fmt(Math.round(totalBudget))+" ₸", activeFp.length+" активных проектов", "#2563eb"],
-                ["Получено", fmt(Math.round(totalInc))+" ₸", recvPct+"% от контрактов", "#059669"],
-                ["Дебиторка", fmt(Math.round(totalDebt))+" ₸", "осталось получить", totalDebt>0?"#dc2626":"#059669"],
-                ["Расходы", fmt(Math.round(totalExp))+" ₸", "по активным проектам", "#64748b"],
-                ["Маржа план", planMargin!=null?planMargin+"%":"—", "контракты − расходы", planMargin!=null&&planMargin>=30?"#059669":planMargin!=null&&planMargin>=0?"#d97706":"#dc2626"],
-                ["Денежный поток за месяц", fmt(Math.round(incMonth-expMonth))+" ₸", "приход "+fmt(Math.round(incMonth))+" − расход "+fmt(Math.round(expMonth)), incMonth-expMonth>=0?"#059669":"#dc2626"],
-              ];
-              const prodCards = [
-                ["В работе", prodActive, "объектов в статусе «В работе»", "#2563eb"],
-                ["Просрочено", prodOverdue, "срок истёк", prodOverdue>0?"#dc2626":"#059669"],
-                ["Сдано за месяц", prodDoneMonth, "объектов завершено", "#059669"],
-                ["Открытых замечаний", prodDefects, "незакрытые дефекты", prodDefects>0?"#d97706":"#059669"],
-              ];
-              const Card = ([l,v,s,c],i)=>(
-                <div key={i} style={{padding:"12px 14px",background:"#f9fafb",borderRadius:8,borderLeft:`3px solid ${c}`}}>
-                  <div style={{fontSize:9,color:"#94a3b8",textTransform:"uppercase",letterSpacing:.8,marginBottom:6}}>{l}</div>
-                  <div style={{fontSize:17,fontWeight:900,color:c,lineHeight:1.1}}>{v}</div>
-                  <div style={{fontSize:10,color:"#94a3b8",marginTop:4}}>{s}</div>
-                </div>
-              );
-              return (
-                <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
-                  <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
-                    <span style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700}}>{hasFinancialDetails?"💼 Финансы и производство":"🏗 Производство"}</span>
-                    <span style={{fontSize:11,color:"#94a3b8"}}>текущий снимок · не зависит от периода</span>
-                  </div>
-                  {hasFinancialDetails && activeFp.length>0 && <>
-                    <div style={{fontSize:10,color:"#059669",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>💰 Финансы по проектам</div>
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:prodAnyCount>0?16:0}}>{finCards.map(Card)}</div>
-                  </>}
-                  {prodAnyCount>0 && <>
-                    <div style={{fontSize:10,color:"#d97706",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>🏗 Производство</div>
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>{prodCards.map(Card)}</div>
-                  </>}
-                </div>
-              );
-            })()}
-
-            {/* ── E. Динамика по месяцам ── */}
-            {monthly.length>0 && (
-              <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
-                <div style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:16}}>📈 Динамика по месяцам</div>
-                {(() => {
-                  const maxRev = Math.max(1, ...monthly.map(m=>m.revenue));
-                  return (
-                    <div style={{display:"flex",alignItems:"flex-end",gap:10,height:160,overflowX:"auto",paddingBottom:4}}>
-                      {monthly.map(m=>(
-                        <div key={m.key} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,minWidth:46,flex:"1 0 46px"}}>
-                          <div style={{fontSize:9,color:"#059669",fontWeight:700,whiteSpace:"nowrap"}}>{hasFinancialDetails&&m.profit>0?Math.round(m.profit/1000)+"k":""}</div>
-                          <div style={{display:"flex",alignItems:"flex-end",gap:2,height:110,width:"100%",justifyContent:"center"}}>
-                            <div title={"Выручка: "+fmt(Math.round(m.revenue))+" ₸"} style={{width:14,height:`${Math.max(2,Math.round(m.revenue/maxRev*110))}px`,background:"#93c5fd",borderRadius:"3px 3px 0 0"}}/>
-                            {hasFinancialDetails && <div title={"Прибыль: "+fmt(Math.round(m.profit))+" ₸"} style={{width:14,height:`${Math.max(2,Math.round(Math.max(0,m.profit)/maxRev*110))}px`,background:"#059669",borderRadius:"3px 3px 0 0"}}/>}
-                          </div>
-                          <div style={{fontSize:9,fontWeight:700,color:m.conv>=40?"#059669":m.conv>=20?"#d97706":"#94a3b8",whiteSpace:"nowrap"}} title="Конверсия в подписанные">{m.total>0?m.conv+"%":""}</div>
-                          <div style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>{m.label}</div>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })()}
-                <div style={{display:"flex",gap:16,marginTop:10,fontSize:11,color:"#94a3b8"}}>
-                  <span><span style={{display:"inline-block",width:10,height:10,background:"#93c5fd",borderRadius:2,marginRight:5}}/>Выручка</span>
-                  {hasFinancialDetails && <span><span style={{display:"inline-block",width:10,height:10,background:"#059669",borderRadius:2,marginRight:5}}/>Прибыль</span>}
-                  <span>% — конверсия в подписанные за месяц</span>
-                </div>
-              </div>
-            )}
-
-            {/* ── F. «Зависшие» объекты в работе ── */}
-            <StaleObjectsPanel
-              items={staleSent.map(({e,days})=>({id:e.id,name:e.proj?.name||"Объект",address:e._obj?.address,days,total:e.total,object:e._obj}))}
-              onOpen={item=>{ if(currentUser.role!=="viewer"&&item.object){ setCurrentObject({...item.object}); setObjectTab("workspace"); setScreen("objects"); } }}
-              fmt={fmt}
-              title="На согласовании без движения 14+ дней"
-            />
-
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(380px,1fr))",gap:16,marginBottom:16}}>
-              <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"18px"}}>
-                <div style={{fontSize:11,color:"#d97706",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>Объекты</div>
-                <div style={{fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По статусам</div>
-                <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:14}}>
-                  {DEAL_STATUSES.map(s=>(
-                    <div key={s.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(0,0,0,.02)",borderRadius:8}}>
-                      <span style={{fontSize:12,color:s.color,fontWeight:600}}>{s.label}</span>
-                      <div style={{display:"flex",alignItems:"center",gap:10}}>
-                        <div style={{width:80,height:4,background:"rgba(255,255,255,.06)",borderRadius:2,overflow:"hidden"}}>
-                          <div style={{width:totalEst?(byStatus[s.key]/totalEst*100)+"%":"0%",height:"100%",background:s.color,borderRadius:2}}/>
-                        </div>
-                        <span style={{fontSize:13,fontWeight:700,color:"#0f172a",minWidth:20,textAlign:"right"}}>{byStatus[s.key]}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {Object.keys(byType).length>0 && <><div style={{fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типу объекта</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(<span key={t} style={{fontSize:11,padding:"3px 10px",borderRadius:4,background:"rgba(0,0,0,.04)",color:"#94a3b8"}}>{t}: <strong style={{color:"#0f172a"}}>{n}</strong></span>))}</div></>}
-              </div>
-              <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"18px"}}>
-                <div style={{fontSize:11,color:"#d97706",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>Договора по объектам</div>
-                {Object.keys(byConType).length>0 && <><div style={{fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>По типам</div><div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:14}}>{Object.entries(byConType).sort((a,b)=>b[1]-a[1]).map(([t,n])=>(<div key={t} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(0,0,0,.02)",borderRadius:8}}><span style={{fontSize:12,color:"#94a3b8"}}>{t}</span><span style={{fontSize:13,fontWeight:700,color:"#2563eb"}}>{n}</span></div>))}</div></>}
-                {baseCon.length>0 && <><div style={{fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:1,marginBottom:8,fontWeight:700}}>Договора в периоде</div><div style={{display:"flex",flexDirection:"column",gap:3}}>{[...baseCon].sort((a,b)=>Number(b.id||0)-Number(a.id||0)).slice(0,6).map(c=>{const obj=objects.find(o=>o.id===c.objectId);const sum=(c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);return(<div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"rgba(0,0,0,.02)",borderRadius:8,cursor:"pointer"}} onClick={()=>{if(obj){setCurrentObject({...obj});setObjectTab("workspace");setScreen("objects");}}}><div style={{minWidth:0}}><div style={{fontSize:12,color:"#0f172a",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{TYPE_L2[c.type||"repair_fiz"]} #{c.number||"--"}</div><div style={{fontSize:10,color:"#94a3b8"}}>{obj?.clientName||"--"}</div></div><span style={{fontSize:12,fontWeight:700,color:"#2563eb",flexShrink:0,marginLeft:8}}>{fmt(sum)} ₸</span></div>);})}</div></>}
-                {totalCon===0 && <div style={{textAlign:"center",color:"#334155",fontSize:13,padding:"30px 0"}}>Нет договоров по объектам за период</div>}
-              </div>
-            </div>
-            {/* ── C. Менеджеры по прибыли ── */}
-            {!statsManager && managerStats.length>0 && (
-              <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
-                <div style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>👥 Менеджеры — {hasFinancialDetails?"прибыль и конверсия":"оборот и конверсия"}</div>
-                <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10,padding:"0 12px",fontSize:9,color:"#94a3b8",textTransform:"uppercase",letterSpacing:.5}}>
-                    <span style={{flex:1}}>Менеджер</span>
-                    <span style={{width:70,textAlign:"right"}}>Оборот</span>
-                    {hasFinancialDetails && <span style={{width:70,textAlign:"right"}}>Прибыль</span>}
-                    {hasFinancialDetails && <span style={{width:46,textAlign:"right"}}>Маржа</span>}
-                    <span style={{width:54,textAlign:"right"}}>Конв.</span>
-                  </div>
-                  {managerStats.map(m=>(
-                    <div key={m.name} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"#f9fafb",borderRadius:8,cursor:"pointer"}} onClick={()=>setStatsManager(m.name)}>
-                      <span style={{fontSize:13,color:"#0f172a",flex:1,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>👤 {m.name} <span style={{fontSize:10,color:"#94a3b8"}}>· {m.count}</span></span>
-                      <span style={{fontSize:12,fontWeight:600,color:"#334155",width:70,textAlign:"right"}}>{fmt(Math.round(m.sum/1000))}k</span>
-                      {hasFinancialDetails && <span style={{fontSize:12,fontWeight:700,color:"#059669",width:70,textAlign:"right"}}>{fmt(Math.round(m.profit/1000))}k</span>}
-                      {hasFinancialDetails && <span style={{fontSize:12,fontWeight:700,width:46,textAlign:"right",color:m.margin>=35?"#059669":m.margin>=20?"#d97706":"#ef4444"}}>{m.margin}%</span>}
-                      <span style={{fontSize:12,fontWeight:700,color:"#7c3aed",width:54,textAlign:"right"}}>{m.conv}%</span>
-                    </div>
-                  ))}
-                </div>
-                <div style={{fontSize:10,color:"#94a3b8",marginTop:8}}>{hasFinancialDetails?"Оборот/прибыль":"Оборот"} — в тыс. ₸. Конверсия = подписано / активные объекты (кроме архива).</div>
-              </div>
-            )}
-
-            {/* ── G+H. Цикл сделки + Конверсия по типу ── */}
-            {(avgDealDays!==null || avgApprovalDays!==null || Object.keys(convByType).length>0) && (
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:16,marginBottom:16}}>
-                {avgDealDays!==null && (
-                  <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
-                    <div style={{fontSize:11,color:"#7c3aed",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>⏱ Средний цикл сделки</div>
-                    <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
-                      <span style={{fontSize:36,fontWeight:900,color:"#0f172a"}}>{avgDealDays}</span>
-                      <span style={{fontSize:14,color:"#64748b"}}>дней</span>
-                      {avgApprovalDays!==null && <span style={{fontSize:12,color:"#94a3b8",marginLeft:"auto"}}>в согласовании сейчас: <b style={{color:avgApprovalDays>14?"#dc2626":"#0f172a"}}>{avgApprovalDays} дн.</b></span>}
-                    </div>
-                    <div style={{fontSize:12,color:"#94a3b8"}}>от создания объекта до подписания договора</div>
-                    <div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>по {signedObjsCount} подписанным договорам в периоде</div>
-                  </div>
-                )}
-                {avgDealDays===null && avgApprovalDays!==null && (
-                  <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
-                    <div style={{fontSize:11,color:"#d97706",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>⏳ Среднее время в согласовании</div>
-                    <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
-                      <span style={{fontSize:36,fontWeight:900,color:avgApprovalDays>14?"#dc2626":"#0f172a"}}>{avgApprovalDays}</span>
-                      <span style={{fontSize:14,color:"#64748b"}}>дней</span>
-                    </div>
-                    <div style={{fontSize:12,color:"#94a3b8"}}>открытые сделки в статусе «Согласование»</div>
-                  </div>
-                )}
-                {Object.keys(convByType).length>0 && (
-                  <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
-                    <div style={{fontSize:11,color:"#059669",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:14}}>🏠 Конверсия по типу объекта</div>
-                    <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                      {Object.entries(convByType).sort((a,b)=>b[1].total-a[1].total).map(([t,d])=>{
-                        const conv = d.total>0 ? Math.round(d.signed/d.total*100) : 0;
-                        return (
-                          <div key={t} style={{display:"flex",alignItems:"center",gap:10}}>
-                            <span style={{fontSize:12,color:"#334155",width:100,flexShrink:0}}>{t}</span>
-                            <div style={{flex:1,background:"rgba(0,0,0,.04)",borderRadius:4,height:20,position:"relative",overflow:"hidden"}}>
-                              <div style={{width:conv+"%",height:"100%",background:"rgba(5,150,105,.15)",borderLeft:"3px solid #059669"}}/>
-                              <span style={{position:"absolute",left:8,top:0,height:"100%",display:"flex",alignItems:"center",fontSize:11,fontWeight:700,color:"#059669"}}>{d.signed}/{d.total}</span>
-                            </div>
-                            <span style={{fontSize:12,fontWeight:700,color:conv>=50?"#059669":conv>=25?"#d97706":"#64748b",width:36,textAlign:"right"}}>{conv}%</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div style={{fontSize:10,color:"#94a3b8",marginTop:8}}>подписано / всего объектов</div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── I. Топ объектов по сумме ── */}
-            {topObjects.length>0 && (
-              <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",marginBottom:16,boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
-                <div style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>🏆 Топ объектов периода по сумме</div>
-                <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                  {topObjects.map((o,i)=>{
-                    const v = objVal(o);
-                    const st = DEAL_STATUSES.find(s=>s.key===unifiedStatusOf(o))||DEAL_STATUSES[0];
-                    return (
-                      <div key={o.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",background:"#f9fafb",borderRadius:8,cursor:"pointer"}}
-                        onClick={()=>{setCurrentObject({...o});setObjectTab("workspace");setScreen("objects");}}>
-                        <span style={{fontSize:11,color:"#94a3b8",minWidth:18,fontWeight:700}}>#{i+1}</span>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:13,color:"#0f172a",fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{o.clientName||"Без клиента"}</div>
-                          <div style={{display:"flex",alignItems:"center",gap:6,marginTop:2,flexWrap:"wrap"}}>
-                            <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:4,padding:"1px 6px"}}>{st.label}</span>
-                            <span style={{fontSize:11,color:"#94a3b8",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.objType||"Вторичка"}{o.address?` · ${o.address}`:""}</span>
-                          </div>
-                        </div>
-                        <span style={{fontSize:13,fontWeight:800,color:"#0f172a",flexShrink:0}}>{fmt(v)} ₸</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* ── D. Рентабельность по категориям ── */}
-            {hasFinancialDetails && catProfit.length>0 && (
-              <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:10,padding:"18px 20px",boxShadow:"0 1px 3px rgba(15,23,42,.06)"}}>
-                <div style={{fontSize:11,color:"#2563eb",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:12}}>🏗 Рентабельность по категориям работ</div>
-                <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                  {catProfit.map((c,i)=>(
-                    <div key={c.cat} className="an-catrow" style={{display:"flex",alignItems:"center",gap:10,fontSize:12,padding:"9px 12px",background:"#f9fafb",borderRadius:8}}>
-                      <span style={{fontSize:10,color:"#94a3b8",minWidth:16}}>{i+1}.</span>
-                      <span className="an-cat-name" style={{color:"#0f172a",fontWeight:500,flex:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.cat}</span>
-                      <span style={{color:"#64748b",width:90,textAlign:"right"}}>выр. {fmt(Math.round(c.revenue/1000))}k</span>
-                      <span style={{color:"#059669",fontWeight:700,width:90,textAlign:"right"}}>приб. {fmt(Math.round(c.profit/1000))}k</span>
-                      <span style={{fontWeight:700,width:46,textAlign:"right",color:c.margin>=35?"#059669":c.margin>=20?"#d97706":"#ef4444"}}>{c.margin}%</span>
-                    </div>
-                  ))}
-                </div>
-                <div style={{fontSize:10,color:"#94a3b8",marginTop:8}}>По ценам позиций до скидки. Суммы в тыс. ₸.</div>
-              </div>
-            )}
             {totalEst===0&&<div style={{textAlign:"center",color:"#334155",fontSize:13,padding:"60px 0"}}><div style={{fontSize:32,marginBottom:12}}>📊</div>Нет данных за выбранный период</div>}
           </div>
         );
@@ -14839,16 +14511,43 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     .then(fpRes => { if (!fpRes) throw new Error("saveFinanceProjects заблокирован"); }),
                 );
               }
+              // «Дата продажи (подписание договора)» — по ней считаются срок сделки и
+              // простой до старта. Проставляем её из даты договора, чтобы не заполнять
+              // руками. Это НЕ авто-миграция: запись происходит только по явному
+              // действию владельца — клику по статусу «Договор подписан».
+              // Берём ОСНОВНОЙ клиентский договор: доп. соглашения (annex) подписываются
+              // позже и дали бы поздний срок сделки, подряд — это себестоимость.
+              const saleDateFromContract = contractsRef.current
+                .filter(c => c && !c.deletedAt && c.objectId === obj.id && c.date
+                  && c.type !== "annex" && c.type !== "podryad" && c.type !== "podryad_annex")
+                .map(c => String(c.date).slice(0, 10))
+                .sort()[0] || "";
+
               const hasProd = productionsRef.current.some(p => p.objectId === obj.id);
               if (!hasProd) {
                 const prod = emptyProduction(obj.id, genId);
                 prod.prodStatus = "new";
+                if (saleDateFromContract) prod.saleDate = saleDateFromContract;
                 // create-if-missing — команда идемпотентна: если карточка уже появилась (гонка),
                 // не перезапишет её.
                 dependencyWrites.push(
                   mutateProductions({ type: "create-if-missing", objectId: obj.id, record: prod })
                     .then(prodRes => { if (!prodRes.committed) throw new Error("mutateProductions(create) не подтверждён"); }),
                 );
+              } else if (saleDateFromContract) {
+                // Карточка уже есть: заполняем дату продажи ТОЛЬКО если она пустая —
+                // выставленную вручную не перетираем.
+                const existingProd = productionsRef.current.find(p => p.objectId === obj.id);
+                if (existingProd && !existingProd.saleDate) {
+                  dependencyWrites.push(
+                    mutateProductions({
+                      type: "patch-card",
+                      objectId: obj.id,
+                      patch: { saleDate: saleDateFromContract },
+                      changeId: `bg_saledate_${obj.id}`,
+                    }).catch(e => console.warn("saleDate patch err", e)),
+                  );
+                }
               }
               // Финансовый проект и production-карточка независимы, поэтому создаём их
               // параллельно. Это заметно сокращает ожидание статуса «Договор подписан».
@@ -15418,6 +15117,30 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     </div>
                   )}
 
+                  {/* НОМЕР ДОГОВОРА — ключ, по которому к объекту цепляются деньги
+                      (у операции поле contractNo). Исторически он живёт в трёх местах:
+                      здесь, в документе-договоре и в финпроекте. Показываем, ОТКУДА
+                      он взят: пока источник «финпроект», объект держится на нём, и
+                      удалять раздел «Проекты» нельзя без потери связи с оплатами. */}
+                  {(() => {
+                    const resolved = contractNoOfObject(obj, contracts, finProjects);
+                    if (!resolved.number && !["signed","work","paused","done"].includes(unifiedStatusOf(obj))) return null;
+                    const srcLabel = { object:"указан вручную", contract:"из договора", project:"из финпроекта", none:"не найден" }[resolved.source];
+                    return (
+                      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <span style={{fontSize:11,color:"#64748b",fontWeight:700}}>Номер договора</span>
+                        <input className="fi" style={{width:"auto",minWidth:150,fontSize:12}}
+                          disabled={!canChangeStatus}
+                          placeholder={resolved.number || "не указан"}
+                          value={obj.contractNo||""}
+                          onChange={e=>saveObjField(obj,{contractNo:e.target.value})} />
+                        <span style={{fontSize:11,color:resolved.source==="project"?"#d97706":"#94a3b8"}}>
+                          {resolved.number ? `${resolved.number} · ${srcLabel}` : "по нему связываются оплаты"}
+                        </span>
+                      </div>
+                    );
+                  })()}
+
                   {/* Сводка клиента/объекта + сворачивание */}
                   <div onClick={()=>setObjInfoCollapsed(v=>!v)} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",padding:"2px 0",userSelect:"none"}}>
                     <span style={{fontSize:11,color:"#2563eb",fontWeight:700,letterSpacing:.5,textTransform:"uppercase"}}>👤 Клиент и объект</span>
@@ -15508,9 +15231,20 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         placeholder="Площадь, м²" />
                     </div>
                     <div>
-                      <input className="fi" style={{fontSize:12}} value={obj.manager||""} readOnly={!canAssignObject}
-                        onChange={e=>setObjLocal({manager:e.target.value})} onBlur={persistObj}
-                        placeholder="Менеджер" />
+                      {/* Менеджер — ТОЛЬКО выбор из сотрудников. Свободный ввод убран: раньше
+                          сюда попадал произвольный текст, и один человек дробился на несколько
+                          вариантов написания, ломая фильтр по сотруднику и аналитику.
+                          Старое значение, которого нет в списке, показываем отдельным пунктом,
+                          чтобы оно не потерялось молча при первом же открытии карточки. */}
+                      <select className="fi" style={{fontSize:12}} disabled={!canAssignObject}
+                        value={obj.manager||""}
+                        onChange={e=>{ setObjLocal({manager:e.target.value}); persistObj(); }}>
+                        <option value="">— менеджер не назначен —</option>
+                        {nonViewerUsers.map(u=>(<option key={u.id} value={u.name}>{u.name}</option>))}
+                        {obj.manager && !nonViewerUsers.some(u=>u.name===obj.manager) && (
+                          <option value={obj.manager}>{obj.manager} (нет в сотрудниках)</option>
+                        )}
+                      </select>
                     </div>
                     <div style={{gridColumn:"1 / -1"}}>
                       <textarea className="fi" rows={2} style={{fontSize:12,resize:"vertical",minHeight:44}} value={obj.note||""} readOnly={!canEdit}
@@ -15842,6 +15576,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     buildStagesFromEstimate={buildStagesFromEstimate}
                     finProjects={finProjects}
                     financeTx={financeTx}
+                    staffOptions={nonViewerUsers}
                     fmt={fmt}
                     genId={genId}
                     currentUser={currentUser}
@@ -16212,6 +15947,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           currentUser={currentUser}
           permissions={currentPermissions}
           presence={presence}
+          contractMigrationPlan={contractMigrationPlan}
+          onApplyContractMigration={applyContractMigration}
           rolePermissions={rolePermissions}
           onSaveRolePermissions={saveRolePermissions}
           onUsersChanged={async ()=>{
