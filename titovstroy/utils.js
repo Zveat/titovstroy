@@ -9,6 +9,159 @@
 // приложению для связки договоров/финпроектов/операций между собой. 
 export const normCN = (s) => String(s||"").trim().toLowerCase().replace(/[\s№#]/g,"");
 
+const normalizedSearchText = (value) => String(value ?? "")
+  .toLocaleLowerCase("ru-RU")
+  .replace(/[ё]/g, "е")
+  .replace(/[^a-zа-яәіңғүұқөһ0-9]+/gi, " ")
+  .trim();
+
+// Поиск не создаёт новую связь между сущностями: object/contract сюда передаются только после
+// точного сопоставления по objectId или номеру договора. Функция лишь расширяет видимые поля.
+export function financeProjectMatchesSearch(project, query, context = {}) {
+  const needle = normalizedSearchText(query);
+  if (!needle) return true;
+  const { object, contract } = context;
+  const fields = [
+    project?.id, project?.contractNo, project?.description, project?.comment, project?.name,
+    object?.id, object?.clientName, object?.name, object?.address, object?.clientPhone, object?.phone,
+    contract?.id, contract?.number, contract?.mainNumber, contract?.customer,
+    contract?.customerName, contract?.address, contract?.objectAddress,
+  ];
+  const haystack = normalizedSearchText(fields.filter(Boolean).join(" "));
+  if (haystack.includes(needle)) return true;
+  const compactNeedle = needle.replace(/\s+/g, "");
+  return compactNeedle.length >= 3 && haystack.replace(/\s+/g, "").includes(compactNeedle);
+}
+
+export function applyWorkPricingOverride(work = {}, override) {
+  const base = { ...work, tiers: Array.isArray(work?.tiers) ? work.tiers.map(t => ({ ...t })) : [] };
+  if (!override || typeof override !== "object" || Array.isArray(override)) return base;
+  const result = { ...base };
+  for (const key of ["fixedPrice", "cost", "margin", "priceFrom"]) {
+    if (override[key] !== undefined) result[key] = override[key];
+  }
+  if (override.tiers !== undefined) {
+    result.tiers = Array.isArray(override.tiers) ? override.tiers.map(t => ({ ...t })) : [];
+  }
+  return result;
+}
+
+export function createEstimatePricingSnapshot(work = {}) {
+  return {
+    fixedPrice: work.fixedPrice ?? null,
+    tiers: Array.isArray(work.tiers) ? work.tiers.map(t => ({ ...t })) : [],
+    cost: work.cost ?? null,
+    margin: work.margin ?? null,
+    priceFrom: work.priceFrom ?? null,
+  };
+}
+
+// Снимок в строке имеет приоритет над текущим прайсом. Legacy-строки без снимка продолжают
+// использовать переданную цену; при следующем сохранении сметы App закрепляет её в строке.
+export function resolveEstimateRowWork(work = {}, row = {}) {
+  const snapshot = row?.pricingSnapshot;
+  return snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+    ? applyWorkPricingOverride(work, snapshot)
+    : applyWorkPricingOverride(work, null);
+}
+
+export function sealLegacyEstimateRows(sourceRows = {}, catalog = []) {
+  const byKey = new Map();
+  for (const work of catalog || []) {
+    if (work?.code) byKey.set(work.code, work);
+    if (work?.name) byKey.set(work.name, work);
+  }
+  let changed = false;
+  const sealed = { ...(sourceRows || {}) };
+  for (const [key, row] of Object.entries(sourceRows || {})) {
+    if (!row || Number(row.qty || 0) <= 0 || row.pricingSnapshot) continue;
+    const work = byKey.get(key);
+    if (!work) continue;
+    sealed[key] = { ...row, pricingSnapshot: createEstimatePricingSnapshot(work) };
+    changed = true;
+  }
+  return changed ? sealed : sourceRows;
+}
+
+// Returns every estimate belonging to an object, including legacy additional estimates
+// linked only through parentId. The source array is never mutated.
+export function estimatesForObject(estimates = [], objectId) {
+  const list = (estimates || []).filter(e => e && !e.deletedAt);
+  if (!objectId) return [];
+  const selected = new Set(list.filter(e => e.objectId === objectId && e.id).map(e => e.id));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const e of list) {
+      if (!e?.id || selected.has(e.id) || !e.parentId || !selected.has(e.parentId)) continue;
+      if (e.objectId && e.objectId !== objectId) continue;
+      selected.add(e.id);
+      changed = true;
+    }
+  }
+  return list.filter(e => e.objectId === objectId || (e.id && selected.has(e.id)));
+}
+
+export function isDashboardActiveObject(object) {
+  return !!object && !object.deletedAt && (object.status === "work" || object.status === "signed");
+}
+
+// НОМЕР ДОГОВОРА ОБЪЕКТА — единая точка правды для связи «объект ↔ деньги».
+//
+// Операция в финансах цепляется к объекту по номеру договора (t.contractNo), а сам
+// номер исторически лежит в трёх разных местах. На боевой базе: у 9 объектов он есть
+// и в документе-договоре, и в финпроекте; у 23 — ТОЛЬКО в финпроекте (документ так и
+// не завели), и на них висит ~18,5 млн ₸ операций. Поэтому порядок поиска именно
+// такой и убирать из него финпроект нельзя, пока номера не перенесены на объекты.
+//
+//   1) собственное поле объекта — заполняется владельцем, главнее всего;
+//   2) основной клиентский договор-документ (доп. соглашения и подряд не в счёт);
+//   3) финпроект объекта — исторический носитель номера.
+//
+// source говорит, ОТКУДА взяли: по нему видно, какие объекты ещё держатся на
+// финпроекте, и он же нужен инструменту переноса.
+export function contractNoOfObject(object, contracts = [], finProjects = []) {
+  const empty = { number: "", source: "none" };
+  if (!object) return empty;
+
+  const own = String(object.contractNo || "").trim();
+  if (own) return { number: own, source: "object" };
+
+  const doc = (contracts || []).find(c => c && !c.deletedAt && c.objectId === object.id
+    && c.number && c.type !== "annex" && c.type !== "podryad" && c.type !== "podryad_annex");
+  if (doc) return { number: String(doc.number).trim(), source: "contract" };
+
+  const project = (finProjects || []).find(p => p && p.objectId === object.id && p.contractNo);
+  if (project) return { number: String(project.contractNo).trim(), source: "project" };
+
+  return empty;
+}
+
+export function findFinanceProjectForObject(object, contracts = [], finProjects = []) {
+  if (!object) return null;
+  const direct = finProjects.find(fp => fp?.objectId === object.id);
+  if (direct) return direct;
+
+  const numbers = new Set();
+  for (const key of ["contractNo", "contractNumber", "agreementNo", "number"]) {
+    const value = normCN(object[key]);
+    if (value) numbers.add(value);
+  }
+  for (const c of contracts) {
+    if (!c || c.deletedAt || c.objectId !== object.id || c.type === "podryad" || c.type === "podryad_annex") continue;
+    const number = normCN(c.number);
+    const mainNumber = normCN(c.mainNumber);
+    if (number) numbers.add(number);
+    if (mainNumber) numbers.add(mainNumber);
+  }
+  const byNumber = finProjects.find(fp => fp?.contractNo && numbers.has(normCN(fp.contractNo)));
+  if (byNumber) return byNumber;
+
+  // Имя, адрес и телефон не являются ключами связи. Старые записи разрешено
+  // сопоставлять только по точному номеру договора; новые всегда несут objectId.
+  return null;
+}
+
 export function isStaleApprovalObject(object, now = Date.now(), days = 14) {
   if (!object || object.deletedAt || object.status !== "approval") return false;
   const lastMovement = Number(object.updatedAt || object.createdAt || 0);
@@ -98,7 +251,7 @@ export const ROLE_DEFINITIONS = Object.freeze([
 
 const FULL_ADMIN_ACCESS = Object.freeze({
   dashboard:"all", objects:"all", calendar:"all", estimates:"all", production:"all",
-  documents:"all", analytics:"all", finance:"edit", admin:"full",
+  documents:"all", analytics:"all", masters:"all", mastersManage:"all", finance:"edit", admin:"full",
   objectCreate:"all", objectEdit:"all", objectDelete:"all", objectStatus:"all",
   objectAssign:"all", objectExport:"all", calendarEdit:"all",
   estimateCreate:"all", estimateEdit:"all", estimateDelete:"all", estimateStatus:"all",
@@ -107,13 +260,28 @@ const FULL_ADMIN_ACCESS = Object.freeze({
   productionClientAccess:"all",
   documentCreate:"all", documentEdit:"all", documentDelete:"all", documentExport:"all",
   docRepair:"all", docDesign:"all", docPodryad:"all", docAvr:"all",
+  templateView:"all", templateEdit:"all", templatePublish:"all", templateRollback:"all",
+  templateArchive:"all", documentInstanceEdit:"all",
   analyticsExport:"all",
   financeCreate:"all", financeEdit:"all", financeDelete:"all", financeExport:"all",
   financeDirectories:"all",
   adminUsers:"all", adminRoles:"all", adminClients:"all", adminContractors:"all",
   adminCatalog:"all", adminPrices:"all", adminBackups:"all", adminRestore:"all",
   adminAudit:"all", adminDbCheck:"all",
-  financialDetails:true, showLocked:false,
+  financialDetails:true, objectFinanceSummary:true, showLocked:false,
+  analyticsSales:true, analyticsBacklog:true, analyticsProduction:true,
+  analyticsFinance:true, analyticsQuality:true,
+});
+
+// Блоки аналитики — отдельные галочки видимости. Позволяют показать роли,
+// например, воронку и производство, но скрыть финансовый блок.
+const ANALYTICS_BLOCK_KEYS = [
+  "analyticsSales", "analyticsBacklog", "analyticsProduction", "analyticsFinance", "analyticsQuality",
+];
+
+const NO_TEMPLATE_ACCESS = Object.freeze({
+  templateView:"none", templateEdit:"none", templatePublish:"none", templateRollback:"none",
+  templateArchive:"none", documentInstanceEdit:"none",
 });
 
 // Централизованные пресеты ролей. Сохранённая в базе матрица накладывается поверх
@@ -121,9 +289,10 @@ const FULL_ADMIN_ACCESS = Object.freeze({
 export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
   admin: FULL_ADMIN_ACCESS,
   manager: {
+    ...NO_TEMPLATE_ACCESS,
     dashboard:"all", objects:"all", calendar:"all", estimates:"all", production:"all",
-    documents:"all", analytics:"all",
-    finance:"view", admin:"none", financialDetails:true,
+    documents:"all", analytics:"all", masters:"all", mastersManage:"none",
+    finance:"view", admin:"none", financialDetails:true, objectFinanceSummary:true,
     objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
     objectAssign:"none", objectExport:"all", calendarEdit:"none",
     estimateCreate:"all", estimateEdit:"all", estimateDelete:"all", estimateStatus:"all",
@@ -136,12 +305,14 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
     adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
     adminAudit:"none", adminDbCheck:"none",
+    analyticsSales:true, analyticsBacklog:true, analyticsProduction:true, analyticsFinance:true, analyticsQuality:true,
     showLocked:false,
   },
   sales_head: {
+    ...NO_TEMPLATE_ACCESS,
     dashboard:"all", objects:"all", calendar:"all", estimates:"all", production:"all",
-    documents:"all", analytics:"all",
-    finance:"none", admin:"none", financialDetails:false,
+    documents:"all", analytics:"all", masters:"all", mastersManage:"none",
+    finance:"none", admin:"none", financialDetails:false, objectFinanceSummary:false,
     objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
     objectAssign:"none", objectExport:"all", calendarEdit:"none",
     estimateCreate:"none", estimateEdit:"none", estimateDelete:"none", estimateStatus:"none",
@@ -154,12 +325,14 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
     adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
     adminAudit:"none", adminDbCheck:"none",
+    analyticsSales:true, analyticsBacklog:true, analyticsProduction:true, analyticsFinance:false, analyticsQuality:true,
     showLocked:true,
   },
   foreman: {
+    ...NO_TEMPLATE_ACCESS,
     dashboard:"own", objects:"all", calendar:"all", estimates:"none", production:"all",
-    documents:"none", analytics:"none",
-    finance:"none", admin:"none", financialDetails:true,
+    documents:"none", analytics:"none", masters:"all", mastersManage:"none",
+    finance:"none", admin:"none", financialDetails:true, objectFinanceSummary:false,
     objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
     objectAssign:"none", objectExport:"none", calendarEdit:"own",
     estimateCreate:"none", estimateEdit:"none", estimateDelete:"none", estimateStatus:"none",
@@ -172,12 +345,14 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
     adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
     adminAudit:"none", adminDbCheck:"none",
+    analyticsSales:false, analyticsBacklog:true, analyticsProduction:true, analyticsFinance:false, analyticsQuality:true,
     showLocked:false,
   },
   user: {
+    ...NO_TEMPLATE_ACCESS,
     dashboard:"own", objects:"own", calendar:"own", estimates:"own", production:"own",
-    documents:"own", analytics:"own",
-    finance:"none", admin:"none", financialDetails:false,
+    documents:"own", analytics:"own", masters:"all", mastersManage:"none",
+    finance:"none", admin:"none", financialDetails:false, objectFinanceSummary:false,
     objectCreate:"all", objectEdit:"own", objectDelete:"own", objectStatus:"own",
     objectAssign:"none", objectExport:"own", calendarEdit:"own",
     estimateCreate:"all", estimateEdit:"own", estimateDelete:"own", estimateStatus:"own",
@@ -190,12 +365,14 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
     adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
     adminAudit:"none", adminDbCheck:"none",
+    analyticsSales:true, analyticsBacklog:false, analyticsProduction:true, analyticsFinance:false, analyticsQuality:true,
     showLocked:true,
   },
   viewer: {
+    ...NO_TEMPLATE_ACCESS,
     dashboard:"none", objects:"all", calendar:"none", estimates:"none", production:"none",
-    documents:"none", analytics:"none",
-    finance:"none", admin:"none", financialDetails:false,
+    documents:"none", analytics:"none", masters:"all", mastersManage:"none",
+    finance:"none", admin:"none", financialDetails:false, objectFinanceSummary:false,
     objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
     objectAssign:"none", objectExport:"none", calendarEdit:"none",
     estimateCreate:"none", estimateEdit:"none", estimateDelete:"none", estimateStatus:"none",
@@ -208,18 +385,20 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
     adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
     adminAudit:"none", adminDbCheck:"none",
+    analyticsSales:true, analyticsBacklog:false, analyticsProduction:false, analyticsFinance:false, analyticsQuality:false,
     showLocked:false,
   },
 });
 
 const SCOPE_VALUES = new Set(["none", "own", "all"]);
 const SCOPE_KEYS = [
-  "dashboard","objects","calendar","estimates","production","documents","analytics",
+  "dashboard","objects","calendar","estimates","production","documents","analytics","masters","mastersManage",
   "objectCreate","objectEdit","objectDelete","objectStatus","objectAssign","objectExport",
   "calendarEdit",
   "estimateCreate","estimateEdit","estimateDelete","estimateStatus","estimatePublish","estimateExport",
   "productionEdit","productionStages","productionQuality","productionClientAccess",
   "documentCreate","documentEdit","documentDelete","documentExport","analyticsExport",
+  "templateView","templateEdit","templatePublish","templateRollback","templateArchive","documentInstanceEdit",
   "financeCreate","financeEdit","financeDelete","financeExport","financeDirectories",
   "adminUsers","adminRoles","adminClients","adminContractors","adminCatalog","adminPrices",
   "adminBackups","adminRestore","adminAudit","adminDbCheck",
@@ -298,7 +477,14 @@ export function normalizeRolePermissions(saved = {}) {
     if (!["none","view","edit"].includes(merged.finance)) merged.finance = base.finance;
     if (!["none","full"].includes(merged.admin)) merged.admin = base.admin;
     merged.financialDetails = merged.financialDetails === true;
+    merged.objectFinanceSummary = merged.objectFinanceSummary === true;
     merged.showLocked = merged.showLocked === true;
+    // Блоки аналитики: в старых сохранённых матрицах этих ключей нет. Берём значение
+    // из пресета роли, а не гасим в false — иначе после обновления у всех пропала бы
+    // вся аналитика, хотя право «Аналитика: просмотр» осталось.
+    for (const key of ANALYTICS_BLOCK_KEYS) {
+      merged[key] = (key in patch ? patch[key] : base[key]) === true;
+    }
     result[role.key] = merged;
   }
   // Главного администратора нельзя случайно лишить доступа к матрице и данным.
@@ -407,7 +593,53 @@ export function buildEstimatorDashboard({ objects = [], estimates = [], producti
 // Финансовый проект хранит деньги и ссылку objectId. Описательные поля всегда
 // вычисляются из объекта, производства, договора и актов, чтобы их нельзя было
 // независимо изменить в двух разделах.
-export function buildFinanceProjectView({ project = {}, object = null, production = null, contract = null, reports = [], status = null } = {}) {
+export function resolveFinanceProjectBudget({ project = {}, object = null, estimates = [], contractTotal = 0 } = {}) {
+  const linkedEstimates = object?.id
+    ? estimatesForObject((estimates || []).filter(e => e && !e.deletedAt), object.id)
+    : [];
+  const estimateTotal = linkedEstimates.reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0);
+  const calcMode = object?.financeCalcMode || project?.financeCalcMode || "estimates-v1";
+  const safeContractTotal = Math.max(0, Number(contractTotal) || 0);
+  if (calcMode === "contracts-v2") {
+    return { budget: safeContractTotal, source: "contracts-v2", estimateCount: linkedEstimates.length, calcMode };
+  }
+  if (estimateTotal > 0) return { budget: estimateTotal, source: "estimates", estimateCount: linkedEstimates.length };
+
+  if (safeContractTotal > 0) return { budget: safeContractTotal, source: "contracts", estimateCount: linkedEstimates.length };
+
+  return { budget: Number(project?.budget) || 0, source: "legacy", estimateCount: linkedEstimates.length };
+}
+
+export function sortProductionStages(stages = []) {
+  return (Array.isArray(stages) ? stages : [])
+    .map((stage, index) => ({ stage, index }))
+    .sort((a, b) => {
+      const ao = a.stage?.order == null ? 1e9 + a.index : Number(a.stage.order);
+      const bo = b.stage?.order == null ? 1e9 + b.index : Number(b.stage.order);
+      return ao - bo || a.index - b.index;
+    })
+    .map(item => item.stage);
+}
+
+export function moveProductionStage(stages = [], stageId, targetIndex) {
+  const sorted = sortProductionStages(stages).filter(Boolean);
+  const moving = sorted.find(stage => stage.id === stageId);
+  if (!moving) return sorted;
+  const category = moving.cat || "Прочее";
+  const sameCategory = sorted.filter(stage => (stage.cat || "Прочее") === category);
+  const from = sameCategory.findIndex(stage => stage.id === stageId);
+  if (from < 0 || sameCategory.length < 2) return sorted.map((stage, order) => ({ ...stage, order }));
+  const to = Math.max(0, Math.min(sameCategory.length - 1, Number(targetIndex) || 0));
+  const reorderedCategory = [...sameCategory];
+  const [item] = reorderedCategory.splice(from, 1);
+  reorderedCategory.splice(to, 0, item);
+  let categoryIndex = 0;
+  return sorted
+    .map(stage => (stage.cat || "Прочее") === category ? reorderedCategory[categoryIndex++] : stage)
+    .map((stage, order) => ({ ...stage, order }));
+}
+
+export function buildFinanceProjectView({ project = {}, object = null, production = null, contract = null, estimates = [], contractTotal = 0, reports = [], status = null } = {}) {
   const linked = !!object;
   const clientType = object?.clientType === "юр" ? "Юр лицо" : object ? "Физ лицо" : (project.client || "—");
   const legacyStatus = financeStatusMeta(linked ? (object.status || "new") : (project.rawStatus || project.status || ""));
@@ -419,6 +651,7 @@ export function buildFinanceProjectView({ project = {}, object = null, productio
   const contractSigned = linked
     ? !!(contract && contract.contractStatus === "signed")
     : project.contractSigned === "да";
+  const budgetView = resolveFinanceProjectBudget({ project, object, estimates, contractTotal });
   return {
     linked,
     object,
@@ -443,12 +676,187 @@ export function buildFinanceProjectView({ project = {}, object = null, productio
     factEndDate: production?.factEndDate || "",
     contractSigned,
     hasAvr,
+    budget: budgetView.budget,
+    budgetSource: budgetView.source,
+    estimateCount: budgetView.estimateCount,
   };
 }
 
-export const CATALOG_DEFAULTS = Object.freeze({ renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[] });
+export const CATALOG_DEFAULTS = Object.freeze({ renames:{}, catRenames:{}, subRenames:{}, hiddenCodes:[], hiddenSubs:[], hiddenCats:[], custom:[], suggestionRules:null });
 // Дефолты + текущее состояние + патч, одним местом.
 export const withCatalogOverrides = (cur, patch = {}) => ({ ...CATALOG_DEFAULTS, ...(cur||{}), ...patch });
+
+const roundSuggestionQty = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return Math.round(n * 100) / 100;
+};
+
+// Правила хранят только стабильные коды работ. Названия, цены и единицы всегда берутся
+// из актуального прайса, поэтому удалённая/скрытая позиция физически не попадёт в подсказки.
+export function normalizeEstimateSuggestionRules(rawRules, catalog = []) {
+  if (!Array.isArray(rawRules)) return [];
+  const byCode = new Map((catalog || []).filter(w => w?.code).map(w => [String(w.code), w]));
+  const seen = new Set();
+  const result = [];
+  for (const raw of rawRules) {
+    if (!raw || typeof raw !== "object") continue;
+    const sourceCode = String(raw.sourceCode || "").trim();
+    const targetCode = String(raw.targetCode || "").trim();
+    const pairKey = `${sourceCode}>${targetCode}`;
+    if (!sourceCode || !targetCode || sourceCode === targetCode || seen.has(pairKey)) continue;
+    if (!byCode.has(sourceCode) || !byCode.has(targetCode)) continue;
+    const multiplierRaw = raw.multiplier;
+    const multiplier = multiplierRaw === null || multiplierRaw === ""
+      ? null
+      : Number(multiplierRaw);
+    if (multiplier !== null && (!Number.isFinite(multiplier) || multiplier <= 0)) continue;
+    seen.add(pairKey);
+    result.push({
+      id: String(raw.id || pairKey),
+      sourceCode,
+      targetCode,
+      multiplier,
+      reason: String(raw.reason || "Связанная работа").trim() || "Связанная работа",
+      defaultSelected: raw.defaultSelected !== false,
+    });
+  }
+  return result;
+}
+
+// Базовый набор сопутствующих работ (согласован с владельцем). Правило активируется только
+// если ОБЕ работы реально есть в текущем прайсе (add проверяет коды), поэтому удалённая/
+// переименованная позиция просто выпадет. multiplier: 1 — количество подставляется (тот же
+// объём); null — вводится вручную (разные единицы / необязательная проверка). defaultSelected
+// (последний аргумент) — стоит ли галочка по умолчанию. Администратор может заменить весь набор
+// своими правилами в «Админка → Каталог».
+export function createDefaultEstimateSuggestionRules(catalog = []) {
+  const codes = new Set((catalog || []).map(w => String(w?.code || "")).filter(Boolean));
+  const rules = [];
+  const add = (sourceCode, targetCode, multiplier, reason, defaultSelected = true) => {
+    if (codes.has(sourceCode) && codes.has(targetCode)) {
+      rules.push({ sourceCode, targetCode, multiplier, reason, defaultSelected });
+    }
+  };
+
+  // — Полы: стяжка / наливной пол —
+  for (const sourceCode of ["FLOOR-004", "FLOOR-005", "FLOOR-006"]) {
+    add(sourceCode, "PREP-007", 1, "Перед стяжкой обычно грунтуют основание", true);
+    add(sourceCode, "FLOOR-002", 1, "Проверьте, требуется ли армирование стяжки", false);
+    add(sourceCode, "FLOOR-003", null, "Проверьте монтаж маяков и укажите погонные метры", false);
+  }
+  add("FLOOR-008", "PREP-007", 1, "Перед наливным полом обычно грунтуют основание", true);
+  // Стяжка «под керамзит» ⇄ засыпка керамзита (в обе стороны)
+  add("FLOOR-004", "FLOOR-007", 1, "Эта стяжка идёт по керамзиту — нужна засыпка", true);
+  add("FLOOR-007", "FLOOR-004", 1, "Под керамзит сверху заливают стяжку", true);
+
+  // — Радиаторы: монтаж ⇄ демонтаж —
+  add("SN-008", "DEM-026", 1, "Ставите новый радиатор — старый нужно демонтировать", true);
+  add("SN-009", "DEM-026", 1, "Ставите новый радиатор — старый нужно демонтировать", true);
+  add("DEM-026", "SN-008", 1, "После демонтажа радиатора обычно ставят новый", true);
+  add("DEM-026", "SN-009", 1, "Вариант монтажа радиатора с заменой труб/подводки", false);
+
+  // — Плитка: затирка швов (тот же объём) —
+  add("TL-001", "TL-005", 1, "После укладки плитки затирают швы — тот же объём", true);
+  add("TL-002", "TL-005", 1, "После укладки плитки затирают швы — тот же объём", true);
+  add("FLR-007", "TL-005", 1, "После укладки плитки на пол затирают швы", true);
+  add("FLR-006", "TL-005", 1, "После укладки керамогранита затирают швы", true);
+  add("TL-006", "TL-005", 1, "После монтажа фартука затирают швы", true);
+  add("TL-007", "TL-005", null, "Затирка швов бордюров — объём вручную (разные единицы)", false);
+  // Плитка: раскладка под 45° и гидроизоляция (необязательно, объём вручную)
+  add("TL-001", "TL-003", null, "Уточните, есть ли запил/раскладка под 45°", false);
+  add("TL-002", "TL-003", null, "Уточните, есть ли запил/раскладка под 45°", false);
+  add("TL-002", "FLOOR-001", null, "Проверьте гидроизоляцию пола (санузел)", false);
+  add("TL-001", "GID-003", null, "Проверьте гидроизоляцию стен под ванной/душем", false);
+  add("FLR-006", "FLOOR-001", null, "Проверьте гидроизоляцию пола (санузел)", false);
+  add("FLR-007", "FLOOR-001", null, "Проверьте гидроизоляцию пола (санузел)", false);
+
+  // — Стены: штукатурка → грунтовка / маяки / армирование —
+  add("WALL-003", "WALL-001", 1, "Перед штукатуркой грунтуют основание стен", true);
+  add("WALL-003", "WALL-002", 1, "Если штукатурите по маякам", false);
+  add("WALL-003", "WALL-005", 1, "Проверьте, нужно ли армирование сеткой", false);
+  add("WALL-004", "WALL-001", 1, "Перед штукатуркой грунтуют основание стен", true);
+  add("WALL-004", "WALL-002", 1, "Толстый слой обычно кладут по маякам", true);
+  add("WALL-004", "WALL-005", 1, "Толстый слой армируют сеткой", true);
+  // Стены: шпаклёвка → ошкуривание
+  add("WALL-006", "WALL-007", 1, "После шпаклёвки стены ошкуривают — тот же объём", true);
+
+  // — Покраска / декор стен: грунтовка основания —
+  add("PA-003", "PA-001", 1, "Перед покраской стены грунтуют — тот же объём", true);
+  add("PA-002", "PA-001", 1, "Перед покраской стены грунтуют — тот же объём", true);
+  add("DEC-001", "WALL-001", 1, "Под декоративную штукатурку грунтуют основание", false);
+  add("DEC-002", "WALL-001", 1, "Под микробетон грунтуют основание", false);
+  add("DEC-003", "WALL-001", 1, "Под венецианку грунтуют основание", false);
+  add("DEC-004", "WALL-001", 1, "Под акцентные стены грунтуют основание", false);
+  // Откосы под окна/двери → окраска откосов
+  add("WALL-009", "PA-004", 1, "Откосы под окна/двери потом красят", false);
+
+  // — Потолок: покраска / шпаклёвка → грунтовка, ошкуривание —
+  add("CEIL-001", "PREP-008", 1, "Перед покраской потолок грунтуют", true);
+  add("CEIL-001", "PREP-003", 1, "Проверьте, нужна ли шпаклёвка потолка", false);
+  add("PREP-003", "PREP-008", 1, "Перед шпаклёвкой потолок грунтуют", true);
+  add("PREP-003", "PREP-006", 1, "После шпаклёвки потолок ошкуривают", true);
+
+  // — Обои: подготовка стен —
+  add("OB-001", "PREP-002", 1, "Под обои стены подготавливают — тот же объём", true);
+
+  // — Двери: наличники / доборы, замена старой —
+  add("DR-001", "DR-004", 1, "К двери устанавливают наличники", true);
+  add("DR-002", "DR-004", 1, "К двери устанавливают наличники", true);
+  add("DR-001", "DR-003", 1, "Проверьте, нужны ли доборы к двери", false);
+  add("DR-002", "DR-003", 1, "Проверьте, нужны ли доборы к двери", false);
+  add("DEM-016", "DR-001", 1, "Сняли старую дверь — ставят новую", false);
+  add("DEM-017", "DR-001", 1, "Сняли старую дверь — ставят новую", false);
+
+  // — Напольные покрытия: подложка —
+  add("FLR-002", "FLRA-001", 1, "Под ламинат укладывают подложку — тот же объём", true);
+  add("FLR-003", "FLRA-001", 1, "Под кварц-винил укладывают подложку", true);
+  add("FLR-004", "FLRA-001", 1, "Под паркетную доску укладывают подложку", true);
+  add("FLR-005", "FLRA-001", 1, "Под инженерную доску укладывают подложку", true);
+
+  return normalizeEstimateSuggestionRules(rules, catalog);
+}
+
+export function resolveEstimateSuggestionRules(catalogSettings, catalog = []) {
+  const configured = catalogSettings?.suggestionRules;
+  return configured === null || configured === undefined
+    ? createDefaultEstimateSuggestionRules(catalog)
+    : normalizeEstimateSuggestionRules(configured, catalog);
+}
+
+// Функция только читает rows/catalog и возвращает рекомендации. Исходная смета не мутируется.
+export function buildEstimateSuggestions(rows = {}, catalog = [], rules = []) {
+  const byCode = new Map((catalog || []).filter(w => w?.code).map(w => [String(w.code), w]));
+  const normalizedRules = normalizeEstimateSuggestionRules(rules, catalog);
+  const resultByTarget = new Map();
+  for (const rule of normalizedRules) {
+    const source = byCode.get(rule.sourceCode);
+    const target = byCode.get(rule.targetCode);
+    if (!source || !target) continue;
+    const sourceRow = rows?.[source.code] || rows?.[source.name] || {};
+    const sourceQty = Number(sourceRow?.qty || 0);
+    if (!Number.isFinite(sourceQty) || sourceQty <= 0) continue;
+    const targetRow = rows?.[target.code] || rows?.[target.name] || {};
+    if (Number(targetRow?.qty || 0) > 0) continue;
+    const qty = rule.multiplier === null ? "" : roundSuggestionQty(sourceQty * rule.multiplier);
+    const suggestion = {
+      id: rule.id,
+      sourceCode: source.code,
+      sourceName: source.name,
+      targetCode: target.code,
+      targetName: target.name,
+      targetUnit: target.unit || "",
+      reason: rule.reason,
+      qty,
+      defaultSelected: rule.defaultSelected && qty !== "",
+    };
+    const previous = resultByTarget.get(target.code);
+    if (!previous || Number(suggestion.qty || 0) > Number(previous.qty || 0)) {
+      resultByTarget.set(target.code, suggestion);
+    }
+  }
+  return [...resultByTarget.values()];
+}
 
 // Группировка строк по (cat, sub) — категория › подкатегория, с сохранением порядка появления.
 export function groupData(works) {
@@ -566,29 +974,9 @@ export function computeIssues(data = {}, opts = {}) {
   const incByCN = {};
   for (const t of financeTx) { const cn = normCN(t.contractNo); if (!cn) continue; if (t.type==="income") incByCN[cn] = (incByCN[cn]||0) + (Number(t.amount)||0); }
 
-  // Связка финпроект ↔ объект (по objectId или по номеру договора объекта)
-  const contractsByObj = {}; for (const c of contracts) { if (c.objectId) (contractsByObj[c.objectId]||(contractsByObj[c.objectId]=[])).push(c); }
-  const finProjByObj = {}, finProjByCN = {};
-  for (const fp of finProjects) { if (fp.objectId) finProjByObj[fp.objectId] = fp; if (fp.contractNo) finProjByCN[normCN(fp.contractNo)] = fp; }
-  // Связка объект→финпроект — той же логикой, что matchFpToObject на экране
-  // «Финансы → Проекты»: objectId → номер договора объекта → фаззи по имени/телефону
-  // клиента. Без фаззи «подписан без финпроекта» ложно горел на объектах, где проект
-  // реально есть, но привязан к нему по имени/телефону (а не по objectId/номеру).
-  const _lc = s => String(s||"").toLowerCase().replace(/\s+/g," ").trim();
-  const finProjForObject = (o) => {
-    if (finProjByObj[o.id]) return finProjByObj[o.id];
-    for (const c of (contractsByObj[o.id]||[])) { const fp = finProjByCN[normCN(c.number)]; if (fp) return fp; }
-    const nm = _lc(o.clientName);
-    const ph = String(o.clientPhone||"").replace(/\D/g,"");
-    if ((nm && nm.length>=4) || (ph && ph.length>=6)) {
-      for (const fp of finProjects) {
-        const hay = _lc((fp.description||"")+" "+(fp.client||"")+" "+(fp.comment||""));
-        if (nm && nm.length>=4 && hay.includes(nm)) return fp;
-        if (ph && ph.length>=6 && hay.replace(/\D/g,"").includes(ph)) return fp;
-      }
-    }
-    return null;
-  };
+  // Связка финпроект ↔ объект: objectId, номера основного/доп. договоров,
+  // затем только однозначное совпадение по полному имени или телефону.
+  const finProjForObject = (o) => findFinanceProjectForObject(o, contracts, finProjects);
   const objIsActive = (o) => !["done","cancel","archive","refuse"].includes(o.status);
 
   // ─────────── TODAY: операционные (что разрулить сегодня) ───────────
@@ -623,19 +1011,21 @@ export function computeIssues(data = {}, opts = {}) {
       title:"Договор подписан, но нет финпроекта", detail:_objLabel(o),
       nav:{ object:o.id, tab:"finance" } });
   }
-  // (Долг клиента убран из «горит сегодня»: это дебиторка, а не операционная задача.
-  //  Дебиторку смотрят на экране «Финансы → Проекты», где ей и место.)
+  // Дебиторка не является срочной ошибкой и показывается в Финансах, а не в «Что горит».
   // 5. Замечания клиента (новые/необработанные из клиентского кабинета)
   for (const o of objects) {
     const p = prodByObj[o.id]; if (!p) continue;
     for (const d of (p.defects||[])) {
-      if (!d || d.source!=="client" || d.done) continue;
-      out.push({ id:`client-remark:${o.id}:${d.id||d.clientRemarkId||d.ts}`, group:"Клиенты", sev:"red", scope:"today", dismissable:true,
+      if (!d || d.source!=="client" || d.done || d.dashboardDismissedAt) continue;
+      const itemId = d.id || "";
+      out.push({ id:`client-remark:${o.id}:${itemId||d.clientRemarkId||d.ts}`, group:"Клиенты", sev:"red", scope:"today", dismissable:Boolean(itemId),
         title:"Замечание клиента", detail:`${_objLabel(o)}: «${String(d.text||"").slice(0,80)}»`,
+        dismissAction:itemId ? { type:"client-remark", objectId:o.id, itemId } : null,
+        dismissLabel:"Убрать с главной",
         nav:{ object:o.id, tab:"defects" } });
     }
   }
-  // 6. Близко к сдаче, но есть незакрытые этапы или долг
+  // 6. Близко к сдаче, но есть незакрытые этапы
   for (const o of objects) {
     if (o.status!=="work") continue;
     const p = prodByObj[o.id]; if (!p || !p.planEndDate || p.factEndDate) continue;
@@ -643,11 +1033,10 @@ export function computeIssues(data = {}, opts = {}) {
     const left = Math.round((d - today)/864e5);
     if (left < 0 || left > 7) continue;
     const openStages = (p.stages||[]).filter(s => (s.status||"todo")!=="done").length;
-    const fp = finProjForObject(o); const budget = fp?(Number(fp.budget)||0):0; const debt = fp?Math.max(0,budget-(incByCN[normCN(fp.contractNo)]||0)):0;
-    if (openStages===0 && debt<=0) continue;
+    if (openStages===0) continue;
     out.push({ id:`near-handover:${o.id}`, group:"Производство", sev:"yellow", scope:"today", dismissable:true,
       title:`Скоро сдача (${left===0?"сегодня":("через "+left+" дн")})`,
-      detail:`${_objLabel(o)}${openStages?` · ${openStages} незакрытых этапов`:""}${debt>0?` · долг ${_fmtT(debt)} ₸`:""}`,
+      detail:`${_objLabel(o)} · ${openStages} незакрытых этапов`,
       nav:{ object:o.id, tab:"info" } });
   }
 
@@ -694,7 +1083,7 @@ export function computeIssues(data = {}, opts = {}) {
   for (const o of objects) {
     const fp = finProjForObject(o); if (!fp) continue;
     const budget = Number(fp.budget)||0; if (budget<=0) continue;
-    const estSum = estimates.filter(e => e && e.objectId===o.id).reduce((s,e)=>s+(Number(e.total)||0),0);
+    const estSum = estimatesForObject(estimates, o.id).reduce((s,e)=>s+(Number(e.total)||0),0);
     if (estSum<=0) continue;
     const diff = Math.abs(budget-estSum);
     if (diff > budget*0.2) out.push({ id:`budget-mismatch:${o.id}`, group:"Финансы", sev:"yellow", scope:"check", dismissable:false,
@@ -878,14 +1267,16 @@ export function validateBackupSchema(snap, arraySpecs = []) {
   if (!isPlain(d)) return { ok: false, error: "data не является объектом" };
   const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
   for (const spec of arraySpecs) {
-    const key = spec.key, idKey = spec.idKey || "id";
+    const key = spec.key, idKey = spec.idKey === false ? null : (spec.idKey || "id");
     if (!has(d, key)) continue;
     const arr = d[key];
     if (!Array.isArray(arr)) return { ok: false, error: `раздел «${key}» должен быть массивом` };
     for (let i = 0; i < arr.length; i++) {
       const it = arr[i];
       if (!isPlain(it)) return { ok: false, error: `раздел «${key}»: элемент #${i} не является объектом (null/строка/число не допускаются)` };
-      if (it[idKey] == null || it[idKey] === "") return { ok: false, error: `раздел «${key}»: элемент #${i} без «${idKey}»` };
+      if (idKey && (it[idKey] == null || it[idKey] === "")) return { ok: false, error: `раздел «${key}»: элемент #${i} без «${idKey}»` };
+      const itemError = typeof spec.itemValidator === "function" ? spec.itemValidator(it, i) : null;
+      if (itemError) return { ok: false, error: `раздел «${key}»: ${itemError}` };
     }
   }
   for (const k of ["financeMeta", "catalog", "prices", "rolePermissions"]) {
@@ -1011,6 +1402,53 @@ export function discardOwnedDirty(store, uid, tab, mem, suffixes = { dirty: "__d
   return owned;
 }
 
+// Удаляет локальное зеркало после подтвержденной записи в облако. localStorage нужен как
+// durable-буфер только ПОКА запись не подтверждена; хранить там вечную полную копию каждого
+// рабочего списка нельзя — несколько больших разделов и истории бэкапов быстро выбивают квоту.
+// Чужой dirty-маркер блокирует очистку: его содержимое принадлежит другой вкладке/пользователю.
+export function clearSyncedLocalMirror(store, mem, base, canClearDirty, suffixes = { dirty: "__dirty", ts: "__wts" }) {
+  let marker = null;
+  try { marker = store.getItem(base + suffixes.dirty); } catch { return false; }
+  if (marker && !(canClearDirty && canClearDirty(marker))) return false;
+  try {
+    store.removeItem(base);
+    store.removeItem(base + suffixes.ts);
+    if (marker) store.removeItem(base + suffixes.dirty);
+  } catch { return false; }
+  if (mem) delete mem[base];
+  return true;
+}
+
+// Одноразовая/периодическая уборка старых зеркал, оставленных предыдущими версиями.
+// Рабочий ключ удаляем только при наличии __wts и отсутствии dirty. Технические *-backups
+// всегда можно убрать локально: их каноническая история находится в Firebase, это не черновики.
+// Durable production-draft/retry и служебные настройки без __wts функция не затрагивает.
+export function compactLocalStorageMirrors(store, mem, suffixes = { dirty: "__dirty", ts: "__wts" }) {
+  const keys = [];
+  try { for (let i = 0; i < store.length; i++) keys.push(store.key(i)); } catch { return { removed: [], preservedDirty: [] }; }
+  const bases = new Set();
+  for (const key of keys) {
+    if (!key) continue;
+    if (key.endsWith(suffixes.ts)) bases.add(key.slice(0, -suffixes.ts.length));
+    if (/^titovstroy-.*-backups$/.test(key)) bases.add(key);
+  }
+  const removed = [], preservedDirty = [];
+  for (const base of bases) {
+    const technicalBackup = /^titovstroy-.*-backups$/.test(base);
+    let marker = null;
+    try { marker = store.getItem(base + suffixes.dirty); } catch { continue; }
+    if (marker && !technicalBackup) { preservedDirty.push(base); continue; }
+    try {
+      store.removeItem(base);
+      store.removeItem(base + suffixes.ts);
+      if (technicalBackup) store.removeItem(base + suffixes.dirty);
+      if (mem) delete mem[base];
+      removed.push(base);
+    } catch { /* следующий вход попробует снова */ }
+  }
+  return { removed, preservedDirty };
+}
+
 // Legacy-маркер (голый timestamp/не-JSON из версий до владения) — владелец НЕИЗВЕСТЕН.
 export function isLegacyDirtyMarker(raw) {
   if (!raw) return false;
@@ -1033,6 +1471,50 @@ export function visibleDirtyKeys(keys, inFlight) {
     ? key => inFlight.has(key)
     : () => false;
   return list.filter(key => !has(key));
+}
+
+// Единые предустановки перехода из финансового дашборда в список операций.
+// Важно держать их вне JSX: цифра на карточке и открытый по ней список должны
+// строиться по одной и той же классификации.
+export function matchesFinanceOperationsPreset(tx, preset) {
+  if (!preset) return true;
+  const type = tx?.type || "";
+  const category = tx?.category || "";
+  const subcategory = tx?.subcategory || "";
+  const revenue = type === "income"
+    && !tx?.isAdvance
+    && category !== "Финансирование (не выручка)"
+    && category !== "Возврат займов и активов";
+  const pnlExpense = type === "expense"
+    && subcategory !== "Дивиденды учредителям"
+    && category !== "Финансовая деятельность (не расход)"
+    && category !== "Выданные займы и прочие активы";
+
+  if (preset === "revenue") return revenue;
+  if (preset === "cogs") return type === "expense" && category === "Прямые расходы (COGS / себестоимость)";
+  if (preset === "gross") return revenue || (type === "expense" && category === "Прямые расходы (COGS / себестоимость)");
+  if (preset === "pnl-expense") return pnlExpense;
+  if (preset === "net-profit") return revenue || pnlExpense;
+  if (preset === "dividends") return type === "expense" && subcategory === "Дивиденды учредителям";
+  if (preset === "cash-in") return type === "income";
+  if (preset === "cash-out") return type === "expense";
+  if (preset === "cash-flow") return type === "income" || type === "expense";
+  return true;
+}
+
+export function summarizeFinanceOperations(list) {
+  const result = { income:0, expense:0, transfer:0, net:0, counted:0, excluded:0 };
+  for (const tx of Array.isArray(list) ? list : []) {
+    if (!tx || tx.deletedAt) continue;
+    if (tx.included === false) { result.excluded += 1; continue; }
+    const amount = Number(tx.amount) || 0;
+    result.counted += 1;
+    if (tx.type === "income") result.income += amount;
+    else if (tx.type === "expense") result.expense += amount;
+    else if (tx.type === "transfer") result.transfer += amount;
+  }
+  result.net = result.income - result.expense;
+  return result;
 }
 // Можно ли УСПЕШНОЙ облачной записи этой вкладки снять dirty-метку ключа: свою или
 // отсутствующую — да. Legacy НЕ снимаем: обычное чтение намеренно не примешивает его локальную

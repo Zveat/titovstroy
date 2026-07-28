@@ -1,5 +1,112 @@
 import { describe, it, expect } from "vitest";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch } from "./utils.js";
+import * as utils from "./utils.js";
+import { contractNoOfObject, normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, normalizeEstimateSuggestionRules, createDefaultEstimateSuggestionRules, resolveEstimateSuggestionRules, buildEstimateSuggestions } from "./utils.js";
+import { documentTemplateBackupSpecs } from "./documents/documentTemplateBackup.js";
+
+describe("поиск финансового проекта по связанному объекту", () => {
+  const project = { id:"fp1", contractNo:"1019", description:"Ремонт квартиры", comment:"этап 1" };
+  const object = { id:"o1", clientName:"Сергей", address:"Аманжолова 33-47", clientPhone:"+7 777 123 45 67" };
+  const contract = { id:"c1", number:"№1019", customer:"Сергей Иванов" };
+
+  it("находит один и тот же проект по имени, адресу, телефону и номеру договора", () => {
+    expect(financeProjectMatchesSearch(project, "сергей", { object, contract })).toBe(true);
+    expect(financeProjectMatchesSearch(project, "аманжолова", { object, contract })).toBe(true);
+    expect(financeProjectMatchesSearch(project, "777123", { object, contract })).toBe(true);
+    expect(financeProjectMatchesSearch(project, "1019", { object, contract })).toBe(true);
+  });
+
+  it("не подменяет связь похожим, но посторонним объектом", () => {
+    expect(financeProjectMatchesSearch(project, "лариса", { object, contract })).toBe(false);
+  });
+});
+
+describe("переходы с финансового дашборда в операции", () => {
+  const revenue = { type:"income", amount:1000, category:"Оплата клиентов" };
+  const advance = { type:"income", amount:300, isAdvance:true, category:"Оплата клиентов" };
+  const financing = { type:"income", amount:5000, category:"Финансирование (не выручка)" };
+  const cogs = { type:"expense", amount:400, category:"Прямые расходы (COGS / себестоимость)" };
+  const opex = { type:"expense", amount:200, category:"Косвенные расходы (OPEX / операционные)" };
+  const dividend = { type:"expense", amount:100, category:"Финансовые расходы", subcategory:"Дивиденды учредителям" };
+
+  it("открывает выручку без авансов и финансирования", () => {
+    expect(matchesFinanceOperationsPreset(revenue, "revenue")).toBe(true);
+    expect(matchesFinanceOperationsPreset(advance, "revenue")).toBe(false);
+    expect(matchesFinanceOperationsPreset(financing, "revenue")).toBe(false);
+    expect(matchesFinanceOperationsPreset({ type:"income", category:"Возврат займов и активов" }, "revenue")).toBe(false);
+  });
+
+  it("для валовой прибыли показывает выручку и себестоимость, а для чистой — все P&L операции", () => {
+    expect([revenue, advance, financing, cogs, opex, dividend].filter(t=>matchesFinanceOperationsPreset(t, "gross"))).toEqual([revenue, cogs]);
+    expect([revenue, advance, financing, cogs, opex, dividend].filter(t=>matchesFinanceOperationsPreset(t, "net-profit"))).toEqual([revenue, cogs, opex]);
+    expect(matchesFinanceOperationsPreset({ type:"expense", category:"Финансовая деятельность (не расход)" }, "net-profit")).toBe(false);
+    expect(matchesFinanceOperationsPreset({ type:"expense", category:"Выданные займы и прочие активы" }, "net-profit")).toBe(false);
+  });
+
+  it("считает итоги только по учитываемым отфильтрованным операциям", () => {
+    expect(summarizeFinanceOperations([
+      revenue,
+      cogs,
+      { type:"transfer", amount:250 },
+      { type:"income", amount:999, included:false },
+    ])).toEqual({ income:1000, expense:400, transfer:250, net:600, counted:3, excluded:1 });
+  });
+});
+
+describe("цена и себестоимость из прайса", () => {
+  it("одновременно применяет новую цену и новую себестоимость", () => {
+    const work = { code:"W-1", fixedPrice:1000, cost:600, margin:0.4, tiers:[] };
+    expect(applyWorkPricingOverride(work, { fixedPrice:1400, cost:850 })).toMatchObject({
+      fixedPrice:1400,
+      cost:850,
+    });
+  });
+
+  it("не обнуляет поля, которых нет в переопределении", () => {
+    const work = { code:"W-1", fixedPrice:1000, cost:600, margin:0.4, tiers:[] };
+    expect(applyWorkPricingOverride(work, { fixedPrice:1400 })).toMatchObject({
+      fixedPrice:1400,
+      cost:600,
+      margin:0.4,
+    });
+  });
+
+  it("снимок старой сметы не меняется после следующего обновления прайса", () => {
+    const base = { code:"W-1", fixedPrice:1000, cost:600, tiers:[{ min:1, max:10, price:1000 }] };
+    const atCreation = applyWorkPricingOverride(base, { fixedPrice:1400, cost:850, tiers:[{ min:1, max:10, price:1400 }] });
+    const row = { qty:3, pricingSnapshot:createEstimatePricingSnapshot(atCreation) };
+    const laterPrice = applyWorkPricingOverride(base, { fixedPrice:2000, cost:1200, tiers:[{ min:1, max:10, price:2000 }] });
+
+    expect(resolveEstimateRowWork(laterPrice, row)).toMatchObject({ fixedPrice:1400, cost:850 });
+    expect(resolveEstimateRowWork(laterPrice, row).tiers[0].price).toBe(1400);
+  });
+
+  it("legacy-строка без снимка использует переданную базовую цену", () => {
+    const base = { code:"W-1", fixedPrice:1000, cost:600, tiers:[] };
+    expect(resolveEstimateRowWork(base, { qty:2 })).toMatchObject({ fixedPrice:1000, cost:600 });
+  });
+
+  it("снимок копирует диапазоны цен и не меняется вместе с исходным прайсом", () => {
+    const work = { fixedPrice:null, cost:500, tiers:[{ min:1, max:5, price:900 }] };
+    const snapshot = createEstimatePricingSnapshot(work);
+    work.tiers[0].price = 1700;
+    expect(snapshot.tiers[0].price).toBe(900);
+  });
+
+  it("при сохранении старой заполненной сметы фиксирует базовую историческую цену", () => {
+    const rows = { "W-1": { qty:2, complexity:"std" }, empty:{ qty:0 } };
+    const sealed = sealLegacyEstimateRows(rows, [{ code:"W-1", fixedPrice:1000, cost:600, tiers:[] }]);
+    expect(sealed["W-1"].pricingSnapshot).toMatchObject({ fixedPrice:1000, cost:600 });
+    expect(sealed.empty.pricingSnapshot).toBeUndefined();
+    expect(rows["W-1"].pricingSnapshot).toBeUndefined();
+  });
+
+  it("не переписывает уже сохранённый снимок старой сметы", () => {
+    const rows = { "W-1": { qty:2, pricingSnapshot:{ fixedPrice:1400, cost:850, tiers:[] } } };
+    const sealed = sealLegacyEstimateRows(rows, [{ code:"W-1", fixedPrice:2000, cost:1200, tiers:[] }]);
+    expect(sealed).toBe(rows);
+    expect(sealed["W-1"].pricingSnapshot).toMatchObject({ fixedPrice:1400, cost:850 });
+  });
+});
 
 describe("матрица прав ролей", () => {
   it("руководитель продаж видит все объекты и общую аналитику без финансовых деталей", () => {
@@ -10,6 +117,7 @@ describe("матрица прав ролей", () => {
       analytics:"all",
       finance:"none",
       financialDetails:false,
+      objectFinanceSummary:false,
       objectEdit:"none",
       objectCreate:"none",
       objectDelete:"none",
@@ -28,6 +136,41 @@ describe("матрица прав ролей", () => {
     expect(p.analyticsExport).toBe("own");
   });
 
+  it("шаблоны по умолчанию доступны только администратору", () => {
+    const admin = permissionsForRole({}, "admin");
+    expect(admin).toMatchObject({
+      templateView: "all",
+      templateEdit: "all",
+      templatePublish: "all",
+      templateRollback: "all",
+      templateArchive: "all",
+      documentInstanceEdit: "all",
+    });
+    for (const role of ["manager", "sales_head", "foreman", "user", "viewer"]) {
+      expect(permissionsForRole({}, role)).toMatchObject({
+        templateView: "none",
+        templateEdit: "none",
+        templatePublish: "none",
+        templateRollback: "none",
+        templateArchive: "none",
+        documentInstanceEdit: "none",
+      });
+    }
+  });
+
+  it("база мастеров видна по отдельному праву, а парсером по умолчанию управляет только администратор", () => {
+    const admin = permissionsForRole({}, "admin");
+    expect(admin).toMatchObject({ masters:"all", mastersManage:"all" });
+    for (const role of ["manager", "sales_head", "foreman", "user", "viewer"]) {
+      expect(permissionsForRole({}, role)).toMatchObject({ masters:"all", mastersManage:"none" });
+    }
+    const closed = permissionsForRole({ user:{ masters:"none" } }, "user");
+    expect(closed.masters).toBe("none");
+    expect(accessAllows(closed.masters, true)).toBe(false);
+    const manager = permissionsForRole({ manager:{ mastersManage:"all" } }, "manager");
+    expect(accessAllows(manager.mastersManage, true)).toBe(true);
+  });
+
   it("сохранённые настройки накладываются на пресет, но администратора нельзя заблокировать", () => {
     const matrix = normalizeRolePermissions({
       sales_head:{ objectEdit:"all", analytics:"own" },
@@ -36,6 +179,9 @@ describe("матрица прав ролей", () => {
     expect(matrix.sales_head.objectEdit).toBe("all");
     expect(matrix.sales_head.analytics).toBe("own");
     expect(matrix.sales_head.financialDetails).toBe(false);
+    expect(matrix.manager.objectFinanceSummary).toBe(true);
+    expect(matrix.foreman.objectFinanceSummary).toBe(false);
+    expect(matrix.admin.objectFinanceSummary).toBe(true);
     expect(matrix.admin).toMatchObject({ objects:"all", admin:"full", finance:"edit" });
     expect(matrix.admin.adminRoles).toBe("all");
     expect(matrix.admin.adminRestore).toBe("all");
@@ -216,6 +362,63 @@ describe("главная замерщика", () => {
 });
 
 describe("объекты без движения и единый источник данных финпроекта", () => {
+  it("заменяет старый импортный бюджет суммой всех актуальных смет связанного объекта", () => {
+    const result = resolveFinanceProjectBudget({
+      project:{ budget:333, objectId:"o1" },
+      object:{ id:"o1" },
+      estimates:[
+        { id:"e1", objectId:"o1", total:2_000_000 },
+        { id:"e2", objectId:"o1", total:436_000 },
+        { id:"other", objectId:"o2", total:9_999_999 },
+      ],
+      contractTotal:2_436_000,
+    });
+    expect(result).toEqual({ budget:2_436_000, source:"estimates", estimateCount:2 });
+  });
+
+  it("после удаления допсметы немедленно пересчитывает сумму, не сохраняя старый итог", () => {
+    const base = { project:{ budget:2_436_000 }, object:{ id:"o1" }, contractTotal:2_000_000 };
+    expect(resolveFinanceProjectBudget({ ...base, estimates:[{ id:"e1", objectId:"o1", total:2_000_000 }, { id:"e2", objectId:"o1", total:436_000 }] }).budget).toBe(2_436_000);
+    expect(resolveFinanceProjectBudget({ ...base, estimates:[{ id:"e1", objectId:"o1", total:2_000_000 }, { id:"e2", objectId:"o1", total:436_000, deletedAt:1 }] }).budget).toBe(2_000_000);
+  });
+
+  it("учитывает старые дополнительные сметы, связанные через parentId", () => {
+    expect(resolveFinanceProjectBudget({
+      project:{ budget:333 },
+      object:{ id:"o1" },
+      estimates:[
+        { id:"main", objectId:"o1", total:2_000_000 },
+        { id:"extra", parentId:"main", total:436_000 },
+      ],
+    })).toMatchObject({ budget:2_436_000, estimateCount:2 });
+  });
+
+  it("использует договор без смет и legacy-сумму только без актуальных данных объекта", () => {
+    expect(resolveFinanceProjectBudget({ project:{ budget:333 }, object:{ id:"o1" }, estimates:[], contractTotal:2_436_000 })).toMatchObject({ budget:2_436_000, source:"contracts" });
+    expect(resolveFinanceProjectBudget({ project:{ budget:333 } })).toMatchObject({ budget:333, source:"legacy" });
+  });
+
+  it("не меняет схему расчёта существующих объектов без версии", () => {
+    expect(resolveFinanceProjectBudget({
+      project:{ budget:333 }, object:{ id:"o1" },
+      estimates:[{ id:"e1", objectId:"o1", total:2_000_000 }], contractTotal:2_436_000,
+    })).toMatchObject({ budget:2_000_000, source:"estimates" });
+  });
+
+  it("для новых objects contracts-v2 считает бюджет только по договорам", () => {
+    expect(resolveFinanceProjectBudget({
+      project:{ budget:333 }, object:{ id:"o1", financeCalcMode:"contracts-v2" },
+      estimates:[{ id:"e1", objectId:"o1", total:9_999_999 }], contractTotal:2_436_000,
+    })).toMatchObject({ budget:2_436_000, source:"contracts-v2", calcMode:"contracts-v2" });
+  });
+
+  it("для contracts-v2 без договора не подставляет смету или старый budget", () => {
+    expect(resolveFinanceProjectBudget({
+      project:{ budget:333 }, object:{ id:"o1", financeCalcMode:"contracts-v2" },
+      estimates:[{ id:"e1", objectId:"o1", total:9_999_999 }], contractTotal:0,
+    })).toMatchObject({ budget:0, source:"contracts-v2" });
+  });
+
   it("считает зависшим только живой объект на согласовании без движения 14+ дней", () => {
     const now = new Date("2026-07-18T00:00:00Z").getTime();
     expect(isStaleApprovalObject({ status:"approval", updatedAt:now-14*86400000 }, now)).toBe(true);
@@ -253,6 +456,30 @@ describe("объекты без движения и единый источни�
     expect(isActiveFinanceStatus("в работе")).toBe(true);
     expect(isActiveFinanceStatus("выполнен")).toBe(false);
     expect(isActiveFinanceStatus("archive")).toBe(false);
+  });
+});
+
+describe("порядок этапов производства", () => {
+  const stages = [
+    { id:"a", cat:"Черновые", order:2 },
+    { id:"b", cat:"Черновые", order:0 },
+    { id:"c", cat:"Чистовые", order:1 },
+    { id:"d", cat:"Черновые", order:3 },
+  ];
+
+  it("сортирует одинаково для карточки и клиентского кабинета", () => {
+    expect(sortProductionStages(stages).map(s => s.id)).toEqual(["b", "c", "a", "d"]);
+  });
+
+  it("переносит этап сразу на выбранную позицию внутри раздела", () => {
+    const moved = moveProductionStage(stages, "d", 0);
+    expect(moved.filter(s => s.cat === "Черновые").map(s => s.id)).toEqual(["d", "b", "a"]);
+    expect(sortProductionStages(moved).map(s => s.id)).toEqual(moved.map(s => s.id));
+  });
+
+  it("не меняет порядок других разделов", () => {
+    const moved = moveProductionStage(stages, "a", 0);
+    expect(moved.filter(s => s.cat === "Чистовые").map(s => s.id)).toEqual(["c"]);
   });
 });
 
@@ -338,6 +565,52 @@ describe("validateBackupSchema — проверка структуры и СОД
   });
   it("отсутствующие необязательные разделы — это ОК (частичный бэкап)", () => {
     expect(validateBackupSchema({ _type: "titovstroy-backup", data: { objects: [{ id: "o1" }] } }, SPECS).ok).toBe(true);
+  });
+
+  const templateStore = templates => ({ schemaVersion: 1, templates });
+  const validTemplate = () => ({
+    id: "repair",
+    type: "repair_fiz",
+    status: "published",
+    activeVersionId: "repair:v1",
+    draft: null,
+    versions: [{
+      id: "repair:v1",
+      templateId: "repair",
+      versionNumber: 1,
+      contentJson: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Текст" }] }] },
+      publishedAt: 1,
+    }],
+  });
+  const validSnapshot = () => ({
+    documentId: "document-1",
+    objectId: "object-1",
+    templateVersionId: "repair:v1",
+    schemaVersion: 1,
+    contentSnapshot: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Текст" }] }] },
+    createdAt: 1,
+  });
+
+  it("глубоко проверяет шаблоны и снимки документов", () => {
+    const specs = [...SPECS, ...documentTemplateBackupSpecs()];
+    const backup = good();
+    backup.data.documentTemplates = [templateStore([validTemplate()])];
+    backup.data.documentSnapshots = [validSnapshot()];
+    expect(validateBackupSchema(backup, specs).ok).toBe(true);
+  });
+
+  it("отклоняет битые версии шаблонов до любой записи", () => {
+    const specs = [...SPECS, ...documentTemplateBackupSpecs()];
+    const backup = good();
+    backup.data.documentTemplates = [templateStore([{ ...validTemplate(), versions: "broken" }])];
+    expect(validateBackupSchema(backup, specs).ok).toBe(false);
+  });
+
+  it("отклоняет снимок без неизменяемого содержимого", () => {
+    const specs = [...SPECS, ...documentTemplateBackupSpecs()];
+    const backup = good();
+    backup.data.documentSnapshots = [{ ...validSnapshot(), contentSnapshot: null }];
+    expect(validateBackupSchema(backup, specs).ok).toBe(false);
   });
 });
 
@@ -518,6 +791,93 @@ describe("withCatalogOverrides — мердж дефолтов каталога"
   });
 });
 
+describe("умные подсказки сметы", () => {
+  const catalog = [
+    { code:"FLOOR-005", name:"Стяжка ц/п 5–8 см", unit:"м²" },
+    { code:"PREP-007", name:"Грунтовка пола", unit:"м²" },
+    { code:"FLOOR-002", name:"Армирование сеткой (пол)", unit:"м²" },
+    { code:"FLOOR-003", name:"Монтаж маяков (пол)", unit:"м.п." },
+  ];
+
+  it("предлагает только существующие в текущем прайсе работы", () => {
+    const rules = normalizeEstimateSuggestionRules([
+      { sourceCode:"FLOOR-005", targetCode:"PREP-007", multiplier:1 },
+      { sourceCode:"FLOOR-005", targetCode:"DELETED", multiplier:1 },
+    ], catalog);
+    expect(rules).toHaveLength(1);
+    expect(rules[0].targetCode).toBe("PREP-007");
+  });
+
+  it("не предлагает уже добавленную позицию и не мутирует смету", () => {
+    const rows = { "FLOOR-005":{ qty:45.7 }, "PREP-007":{ qty:45.7 } };
+    const before = JSON.stringify(rows);
+    const result = buildEstimateSuggestions(rows, catalog, [
+      { sourceCode:"FLOOR-005", targetCode:"PREP-007", multiplier:1 },
+    ]);
+    expect(result).toEqual([]);
+    expect(JSON.stringify(rows)).toBe(before);
+  });
+
+  it("рассчитывает количество, но ручную единицу оставляет пустой", () => {
+    const result = buildEstimateSuggestions({ "FLOOR-005":{ qty:45.7 } }, catalog, [
+      { sourceCode:"FLOOR-005", targetCode:"PREP-007", multiplier:1, defaultSelected:true },
+      { sourceCode:"FLOOR-005", targetCode:"FLOOR-003", multiplier:null, defaultSelected:true },
+    ]);
+    expect(result.find(x=>x.targetCode==="PREP-007")).toMatchObject({ qty:45.7, defaultSelected:true });
+    expect(result.find(x=>x.targetCode==="FLOOR-003")).toMatchObject({ qty:"", defaultSelected:false });
+  });
+
+  it("убирает дубли одной рекомендации от нескольких исходных работ", () => {
+    const result = buildEstimateSuggestions({ A:{qty:10}, B:{qty:20} }, [
+      {code:"A",name:"A"}, {code:"B",name:"B"}, {code:"T",name:"T"},
+    ], [
+      {sourceCode:"A",targetCode:"T",multiplier:1},
+      {sourceCode:"B",targetCode:"T",multiplier:1},
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ targetCode:"T", qty:20 });
+  });
+
+  it("базовые правила появляются только для реально существующих кодов", () => {
+    expect(createDefaultEstimateSuggestionRules(catalog).map(x=>x.targetCode).sort()).toEqual([
+      "FLOOR-002", "FLOOR-003", "PREP-007",
+    ]);
+    expect(createDefaultEstimateSuggestionRules(catalog.filter(w=>w.code!=="PREP-007")).some(x=>x.targetCode==="PREP-007")).toBe(false);
+  });
+
+  it("пустой сохранённый список отключает подсказки, null включает базовые", () => {
+    expect(resolveEstimateSuggestionRules({ suggestionRules:[] }, catalog)).toEqual([]);
+    expect(resolveEstimateSuggestionRules({ suggestionRules:null }, catalog).length).toBeGreaterThan(0);
+  });
+
+  it("расширенный набор: сопутствующие работы появляются при наличии обоих кодов", () => {
+    const richCatalog = [
+      { code:"SN-008", name:"Монтаж радиатора отопления", unit:"шт" },
+      { code:"DEM-026", name:"Демонтаж радиатора отопления", unit:"шт" },
+      { code:"TL-002", name:"Укладка плитки на пол", unit:"м²" },
+      { code:"TL-005", name:"Затирка швов", unit:"м²" },
+      { code:"WALL-003", name:"Штукатурка стен (1–3 см)", unit:"м²" },
+      { code:"WALL-001", name:"Грунтовка основания стен", unit:"м²" },
+      { code:"FLOOR-004", name:"Стяжка ц/п до 80 мм (под керамзит)", unit:"м²" },
+      { code:"FLOOR-007", name:"Засыпка керамзита до 100 мм", unit:"м²" },
+    ];
+    const pairs = new Set(
+      createDefaultEstimateSuggestionRules(richCatalog).map(r => `${r.sourceCode}>${r.targetCode}`)
+    );
+    // монтаж радиатора ⇄ демонтаж (в обе стороны)
+    expect(pairs.has("SN-008>DEM-026")).toBe(true);
+    expect(pairs.has("DEM-026>SN-008")).toBe(true);
+    // плитка → затирка (тот же объём), штукатурка → грунтовка
+    expect(pairs.has("TL-002>TL-005")).toBe(true);
+    expect(pairs.has("WALL-003>WALL-001")).toBe(true);
+    // стяжка под керамзит ⇄ засыпка керамзита
+    expect(pairs.has("FLOOR-004>FLOOR-007")).toBe(true);
+    expect(pairs.has("FLOOR-007>FLOOR-004")).toBe(true);
+    // код без пары в прайсе не даёт правил (нет цели SN-009)
+    expect([...pairs].some(p => p.endsWith(">SN-009"))).toBe(false);
+  });
+});
+
 describe("groupData — группировка по категории/подкатегории", () => {
   it("группирует работы по cat → sub, сохраняя порядок", () => {
     const works = [
@@ -595,6 +955,63 @@ describe("mergeFinMeta — дозаполнение дефолтных кате�
   });
 });
 
+describe("findFinanceProjectForObject — строгая связь по ID", () => {
+  const object = { id:"obj-sergey", clientName:"Сергей", clientPhone:"87000000000" };
+  const projects = [
+    { id:"wrong", description:"Сергей, Металлистов", contractNo:"777", budget:310000 },
+    { id:"right", contractNo:"1019", budget:3994954 },
+  ];
+
+  it("не выбирает чужой проект по совпавшему имени", () => {
+    expect(findFinanceProjectForObject(object, [], projects)).toBeNull();
+  });
+
+  it("находит старый проект по точному номеру договора", () => {
+    const contracts = [{ id:"c1", objectId:object.id, number:"№1019", type:"repair_fiz" }];
+    expect(findFinanceProjectForObject(object, contracts, projects)?.id).toBe("right");
+  });
+
+  it("objectId имеет высший приоритет", () => {
+    const linked = [{ id:"direct", objectId:object.id, contractNo:"other" }, ...projects];
+    expect(findFinanceProjectForObject(object, [], linked)?.id).toBe("direct");
+  });
+});
+
+describe("contractNoOfObject — по нему деньги цепляются к объекту", () => {
+  const obj = { id: "o1" };
+  const doc = { id: "c1", objectId: "o1", number: "№ 1013" };
+  const proj = { id: "p1", objectId: "o1", contractNo: "0919#154" };
+
+  it("своё поле объекта главнее договора и финпроекта", () => {
+    const r = contractNoOfObject({ ...obj, contractNo: "ручной-1" }, [doc], [proj]);
+    expect(r).toEqual({ number: "ручной-1", source: "object" });
+  });
+
+  it("нет своего — берём основной договор-документ", () => {
+    expect(contractNoOfObject(obj, [doc], [proj])).toEqual({ number: "№ 1013", source: "contract" });
+  });
+
+  it("нет документа — берём финпроект (на боевой базе так у 23 объектов)", () => {
+    expect(contractNoOfObject(obj, [], [proj])).toEqual({ number: "0919#154", source: "project" });
+  });
+
+  it("доп. соглашение и подряд номером объекта не считаются", () => {
+    const annex = { id: "c2", objectId: "o1", number: "№ 2", type: "annex" };
+    const podryad = { id: "c3", objectId: "o1", number: "№ 1012", type: "podryad" };
+    expect(contractNoOfObject(obj, [annex, podryad], []).source).toBe("none");
+    expect(contractNoOfObject(obj, [annex, podryad], [proj]).source).toBe("project");
+  });
+
+  it("удалённый договор не берётся", () => {
+    expect(contractNoOfObject(obj, [{ ...doc, deletedAt: 1 }], []).source).toBe("none");
+  });
+
+  it("пусто везде — источник «none», а не пустая строка молча", () => {
+    expect(contractNoOfObject(obj, [], [])).toEqual({ number: "", source: "none" });
+    expect(contractNoOfObject(null, [], [])).toEqual({ number: "", source: "none" });
+  });
+});
+
 describe("computeIssues — детектор «Что горит» / «Проверка базы»", () => {
   const DAY = 864e5;
   const now = new Date("2026-07-09T12:00:00Z").getTime();
@@ -658,33 +1075,26 @@ describe("computeIssues — детектор «Что горит» / «Пров�
     expect(find(ok, "signed-nofin").length).toBe(0); // связался, несмотря на «№»
   });
 
-  it("подписан без финпроекта НЕ горит, если проект связан по имени клиента (фаззи)", () => {
-    const ok = computeIssues({
-      objects:[{ id:"o1", status:"signed", clientName:"Сергей Аманжолов", clientPhone:"+7 701 555 12 34" }],
-      finProjects:[{ id:"fp1", description:"Ремонт — Сергей Аманжолов, Абая 33", budget:1000 }],
-    }, { now });
-    expect(find(ok, "signed-nofin").length).toBe(0); // нашёлся по имени, как на экране Финансы
-    // и по телефону, если имя в описании не совпало (формат цифр совпадает, как в приложении)
-    const okPhone = computeIssues({
-      objects:[{ id:"o2", status:"signed", clientName:"Абв", clientPhone:"+7 701 555 12 34" }],
-      finProjects:[{ id:"fp2", description:"Проект, тел. +7-701-555-12-34", budget:1000 }],
-    }, { now });
-    expect(find(okPhone, "signed-nofin").length).toBe(0);
-    // а если совсем не связать — горит
-    const bad = computeIssues({
-      objects:[{ id:"o3", status:"signed", clientName:"Пётр Уникальный" }],
-      finProjects:[{ id:"fp3", description:"Совсем другой клиент", budget:1000 }],
-    }, { now });
-    expect(find(bad, "signed-nofin:o3").length).toBe(1);
-  });
-
-  it("долг клиента убран из «горит сегодня» (это дебиторка, а не операционная задача)", () => {
+  it("дебиторка не попадает в оперативную панель «Что горит»", () => {
     const issues = computeIssues({
       objects:[{ id:"o1", status:"work", clientName:"Клиент" }],
       finProjects:[{ id:"fp1", objectId:"o1", contractNo:"1012", budget:1000000 }],
       financeTx:[{ id:"t1", type:"income", amount:400000, contractNo:"1012" }],
     }, { now });
-    expect(find(issues, "debt:").length).toBe(0); // долг больше не попадает в «горит»
+    const debt = find(issues, "debt:fp1");
+    expect(debt.length).toBe(0);
+  });
+
+  it("не создаёт предупреждение о дебиторке даже при исключённых операциях", () => {
+    const issues = computeIssues({
+      finProjects:[{ id:"fp1", contractNo:"1012", budget:1000, rawStatus:"активен" }],
+      financeTx:[
+        { id:"t1", type:"income", amount:1000, contractNo:"1012", included:false },
+        { id:"t2", type:"income", amount:500, contractNo:"1012", deletedAt: now },
+      ],
+    }, { now });
+    const debt = find(issues, "debt:fp1");
+    expect(debt.length).toBe(0);
   });
 
   it("замечание клиента (source=client, не done) → проблема; закрытое — нет", () => {
@@ -694,9 +1104,13 @@ describe("computeIssues — детектор «Что горит» / «Пров�
         { id:"d1", text:"Скол на плитке", source:"client", done:false },
         { id:"d2", text:"Своё внутреннее", source:"client", done:true },
         { id:"d3", text:"Не от клиента", source:"internal", done:false },
+        { id:"d4", text:"Убрано администратором с главной", source:"client", done:false, dashboardDismissedAt:now - 1 },
       ] }],
     }, { now });
-    expect(find(issues, "client-remark:o1").length).toBe(1);
+    const remarks = find(issues, "client-remark:o1");
+    expect(remarks.length).toBe(1);
+    expect(remarks[0].dismissAction).toEqual({ type:"client-remark", objectId:"o1", itemId:"d1" });
+    expect(remarks[0].dismissLabel).toBe("Убрать с главной");
   });
 
   it("дубли номеров договоров → red в check", () => {
@@ -1006,5 +1420,66 @@ describe("mayUseLocalCopy — чтение локальной копии тол�
     expect(mayUseLocalCopy(makeDirtyMarker("userA", "tab1"), "userA", "tab1")).toBe(true);  // своя
     expect(mayUseLocalCopy(null, "userA", "tab1")).toBe(true);                              // нет dirty — обычный кеш
     expect(mayUseLocalCopy(String(Date.now()), "userA", "tab1")).toBe(false);               // legacy: только ручная recovery-выгрузка
+  });
+});
+
+describe("compactLocalStorageMirrors — освобождение места без потери черновиков", () => {
+  it("удаляет подтвержденные зеркала и их timestamps", () => {
+    const ls = fakeLS();
+    const mem = { "titovstroy-estimates": "cached" };
+    ls.setItem("titovstroy-estimates", "cached");
+    ls.setItem("titovstroy-estimates__wts", "123");
+
+    const result = utils.compactLocalStorageMirrors(ls, mem);
+
+    expect(result.removed).toContain("titovstroy-estimates");
+    expect(ls.getItem("titovstroy-estimates")).toBeNull();
+    expect(ls.getItem("titovstroy-estimates__wts")).toBeNull();
+    expect(mem["titovstroy-estimates"]).toBeUndefined();
+  });
+
+  it("сохраняет рабочее значение, если у него есть dirty-маркер", () => {
+    const ls = fakeLS();
+    const marker = makeDirtyMarker("u1", "tab1");
+    ls.setItem("titovstroy-finance-tx", "unsynced");
+    ls.setItem("titovstroy-finance-tx__wts", "123");
+    ls.setItem("titovstroy-finance-tx__dirty", marker);
+
+    const result = utils.compactLocalStorageMirrors(ls, {});
+
+    expect(result.preservedDirty).toEqual(["titovstroy-finance-tx"]);
+    expect(ls.getItem("titovstroy-finance-tx")).toBe("unsynced");
+    expect(ls.getItem("titovstroy-finance-tx__dirty")).toBe(marker);
+  });
+
+  it("технические backup-ключи удаляет локально даже со старым dirty-маркером", () => {
+    const ls = fakeLS();
+    ls.setItem("titovstroy-workspace-backups", "huge-history");
+    ls.setItem("titovstroy-workspace-backups__wts", "123");
+    ls.setItem("titovstroy-workspace-backups__dirty", "legacy");
+    ls.setItem("titovstroy-production-draft-v2:u1:o1", "real-draft");
+
+    utils.compactLocalStorageMirrors(ls, {});
+
+    expect(ls.getItem("titovstroy-workspace-backups")).toBeNull();
+    expect(ls.getItem("titovstroy-workspace-backups__dirty")).toBeNull();
+    expect(ls.getItem("titovstroy-production-draft-v2:u1:o1")).toBe("real-draft");
+  });
+
+  it("после подтвержденной облачной записи удаляет зеркало, но не чужой dirty", () => {
+    const ls = fakeLS();
+    const mem = { clean: "value", foreign: "other-value" };
+    ls.setItem("clean", "value");
+    ls.setItem("clean__wts", "123");
+    ls.setItem("clean__dirty", makeDirtyMarker("u1", "tab1"));
+    ls.setItem("foreign", "other-value");
+    ls.setItem("foreign__wts", "123");
+    ls.setItem("foreign__dirty", makeDirtyMarker("u2", "tab2"));
+
+    expect(utils.clearSyncedLocalMirror(ls, mem, "clean", raw => mayClearDirtyOnSuccess(raw, "u1", "tab1"))).toBe(true);
+    expect(utils.clearSyncedLocalMirror(ls, mem, "foreign", raw => mayClearDirtyOnSuccess(raw, "u1", "tab1"))).toBe(false);
+    expect(ls.getItem("clean")).toBeNull();
+    expect(ls.getItem("clean__dirty")).toBeNull();
+    expect(ls.getItem("foreign")).toBe("other-value");
   });
 });
