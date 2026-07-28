@@ -501,6 +501,70 @@ describe("оплата этапов производства", () => {
       { id:"invalid-paid", status:"done", paid:true, priceClient:-5000 },
     ])).toBe(150000);
   });
+
+  it("берёт бюджет финансового проекта, если он задан", () => {
+    expect(utils.resolveProgressBudget(500000, [
+      { priceClient: 100000 },
+      { priceClient: 200000 },
+    ])).toBe(500000);
+  });
+
+  it("восстанавливает бюджет личного кабинета из актуальных этапов", () => {
+    expect(utils.resolveProgressBudget(0, [
+      { priceClient: 100000 },
+      { priceClient: "250000" },
+      { priceClient: -1000 },
+      { priceClient: "не число" },
+    ])).toBe(350000);
+  });
+});
+
+describe("автообновление личного кабинета", () => {
+  it("обновляет видимый кабинет по таймеру и при возврате на вкладку", async () => {
+    const calls = [];
+    const listeners = new Map();
+    const doc = {
+      hidden: false,
+      addEventListener: (name, fn) => listeners.set(name, fn),
+      removeEventListener: (name, fn) => {
+        if (listeners.get(name) === fn) listeners.delete(name);
+      },
+    };
+    let intervalCallback;
+    let clearedTimer;
+    const stop = utils.startPublicProgressAutoRefresh(
+      opts => calls.push(opts),
+      {
+        doc,
+        intervalMs: 10000,
+        setIntervalFn: fn => {
+          intervalCallback = fn;
+          return 77;
+        },
+        clearIntervalFn: timer => {
+          clearedTimer = timer;
+        },
+      },
+    );
+
+    intervalCallback();
+    await Promise.resolve();
+    expect(calls).toEqual([{ isRefresh: true }]);
+
+    doc.hidden = true;
+    intervalCallback();
+    await Promise.resolve();
+    expect(calls).toHaveLength(1);
+
+    doc.hidden = false;
+    listeners.get("visibilitychange")();
+    await Promise.resolve();
+    expect(calls).toHaveLength(2);
+
+    stop();
+    expect(clearedTimer).toBe(77);
+    expect(listeners.has("visibilitychange")).toBe(false);
+  });
 });
 
 describe("isBackupRestorable — запрет массового восстановления из неполного файла", () => {

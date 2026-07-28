@@ -609,6 +609,37 @@ export function sumPaidProductionStages(stages = []) {
   }, 0);
 }
 
+export function resolveProgressBudget(entryBudget, stages = []) {
+  const savedBudget = Number(entryBudget);
+  if (Number.isFinite(savedBudget) && savedBudget > 0) return savedBudget;
+  return (Array.isArray(stages) ? stages : []).reduce((total, stage) => {
+    const amount = Number(stage?.priceClient);
+    return total + (Number.isFinite(amount) && amount > 0 ? amount : 0);
+  }, 0);
+}
+
+export function startPublicProgressAutoRefresh(load, {
+  doc = typeof document !== "undefined" ? document : null,
+  intervalMs = 10000,
+  setIntervalFn = setInterval,
+  clearIntervalFn = clearInterval,
+} = {}) {
+  if (typeof load !== "function") return () => {};
+  const refresh = () => {
+    if (doc?.hidden) return;
+    Promise.resolve(load({ isRefresh: true })).catch(() => {});
+  };
+  const timer = setIntervalFn(refresh, intervalMs);
+  const onVisibilityChange = () => {
+    if (!doc?.hidden) refresh();
+  };
+  doc?.addEventListener?.("visibilitychange", onVisibilityChange);
+  return () => {
+    clearIntervalFn(timer);
+    doc?.removeEventListener?.("visibilitychange", onVisibilityChange);
+  };
+}
+
 export function moveProductionStage(stages = [], stageId, targetIndex) {
   const sorted = sortProductionStages(stages).filter(Boolean);
   const moving = sorted.find(stage => stage.id === stageId);

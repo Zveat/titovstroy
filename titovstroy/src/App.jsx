@@ -18,7 +18,7 @@ import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restore
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -5086,9 +5086,16 @@ function PublicProgress({ token }) {
   // "недоступно" и не накручиваем счётчик просмотров при ручном обновлении.
   const load = useCallback(async (opts = {}) => {
     const isRefresh = !!opts.isRefresh;
+    const readFresh = async (key) => {
+      if (isRefresh) {
+        const cloud = await storage.getCloudResult(key);
+        if (cloud.status !== "unavailable") return cloud;
+      }
+      return storage.getResult(key);
+    };
     let ok = false;
     try {
-      const r = await storage.getResult(PROGRESS_NODE(token));
+      const r = await readFresh(PROGRESS_NODE(token));
       if (r.status === "found" && r.value) {
         let data = null; try { data = JSON.parse(r.value); } catch {}
         if (data && data.expiresAt && Date.now() > data.expiresAt) {
@@ -5103,9 +5110,15 @@ function PublicProgress({ token }) {
     } catch {}
     if (!ok && !isRefresh) setState("notfound");
     // Документы клиента (договоры/акты) из отдельной ноды
-    try { const r2 = await storage.getResult(DOCS_NODE(token)); if (r2.status === "found" && r2.value) { try { setDocs(JSON.parse(r2.value)); } catch {} } } catch {}
+    try { const r2 = await readFresh(DOCS_NODE(token)); if (r2.status === "found" && r2.value) { try { setDocs(JSON.parse(r2.value)); } catch {} } } catch {}
   }, [token]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    return startPublicProgressAutoRefresh(load, {
+      doc: typeof document !== "undefined" ? document : null,
+      intervalMs: 10000,
+    });
+  }, [load]);
   const refresh = async () => {
     if (refreshing) return;
     setRefreshing(true);
@@ -5330,7 +5343,7 @@ function PublicProgress({ token }) {
     )}
 
     {/* Оплата */}
-    {showPay && (pay.budget > 0 || pay.paid > 0) && (() => {
+    {showPay && s.payment && (() => {
       const fill = pay.budget > 0 ? Math.min(100, Math.round((pay.paid || 0) / pay.budget * 100)) : 0;
       return (
       <div style={card}>
@@ -7356,7 +7369,7 @@ ${reqBlock}`;
     // Готовность считаем ТАК ЖЕ, как в производстве: доля выполненных этапов (по количеству)
     const progressPct = stages.length > 0 ? Math.round(doneCnt / stages.length * 100) : 0;
     const handover = (prod.checklistHandover || []).filter(i => (i.section || "") === "Клиентская приёмка").map(i => ({ text: i.text, done: !!i.done }));
-    const budget = Number(entry?.budget) || 0;
+    const budget = resolveProgressBudget(entry?.budget, stages);
     // Статус «Готово» влияет только на прогресс. Оплата подтверждается отдельно
     // галочкой «Оплачено» во вкладке «Финансы» карточки объекта.
     const paid = sumPaidProductionStages(stages);
