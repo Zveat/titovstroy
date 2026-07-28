@@ -138,7 +138,14 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
           <Tile label="В согласовании" value={sales.inApprovalCount} sub={money(sales.inApprovalSum)} accent="#d97706" />
           <Tile label="Подписано" value={sales.signedCount} sub={`${money(sales.signedSum)} · по дате подписания`}
             accent="#059669" delta={d(previous?.sales.signedSum, sales.signedSum)} />
-          <Tile label="Средний чек" value={money(sales.avgCheck)} sub="на подписанный объект" />
+          {/* Чек считается только по объектам с известной суммой: у старых объектов
+              нет ни договора, ни сметы, и «0 ₸» там означает «не заполнено». */}
+          <Tile label="Средний чек"
+            value={sales.avgCheck === null ? "—" : money(sales.avgCheck)}
+            sub={sales.avgCheck === null
+              ? "ни у одного подписанного нет суммы"
+              : `по ${sales.avgCheckSample} объектам${sales.signedWithoutValue
+                  ? ` · ещё ${sales.signedWithoutValue} без сметы и договора` : ""}`} />
           {/* База конверсии — КОГОРТА (зашли в периоде), а «Подписано» рядом считается
               по дате подписания и включает сделки прошлых месяцев. Числа разные
               законно, поэтому у конверсии подписана её база. */}
@@ -191,7 +198,7 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
                   .map(([name, v]) => (
                     <BarRow key={name} label={name} value={v.estimatedSum}
                       max={Math.max(...Object.values(sales.byManager).map(x => x.estimatedSum), 1)}
-                      note={`смет ${v.estimated}/${v.objects} · подписано ${v.signed}${v.avgCheck ? ` · чек ${money(v.avgCheck)}` : ""}`}
+                      note={`смет ${v.estimated}/${v.objects} · подписано ${v.signed}${v.avgCheck !== null ? ` · чек ${money(v.avgCheck)}` : ""}`}
                       color="#059669" />
                   ))}
           </div>

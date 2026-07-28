@@ -276,7 +276,7 @@ export function Dashboard({ data, fmt, financialDetails = true, permissions = {}
     });
     heroes.push({
       label: "Конверсия", value: `${sales.convTotal}%`,
-      sub: `новых за месяц: ${sales.newObjects} · средний чек ${short(sales.avgCheck)}`,
+      sub: `новых за месяц: ${sales.newObjects}${sales.avgCheck === null ? "" : ` · средний чек ${short(sales.avgCheck)}`}`,
       accent: "#0f172a",
     });
   }

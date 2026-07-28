@@ -290,6 +290,10 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
 
   const estimatedSum = withEstimate.reduce((s, o) => s + objectValue(o), 0);
   const signedSum = signed.reduce((s, o) => s + dealValue(o), 0);
+  // Подписанные, у которых сумма известна. Старые объекты без сметы и без договора
+  // стоят «0 ₸» — это не бесплатная сделка, а отсутствие данных, поэтому в средних
+  // они не участвуют (в самой сумме их ноль всё равно ничего не меняет).
+  const signedValued = signed.filter(o => dealValue(o) > 0);
   const lostSum = lost.reduce((s, o) => s + objectValue(o), 0);
 
   // Срок сделки: от создания объекта до даты договора. Считаем только там,
@@ -321,10 +325,14 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
   const byManager = {};
   for (const o of cohort) {
     const key = resolveManager(o.manager);
-    if (!byManager[key]) byManager[key] = { objects: 0, estimated: 0, estimatedSum: 0, signed: 0, signedSum: 0 };
+    if (!byManager[key]) byManager[key] = { objects: 0, estimated: 0, estimatedSum: 0, signed: 0, signedValued: 0, signedSum: 0 };
     byManager[key].objects += 1;
     if (objectValue(o) > 0) { byManager[key].estimated += 1; byManager[key].estimatedSum += objectValue(o); }
-    if (signedSet.has(o.id)) { byManager[key].signed += 1; byManager[key].signedSum += dealValue(o); }
+    if (signedSet.has(o.id)) {
+      byManager[key].signed += 1;
+      byManager[key].signedSum += dealValue(o);
+      if (dealValue(o) > 0) byManager[key].signedValued += 1;
+    }
   }
 
   const byType = {};
@@ -337,7 +345,11 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
   }
   // Конверсия по типу: где мы реально сильнее — вторичка, новостройка или коммерция.
   for (const v of Object.values(byType)) v.conv = pct(v.signed, v.objects);
-  for (const v of Object.values(byManager)) v.avgCheck = v.signed ? Math.round(v.signedSum / v.signed) : 0;
+  // Средний чек считаем ТОЛЬКО по объектам с известной суммой (см. ниже, там же
+  // подробно). Иначе менеджер со старыми объектами без смет выглядит хуже, чем есть.
+  for (const v of Object.values(byManager)) {
+    v.avgCheck = v.signedValued ? Math.round(v.signedSum / v.signedValued) : null;
+  }
 
   return {
     newObjects: cohort.length,
@@ -383,7 +395,14 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
     inApprovalSum: inApproval.reduce((s, o) => s + objectValue(o), 0),
     signedCount: signed.length,
     signedSum,
-    avgCheck: signed.length ? Math.round(signedSum / signed.length) : 0,
+    // СРЕДНИЙ ЧЕК — по объектам, у которых сумма ВООБЩЕ известна (есть договор или
+    // смета). Раньше делили на всех подписанных, включая тех, у кого ни договора,
+    // ни сметы нет: такой объект в сумму не давал ничего, но знаменатель увеличивал.
+    // На боевой базе из 30 подписанных сумма была известна у 8 — чек занижался
+    // вчетверо (614 749 ₸ вместо 2 305 308 ₸).
+    avgCheck: signedValued.length ? Math.round(signedSum / signedValued.length) : null,
+    avgCheckSample: signedValued.length,
+    signedWithoutValue: signed.length - signedValued.length,
     // Воронка по шагам: сколько дошло от предыдущего этапа.
     convToEstimate: pct(withEstimate.length, cohort.length),
     convToSigned: pct(signedFromCohort.length, withEstimate.length),

@@ -129,7 +129,10 @@ describe("продажи и воронка", () => {
     const { sales } = all();
     expect(sales.signedCount).toBe(2);               // o1 + миграционный
     expect(sales.signedSum).toBe(1300000);           // договор o1; у миграционного смет и договора нет
-    expect(sales.avgCheck).toBe(650000);
+    // Чек — по одному o1, а не по двум: у миграционного суммы просто НЕТ, и делить
+    // на него нельзя (раньше выходило 650 000, вдвое меньше реальной сделки).
+    expect(sales.avgCheck).toBe(1300000);
+    expect(sales.avgCheckSample).toBe(1);
   });
 
   it("договор подряда не подменяет клиентский договор объекта", () => {
@@ -556,6 +559,32 @@ describe("ноль и «нет данных» — разные вещи", () => 
     expect(p.onTimeSample).toBe(0);
     expect(p.avgPlanDays).toBeNull();
     expect(p.avgFactDays).toBe(18);       // факт известен: старт -20д, сдача -2д
+  });
+
+  it("средний чек не делится на объекты без суммы", () => {
+    // На боевой базе из 30 подписанных сумма была известна у 8: остальные — старые
+    // объекты без сметы и без договора. Они давали в сумму ноль, но увеличивали
+    // знаменатель, и чек занижался вчетверо.
+    const f = fixture();
+    f.objects.push(
+      { id:"z1", clientName:"Подписан, но пусто", status:"signed", createdAt: NOW - 4*DAY },
+      { id:"z2", clientName:"И этот тоже",        status:"signed", createdAt: NOW - 4*DAY },
+    );
+    const { sales } = buildAnalytics(f, { period: "all", now: NOW });
+    // сумма известна только у o1 (договор 1 300 000) — чек равен ей, а не трети
+    expect(sales.avgCheck).toBe(1300000);
+    expect(sales.avgCheckSample).toBe(1);
+    expect(sales.signedWithoutValue).toBe(3);      // z1, z2 и миграционный om
+    expect(sales.signedSum).toBe(1300000);         // сама сумма не меняется
+  });
+
+  it("если сумма не известна ни у кого — чек null, а не 0", () => {
+    const f = fixture();
+    f.contracts = [];
+    f.estimates = [];
+    const { sales } = buildAnalytics(f, { period: "all", now: NOW });
+    expect(sales.avgCheck).toBeNull();
+    expect(sales.avgCheckSample).toBe(0);
   });
 
   it("«цена за м²» без площадей — null, а не 0 ₸", () => {
