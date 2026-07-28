@@ -384,69 +384,78 @@ describe("план vs факт маржи", () => {
   });
 });
 
-describe("воронка производства", () => {
-  // База: o1 подписан 15 дней назад и сейчас в работе. Добавляем объекты, подписанные
-  // в этом же месяце и ДАВНО — старая воронка была срезом по всей базе, из-за чего в
-  // «Выполнен» падала вся история и выполненных выходило больше, чем работающих.
+describe("производство за период — поток событий", () => {
+  // Ключевой случай владельца: объект подписали ВЕСНОЙ, а сдали в текущем месяце.
+  // При когортной воронке (когорта = подписанные в периоде) он в месяц не попадал
+  // вообще, и «Сдали» показывало 0, хотя сдача была. Цикл стройки длиннее месяца,
+  // поэтому производство считаем по событиям периода, а не по когорте.
   const prodFixture = () => {
     const f = fixture();
     f.objects.push(
-      { id:"p1", clientName:"Сдан в этом месяце", status:"done",   createdAt: NOW - 40*DAY },
-      { id:"p2", clientName:"Сдан давно",         status:"done",   createdAt: NOW - 400*DAY },
-      { id:"p3", clientName:"На паузе",           status:"paused", createdAt: NOW - 30*DAY },
-      { id:"p4", clientName:"Расторгнут",         status:"cancel", createdAt: NOW - 25*DAY },
-      { id:"p5", clientName:"Подписан, не начат", status:"signed", createdAt: NOW - 20*DAY },
+      { id:"p1", clientName:"Подписан весной, сдан в этом месяце", status:"done",   createdAt: NOW - 200*DAY },
+      { id:"p2", clientName:"Сдан в прошлом году",                 status:"done",   createdAt: NOW - 400*DAY },
+      { id:"p3", clientName:"Вышли на объект в этом месяце",       status:"paused", createdAt: NOW - 30*DAY },
+      { id:"p4", clientName:"Расторгнут",                          status:"cancel", createdAt: NOW - 25*DAY },
+      { id:"p5", clientName:"Подписан в этом месяце, не начат",    status:"signed", createdAt: NOW - 20*DAY },
     );
     f.contracts.push(
-      { id:"cp1", objectId:"p1", number:"№ 101", date: dstr(-12), works:[{quantity:1, price:500000}] },
+      { id:"cp1", objectId:"p1", number:"№ 101", date: "2026-02-10", works:[{quantity:1, price:500000}] },
       { id:"cp2", objectId:"p2", number:"№ 102", date: "2024-03-01", works:[{quantity:1, price:900000}] },
       { id:"cp3", objectId:"p3", number:"№ 103", date: dstr(-11), works:[{quantity:1, price:400000}] },
       { id:"cp4", objectId:"p4", number:"№ 104", date: dstr(-10), works:[{quantity:1, price:300000}] },
       { id:"cp5", objectId:"p5", number:"№ 105", date: dstr(-9),  works:[{quantity:1, price:200000}] },
     );
+    f.productions.push(
+      { objectId:"p1", prodStatus:"done",   startDate:"2026-02-20", factEndDate: dstr(-4) },
+      { objectId:"p2", prodStatus:"done",   startDate:"2024-03-10", factEndDate:"2024-09-01" },
+      { objectId:"p3", prodStatus:"paused", startDate: dstr(-8) },
+      { objectId:"p4", prodStatus:"cancel", startDate: dstr(-7) },
+    );
     return f;
   };
   const monthProd = () => buildAnalytics(prodFixture(), { period: "month", now: NOW }).funnels.production;
 
-  it("начинается с «Договор подписан», а не с «В работе»", () => {
+  it("сдача считается по ФАКТ-дате окончания, даже если договор был давно", () => {
+    const f = monthProd();
+    // p1 подписан в феврале, сдан 4 дня назад — обязан попасть в «Сдали» за месяц.
+    expect(f.stages[2].label).toBe("Сдали");
+    expect(f.stages[2].count).toBe(1);
+    // p2 сдан в 2024-м — в текущий месяц не лезет.
+  });
+
+  it("«Сдали» сходится с плиткой «Сдано за период»", () => {
+    const a = buildAnalytics(prodFixture(), { period: "month", now: NOW });
+    expect(a.funnels.production.stages[2].count).toBe(a.production.doneInPeriod);
+  });
+
+  it("начинается с договора, дальше выход на объект и сдача", () => {
     expect(monthProd().stages.map(s => s.label))
-      .toEqual(["Договор подписан", "Начаты работы", "Выполнен"]);
+      .toEqual(["Подписали договор", "Вышли на объект", "Сдали"]);
   });
 
-  it("когорта — по ДАТЕ ПОДПИСАНИЯ, а не по дате создания объекта", () => {
+  it("каждая стадия — события своего периода, а не подмножество прошлой", () => {
     const f = monthProd();
-    // NOW = 15 июня. В июне подписаны p1, p3, p4, p5. Отсечены двое, и оба по делу:
-    // p2 — договор от марта 2024, o1 — договор от 31 мая (прошлый месяц), хотя сам
-    // объект живой и сейчас в работе.
-    expect(f.stages[0].count).toBe(4);
-    expect(f.stages[2].count).toBe(1);              // выполнен из когорты только p1
+    // Подписали в этом месяце: p3, p4, p5 (p1 — февраль, поэтому не здесь).
+    // Вышли на объект: p3, p4 и o1 из базовой базы (старт 1 июня) — состав другой.
+    expect(f.stages[0].count).toBe(3);
+    expect(f.stages[1].count).toBe(3);
+    // Сдали — вообще другой объект (p1), поэтому сдач может быть больше, чем
+    // подписаний, и это не ошибка. Конверсию между стадиями считать нельзя.
+    expect(f.flow).toBe(true);
+  });
+
+  it("срез «сейчас» отделён от потока и не привязан к периоду", () => {
+    const labels = monthProd().current.map(r => r.label);
+    expect(labels).toEqual(["Сейчас в работе", "Сейчас на паузе", "Расторгнуто всего"]);
+    const byLabel = Object.fromEntries(monthProd().current.map(r => [r.label, r.count]));
+    expect(byLabel["Сейчас на паузе"]).toBe(1);        // p3
+    expect(byLabel["Расторгнуто всего"]).toBe(1);      // p4
+    expect(byLabel["Сейчас в работе"]).toBe(1);        // o1 из базовой базы
+  });
+
+  it("во «всё время» попадают все события, включая прошлогодние", () => {
     const allTime = buildAnalytics(prodFixture(), { period: "all", now: NOW }).funnels.production;
-    expect(allTime.stages[0].count).toBe(7);        // + p2, o1 и миграционный om
-    expect(allTime.stages[2].count).toBe(2);        // во «всё время» добавляется p2
-  });
-
-  it("стадии вложены: выполнено не больше начатых, начатые не больше подписанных", () => {
-    const [signed, started, done] = monthProd().stages.map(s => s.count);
-    expect(started).toBeLessThanOrEqual(signed);
-    expect(done).toBeLessThanOrEqual(started);
-  });
-
-  it("«Начаты работы» не схлопывается по мере сдачи объектов", () => {
-    // p1 уже сдан, p3 на паузе — оба когда-то стартовали и обязаны остаться в стадии.
-    // Если считать только текущий статус work, тут был бы ноль.
-    expect(monthProd().stages[1].count).toBe(2);
-  });
-
-  it("пауза — отдельная строка, а не стадия воронки", () => {
-    const f = monthProd();
-    expect(f.paused.count).toBe(1);
-    expect(f.stages.some(s => s.label === "Приостановлен")).toBe(false);
-  });
-
-  it("исходы сходятся со входом: подписано = сдано + расторгнуто + ещё в работе", () => {
-    const f = monthProd();
-    expect(f.stages[2].count + f.terminal.count + f.inProgress.count).toBe(f.stages[0].count);
-    expect(f.terminal.label).toBe("Расторгнут");
+    expect(allTime.stages[2].count).toBe(2);           // p1 + p2
   });
 });
 

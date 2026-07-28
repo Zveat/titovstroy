@@ -272,7 +272,7 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
           {/* Вторая воронка — производственная. Когорта другая: не «кто зашёл», а
               «кто подписал договор в периоде» и докуда доехал по стройке. */}
           <FunnelChart funnel={funnels.production} fmt={fmt} showMoney
-            title="Движение по производству" hint="подписали в периоде — докуда дошли"
+            title="Движение по производству" hint="события периода: зашло / стартовало / сдано"
             colors={["#a78bfa", "#f59e0b", "#059669"]} />
         </div>
         <AuditList items={production.overdueStageList} fmt={fmt} title="Какие этапы просрочены" />

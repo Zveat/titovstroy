@@ -817,6 +817,12 @@ function buildDataQuality(idx, financeTx, resolveManager) {
       items: signed.filter(o => !ts(prodByObject.get(o.id)?.saleDate)) },
     { key: "foreman", label: "В работе без прораба",
       items: liveObjects.filter(o => statusOf(o, prodByObject) === "work" && !prodByObject.get(o.id)?.responsible) },
+    // Сдача считается по факт-дате окончания. Без неё объект стоит «Выполнен», но
+    // ни в «Сдали за период», ни в «сдача в срок» не попадает — и пропажу видно
+    // только глазами. Поэтому выносим в явный список.
+    { key: "factEnd", label: "Выполнен без даты окончания",
+      items: liveObjects.filter(o => statusOf(o, prodByObject) === "done"
+        && !ts(prodByObject.get(o.id)?.factEndDate)) },
   ].map(g => ({
     key: g.key,
     label: g.label,
@@ -879,14 +885,21 @@ function buildTrend(idx, financeTx, now, months = 6) {
 // Две воронки — они про разное и мешать их нельзя:
 //   ПРОДАЖИ     — путь сделки до договора, терминал «Потерян» (buildSales.cohortFunnel).
 //   ПРОИЗВОДСТВО — путь уже подписанного объекта, терминал «Расторгнут» (здесь).
-// Производственная воронка — тоже КОГОРТНАЯ и тоже за период. Раньше она была срезом
-// «кто где стоит сейчас» по всей базе: в «Выполнен» падали все сданные объекты за всю
-// историю, поэтому за месяц выходило больше выполненных, чем работающих, а конверсия
-// между стадиями считалась от «Приостановлен» и всегда была 0%.
+// Производственная воронка — ПОТОК СОБЫТИЙ за период, а не когорта.
 //
-// Когорта — объекты, ПОДПИСАННЫЕ в периоде (по дате продажи, запасной вариант — дата
-// договора). Начинается воронка с договора: производство и стартует с него, а не с
-// «В работе». Стадии строго вложены: выполнен ⊂ начаты работы ⊂ подписан.
+// Когортой (как в продажах) её делать нельзя: цикл стройки — месяцы, поэтому у
+// объектов, подписанных в июле, к концу июля физически не может быть сдачи, и
+// «Выполнено» вечно показывало бы 0, хотя в июле реально сдавали объекты,
+// подписанные весной. Здесь правильный вопрос — не «докуда доехала когорта», а
+// «что произошло на стройке за месяц»: сколько зашло, сколько вышло на объект,
+// сколько сдали.
+//
+// Каждая стадия — СВОИ объекты (у них разные даты), поэтому конверсию между
+// стадиями считать нельзя: showConversion на графике выключен.
+//
+// Даты берём те же, что и остальная аналитика, чтобы цифры сходились:
+// подписание — saleDate (запасной вариант дата договора), выход на объект —
+// startDate, сдача — factEndDate (по ней же считается плитка «Сдано за период»).
 function buildFunnels(idx, { from, to }, period, manager, resolveManager = (v) => (v || "Без менеджера")) {
   const { liveObjects, objectValue, contractByObject, prodByObject } = idx;
   const dealValue = (o) => contractSum(contractByObject.get(o.id)) || objectValue(o);
@@ -894,39 +907,42 @@ function buildFunnels(idx, { from, to }, period, manager, resolveManager = (v) =
     || ts(contractByObject.get(o.id)?.date || contractByObject.get(o.id)?.contractDate);
   const sum = (list) => list.reduce((s, o) => s + dealValue(o), 0);
 
-  // Расторгнутый объект тоже когда-то был подписан — он обязан остаться во входе
-  // воронки, иначе «расторгнуто» не с чем сравнивать.
-  const cohort = liveObjects
+  const scope = liveObjects
     .filter(o => o.status !== "archive")
     .filter(o => period === "all" || o.createdBy !== "migration")
-    .filter(o => !manager || resolveManager(o.manager) === resolveManager(manager))
-    .filter(o => ["signed", "work", "paused", "done", "cancel"].includes(statusOf(o, prodByObject)))
-    .filter(o => period === "all" || inRange(signedAt(o), from, to));
+    .filter(o => !manager || resolveManager(o.manager) === resolveManager(manager));
 
   const statusIn = (o, ...keys) => keys.includes(statusOf(o, prodByObject));
-  // «Начаты работы» — все, кто дошёл до стройки, включая тех, кто уже сдан или на паузе.
-  // Если считать только текущий статус work, стадия схлопывается по мере сдачи объектов.
-  const started = cohort.filter(o => statusIn(o, "work", "paused", "done"));
-  const done = cohort.filter(o => statusIn(o, "done"));
-  const paused = cohort.filter(o => statusIn(o, "paused"));
-  const cancelled = cohort.filter(o => statusIn(o, "cancel"));
+  const prodOf = (o) => prodByObject.get(o.id);
+  // Во «Всё время» окно не ограничиваем — иначе объекты без даты выпали бы совсем.
+  const happened = (value) => (period === "all" ? !!ts(value) : inRange(value, from, to));
+
+  const signedNow = scope.filter(o => statusIn(o, "signed", "work", "paused", "done", "cancel")
+    && happened(signedAt(o)));
+  const startedNow = scope.filter(o => happened(prodOf(o)?.startDate));
+  // Сдача — строго по факт-дате окончания, ровно как в плитке «Сдано за период».
+  const doneNow = scope.filter(o => happened(prodOf(o)?.factEndDate));
+
+  const inWork = scope.filter(o => statusIn(o, "work"));
+  const paused = scope.filter(o => statusIn(o, "paused"));
+  // Даты расторжения в карточке нет, поэтому к периоду это число не привязать —
+  // показываем как есть, «всего», и отдельно от потока.
+  const cancelled = scope.filter(o => statusIn(o, "cancel"));
 
   return {
     production: {
+      flow: true,   // график: без «% с прошлой стадии»
       stages: [
-        { key: "signed", label: "Договор подписан", count: cohort.length, sum: sum(cohort) },
-        { key: "work", label: "Начаты работы", count: started.length, sum: sum(started) },
-        { key: "done", label: "Выполнен", count: done.length, sum: sum(done) },
+        { key: "signed", label: "Подписали договор", count: signedNow.length, sum: sum(signedNow) },
+        { key: "start", label: "Вышли на объект", count: startedNow.length, sum: sum(startedNow) },
+        { key: "done", label: "Сдали", count: doneNow.length, sum: sum(doneNow) },
       ],
-      // Приостановлен — это текущее состояние, а не шаг воронки: объект на паузе уже
-      // посчитан в «Начаты работы». Показываем отдельной строкой, чтобы не притворяться
-      // стадией и не ломать конверсию между шагами.
-      paused: { count: paused.length, sum: sum(paused) },
-      terminal: { label: "Расторгнут", count: cancelled.length, sum: sum(cancelled) },
-      inProgress: {
-        count: Math.max(0, cohort.length - done.length - cancelled.length),
-        sum: sum(cohort.filter(o => !statusIn(o, "done", "cancel"))),
-      },
+      // Срез «сейчас» — он про другое, поэтому и подписан отдельно.
+      current: [
+        { label: "Сейчас в работе", count: inWork.length, sum: sum(inWork), color: "#0f766e" },
+        { label: "Сейчас на паузе", count: paused.length, sum: sum(paused), color: "#b45309" },
+        { label: "Расторгнуто всего", count: cancelled.length, sum: sum(cancelled), color: "#dc2626" },
+      ],
     },
   };
 }

@@ -131,7 +131,9 @@ export function FunnelChart({ funnel, fmt, showMoney = true, title, hint, colors
         // подпись не читается, а стадия визуально «исчезает».
         const maxCount = Math.max(...stages.map(x => x.count), 1);
         const width = Math.max(38, Math.round((st.count / maxCount) * 100));
-        const conv = i === 0 ? null : pctOf(st.count, stages[i - 1].count);
+        // В потоке событий у каждой стадии СВОИ объекты (подписали одних, сдали
+        // других), поэтому «% с прошлой стадии» там был бы выдумкой.
+        const conv = (i === 0 || funnel?.flow) ? null : pctOf(st.count, stages[i - 1].count);
         return (
           <div key={st.key} style={{ marginBottom: 6 }}>
             <div style={{ display: "flex", justifyContent: "center" }}>
@@ -152,9 +154,10 @@ export function FunnelChart({ funnel, fmt, showMoney = true, title, hint, colors
           </div>
         );
       })}
-      {/* Исходы когорты: кого потеряли и кто ещё в работе. Для когортной воронки
-          это и есть ответ «что стало с теми, кто зашёл». */}
-      {(funnel?.inProgress || funnel?.paused || terminal) && (
+      {/* Для когортной воронки — исходы: кого потеряли и кто ещё в работе.
+          Для потока событий — срез «сейчас», он отвечает на другой вопрос и
+          поэтому отделён чертой. */}
+      {(funnel?.inProgress || terminal || funnel?.current?.length > 0) && (
         <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px dashed #e2e8f0", fontSize: 11.5 }}>
           {funnel?.inProgress && (
             <div style={{ display: "flex", justifyContent: "space-between", color: "#d97706", marginBottom: 4 }}>
@@ -162,13 +165,12 @@ export function FunnelChart({ funnel, fmt, showMoney = true, title, hint, colors
               {showMoney && funnel.inProgress.sum > 0 && <span>{fmt(Math.round(funnel.inProgress.sum / 1000))}k ₸</span>}
             </div>
           )}
-          {/* Пауза — не стадия, а текущее состояние: объект уже посчитан в «Начаты работы». */}
-          {funnel?.paused && funnel.paused.count > 0 && (
-            <div style={{ display: "flex", justifyContent: "space-between", color: "#b45309", marginBottom: 4 }}>
-              <span>Приостановлен сейчас: <b>{funnel.paused.count}</b></span>
-              {showMoney && funnel.paused.sum > 0 && <span>{fmt(Math.round(funnel.paused.sum / 1000))}k ₸</span>}
+          {(funnel?.current || []).map(row => (
+            <div key={row.label} style={{ display: "flex", justifyContent: "space-between", color: row.color, marginBottom: 4 }}>
+              <span>{row.label}: <b>{row.count}</b></span>
+              {showMoney && row.sum > 0 && <span>{fmt(Math.round(row.sum / 1000))}k ₸</span>}
             </div>
-          )}
+          ))}
           {(funnel?.lost || terminal) && (() => {
             const t = funnel?.lost || terminal;
             const label = funnel?.lost ? "Отказ" : terminal.label;
@@ -351,7 +353,7 @@ export function Dashboard({ data, fmt, financialDetails = true, permissions = {}
         )}
         {canProduction && (
           <FunnelChart funnel={funnels.production} fmt={fmt} showMoney={canSales}
-            title="Воронка производства за месяц" hint="кто подписал в этом месяце и докуда дошёл"
+            title="Производство за месяц" hint="что произошло на стройке в этом месяце"
             colors={["#a78bfa", "#f59e0b", "#059669"]} />
         )}
         {canProduction && (
