@@ -11325,7 +11325,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               {[
                 {label:"Активных объектов",  val:activeObjects.length},
                 {label:"В согласовании", val:approvalObjs.length},
-                {label:"Договоров",       val:signedContracts.length},
+                // «Договоров» — это ДОКУМЕНТЫ со статусом «подписан» за ВСЁ время, а
+                // соседние две плитки — состояние на сейчас. Без слова «всего» цифра
+                // выглядела противоречием с аналитикой, где подписания считаются за
+                // период и в объектах, а не в документах (на объекте может быть
+                // несколько договоров).
+                {label:"Договоров всего", val:signedContracts.length},
               ].map((m,i)=>(
                 <div key={i} style={{textAlign:"center"}}>
                   <div style={{fontSize:26,fontWeight:900,color:"#fff",lineHeight:1}}>{m.val}</div>
