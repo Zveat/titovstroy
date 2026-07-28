@@ -300,6 +300,7 @@ export default function ProductionModule({
   onDeleteProduction, onToggleClientShare, onSetClientVis, buildStagesFromEstimate,
   finProjects, financeTx,
   fmt, genId, currentUser, readOnly: externallyReadOnly = false, onAudit,
+  staffOptions = [], // сотрудники системы для выбора ответственного (свободный ввод убран)
   actionPermissions = {},
   embedObjectId, embedTab, clientInfoCard, // встроенный режим: карточка одного объекта внутри раздела «Объекты»
 }) {
@@ -523,7 +524,7 @@ export default function ProductionModule({
   return (
     <div style={{ maxWidth: 1600, margin: "0 auto" }}>
       {(tabReadOnly || (embedTab === "info" && clientAccessReadOnly)) && <div style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 14px", fontSize: 12.5, color: "#64748b", marginBottom: 12 }}>👁 Режим просмотра — часть действий недоступна для вашей роли.</div>}
-      {embedTab === "info" && <InfoTab prod={localProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={mainPatch} clientAccessPatch={clientAccessPatch} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} clientInfoCard={clientInfoCard} audit={audit} readOnly={mainReadOnly} clientAccessReadOnly={clientAccessReadOnly} />}
+      {embedTab === "info" && <InfoTab prod={localProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={mainPatch} clientAccessPatch={clientAccessPatch} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} clientInfoCard={clientInfoCard} audit={audit} readOnly={mainReadOnly} clientAccessReadOnly={clientAccessReadOnly} staffOptions={staffOptions} />}
       {embedTab !== "info" && <fieldset disabled={tabReadOnly} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
       {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист запуска объекта" />}
       {embedTab === "handover" && <ChecklistTab kind="checklistHandover" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист сдачи объекта" />}
@@ -540,7 +541,7 @@ export default function ProductionModule({
 const _dayStart = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); };
 // Телефон → формат для wa.me (КЗ: 8XXXXXXXXXX → 7XXXXXXXXXX)
 const _waPhone = (p) => { let d = (p || "").replace(/\D/g, ""); if (d.length === 11 && d[0] === "8") d = "7" + d.slice(1); else if (d.length === 10) d = "7" + d; return d; };
-function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatch, onToggleClientShare, onSetClientVis, currentUser, clientInfoCard, audit, readOnly=false, clientAccessReadOnly=false }) {
+function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatch, onToggleClientShare, onSetClientVis, currentUser, clientInfoCard, audit, readOnly=false, clientAccessReadOnly=false, staffOptions=[] }) {
   const objEstimates = estimates.filter(e => e.objectId === obj.id);
   // Только клиентские договоры: подряд (с рабочим) — это себестоимость, в метрику «Договоры» не входит
   const objContracts = contracts.filter(c => c.objectId === obj.id && !c.deletedAt && c.type !== "podryad" && c.type !== "podryad_annex");
@@ -589,6 +590,33 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatc
         style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
     </div>
   );
+  // Выбор ответственного — только из сотрудников системы. Свободный ввод убран намеренно:
+  // раньше сюда попадал произвольный текст, и один человек существовал в базе в нескольких
+  // написаниях («Сергей Штанько» / «Сергей Ш.» / «Сергей Ш»), что ломало разрезы по ответственным.
+  // Значение, которого нет в списке (уволенный, старая запись), показываем отдельным пунктом —
+  // чтобы открытие карточки не затирало то, что уже записано.
+  const fldStaff = (label, key, auditLabel = null) => {
+    const current = prod[key] || "";
+    const known = (staffOptions || []).map(u => (typeof u === "string" ? u : u?.name)).filter(Boolean);
+    return (
+      <div>
+        <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>{label}</div>
+        <select value={current} disabled={readOnly}
+          onChange={e => {
+            const next = e.target.value;
+            if (next === current) return;
+            patch({ [key]: next });
+            if (auditLabel && audit) audit({ entity: "object", field: auditLabel, action: "изменил", old: current || "—", new: next || "—" });
+          }}
+          style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 13,
+                   fontFamily: "inherit", outline: "none", boxSizing: "border-box", background: readOnly ? "#f8fafc" : "#fff" }}>
+          <option value="">— не назначен —</option>
+          {known.map(name => <option key={name} value={name}>{name}</option>)}
+          {current && !known.includes(current) && <option value={current}>{current} (нет в сотрудниках)</option>}
+        </select>
+      </div>
+    );
+  };
   const Metric = ({ label, value, sub, color = "#0f172a" }) => (
     <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "13px 15px", minHeight: 86, boxSizing: "border-box", display: "flex", flexDirection: "column", justifyContent: "center" }}>
       <div style={{ fontSize: 10.5, color: "#94a3b8", marginBottom: 5, textTransform: "uppercase", letterSpacing: ".03em", fontWeight: 700 }}>{label}</div>
@@ -628,7 +656,7 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatc
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px" }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 14 }}>Производственная информация</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          {fld("Ответственный прораб / менеджер", "responsible", "text", "прораб")}
+          {fldStaff("Ответственный прораб / менеджер", "responsible", "прораб")}
           {fld("Доступ (ключ, код, пропуск)", "access")}
           {fld("Дата продажи (подписание договора)", "saleDate", "date")}
           {fld("Дата начала работ", "startDate", "date", "старт работ")}
