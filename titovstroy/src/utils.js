@@ -601,6 +601,14 @@ export function sortProductionStages(stages = []) {
     .map(item => item.stage);
 }
 
+export function sumPaidProductionStages(stages = []) {
+  return (Array.isArray(stages) ? stages : []).reduce((total, stage) => {
+    if (stage?.paid !== true) return total;
+    const amount = Number(stage.priceClient);
+    return total + (Number.isFinite(amount) && amount > 0 ? amount : 0);
+  }, 0);
+}
+
 export function moveProductionStage(stages = [], stageId, targetIndex) {
   const sorted = sortProductionStages(stages).filter(Boolean);
   const moving = sorted.find(stage => stage.id === stageId);

@@ -476,7 +476,7 @@ describe("порядок этапов производства", () => {
     { id:"d", cat:"Черновые", order:3 },
   ];
 
-  it("сортирует одинаково для карточки и клиентского кабинета", () => {
+  it("сортирует одинаково для этапов, финансов и клиентского кабинета", () => {
     expect(sortProductionStages(stages).map(s => s.id)).toEqual(["b", "c", "a", "d"]);
   });
 
@@ -489,6 +489,17 @@ describe("порядок этапов производства", () => {
   it("не меняет порядок других разделов", () => {
     const moved = moveProductionStage(stages, "a", 0);
     expect(moved.filter(s => s.cat === "Чистовые").map(s => s.id)).toEqual(["c"]);
+  });
+});
+
+describe("оплата этапов производства", () => {
+  it("считает только явно оплаченные этапы и не связывает оплату со статусом готовности", () => {
+    expect(utils.sumPaidProductionStages([
+      { id:"done-unpaid", status:"done", paid:false, priceClient:367711 },
+      { id:"todo-paid", status:"todo", paid:true, priceClient:120000 },
+      { id:"done-paid", status:"done", paid:true, priceClient:"30000" },
+      { id:"invalid-paid", status:"done", paid:true, priceClient:-5000 },
+    ])).toBe(150000);
   });
 });
 

@@ -1266,7 +1266,8 @@ function FinanceTab({ prod, patch, fmt, finSummary }) {
     : <><b style={{ color: mColor(pct), fontSize: 12.5 }}>{fmt(sum)} ₸</b><div style={{ fontSize: 11, fontWeight: 700, color: mColor(pct) }}>{pct}%</div></>;
   const th = { padding: "6px 8px", fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: ".03em", whiteSpace: "nowrap" };
   const tdc = { padding: "4px 6px", verticalAlign: "top" };
-  const grouped = groupByCat(stages);
+  // Финансовые строки показываем в том же ручном порядке, что и этапы.
+  const grouped = groupByCat(sortProductionStages(stages));
 
   const mCol = (p) => p >= 30 ? "#059669" : p >= 0 ? "#d97706" : "#dc2626";
   return (
