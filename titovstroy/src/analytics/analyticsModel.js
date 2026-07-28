@@ -145,6 +145,9 @@ function buildIndex({ objects = [], estimates = [], contracts = [], productions 
   const contractByObject = new Map();
   for (const c of contracts) {
     if (!c || c.deletedAt || !c.objectId) continue;
+    // Договоры подряда — это себестоимость (в старых записях они лежали в том же списке).
+    // В выручку/дату продажи они попадать не должны.
+    if (c.type === "podryad" || c.type === "podryad_annex") continue;
     // Основным считаем договор с наибольшей суммой — он и есть контракт объекта.
     const prev = contractByObject.get(c.objectId);
     if (!prev || contractSum(c) > contractSum(prev)) contractByObject.set(c.objectId, c);
@@ -304,6 +307,28 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
 
   return {
     newObjects: cohort.length,
+    // КОГОРТНАЯ воронка — движение, а не срез. Берём объекты, ЗАШЕДШИЕ в периоде,
+    // и смотрим, докуда каждый из них дошёл к текущему моменту. Стадии строго
+    // вложены друг в друга (подписал ⊂ посчитал смету ⊂ зашёл), поэтому конверсия
+    // между шагами честная. Срез «кто где стоит сейчас» — это другая картинка,
+    // она живёт отдельно и на вопрос «как отработали июль» не отвечает.
+    cohortFunnel: {
+      stages: [
+        { key: "in", label: "Зашло новых", count: cohort.length,
+          sum: cohort.reduce((s, o) => s + objectValue(o), 0) },
+        { key: "estimate", label: "Посчитана смета", count: withEstimate.length, sum: estimatedSum },
+        { key: "contract", label: "Договор подписан", count: signedFromCohort.length,
+          sum: signedFromCohort.reduce((s, o) => s + dealValue(o), 0) },
+      ],
+      lost: { count: lost.length, sum: lostSum },
+      // Ещё в работе: зашли, но пока ни договора, ни отказа — это то, что можно дожать.
+      inProgress: {
+        count: Math.max(0, cohort.length - signedFromCohort.length - lost.length),
+        sum: cohort
+          .filter(o => !signedSet.has(o.id) && statusOf(o, prodByObject) !== "refuse")
+          .reduce((s, o) => s + objectValue(o), 0),
+      },
+    },
     // Список для проверки: по нему видно, ЧТО именно посчиталось в «Новых объектах».
     cohortList: cohort
       .map(o => ({

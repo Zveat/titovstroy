@@ -132,6 +132,17 @@ describe("продажи и воронка", () => {
     expect(sales.avgCheck).toBe(650000);
   });
 
+  it("договор подряда не подменяет клиентский договор объекта", () => {
+    // В старых записях подряд лежал в том же списке договоров. Если он дороже
+    // клиентского, «Подписано» считалось бы по себестоимости, а срок сделки —
+    // по дате подряда (её подписывают позже).
+    const f = fixture();
+    f.contracts.push({ id:"cp", objectId:"o1", number:"№ 1012", date: dstr(-2),
+      type:"podryad", works:[{ quantity:1, price:9000000 }] });
+    const { sales } = buildAnalytics(f, { period: "all", now: NOW });
+    expect(sales.signedSum).toBe(1300000);
+  });
+
   it("доп.смета через parentId попадает в стоимость объекта", () => {
     const { backlog } = all();
     // o1: 1 000 000 + 200 000 + 100 000 (доп через parentId)
@@ -143,6 +154,24 @@ describe("продажи и воронка", () => {
     expect(sales.estimatedCount).toBe(3);            // o1, o2, o3
     expect(sales.convToEstimate).toBe(60);           // 3 из 5
     expect(sales.convTotal).toBe(40);                // 2 из 5
+  });
+
+  it("когортная воронка: стадии вложены, исходы сходятся с входом", () => {
+    const { sales } = all();
+    const f = sales.cohortFunnel;
+    const [entered, estimated, contracted] = f.stages.map(x => x.count);
+    // каждая следующая стадия — подмножество предыдущей
+    expect(entered).toBe(sales.newObjects);
+    expect(estimated).toBeLessThanOrEqual(entered);
+    expect(contracted).toBeLessThanOrEqual(estimated);
+    // зашло = дошли до договора + отказались + ещё в работе
+    expect(contracted + f.lost.count + f.inProgress.count).toBe(entered);
+  });
+
+  it("когортная воронка считается за ПЕРИОД, а не по всей базе", () => {
+    const month = buildAnalytics(fixture(), { period: "month", now: NOW });
+    expect(month.sales.cohortFunnel.stages[0].count).toBe(month.sales.newObjects);
+    expect(month.sales.cohortFunnel.stages[0].count).toBeLessThan(all().sales.newObjects);
   });
 
   it("отказ и расторжение считаются раздельно", () => {

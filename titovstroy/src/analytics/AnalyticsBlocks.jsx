@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { ANALYTICS_BLOCKS, deltaPct, refuseReasonLabel } from "./analyticsModel.js";
+import { FunnelChart } from "./Dashboard.jsx";
 
 // Блоки аналитики. Компонент только рисует — все числа приходят готовыми из
 // buildAnalytics (чистая функция с тестами). Каждый блок скрывается своим правом,
@@ -150,16 +151,11 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
         <AuditList items={sales.cohortList} fmt={fmt} title="Какие объекты посчитаны" />
 
         <div style={{ ...grid(260), marginTop: 10 }}>
-          <div style={card}>
-            <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>Воронка по шагам</div>
-            {[
-              ["Создано объектов", sales.newObjects, 100],
-              ["Посчитана смета", sales.estimatedCount, sales.convToEstimate],
-              ["Подписан договор", sales.signedFromCohortCount, sales.convTotal],
-            ].map(([label, count, percent]) => (
-              <BarRow key={label} label={label} value={percent} max={100} note={`${count} · ${percent}%`} />
-            ))}
-          </div>
+          {/* Когортная воронка: движение объектов, зашедших в выбранном периоде.
+              Отвечает на «как отработали месяц», а не «кто где стоит сейчас». */}
+          <FunnelChart funnel={sales.cohortFunnel} fmt={fmt} showMoney
+            title="Движение по воронке" hint="зашли в периоде — докуда дошли"
+            colors={["#93c5fd", "#60a5fa", "#2563eb"]} />
 
           <div style={card}>
             <div style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>Причины отказа</div>

@@ -117,7 +117,7 @@ function TrendChart({ trend = [], fmt, showMoney = true }) {
 
 // Настоящая воронка: каждая стадия уже предыдущей, ширина = доля от входа.
 // Так сразу видно, где отваливаются сделки, а не просто список статусов.
-function FunnelChart({ funnel, fmt, showMoney = true, title, hint, colors }) {
+export function FunnelChart({ funnel, fmt, showMoney = true, title, hint, colors }) {
   const stages = funnel?.stages || [];
   const terminal = funnel?.terminal;
   return (
@@ -152,11 +152,26 @@ function FunnelChart({ funnel, fmt, showMoney = true, title, hint, colors }) {
           </div>
         );
       })}
-      {terminal && (
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, paddingTop: 8,
-          borderTop: "1px dashed #fecaca", fontSize: 11.5, color: "#dc2626" }}>
-          <span>{terminal.label}: <b>{terminal.count}</b></span>
-          {showMoney && terminal.sum > 0 && <span>{fmt(Math.round(terminal.sum / 1000))}k ₸</span>}
+      {/* Исходы когорты: кого потеряли и кто ещё в работе. Для когортной воронки
+          это и есть ответ «что стало с теми, кто зашёл». */}
+      {(funnel?.inProgress || terminal) && (
+        <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px dashed #e2e8f0", fontSize: 11.5 }}>
+          {funnel?.inProgress && (
+            <div style={{ display: "flex", justifyContent: "space-between", color: "#d97706", marginBottom: 4 }}>
+              <span>Ещё в работе: <b>{funnel.inProgress.count}</b></span>
+              {showMoney && funnel.inProgress.sum > 0 && <span>{fmt(Math.round(funnel.inProgress.sum / 1000))}k ₸</span>}
+            </div>
+          )}
+          {(funnel?.lost || terminal) && (() => {
+            const t = funnel?.lost || terminal;
+            const label = funnel?.lost ? "Отказ" : terminal.label;
+            return (
+              <div style={{ display: "flex", justifyContent: "space-between", color: "#dc2626" }}>
+                <span>{label}: <b>{t.count}</b></span>
+                {showMoney && t.sum > 0 && <span>{fmt(Math.round(t.sum / 1000))}k ₸</span>}
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
@@ -323,8 +338,8 @@ export function Dashboard({ data, fmt, financialDetails = true, permissions = {}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12, marginTop: 12 }}>
         {canSales && (
-          <FunnelChart funnel={funnels.sales} fmt={fmt} showMoney={canSales}
-            title="Воронка продаж" hint="путь до договора"
+          <FunnelChart funnel={sales.cohortFunnel} fmt={fmt} showMoney={canSales}
+            title="Воронка продаж за месяц" hint="кто зашёл в этом месяце и докуда дошёл"
             colors={["#93c5fd", "#60a5fa", "#2563eb"]} />
         )}
         {canProduction && (
