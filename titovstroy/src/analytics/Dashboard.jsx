@@ -154,12 +154,19 @@ export function FunnelChart({ funnel, fmt, showMoney = true, title, hint, colors
       })}
       {/* Исходы когорты: кого потеряли и кто ещё в работе. Для когортной воронки
           это и есть ответ «что стало с теми, кто зашёл». */}
-      {(funnel?.inProgress || terminal) && (
+      {(funnel?.inProgress || funnel?.paused || terminal) && (
         <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px dashed #e2e8f0", fontSize: 11.5 }}>
           {funnel?.inProgress && (
             <div style={{ display: "flex", justifyContent: "space-between", color: "#d97706", marginBottom: 4 }}>
               <span>Ещё в работе: <b>{funnel.inProgress.count}</b></span>
               {showMoney && funnel.inProgress.sum > 0 && <span>{fmt(Math.round(funnel.inProgress.sum / 1000))}k ₸</span>}
+            </div>
+          )}
+          {/* Пауза — не стадия, а текущее состояние: объект уже посчитан в «Начаты работы». */}
+          {funnel?.paused && funnel.paused.count > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", color: "#b45309", marginBottom: 4 }}>
+              <span>Приостановлен сейчас: <b>{funnel.paused.count}</b></span>
+              {showMoney && funnel.paused.sum > 0 && <span>{fmt(Math.round(funnel.paused.sum / 1000))}k ₸</span>}
             </div>
           )}
           {(funnel?.lost || terminal) && (() => {
@@ -344,7 +351,7 @@ export function Dashboard({ data, fmt, financialDetails = true, permissions = {}
         )}
         {canProduction && (
           <FunnelChart funnel={funnels.production} fmt={fmt} showMoney={canSales}
-            title="Воронка производства" hint="путь подписанного объекта"
+            title="Воронка производства за месяц" hint="кто подписал в этом месяце и докуда дошёл"
             colors={["#a78bfa", "#f59e0b", "#059669"]} />
         )}
         {canProduction && (

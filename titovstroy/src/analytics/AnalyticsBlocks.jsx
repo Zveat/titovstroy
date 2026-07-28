@@ -108,7 +108,7 @@ const EmptyNote = ({ text }) => (
 
 export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails = true, catProfit = [] }) {
   if (!data) return null;
-  const { sales, backlog, production, finance, quality, cash, dataQuality, previous } = data;
+  const { sales, backlog, production, finance, quality, cash, dataQuality, previous, funnels } = data;
   const money = (v) => `${fmt(Math.round(v || 0))} ₸`;
   const can = (block) => permissions[block.permission] !== false;
   const d = (path, current) => (previous ? deltaPct(current, path) : undefined);
@@ -259,6 +259,13 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
             <Tile label="Закрыто, но не оплачено клиентом" value={money(production.unpaidDoneSum)}
               sub={`${production.unpaidDoneStages} закрытых этапов без галочки «оплачено»`} accent="#d97706" />
           )}
+        </div>
+        <div style={{ ...grid(260), marginTop: 10 }}>
+          {/* Вторая воронка — производственная. Когорта другая: не «кто зашёл», а
+              «кто подписал договор в периоде» и докуда доехал по стройке. */}
+          <FunnelChart funnel={funnels.production} fmt={fmt} showMoney
+            title="Движение по производству" hint="подписали в периоде — докуда дошли"
+            colors={["#a78bfa", "#f59e0b", "#059669"]} />
         </div>
         <AuditList items={production.overdueStageList} fmt={fmt} title="Какие этапы просрочены" />
         <AuditList items={production.staleObjects} fmt={fmt} title="Объекты без движения" />

@@ -877,45 +877,56 @@ function buildTrend(idx, financeTx, now, months = 6) {
 }
 
 // Две воронки — они про разное и мешать их нельзя:
-//   ПРОДАЖИ    — путь сделки до договора, терминал «Потерян».
-//   ПРОИЗВОДСТВО — путь уже подписанного объекта, терминал «Расторгнут».
-const SALES_STAGES = [
-  { key: "new",      label: "Новый" },
-  { key: "approval", label: "Согласование сметы" },
-  { key: "signed",   label: "Договор подписан" },
-];
-const PRODUCTION_STAGES = [
-  { key: "work",   label: "В работе" },
-  { key: "paused", label: "Приостановлен" },
-  { key: "done",   label: "Выполнен" },
-];
-function buildFunnels(idx) {
+//   ПРОДАЖИ     — путь сделки до договора, терминал «Потерян» (buildSales.cohortFunnel).
+//   ПРОИЗВОДСТВО — путь уже подписанного объекта, терминал «Расторгнут» (здесь).
+// Производственная воронка — тоже КОГОРТНАЯ и тоже за период. Раньше она была срезом
+// «кто где стоит сейчас» по всей базе: в «Выполнен» падали все сданные объекты за всю
+// историю, поэтому за месяц выходило больше выполненных, чем работающих, а конверсия
+// между стадиями считалась от «Приостановлен» и всегда была 0%.
+//
+// Когорта — объекты, ПОДПИСАННЫЕ в периоде (по дате продажи, запасной вариант — дата
+// договора). Начинается воронка с договора: производство и стартует с него, а не с
+// «В работе». Стадии строго вложены: выполнен ⊂ начаты работы ⊂ подписан.
+function buildFunnels(idx, { from, to }, period, manager, resolveManager = (v) => (v || "Без менеджера")) {
   const { liveObjects, objectValue, contractByObject, prodByObject } = idx;
   const dealValue = (o) => contractSum(contractByObject.get(o.id)) || objectValue(o);
-  const byStatus = (key) => liveObjects.filter(o => statusOf(o, prodByObject) === key);
-  const stage = (st) => {
-    const list = byStatus(st.key);
-    return { key: st.key, label: st.label, count: list.length, sum: list.reduce((s, o) => s + dealValue(o), 0) };
-  };
-  // «Договор подписан» в воронке продаж — это ВСЕ, кто дошёл до договора, включая
-  // ушедших в работу и сданных. Иначе стадия схлопывается в ноль, как только
-  // объект стартовал, и воронка врёт про конверсию.
-  const reachedContract = liveObjects.filter(o =>
-    ["signed", "work", "paused", "done"].includes(statusOf(o, prodByObject)));
-  const salesStages = SALES_STAGES.map(st => (st.key === "signed"
-    ? { key: st.key, label: st.label, count: reachedContract.length,
-        sum: reachedContract.reduce((s, o) => s + dealValue(o), 0) }
-    : stage(st)));
-  const lost = byStatus("refuse");
-  const cancelled = byStatus("cancel");
+  const signedAt = (o) => ts(prodByObject.get(o.id)?.saleDate)
+    || ts(contractByObject.get(o.id)?.date || contractByObject.get(o.id)?.contractDate);
+  const sum = (list) => list.reduce((s, o) => s + dealValue(o), 0);
+
+  // Расторгнутый объект тоже когда-то был подписан — он обязан остаться во входе
+  // воронки, иначе «расторгнуто» не с чем сравнивать.
+  const cohort = liveObjects
+    .filter(o => o.status !== "archive")
+    .filter(o => period === "all" || o.createdBy !== "migration")
+    .filter(o => !manager || resolveManager(o.manager) === resolveManager(manager))
+    .filter(o => ["signed", "work", "paused", "done", "cancel"].includes(statusOf(o, prodByObject)))
+    .filter(o => period === "all" || inRange(signedAt(o), from, to));
+
+  const statusIn = (o, ...keys) => keys.includes(statusOf(o, prodByObject));
+  // «Начаты работы» — все, кто дошёл до стройки, включая тех, кто уже сдан или на паузе.
+  // Если считать только текущий статус work, стадия схлопывается по мере сдачи объектов.
+  const started = cohort.filter(o => statusIn(o, "work", "paused", "done"));
+  const done = cohort.filter(o => statusIn(o, "done"));
+  const paused = cohort.filter(o => statusIn(o, "paused"));
+  const cancelled = cohort.filter(o => statusIn(o, "cancel"));
+
   return {
-    sales: {
-      stages: salesStages,
-      terminal: { label: "Потерян", count: lost.length, sum: lost.reduce((s, o) => s + objectValue(o), 0) },
-    },
     production: {
-      stages: PRODUCTION_STAGES.map(stage),
-      terminal: { label: "Расторгнут", count: cancelled.length, sum: cancelled.reduce((s, o) => s + dealValue(o), 0) },
+      stages: [
+        { key: "signed", label: "Договор подписан", count: cohort.length, sum: sum(cohort) },
+        { key: "work", label: "Начаты работы", count: started.length, sum: sum(started) },
+        { key: "done", label: "Выполнен", count: done.length, sum: sum(done) },
+      ],
+      // Приостановлен — это текущее состояние, а не шаг воронки: объект на паузе уже
+      // посчитан в «Начаты работы». Показываем отдельной строкой, чтобы не притворяться
+      // стадией и не ломать конверсию между шагами.
+      paused: { count: paused.length, sum: sum(paused) },
+      terminal: { label: "Расторгнут", count: cancelled.length, sum: sum(cancelled) },
+      inProgress: {
+        count: Math.max(0, cohort.length - done.length - cancelled.length),
+        sum: sum(cohort.filter(o => !statusIn(o, "done", "cancel"))),
+      },
     },
   };
 }
@@ -942,7 +953,7 @@ export function buildAnalytics(data = {}, options = {}) {
   });
   current.dataQuality = buildDataQuality(idx, financeTx, resolveManager);
   current.trend = buildTrend(idx, financeTx, now);
-  current.funnels = buildFunnels(idx);
+  current.funnels = buildFunnels(idx, bounds, period, manager, resolveManager);
 
   // Сравнение с предыдущим периодом. «Портфель» и «Качество» — состояние на сейчас
   // (в базе нет дат закрытия замечаний), поэтому у них сравнения нет и быть не может.

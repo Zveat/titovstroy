@@ -384,6 +384,72 @@ describe("план vs факт маржи", () => {
   });
 });
 
+describe("воронка производства", () => {
+  // База: o1 подписан 15 дней назад и сейчас в работе. Добавляем объекты, подписанные
+  // в этом же месяце и ДАВНО — старая воронка была срезом по всей базе, из-за чего в
+  // «Выполнен» падала вся история и выполненных выходило больше, чем работающих.
+  const prodFixture = () => {
+    const f = fixture();
+    f.objects.push(
+      { id:"p1", clientName:"Сдан в этом месяце", status:"done",   createdAt: NOW - 40*DAY },
+      { id:"p2", clientName:"Сдан давно",         status:"done",   createdAt: NOW - 400*DAY },
+      { id:"p3", clientName:"На паузе",           status:"paused", createdAt: NOW - 30*DAY },
+      { id:"p4", clientName:"Расторгнут",         status:"cancel", createdAt: NOW - 25*DAY },
+      { id:"p5", clientName:"Подписан, не начат", status:"signed", createdAt: NOW - 20*DAY },
+    );
+    f.contracts.push(
+      { id:"cp1", objectId:"p1", number:"№ 101", date: dstr(-12), works:[{quantity:1, price:500000}] },
+      { id:"cp2", objectId:"p2", number:"№ 102", date: "2024-03-01", works:[{quantity:1, price:900000}] },
+      { id:"cp3", objectId:"p3", number:"№ 103", date: dstr(-11), works:[{quantity:1, price:400000}] },
+      { id:"cp4", objectId:"p4", number:"№ 104", date: dstr(-10), works:[{quantity:1, price:300000}] },
+      { id:"cp5", objectId:"p5", number:"№ 105", date: dstr(-9),  works:[{quantity:1, price:200000}] },
+    );
+    return f;
+  };
+  const monthProd = () => buildAnalytics(prodFixture(), { period: "month", now: NOW }).funnels.production;
+
+  it("начинается с «Договор подписан», а не с «В работе»", () => {
+    expect(monthProd().stages.map(s => s.label))
+      .toEqual(["Договор подписан", "Начаты работы", "Выполнен"]);
+  });
+
+  it("когорта — по ДАТЕ ПОДПИСАНИЯ, а не по дате создания объекта", () => {
+    const f = monthProd();
+    // NOW = 15 июня. В июне подписаны p1, p3, p4, p5. Отсечены двое, и оба по делу:
+    // p2 — договор от марта 2024, o1 — договор от 31 мая (прошлый месяц), хотя сам
+    // объект живой и сейчас в работе.
+    expect(f.stages[0].count).toBe(4);
+    expect(f.stages[2].count).toBe(1);              // выполнен из когорты только p1
+    const allTime = buildAnalytics(prodFixture(), { period: "all", now: NOW }).funnels.production;
+    expect(allTime.stages[0].count).toBe(7);        // + p2, o1 и миграционный om
+    expect(allTime.stages[2].count).toBe(2);        // во «всё время» добавляется p2
+  });
+
+  it("стадии вложены: выполнено не больше начатых, начатые не больше подписанных", () => {
+    const [signed, started, done] = monthProd().stages.map(s => s.count);
+    expect(started).toBeLessThanOrEqual(signed);
+    expect(done).toBeLessThanOrEqual(started);
+  });
+
+  it("«Начаты работы» не схлопывается по мере сдачи объектов", () => {
+    // p1 уже сдан, p3 на паузе — оба когда-то стартовали и обязаны остаться в стадии.
+    // Если считать только текущий статус work, тут был бы ноль.
+    expect(monthProd().stages[1].count).toBe(2);
+  });
+
+  it("пауза — отдельная строка, а не стадия воронки", () => {
+    const f = monthProd();
+    expect(f.paused.count).toBe(1);
+    expect(f.stages.some(s => s.label === "Приостановлен")).toBe(false);
+  });
+
+  it("исходы сходятся со входом: подписано = сдано + расторгнуто + ещё в работе", () => {
+    const f = monthProd();
+    expect(f.stages[2].count + f.terminal.count + f.inProgress.count).toBe(f.stages[0].count);
+    expect(f.terminal.label).toBe("Расторгнут");
+  });
+});
+
 describe("служебное", () => {
   it("сумма договора: работы → цена за м² → итог", () => {
     expect(contractSum({ works:[{quantity:2, price:100}] })).toBe(200);
