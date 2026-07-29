@@ -2299,6 +2299,23 @@ function LoginScreen({ onLogin }) {
   const handleLogin = async () => {
     if (loading) return; // защита от двойной отправки
     if (!login.trim() || !password.trim()) { setError("Введите логин и пароль"); return; }
+
+    // Временный вход только для тестового Vercel Preview. На боевом домене и без
+    // отдельной dev-базы эта учётная запись никогда не принимается.
+    const isTestPreview = IS_DEV_ENV && window.location.hostname.endsWith(".vercel.app");
+    if (isTestPreview && login.trim().toLowerCase() === "admin" && password === "titov2024") {
+      const testUser = {
+        id: "preview-admin",
+        login: "admin",
+        name: "Тестовый администратор",
+        role: "admin",
+        authAt: Date.now(),
+      };
+      try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: testUser, savedAt: Date.now() })); } catch(e) {}
+      onLogin(testUser);
+      return;
+    }
+
     // Блокировка после серии неверных попыток — защита от простого перебора пароля.
     const lockUntil = getLoginLockout(login.trim());
     if (lockUntil) {
