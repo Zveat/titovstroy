@@ -15153,6 +15153,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap",borderBottom:"1px solid #e2e8f0"}}>
                   {[
                     ["info","ℹ️ Информация"],
+                    ...((_isAdmin || _isMgr) ? [["control","🎛 Управление"]] : []),
+                    ...((_isAdmin || _isMgr || _isForeman) ? [["today","☀️ Сегодня"]] : []),
                     ["documents",`📄 Документы (${objEsts.length+objCons.length+reports.filter(r=>r.objectId===obj.id && canSeeReport(r)).length})`],
                     ["launch","🚀 Запуск"],
                     ["stages","🔨 Этапы"],
@@ -15167,7 +15169,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         || currentPermissions.estimates !== "none"
                         || currentPermissions.documents !== "none";
                     }
-                    if (["launch","stages","journal","defects","handover"].includes(k)) {
+                    if (["control","today","launch","stages","journal","defects","handover"].includes(k)) {
                       return currentPermissions.showLocked || currentPermissions.production !== "none";
                     }
                     return true;
@@ -15444,7 +15446,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   </div>
                 )}
                 {/* Производственные вкладки (и производственная часть «Информации») — встроенный модуль Производства */}
-                {["info","launch","stages","finance","journal","defects","handover"].includes(objWsTab)
+                {["info","control","today","launch","stages","finance","journal","defects","handover"].includes(objWsTab)
                   && currentPermissions.production !== "none"
                   && !(objWsTab==="finance" && !hasFinancialDetails) && (
                   <div style={{marginTop: objWsTab==="info" ? 14 : 0}}>
@@ -15482,7 +15484,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   />
                   </div>
                 )}
-                {["launch","stages","journal","defects","handover"].includes(objWsTab)
+                {["control","today","launch","stages","journal","defects","handover"].includes(objWsTab)
                   && currentPermissions.production === "none"
                   && (
                     <div style={{maxWidth:480,margin:"32px auto",textAlign:"center",background:"#f9fafb",border:"1px dashed #e5e7eb",borderRadius:12,padding:"32px 24px"}}>

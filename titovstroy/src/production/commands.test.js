@@ -98,6 +98,33 @@ describe("applyProductionCommand — результат {list, ok, changed, reas
     expect(list[0].journal.map(j => j.id).sort()).toEqual(["j1", "j2"]);
   });
 
+  it("ежедневные отчёты сохраняются гранулярно и повтор не создаёт дубль", () => {
+    const report = { id: "daily:o1:2026-07-29:u1", date: "2026-07-29", note: "День закрыт" };
+    let list = [card({ dailyReports: [] })];
+    let result = applyProductionCommand(list, {
+      type: "add-item",
+      objectId: "o1",
+      field: "dailyReports",
+      item: report,
+      ts: 10,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.list[0].dailyReports).toEqual([report]);
+
+    list = result.list;
+    result = applyProductionCommand(list, {
+      type: "patch-item",
+      objectId: "o1",
+      field: "dailyReports",
+      itemId: report.id,
+      patch: { note: "Исправленный отчёт" },
+      ts: 11,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.list[0].dailyReports).toHaveLength(1);
+    expect(result.list[0].dailyReports[0].note).toBe("Исправленный отчёт");
+  });
+
   // merge-client-remarks: дедуп по clientRemarkId внутри команды
   it("merge-client-remarks добавляет только новые (дедуп по clientRemarkId)", () => {
     const list = [card({ defects: [{ id: "cr_r1", clientRemarkId: "r1", text: "уже есть" }] })];

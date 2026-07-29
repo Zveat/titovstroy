@@ -3,6 +3,8 @@ import { STAGE_STATUSES, emptyProduction } from "./constants.js";
 import { normCN, estimatesForObject, findFinanceProjectForObject, sortProductionStages, moveProductionStage } from "../utils.js";
 import { buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, _stageKey } from "./commands.js";
 import { listProductionDrafts, removeProductionDraft, saveProductionDraft } from "./drafts.js";
+import ObjectControlModule from "../object-control/ObjectControlModule.jsx";
+import { updateStageStatus, upsertDailyReport } from "../object-control/objectControl.js";
 
 // ─────────────────────────────────────────────────────────────────────────
 // ПРОИЗВОДСТВО — управление и контроль объектов в работе.
@@ -20,6 +22,11 @@ import { listProductionDrafts, removeProductionDraft, saveProductionDraft } from
 // ─────────────────────────────────────────────────────────────────────────
 
 const stByKey = (k) => STAGE_STATUSES.find(s => s.key === k) || STAGE_STATUSES[0];
+const localDateKey = () => {
+  const date = new Date();
+  const pad = value => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
 
 // Превратить строки сметы в строки-работы (наименования). cat = блок-заголовок. estimateKey
 // (стабильный ключ сметной позиции) ОБЯЗАТЕЛЕН — по нему автосинк сопоставляет этапы; без него
@@ -438,8 +445,10 @@ export default function ProductionModule({
   const stagesReadOnly = baseReadOnly || actionPermissions.stages === false;
   const qualityReadOnly = baseReadOnly || actionPermissions.quality === false;
   const clientAccessReadOnly = baseReadOnly || actionPermissions.clientAccess === false;
-  const tabReadOnly = embedTab === "stages"
+  const tabReadOnly = ["stages", "today"].includes(embedTab)
     ? stagesReadOnly
+    : embedTab === "control"
+      ? false
     : ["launch", "handover", "journal", "defects"].includes(embedTab)
       ? qualityReadOnly
       : mainReadOnly;
@@ -467,6 +476,19 @@ export default function ProductionModule({
   const stagesPatch = (patch) => patchProd(patch, !stagesReadOnly);
   const qualityPatch = (patch) => patchProd(patch, !qualityReadOnly);
   const clientAccessPatch = (patch) => patchProd(patch, !clientAccessReadOnly);
+  const handleTodayStageStatus = (stageId, status) => {
+    const current = localProdRef.current;
+    const stages = (current?.stages || []).map(stage => (
+      stage?.id === stageId ? updateStageStatus(stage, status, localDateKey()) : stage
+    ));
+    stagesPatch({ stages });
+  };
+  const handleCloseDay = (report) => {
+    const current = localProdRef.current;
+    stagesPatch({
+      dailyReports: upsertDailyReport(current?.dailyReports || [], report, Date.now()),
+    });
+  };
 
   // Данные из Финансов для текущего объекта — ДОЛЖНЫ быть до if(!openObj), иначе нарушение Rules of Hooks
   const finProj = useMemo(() => {
@@ -523,9 +545,11 @@ export default function ProductionModule({
   const audit = (ev) => { try { if (onAudit) onAudit({ objectId: openObj.id, label: _objLbl, source: "manual", ...ev }); } catch (e) { console.warn("audit failed", e); } };
   return (
     <div style={{ maxWidth: 1600, margin: "0 auto" }}>
-      {(tabReadOnly || (embedTab === "info" && clientAccessReadOnly)) && <div style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 14px", fontSize: 12.5, color: "#64748b", marginBottom: 12 }}>👁 Режим просмотра — часть действий недоступна для вашей роли.</div>}
+      {embedTab !== "control" && (tabReadOnly || (embedTab === "info" && clientAccessReadOnly)) && <div style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 14px", fontSize: 12.5, color: "#64748b", marginBottom: 12 }}>👁 Режим просмотра — часть действий недоступна для вашей роли.</div>}
       {embedTab === "info" && <InfoTab prod={localProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={mainPatch} clientAccessPatch={clientAccessPatch} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} clientInfoCard={clientInfoCard} audit={audit} readOnly={mainReadOnly} clientAccessReadOnly={clientAccessReadOnly} staffOptions={staffOptions} />}
-      {embedTab !== "info" && <fieldset disabled={tabReadOnly} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
+      {embedTab === "control" && <ObjectControlModule mode="control" object={openObj} production={localProd} currentUser={currentUser} readOnly />}
+      {embedTab === "today" && <ObjectControlModule mode="today" object={openObj} production={localProd} currentUser={currentUser} readOnly={stagesReadOnly} onStageStatus={handleTodayStageStatus} onCloseDay={handleCloseDay} />}
+      {!["info", "control", "today"].includes(embedTab) && <fieldset disabled={tabReadOnly} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
       {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист запуска объекта" />}
       {embedTab === "handover" && <ChecklistTab kind="checklistHandover" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист сдачи объекта" />}
       {embedTab === "stages" && <StagesTab prod={localProd} patch={stagesPatch} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} audit={audit} />}
