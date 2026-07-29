@@ -11,6 +11,7 @@ import { parserRunMessage, triggerParserRun } from "./masters/parserTrigger.js";
 import { MasterCrmButton, MasterCrmDatabase, MasterCrmEditor } from "./masters/MasterCRM.jsx";
 import { interactionsForContact, masterSourceKey, normalizeMasterCrm } from "./masters/masterCrm.js";
 import { EstimateSuggestions, EstimateSuggestionRulesEditor } from "./estimate/EstimateSuggestions.jsx";
+import ObjectDispatcher from "./object-control/ObjectDispatcher.jsx";
 import { AnalyticsBlocks } from "./analytics/AnalyticsBlocks.jsx";
 import { Dashboard } from "./analytics/Dashboard.jsx";
 import { buildAnalytics, makeManagerResolver, REFUSE_REASONS } from "./analytics/analyticsModel.js";
@@ -14760,6 +14761,13 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   </div>
                 </div>;
               })()}
+              {(_isAdmin || _isMgr) && !objectAttentionFilter && (
+                <ObjectDispatcher
+                  objects={usRows}
+                  productions={productions}
+                  onOpenObject={(object) => openIssue({ object: object.id, tab: "control" })}
+                />
+              )}
               {objectAttentionFilter && usRows.length === 0 && (
                 <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:"18px",textAlign:"center",color:"#166534",fontSize:13,fontWeight:700}}>
                   ✓ Сейчас нет объектов без движения 14+ дней

@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { buildObjectHealth, buildTodayStageGroups } from "./objectControl.js";
+import {
+  buildObjectHealth,
+  buildSupplySummary,
+  buildTaskSummary,
+  buildTodayStageGroups,
+  updateSupplyStatus,
+  updateTaskStatus,
+} from "./objectControl.js";
 
 const localDateKey = (value = new Date()) => {
   const date = value instanceof Date ? value : new Date(value);
@@ -67,7 +74,7 @@ const actionStyle = (color, background) => ({
   fontSize: 11.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
 });
 
-function ControlView({ production }) {
+function ControlView({ production, currentUser, readOnly, onPatchProduction }) {
   const today = localDateKey();
   const health = useMemo(() => buildObjectHealth(production, today), [production, today]);
   const active = (production.stages || []).filter((stage) => ["progress", "delayed"].includes(stage.status));
@@ -112,6 +119,7 @@ function ControlView({ production }) {
           ) : <div style={{ color: "#94a3b8", fontSize: 12.5, padding: "18px 0" }}>Ежедневных отчётов пока нет.</div>}
         </section>
       </div>
+      <WorkCoordination production={production} currentUser={currentUser} readOnly={readOnly} onPatchProduction={onPatchProduction} />
     </div>
   );
 }
@@ -120,7 +128,7 @@ function ReportField({ label, value }) {
   return <div><div style={{ color: "#94a3b8", fontSize: 10.5, fontWeight: 800, textTransform: "uppercase" }}>{label}</div><div style={{ marginTop: 2, overflowWrap: "anywhere" }}>{value}</div></div>;
 }
 
-function TodayView({ object, production, currentUser, readOnly, onStageStatus, onCloseDay }) {
+function TodayView({ object, production, currentUser, readOnly, onStageStatus, onCloseDay, onPatchProduction }) {
   const today = localDateKey();
   const groups = useMemo(() => buildTodayStageGroups(production.stages || [], today), [production.stages, today]);
   const existing = (production.dailyReports || []).find((report) => report?.date === today && String(report?.createdById || "") === String(currentUser?.id || ""));
@@ -187,9 +195,151 @@ function TodayView({ object, production, currentUser, readOnly, onStageStatus, o
           {!readOnly && <button type="button" onClick={closeDay} style={{ border: 0, borderRadius: 7, padding: "10px 16px", background: "#0f172a", color: "#fff", fontFamily: "inherit", fontSize: 12.5, fontWeight: 900, cursor: "pointer" }}>Закрыть день</button>}
         </div>
       </section>
+      <WorkCoordination production={production} currentUser={currentUser} readOnly={readOnly} onPatchProduction={onPatchProduction} />
     </div>
   );
 }
+
+const taskStatusMeta = {
+  open: { label: "К выполнению", color: "#b45309", bg: "#fffbeb" },
+  in_progress: { label: "В работе", color: "#2563eb", bg: "#eff6ff" },
+  done: { label: "Готово", color: "#047857", bg: "#ecfdf5" },
+  cancelled: { label: "Отменено", color: "#64748b", bg: "#f1f5f9" },
+};
+
+const supplyStatusMeta = {
+  needed: { label: "Нужно", color: "#b45309", bg: "#fffbeb" },
+  ordered: { label: "Заказано", color: "#2563eb", bg: "#eff6ff" },
+  delivered: { label: "На объекте", color: "#047857", bg: "#ecfdf5" },
+  cancelled: { label: "Отменено", color: "#64748b", bg: "#f1f5f9" },
+};
+
+const makeWorkId = (prefix) => {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return uuid ? `${prefix}_${uuid}` : `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+};
+
+function WorkCoordination({ production, currentUser, readOnly, onPatchProduction }) {
+  const today = localDateKey();
+  const tasks = Array.isArray(production?.tasks) ? production.tasks : [];
+  const supplyRequests = Array.isArray(production?.supplyRequests) ? production.supplyRequests : [];
+  const taskSummary = useMemo(() => buildTaskSummary(tasks, today), [tasks, today]);
+  const supplySummary = useMemo(() => buildSupplySummary(supplyRequests, today), [supplyRequests, today]);
+  const [taskForm, setTaskForm] = useState({ title: "", assignee: "", dueDate: "", priority: "normal" });
+  const [supplyForm, setSupplyForm] = useState({ title: "", quantity: "", neededBy: "", responsible: "" });
+
+  const visibleTasks = tasks.filter((item) => !["done", "cancelled"].includes(item?.status)).slice(0, 8);
+  const visibleSupply = supplyRequests.filter((item) => !["delivered", "cancelled"].includes(item?.status)).slice(0, 8);
+  const actor = currentUser?.name || currentUser?.login || "Сотрудник";
+
+  const saveTasks = (next) => onPatchProduction?.({ tasks: next });
+  const saveSupply = (next) => onPatchProduction?.({ supplyRequests: next });
+  const setTaskStatus = (taskId, status) => saveTasks(tasks.map((task) => (
+    task?.id === taskId ? updateTaskStatus(task, status, Date.now()) : task
+  )));
+  const setSupplyStatus = (requestId, status) => saveSupply(supplyRequests.map((request) => (
+    request?.id === requestId ? updateSupplyStatus(request, status, Date.now()) : request
+  )));
+
+  const addTask = () => {
+    const title = taskForm.title.trim();
+    if (!title || readOnly) return;
+    saveTasks([...tasks, {
+      id: makeWorkId("task"), title, assignee: taskForm.assignee.trim(), dueDate: taskForm.dueDate,
+      priority: taskForm.priority, status: "open", createdAt: Date.now(), createdByName: actor,
+    }]);
+    setTaskForm({ title: "", assignee: "", dueDate: "", priority: "normal" });
+  };
+
+  const addSupply = () => {
+    const title = supplyForm.title.trim();
+    if (!title || readOnly) return;
+    saveSupply([...supplyRequests, {
+      id: makeWorkId("supply"), title, quantity: supplyForm.quantity.trim(), neededBy: supplyForm.neededBy,
+      responsible: supplyForm.responsible.trim(), status: "needed", createdAt: Date.now(), createdByName: actor,
+    }]);
+    setSupplyForm({ title: "", quantity: "", neededBy: "", responsible: "" });
+  };
+
+  return (
+    <section style={{ ...panelStyle, padding: 0, overflow: "hidden" }}>
+      <div style={{ padding: "15px 18px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 900, color: "#0f172a" }}>Координация работ</div>
+          <div style={{ color: "#64748b", fontSize: 11.5, marginTop: 3 }}>Поручения прорабу и заявки на материалы в одной очереди</div>
+        </div>
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+          <span style={chipStyle(taskSummary.overdue ? "#b91c1c" : "#2563eb", taskSummary.overdue ? "#fef2f2" : "#eff6ff")}>Задачи: {taskSummary.open}</span>
+          <span style={chipStyle(supplySummary.late ? "#b91c1c" : "#b45309", supplySummary.late ? "#fef2f2" : "#fffbeb")}>Снабжение: {supplySummary.open}</span>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 390px), 1fr))" }}>
+        <CoordinationColumn title="Задачи" icon="✓" empty="Открытых задач нет." bordered>
+          {!readOnly && (
+            <div style={coordinationFormStyle}>
+              <input value={taskForm.title} onChange={(event) => setTaskForm((prev) => ({ ...prev, title: event.target.value }))} placeholder="Что нужно сделать" style={{ ...inputStyle, gridColumn: "1 / -1" }} />
+              <input value={taskForm.assignee} onChange={(event) => setTaskForm((prev) => ({ ...prev, assignee: event.target.value }))} placeholder="Ответственный" style={inputStyle} />
+              <input type="date" value={taskForm.dueDate} onChange={(event) => setTaskForm((prev) => ({ ...prev, dueDate: event.target.value }))} style={inputStyle} />
+              <select value={taskForm.priority} onChange={(event) => setTaskForm((prev) => ({ ...prev, priority: event.target.value }))} style={inputStyle}>
+                <option value="normal">Обычная</option><option value="high">Срочная</option>
+              </select>
+              <button type="button" onClick={addTask} disabled={!taskForm.title.trim()} style={primaryMiniButton}>Добавить</button>
+            </div>
+          )}
+          {visibleTasks.length ? visibleTasks.map((task) => (
+            <CoordinationRow key={task.id} title={task.title} meta={[task.assignee, task.dueDate && `до ${task.dueDate}`].filter(Boolean).join(" · ")} status={taskStatusMeta[task.status] || taskStatusMeta.open} urgent={task.priority === "high" || (task.dueDate && task.dueDate < today)}>
+              {!readOnly && task.status === "open" && <button type="button" onClick={() => setTaskStatus(task.id, "in_progress")} style={actionStyle("#2563eb", "#eff6ff")}>Начать</button>}
+              {!readOnly && task.status !== "done" && <button type="button" onClick={() => setTaskStatus(task.id, "done")} style={actionStyle("#047857", "#ecfdf5")}>Готово</button>}
+            </CoordinationRow>
+          )) : <EmptyCoordination text="Открытых задач нет." />}
+        </CoordinationColumn>
+
+        <CoordinationColumn title="Снабжение" icon="▣" empty="Открытых заявок нет.">
+          {!readOnly && (
+            <div style={coordinationFormStyle}>
+              <input value={supplyForm.title} onChange={(event) => setSupplyForm((prev) => ({ ...prev, title: event.target.value }))} placeholder="Материал или инструмент" style={{ ...inputStyle, gridColumn: "1 / -1" }} />
+              <input value={supplyForm.quantity} onChange={(event) => setSupplyForm((prev) => ({ ...prev, quantity: event.target.value }))} placeholder="Количество" style={inputStyle} />
+              <input type="date" value={supplyForm.neededBy} onChange={(event) => setSupplyForm((prev) => ({ ...prev, neededBy: event.target.value }))} style={inputStyle} />
+              <input value={supplyForm.responsible} onChange={(event) => setSupplyForm((prev) => ({ ...prev, responsible: event.target.value }))} placeholder="Кто закупает" style={inputStyle} />
+              <button type="button" onClick={addSupply} disabled={!supplyForm.title.trim()} style={primaryMiniButton}>Добавить</button>
+            </div>
+          )}
+          {visibleSupply.length ? visibleSupply.map((item) => (
+            <CoordinationRow key={item.id} title={item.title} meta={[item.quantity, item.responsible, item.neededBy && `к ${item.neededBy}`].filter(Boolean).join(" · ")} status={supplyStatusMeta[item.status] || supplyStatusMeta.needed} urgent={item.neededBy && item.neededBy < today}>
+              {!readOnly && item.status === "needed" && <button type="button" onClick={() => setSupplyStatus(item.id, "ordered")} style={actionStyle("#2563eb", "#eff6ff")}>Заказано</button>}
+              {!readOnly && item.status !== "delivered" && <button type="button" onClick={() => setSupplyStatus(item.id, "delivered")} style={actionStyle("#047857", "#ecfdf5")}>На объекте</button>}
+            </CoordinationRow>
+          )) : <EmptyCoordination text="Открытых заявок нет." />}
+        </CoordinationColumn>
+      </div>
+    </section>
+  );
+}
+
+function CoordinationColumn({ title, icon, children, bordered }) {
+  return <div style={{ padding: "15px 18px 18px", borderRight: bordered ? "1px solid #e2e8f0" : "none", minWidth: 0 }}><div style={{ fontSize: 13.5, fontWeight: 900, color: "#0f172a", marginBottom: 10 }}>{icon} {title}</div>{children}</div>;
+}
+
+function CoordinationRow({ title, meta, status, urgent, children }) {
+  return <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 10, alignItems: "center", padding: "10px 0", borderBottom: "1px solid #eef2f7" }}>
+    <div style={{ minWidth: 0 }}>
+      <div style={{ color: urgent ? "#b91c1c" : "#0f172a", fontSize: 12.5, fontWeight: 850, overflowWrap: "anywhere" }}>{title}</div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4, alignItems: "center" }}>
+        <span style={{ ...chipStyle(status.color, status.bg), padding: "2px 6px", fontSize: 10.5 }}>{status.label}</span>
+        {meta && <span style={{ color: "#64748b", fontSize: 10.8 }}>{meta}</span>}
+      </div>
+    </div>
+    <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>{children}</div>
+  </div>;
+}
+
+function EmptyCoordination({ text }) {
+  return <div style={{ color: "#94a3b8", fontSize: 12, padding: "14px 0 4px" }}>{text}</div>;
+}
+
+const coordinationFormStyle = { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 7, padding: 10, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 7, marginBottom: 7 };
+const primaryMiniButton = { border: 0, borderRadius: 6, padding: "8px 10px", background: "#0f172a", color: "#fff", fontFamily: "inherit", fontSize: 11.5, fontWeight: 850, cursor: "pointer" };
 
 function InputField({ label, children }) {
   return <label style={{ display: "grid", gap: 5, color: "#64748b", fontSize: 11.5, fontWeight: 800 }}>{label}{children}</label>;

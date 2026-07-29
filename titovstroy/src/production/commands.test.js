@@ -218,6 +218,33 @@ describe("syncEstimateStages — ручной этап с именем как в
 });
 
 describe("diffProductionToCommands — granular по всем массивам", () => {
+  it("задачи и заявки снабжения сохраняются гранулярно", () => {
+    const prev = {
+      objectId: "o1",
+      tasks: [{ id: "t1", status: "open" }],
+      supplyRequests: [],
+    };
+    const next = {
+      objectId: "o1",
+      tasks: [{ id: "t1", status: "done" }],
+      supplyRequests: [{ id: "r1", title: "Клей" }],
+    };
+    const commands = diffProductionToCommands(prev, next, "o1", 10);
+
+    expect(commands).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "patch-item", field: "tasks", itemId: "t1" }),
+      expect.objectContaining({
+        type: "add-item",
+        field: "supplyRequests",
+        item: expect.objectContaining({ id: "r1" }),
+      }),
+    ]));
+
+    let list = [prev];
+    for (const command of commands) list = applyProductionCommand(list, command).list;
+    expect(list[0]).toMatchObject(next);
+  });
+
   it("правка журнала → patch-item(journal), а не patch-card целым массивом", () => {
     const prev = { objectId: "o1", journal: [{ id: "j1", text: "a" }] };
     const next = { objectId: "o1", journal: [{ id: "j1", text: "b" }] };

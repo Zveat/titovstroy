@@ -448,7 +448,7 @@ export default function ProductionModule({
   const tabReadOnly = ["stages", "today"].includes(embedTab)
     ? stagesReadOnly
     : embedTab === "control"
-      ? false
+      ? stagesReadOnly
     : ["launch", "handover", "journal", "defects"].includes(embedTab)
       ? qualityReadOnly
       : mainReadOnly;
@@ -547,8 +547,8 @@ export default function ProductionModule({
     <div style={{ maxWidth: 1600, margin: "0 auto" }}>
       {embedTab !== "control" && (tabReadOnly || (embedTab === "info" && clientAccessReadOnly)) && <div style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 14px", fontSize: 12.5, color: "#64748b", marginBottom: 12 }}>👁 Режим просмотра — часть действий недоступна для вашей роли.</div>}
       {embedTab === "info" && <InfoTab prod={localProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={mainPatch} clientAccessPatch={clientAccessPatch} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} clientInfoCard={clientInfoCard} audit={audit} readOnly={mainReadOnly} clientAccessReadOnly={clientAccessReadOnly} staffOptions={staffOptions} />}
-      {embedTab === "control" && <ObjectControlModule mode="control" object={openObj} production={localProd} currentUser={currentUser} readOnly />}
-      {embedTab === "today" && <ObjectControlModule mode="today" object={openObj} production={localProd} currentUser={currentUser} readOnly={stagesReadOnly} onStageStatus={handleTodayStageStatus} onCloseDay={handleCloseDay} />}
+      {embedTab === "control" && <ObjectControlModule mode="control" object={openObj} production={localProd} currentUser={currentUser} readOnly={stagesReadOnly} onPatchProduction={stagesPatch} />}
+      {embedTab === "today" && <ObjectControlModule mode="today" object={openObj} production={localProd} currentUser={currentUser} readOnly={stagesReadOnly} onStageStatus={handleTodayStageStatus} onCloseDay={handleCloseDay} onPatchProduction={stagesPatch} />}
       {!["info", "control", "today"].includes(embedTab) && <fieldset disabled={tabReadOnly} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
       {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист запуска объекта" />}
       {embedTab === "handover" && <ChecklistTab kind="checklistHandover" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист сдачи объекта" />}
