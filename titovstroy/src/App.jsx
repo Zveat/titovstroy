@@ -8332,12 +8332,16 @@ ${reqBlock}`;
   // строго последовательно (цепочка промисов на ключ), разные ключи — по-прежнему параллельно.
   const _saveQueues = useRef(new Map()); // key -> хвостовой промис очереди
   const _saveListProtectedRaw = useCallback(async (key, backupKey, list, applyState, opts = {}) => {
-    if (storage.isReadOnlyTab()) return;
-    if (!Array.isArray(list)) { console.error("saveListProtected: не массив", key); return; }
+    // МОЛЧАЛИВЫЕ ОТКАЗЫ — главная причина «внёс операцию, вышел, а её нет». Пять веток
+    // ниже возвращали undefined без единого слова наружу, а вызывающий код это не
+    // проверял. Теперь причина уходит в opts.onBlocked, и вызывающий может показать её.
+    const _blocked = (reason) => { try { opts.onBlocked?.(reason); } catch {} return undefined; };
+    if (storage.isReadOnlyTab()) return _blocked("read-only-tab");
+    if (!Array.isArray(list)) { console.error("saveListProtected: не массив", key); return _blocked("bad-list"); }
     // identityKey — по какому полю мерджить (по умолчанию "id"; у production записей его нет,
     // там ключ — "objectId", иначе слияние молча даёт пустой список и сохранение блокируется).
     const { replace = false, removedIds = [], allowEmpty = false, loadedRef = null, identityKey = "id", hardReplace = false } = opts;
-    if (loadedRef && !loadedRef.current) { console.warn("saveListProtected заблокирован: не загружено", key); return; }
+    if (loadedRef && !loadedRef.current) { console.warn("saveListProtected заблокирован: не загружено", key); return _blocked("not-loaded"); }
 
     let stored = [], prevValue = null, prevStatus = "empty";
     try {
@@ -8348,7 +8352,7 @@ ${reqBlock}`;
       } else if (prevCheck.status === "unavailable") {
         console.error("saveListProtected ЗАБЛОКИРОВАН: база недоступна", key);
         setCloudError(true);
-        return;
+        return _blocked("db-unavailable");
       }
     } catch(e) { console.warn("guard check err", e); }
 
@@ -8387,7 +8391,7 @@ ${reqBlock}`;
 
     if (stored.length > 0 && finalList.length === 0 && !allowEmpty) {
       console.error("saveListProtected ЗАБЛОКИРОВАН: пусто поверх", stored.length, key);
-      return;
+      return _blocked("empty-over-data");
     }
 
     if (applyState) applyState(finalList);
@@ -8404,9 +8408,16 @@ ${reqBlock}`;
         }
       }
       const res = await storage.set(key, JSON.stringify(finalList));
-      if (res && res.fbOk === false) { console.error("Firebase save FAILED:", key, res.fbError); setCloudError(true); }
-      else { _clearCloudErrorIfAllClean(); }
-    } catch(e) { console.error(e); setCloudError(true); }
+      if (res && res.fbOk === false) {
+        console.error("Firebase save FAILED:", key, res.fbError); setCloudError(true);
+        // Для денег «записалось локально» — это НЕ записалось. requireCloud заставляет
+        // считать такой исход провалом, чтобы вызывающий не закрывал форму молча.
+        if (opts.requireCloud) return _blocked(res.fbError === "read-only-tab" ? "read-only-tab" : "cloud-failed");
+      } else { _clearCloudErrorIfAllClean(); }
+    } catch(e) {
+      console.error(e); setCloudError(true);
+      if (opts.requireCloud) return _blocked("cloud-failed");
+    }
     return finalList;
   }, [currentUser, _clearCloudErrorIfAllClean]);
 
@@ -14209,8 +14220,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               const set = (k,v)=>setFinTxModal(p=>({...p,[k]:v}));
               const catSource = m.type==="income" ? financeMeta.income : m.type==="expense" ? financeMeta.expense : [];
               const subSource = catSource.find(c=>c.cat===m.category)?.subs || [];
-              const save = ()=>{
+              const save = async ()=>{
                 if (m.id ? !canFinanceEditRecord(m) : !canFinanceCreate) return;
+                if (m.__saving) return;                       // защита от двойного нажатия
                 const amt=Number(m.amount)||0;
                 if(amt<=0){ alert("Укажите сумму"); return; }
                 if(m.type==="transfer" && m.account===m.accountTo){ alert("Счета должны отличаться"); return; }
@@ -14222,9 +14234,31 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   included:m.included!==false, opuMonth:m.opuMonth, createdAt:m.createdAt||Date.now(), createdBy:m.createdBy||currentUser.name, createdById:m.createdById||currentUser.id, updatedAt:Date.now() };
                 const isNew = !m.id;
                 const _oldTx = m.id ? financeTxRef.current.find(x=>x.id===m.id) : null;
+                // РАНЬШЕ: окно закрывалось сразу, а сохранение уходило «в никуда» — без await
+                // и без проверки. С телефона это давало потерю: операция показана, форма
+                // закрыта, а запись либо блокировалась (финансы ещё не догрузились), либо
+                // не успевала уйти до закрытия браузера. Теперь ждём подтверждения облака
+                // и закрываем окно ТОЛЬКО после него.
+                let blockedReason = "";
+                setFinTxModal(p => p && ({ ...p, __saving: true, __err: "" }));
+                const saved = await saveFinanceTx([tx], {
+                  replace: false,
+                  requireCloud: true,                          // локальной записи недостаточно
+                  onBlocked: (r) => { blockedReason = r; },
+                });
+                if (!saved) {
+                  const why = {
+                    "not-loaded": "финансы ещё не загрузились — подождите пару секунд и повторите",
+                    "read-only-tab": "приложение открыто в другой вкладке — редактирует она",
+                    "db-unavailable": "нет связи с базой",
+                    "cloud-failed": "не удалось записать в облако — проверьте интернет",
+                    "empty-over-data": "защита от затирания: попробуйте ещё раз",
+                  }[blockedReason] || "не удалось сохранить";
+                  // Данные НЕ теряем: окно остаётся с введённой операцией.
+                  setFinTxModal(p => p && ({ ...p, __saving: false, __err: `Не сохранено: ${why}` }));
+                  return;
+                }
                 setFinTxModal(null);
-                // merge (replace:false) — не перезатираем облако: операции с других устройств не теряются
-                saveFinanceTx([tx],{replace:false});
                 // журнал: привязываем к объекту по номеру договора, если получается
                 const _oid = (tx.contractNo && (contractsRef.current.find(c=>normCN(c.number||"")===normCN(tx.contractNo)||normCN(c.contractNo||"")===normCN(tx.contractNo))||{}).objectId) || "";
                 const _tl = _finTypeLbl[tx.type] || tx.type;
@@ -14368,7 +14402,16 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       {m.id && canFinanceCreate && <button onClick={()=>{ const copy={...m,id:null,createdAt:undefined,updatedAt:undefined,date:new Date().toISOString().slice(0,10)}; setFinCatSearch(copy.subcategory||copy.category||""); setFinTxProjSearch(copy.contractNo||""); setFinTxModal(copy); }} style={{background:"#f8fafc",color:"#475569",border:"1px solid #e2e8f0",borderRadius:9,padding:"10px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📋 Копия</button>}
                       <div style={{flex:1}}/>
                       <button onClick={()=>setFinTxModal(null)} style={{background:"#fff",color:"#64748b",border:"1px solid #e2e8f0",borderRadius:9,padding:"10px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Отмена</button>
-                      <button onClick={save} style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:9,padding:"10px 22px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Сохранить</button>
+                      {m.__err && (
+                        // Операция НЕ потеряна: она осталась в форме, можно нажать ещё раз.
+                        <div style={{flex:"1 1 100%",background:"#fef2f2",border:"1px solid #fecaca",color:"#b91c1c",
+                          borderRadius:9,padding:"8px 12px",fontSize:12.5,fontWeight:600,marginBottom:8}}>
+                          {m.__err}. Данные сохранены в форме — нажмите «Сохранить» ещё раз.
+                        </div>
+                      )}
+                      <button onClick={save} disabled={!!m.__saving}
+                        style={{background:m.__saving?"#93b4f5":"#2563eb",color:"#fff",border:"none",borderRadius:9,padding:"10px 22px",fontSize:13,fontWeight:700,cursor:m.__saving?"default":"pointer",fontFamily:"inherit"}}>
+                        {m.__saving ? "Сохраняю…" : "Сохранить"}</button>
                     </div>
                   </div>
                 </div>
