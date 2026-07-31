@@ -3,7 +3,7 @@ import { initializeApp } from "firebase/app";
 import { getDatabase, ref, get, set, runTransaction } from "firebase/database";
 import ProductionModule, { flushPendingProduction, stopProductionSession, hasPendingProduction, productionDraftsAreDurable, startProductionSession, setProductionCommandHandler } from "./production/ProductionModule.jsx";
 import { emptyProduction } from "./production/constants.js";
-import { applyProductionCommand, runVerifiedProductionTransaction, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, isRegenerableProductionCommand, productionCommandObjectIds, _stageKey, normalizeProductionIds } from "./production/commands.js";
+import { applyProductionCommand, runVerifiedProductionTransaction, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, isRegenerableProductionCommand, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { MASTER_CATEGORIES, NAIMI_CITY_FALLBACK, OLX_REPAIR_CATEGORIES } from "./masters/catalog.mjs";
 import { SearchMultiSelect, SearchSelect as MasterSearchSelect } from "./masters/MasterSelects.jsx";
@@ -18,7 +18,7 @@ import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restore
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { contractNoOfObject, normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, resolveEstimateSuggestionRules, buildEstimateSuggestions, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -438,6 +438,37 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
   const selStyle = { height: 36, borderRadius: 9, border: "1px solid #e2e8f0", padding: "0 10px", fontSize: 13, background: "#fff", color: "#0f172a", fontFamily: "inherit", minWidth: 0 };
   const chip = (active) => ({ border: "1px solid " + (active ? "#2563eb" : "#e2e8f0"), background: active ? "#eff6ff" : "#fff", color: active ? "#2563eb" : "#64748b", borderRadius: 8, padding: "6px 12px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" });
 
+  // Сводка последнего прогона парсера. Раньше в шапке была только дата обновления —
+  // по ней не понять, принёс ли прогон что-то. Теперь видно, сколько анкет и номеров
+  // он реально собрал, и почему остановился, если остановился досрочно.
+  const RunLine = ({ run }) => {
+    if (!run) return null;
+    const when = run.finishedAt || run.startedAt;
+    const dt = when ? new Date(when) : null;
+    const st = {
+      ok:        { c: "#34d399", t: "успешно" },
+      partial:   { c: "#fbbf24", t: "собрано частично" },
+      limit:     { c: "#fbbf24", t: "упёрлись в суточный лимит" },
+      throttled: { c: "#fbbf24", t: "площадка ограничила темп" },
+      running:   { c: "#93c5fd", t: "идёт прогон…" },
+    }[run.status] || { c: "rgba(255,255,255,.6)", t: run.status || "" };
+    return (
+      <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.75)", marginTop: 4, display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <span>
+          Последний прогон:{" "}
+          <b style={{ color: "#fff" }}>
+            {dt ? dt.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—"}
+          </b>
+        </span>
+        <span>+{run.newProfiles || 0} анкет</span>
+        <span>+{run.newPhones || 0} номеров</span>
+        {run.durationSec ? <span>за {run.durationSec < 60 ? `${run.durationSec} с` : `${Math.round(run.durationSec / 60)} мин`}</span> : null}
+        <span style={{ color: st.c, fontWeight: 700 }}>{st.t}</span>
+        {run.error ? <span style={{ color: "#fca5a5" }} title={run.error}>· {String(run.error).slice(0, 60)}</span> : null}
+      </div>
+    );
+  };
+
   return (
     <div className="page" style={{ maxWidth: 1600, minHeight: "100vh", paddingBottom: 40 }}>
       <div className="hero" style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)", borderRadius: 16, padding: "22px 26px", marginBottom: 18, position: "relative", overflow: "hidden", boxShadow: "0 4px 20px rgba(15,23,42,.3)" }}>
@@ -452,6 +483,7 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
                 ? <>База с OLX.kz · актуальных {olxMeta?.activeCount ?? mastersOlx.filter(m => m.active !== false).length} · с телефоном {olxWithPhone}{olxMeta?.updatedAt ? ` · обновлено ${new Date(olxMeta.updatedAt).toLocaleDateString("ru-RU")}` : ""}</>
                 : <>База с naimi.kz · актуальных {meta?.activeCount ?? masters.filter(m => m.active !== false).length} · с телефоном {withPhone}{meta?.updatedAt ? ` · обновлено ${new Date(meta.updatedAt).toLocaleDateString("ru-RU")}` : ""}</>}
             </div>
+            {source === "olx" ? <RunLine run={olxMeta?.lastRun} /> : source === "naimi" ? <RunLine run={meta?.lastRun} /> : null}
           </div>
           <div style={{ display: "flex", gap: 5, background: "rgba(255,255,255,.08)", borderRadius: 10, padding: 4 }}>
             {[["naimi", "naimi.kz"], ["olx", "OLX.kz"], ["own", "Своя база"]].map(([s, l]) => (
@@ -1397,6 +1429,18 @@ const WORKSPACE_BACKUPS_KEY = "titovstroy-workspace-backups";
 const DEALS_KEY          = "titovstroy-deals";
 const DEALS_BACKUPS_KEY  = "titovstroy-deals-backups";
 const STORAGE_KEY        = "titovstroy-estimates";
+// Расшифровка причин, по которым заморозка цен перед сменой прайса не прошла.
+// Нужна и в админке (показ владельцу), и в MainApp (формирование ответа).
+const PRICE_SEAL_REASONS = {
+  "read-only-tab": "приложение открыто в другой вкладке — редактирует она",
+  "editor-lock": "приложение открыто в другой вкладке — редактирует она",
+  "no-sdk": "нет связи с облаком",
+  timeout: "облако не ответило за 15 секунд",
+  aborted: "сметы изменились параллельно — повторите",
+  empty: "облако вернуло пустой ответ",
+  "bad-json": "список смет в облаке повреждён",
+  "not-array": "список смет в облаке повреждён",
+};
 const BACKUPS_KEY        = "titovstroy-estimates-backups"; // снимки архива для восстановления
 const USERS_KEY          = "titovstroy-users";
 const USERS_BACKUPS_KEY  = "titovstroy-users-backups";
@@ -2308,6 +2352,27 @@ function LoginScreen({ onLogin }) {
     }
     setLoading(true); setError("");
 
+    // ── ВРЕМЕННЫЙ ВХОД ДЛЯ DEV-ПРЕВЬЮ ──────────────────────────────────────────
+    // Нужен, потому что в dev-базе лежит своя (старая) копия пользователей, и ни
+    // боевой пароль, ни дефолтный admin/titov2024 туда не подходят.
+    //
+    // БЕЗОПАСНОСТЬ: работает ТОЛЬКО при IS_DEV_ENV, то есть когда задан
+    // VITE_FB_DATABASE_URL. На боевой этой переменной нет — условие ложно ещё до
+    // сравнения пароля, и вход отсюда невозможен в принципе. Это НЕ бэкдор в проде:
+    // на titovstroy.kz данная ветка кода недостижима.
+    //
+    // ⚠️ ВРЕМЕННО: убрать перед мержем в main. Постоянный способ — завести себе
+    // пользователя в самой dev-базе через «Админка → Пользователи».
+    if (IS_DEV_ENV && login.trim().toLowerCase() === "devadmin" && password === "dev2026") {
+      clearLoginAttempts(login.trim());
+      const devUser = { id: "dev-preview", login: "devadmin", name: "Dev-превью", role: "admin", authAt: Date.now() };
+      // Сессию сохраняем так же, как при обычном входе, иначе перезагрузка страницы
+      // выкидывает обратно на логин.
+      try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: devUser, savedAt: Date.now() })); } catch(e) {}
+      onLogin(devUser);
+      return; // компонент размонтируется, setLoading вызывать нельзя
+    }
+
     // Загружаем пользователей. КРИТИЧНО различать "база подтверждённо пуста" (первый
     // запуск — можно войти дефолтным admin) и "база недоступна" (сеть моргнула) — раньше
     // оба случая тихо падали на DEFAULT_USERS по таймауту в 1.5с, а значит логин/пароль
@@ -3139,7 +3204,7 @@ function RolePermissionsEditor({ rolePermissions, onSaveRolePermissions }) {
 }
 
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
-function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE_PERMISSIONS.admin, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], documentTemplateEnabled=false, documentTemplateService=null, documentTemplateData={}, fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBeforePriceChange=async()=>true, onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
+function AdminPageContent({ currentUser, presence = {}, contractMigrationPlan = [], onApplyContractMigration = async()=>false, permissions=DEFAULT_ROLE_PERMISSIONS.admin, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], documentTemplateEnabled=false, documentTemplateService=null, documentTemplateData={}, fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBeforePriceChange=async()=>true, onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
   const [tab, setTab] = useState("users");
   const hasAdminPermission = (key) => accessAllows(permissions[key], true);
   const adminTabs = [
@@ -3315,10 +3380,16 @@ function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE
     }
     if (Object.keys(priceCardCache).length > 0) {
       const protectedHistory = await onBeforePriceChange();
-      if (!protectedHistory) {
+      // Совместимость: старая сигнатура возвращала true/false, новая — {ok, reason}.
+      const sealOk = protectedHistory === true || protectedHistory?.ok === true;
+      if (!sealOk) {
         setPriceSaving(false);
-        setPriceMsg("Не удалось зафиксировать цены заполненных смет. Прайс не изменён.");
-        setTimeout(()=>setPriceMsg(""),5000);
+        const why = protectedHistory?.reason
+          ? (PRICE_SEAL_REASONS[protectedHistory.reason] || protectedHistory.reason)
+          : "";
+        setPriceMsg(`Не удалось зафиксировать цены заполненных смет${why ? `: ${why}` : ""}. Прайс не изменён.`
+          + (protectedHistory?.detail ? ` (${protectedHistory.detail})` : ""));
+        setTimeout(()=>setPriceMsg(""),12000);
         return;
       }
     }
@@ -4206,6 +4277,47 @@ function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE
               </div>
             </div>
             <IssuePanel issues={checkIssues} onNav={onNavIssue} emptyText="✓ База чистая — связи и целостность в порядке" />
+
+            {/* ПЕРЕНОС «финпроект → объект». Гейт жёсткий: на боевой базе блок не
+                отрисовывается вообще (IS_DEV_ENV), плюс та же проверка продублирована
+                внутри самого действия. Правило владельца: никаких автомиграций на бою. */}
+            {IS_DEV_ENV && (
+              <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:12,padding:"14px 18px"}}>
+                <div style={{fontSize:13,fontWeight:800,color:"#92610f"}}>🧪 Перенос данных из финпроектов в объекты</div>
+                <div style={{fontSize:12,color:"#92610f",opacity:.9,marginTop:6,lineHeight:1.5}}>
+                  Деньги цепляются к объекту по номеру договора. Сейчас у части объектов этот номер
+                  и плановая сумма живут только в финпроекте — пока это так, раздел «Проекты» нельзя
+                  убрать. Кнопка переносит их в сами объекты. Финпроекты при этом не меняются и не
+                  удаляются, объекты со своим заполненным номером пропускаются.
+                </div>
+                {contractMigrationPlan.length === 0 ? (
+                  <div style={{fontSize:12.5,color:"#059669",fontWeight:700,marginTop:10}}>✓ Переносить нечего — всё уже в объектах</div>
+                ) : (
+                  <>
+                    <div style={{fontSize:12.5,color:"#0f172a",fontWeight:700,margin:"10px 0 6px"}}>
+                      К переносу: {contractMigrationPlan.length} объектов ·
+                      номеров {contractMigrationPlan.filter(r=>r.number).length} ·
+                      бюджетов {contractMigrationPlan.filter(r=>r.budget>0).length}
+                    </div>
+                    <div style={{maxHeight:220,overflow:"auto",border:"1px solid #fde68a",borderRadius:8,background:"#fff"}}>
+                      {contractMigrationPlan.map((r,i)=>(
+                        <div key={r.id} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto auto",gap:10,
+                          padding:"6px 10px",fontSize:11.5,borderTop:i?"1px solid #fef3c7":0}}>
+                          <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</span>
+                          <span style={{color:"#64748b",whiteSpace:"nowrap"}}>{r.number ? `№ ${r.number}` : "—"}</span>
+                          <span style={{color:"#64748b",whiteSpace:"nowrap"}}>{r.budget>0 ? `${fmt(r.budget)} ₸` : "—"}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <button type="button" onClick={onApplyContractMigration}
+                      style={{marginTop:10,background:"#92610f",color:"#fff",border:0,borderRadius:9,
+                        padding:"9px 16px",fontSize:12.5,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>
+                      Перенести в объекты
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         );
       })()}
@@ -5086,16 +5198,9 @@ function PublicProgress({ token }) {
   // "недоступно" и не накручиваем счётчик просмотров при ручном обновлении.
   const load = useCallback(async (opts = {}) => {
     const isRefresh = !!opts.isRefresh;
-    const readFresh = async (key) => {
-      if (isRefresh) {
-        const cloud = await storage.getCloudResult(key);
-        if (cloud.status !== "unavailable") return cloud;
-      }
-      return storage.getResult(key);
-    };
     let ok = false;
     try {
-      const r = await readFresh(PROGRESS_NODE(token));
+      const r = await storage.getResult(PROGRESS_NODE(token));
       if (r.status === "found" && r.value) {
         let data = null; try { data = JSON.parse(r.value); } catch {}
         if (data && data.expiresAt && Date.now() > data.expiresAt) {
@@ -5110,15 +5215,9 @@ function PublicProgress({ token }) {
     } catch {}
     if (!ok && !isRefresh) setState("notfound");
     // Документы клиента (договоры/акты) из отдельной ноды
-    try { const r2 = await readFresh(DOCS_NODE(token)); if (r2.status === "found" && r2.value) { try { setDocs(JSON.parse(r2.value)); } catch {} } } catch {}
+    try { const r2 = await storage.getResult(DOCS_NODE(token)); if (r2.status === "found" && r2.value) { try { setDocs(JSON.parse(r2.value)); } catch {} } } catch {}
   }, [token]);
-  useEffect(() => {
-    load();
-    return startPublicProgressAutoRefresh(load, {
-      doc: typeof document !== "undefined" ? document : null,
-      intervalMs: 10000,
-    });
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
   const refresh = async () => {
     if (refreshing) return;
     setRefreshing(true);
@@ -5343,7 +5442,7 @@ function PublicProgress({ token }) {
     )}
 
     {/* Оплата */}
-    {showPay && s.payment && (() => {
+    {showPay && (pay.budget > 0 || pay.paid > 0) && (() => {
       const fill = pay.budget > 0 ? Math.min(100, Math.round((pay.paid || 0) / pay.budget * 100)) : 0;
       return (
       <div style={card}>
@@ -6683,6 +6782,63 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     const r = await saveListProtected(OBJECTS_KEY, OBJECTS_BACKUPS_KEY, list, (fl)=>{ objectsRef.current = fl; setObjects(fl); }, { loadedRef: _contractsLoaded, ...opts });
     return r;
   };
+  // ── ПЕРЕНОС «финпроект → объект» (номер договора и бюджет) ──
+  // Зачем: деньги цепляются к объекту по номеру договора, и у большей части базы этот
+  // номер (а также плановая сумма) физически лежит только в финпроекте. Пока это так,
+  // раздел «Проекты» — не витрина, а хранилище, и убрать его нельзя.
+  //
+  // ТАБУ владельца: никакой автомиграции. Это разовое действие ТОЛЬКО по явному клику,
+  // и кнопка вообще не отрисовывается вне dev-базы (см. IS_DEV_ENV в админке).
+  // Идемпотентно: объект, у которого своё поле уже заполнено, пропускается.
+  const contractMigrationPlan = useMemo(() => {
+    const rows = [];
+    for (const o of objects) {
+      if (!o || o.deletedAt) continue;
+      if (String(o.contractNo || "").trim()) continue;   // уже перенесён — не трогаем
+      const project = finProjects.find(p => p && p.objectId === o.id);
+      if (!project) continue;
+      const number = String(project.contractNo || "").trim();
+      const budget = Number(project.budget) || 0;
+      // Номер берём, только если своего документа-договора нет: документ надёжнее.
+      const fromDoc = contracts.some(c => c && !c.deletedAt && c.objectId === o.id && c.number
+        && c.type !== "annex" && c.type !== "podryad" && c.type !== "podryad_annex");
+      const needNumber = !!number && !fromDoc;
+      const needBudget = budget > 0 && !(Number(o.planBudget) > 0);
+      if (!needNumber && !needBudget) continue;
+      rows.push({
+        id: o.id,
+        name: o.clientName || o.address || "Без названия",
+        number: needNumber ? number : "",
+        budget: needBudget ? budget : 0,
+      });
+    }
+    return rows;
+  }, [objects, finProjects, contracts]);
+
+  const applyContractMigration = async () => {
+    if (!IS_DEV_ENV) return false;                       // страховка помимо гейта в UI
+    if (!contractMigrationPlan.length) return false;
+    if (!confirmDangerous(`Перенести данные из финпроектов в объекты?\n\nОбъектов: ${contractMigrationPlan.length}\nНомеров договоров: ${contractMigrationPlan.filter(r => r.number).length}\nБюджетов: ${contractMigrationPlan.filter(r => r.budget > 0).length}\n\nСами финпроекты не меняются и не удаляются.`)) return false;
+    const byId = new Map(contractMigrationPlan.map(r => [r.id, r]));
+    const next = objectsRef.current.map(o => {
+      const row = byId.get(o?.id);
+      if (!row) return o;
+      return {
+        ...o,
+        ...(row.number ? { contractNo: row.number } : {}),
+        ...(row.budget > 0 ? { planBudget: row.budget } : {}),
+        updatedAt: Date.now(),
+      };
+    });
+    const res = await saveObjects(next);
+    if (res) {
+      logChange(currentUser, { entity: "object", field: "перенос из финпроектов", action: "заполнил",
+        old: "", new: `${contractMigrationPlan.length} объектов`, source: "migration" });
+      window.alert(`Перенесено ✓\nОбъектов: ${contractMigrationPlan.length}`);
+    }
+    return !!res;
+  };
+
   // ── ЕДИНАЯ АТОМАРНАЯ ЗАПИСЬ ПРОИЗВОДСТВА (этап 2А) ──
   // saveProductions(готовыйМассив) удалён: все изменения производства идут строго командами.
   // Все изменения производства идут ТОЛЬКО через команды: mutateProductions(command). Команда
@@ -6691,7 +6847,25 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   // Локальная очередь (_prodQueue) упорядочивает команды одной вкладки; транзакция защищает между
   // вкладками/устройствами. REST/обычный set для производства НЕ используем.
   const _prodQueue = useRef(Promise.resolve());
-  const publishProgressRef = useRef(null);
+  // Отложенная публикация страницы клиента: правки карточки идут пачками (снял галочку,
+  // поставил дату, сменил статус), а публичную ноду достаточно переписать один раз в
+  // конце. Ждём паузу в 2 секунды после последнего изменения по этому объекту.
+  const _publishTimers = useRef({});
+  const _schedulePublishProgress = useCallback((objectId) => {
+    if (!objectId) return;
+    const obj = objectsRef.current.find(o => o.id === objectId);
+    // Доступ клиенту не открыт — публиковать нечего.
+    if (!obj || !obj.progressShared || !obj.progressToken) return;
+    clearTimeout(_publishTimers.current[objectId]);
+    _publishTimers.current[objectId] = setTimeout(() => {
+      delete _publishTimers.current[objectId];
+      Promise.resolve(publishProgressRef.current?.(objectId)).catch(e => console.warn("republish err", e));
+    }, 2000);
+  }, []);
+  // Незавершённые публикации не должны теряться при закрытии вкладки.
+  useEffect(() => () => {
+    for (const t of Object.values(_publishTimers.current)) clearTimeout(t);
+  }, []);
   // Множество НЕподтверждённых правок производства по changeId. Ошибка добавляет id, успешный
   // повтор ТОГО ЖЕ changeId удаляет его. Баннер «ожидают синхронизации» — пока множество не пусто.
   // changeId соглашение: "cm_*" — правки карточки из ProductionModule (его очередь сама повторяет
@@ -6808,13 +6982,14 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
           if (_prodUnsyncedIds.current.delete(changeId)) _refreshProdUnsynced();
         }
         _clearCloudErrorIfAllClean();
-        // Обновляем публичный кабинет сразу после подтвержденной записи статуса/этапов.
-        // Не ждём публикацию здесь: внутреннее сохранение уже завершено, а кнопки остаются быстрыми.
-        for (const objectId of productionCommandObjectIds(command)) {
-          Promise.resolve()
-            .then(() => publishProgressRef.current?.(objectId))
-            .catch(error => console.warn("publishProgress after production save", error));
-        }
+        // Обновляем страницу клиента. Раньше publishProgress не вызывалась НИОТКУДА:
+        // публичная нода писалась только при включении доступа, при заходе клиента
+        // (счётчик просмотров) и при отзыве ссылки. Из-за этого клиент видел снимок
+        // на момент выдачи ссылки — прораб отмечал этап «Готово», а в кабинете он
+        // так и оставался «В работе».
+        // Пишем ТОЛЬКО в публичную ноду объекта (зеркало для клиента), никаких
+        // рабочих данных это не трогает. Дребезг гасим: правок подряд бывает много.
+        if (command.objectId) _schedulePublishProgress(command.objectId);
         return { committed: true, list: next };
       }
       return _fail(res.reason, !!res.conflict, res.list);
@@ -7369,10 +7544,7 @@ ${reqBlock}`;
     // Готовность считаем ТАК ЖЕ, как в производстве: доля выполненных этапов (по количеству)
     const progressPct = stages.length > 0 ? Math.round(doneCnt / stages.length * 100) : 0;
     const handover = (prod.checklistHandover || []).filter(i => (i.section || "") === "Клиентская приёмка").map(i => ({ text: i.text, done: !!i.done }));
-    const budget = resolveProgressBudget(entry?.budget, stages);
-    // Статус «Готово» влияет только на прогресс. Оплата подтверждается отдельно
-    // галочкой «Оплачено» во вкладке «Финансы» карточки объекта.
-    const paid = sumPaidProductionStages(stages);
+    const budget = Number(entry?.budget) || 0, paid = Number(entry?.income) || 0;
     // Статус замечаний клиента подтягиваем из дефектов производства (по clientRemarkId)
     const defectDone = {};
     for (const d of (prod.defects || [])) { if (d.clientRemarkId) defectDone[d.clientRemarkId] = !!d.done; }
@@ -7450,7 +7622,7 @@ ${reqBlock}`;
     }
     try { await storage.set(PROGRESS_NODE(obj.progressToken), JSON.stringify(snap)); } catch (e) { console.warn("publishProgress err", e); }
   }, [buildProgressSnapshot]);
-  publishProgressRef.current = publishProgress;
+  const publishProgressRef = useRef(); publishProgressRef.current = publishProgress;
   const _publishDocsRef = useRef(null); // назначается ниже (после генераторов договоров/актов)
   // Забрать замечания клиента из ноды прогресса и завести их в «Замечания» производства (с пометкой «от клиента»)
   const syncClientRemarks = useCallback(async (objectId) => {
@@ -7656,6 +7828,9 @@ ${reqBlock}`;
         // сопоставляет этапы по estimateKey, а НЕ по названию: ручной этап с именем как в смете
         // (без estimateKey) не будет ни обновлён, ни удалён.
         const built = buildStagesFromEstimate(p.objectId).map(b => ({ id: genId(), estimateKey: _stageKey(b), ...b }));
+        // Никогда не очищаем существующие этапы автоматически, если связанная смета
+        // временно не прочиталась или действительно пуста. Удаление всех этапов — только явно.
+        if (built.length === 0) continue;
         const command = { type: "sync-estimate-stages", objectId: p.objectId, estimateStages: built, changeId: "bg_sync_" + p.objectId, __ephemeral: true };
         // Главное исправление скорости/мигающего баннера: раньше при каждом входе отправляли
         // транзакцию для КАЖДОЙ карточки, даже когда менять нечего. Команды копились в локальном
@@ -7744,9 +7919,17 @@ ${reqBlock}`;
       else ok = false;
       if (mt.status === "found" && mt.value) { try { const p = JSON.parse(mt.value); if (p && p.accounts) { const m = mergeFinMeta(p); setFinanceMeta(m); financeMetaRef.current = m; } } catch {} }
       if (pj.status === "found" && pj.value) { try { const p = JSON.parse(pj.value); if (Array.isArray(p)) {
-        // Загрузка не должна молча переписывать бизнес-данные. Некорректные даты показывает
-        // «Проверка базы», а исправляет их только пользователь в исходной карточке.
-        setFinProjects(p); finProjectsRef.current = p;
+        const curY = new Date().getFullYear();
+        const fixed = p.map(proj => {
+          if (!proj.createdAt) return proj;
+          const d = new Date(proj.createdAt);
+          if (isNaN(d.getTime()) || d.getFullYear() <= curY + 1) return proj;
+          // год явно неверный — заменяем на текущий, день/месяц сохраняем
+          const corrected = new Date(proj.createdAt);
+          corrected.setFullYear(curY);
+          return { ...proj, createdAt: corrected.toISOString().slice(0, 10) };
+        });
+        setFinProjects(fixed); finProjectsRef.current = fixed;
       } } catch {} }
       _financeLoaded.current = ok;
     } catch(e) { console.error(e); }
@@ -7795,16 +7978,13 @@ ${reqBlock}`;
         if (!linkedObjectId && !mainByNumber) return fp;
         const main = mainByNumber || contractsRef.current.find(c => c && !c.deletedAt && c.objectId === linkedObjectId
           && c.type !== "podryad" && c.type !== "podryad_annex" && c.type !== "annex" && c.type !== "design_add") || null;
-        const linkedObject = directObject || objectsRef.current.find(o => o && !o.deletedAt && o.id === linkedObjectId) || null;
-        const budgetView = resolveFinanceProjectBudget({
-          project: fp,
-          object: linkedObject,
-          estimates: estimatesRef.current,
-          contractTotal: finBudgetOfContract(main),
-        });
-        const nb = budgetView.budget;
-        const contractsV2 = budgetView.calcMode === "contracts-v2";
-        const hasCurrentBudgetSource = budgetView.source !== "legacy";
+        const objectEstimateTotal = linkedObjectId
+          ? estimatesForObject(estimatesRef.current, linkedObjectId).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0)
+          : 0;
+        const contractBudget = finBudgetOfContract(main);
+        const contractsV2 = directObject?.financeCalcMode === "contracts-v2" || fp.financeCalcMode === "contracts-v2";
+        const hasCurrentBudgetSource = contractsV2 || objectEstimateTotal > 0 || !!main;
+        const nb = contractsV2 ? contractBudget : (objectEstimateTotal > 0 ? objectEstimateTotal : contractBudget);
         if ((hasCurrentBudgetSource && Math.round(Number(fp.budget) || 0) !== Math.round(nb)) || linkedObjectId !== (fp.objectId || "") || (contractsV2 && fp.financeCalcMode !== "contracts-v2")) {
           changed = true;
           return { ...fp, budget: nb, objectId: linkedObjectId, ...(contractsV2 ? { financeCalcMode:"contracts-v2" } : {}) };
@@ -7829,16 +8009,18 @@ ${reqBlock}`;
           || (main && updated.find(fp => fp.contractNo && normCN(fp.contractNo) === normCN(main.number)));
         if (existing) {
           if (!existing.objectId) {
-            const budgetView = resolveFinanceProjectBudget({ project:existing, object, estimates:estimatesRef.current, contractTotal:finBudgetOfContract(main) });
-            updated = updated.map(fp => fp.id === existing.id ? { ...fp, objectId:object.id, budget:budgetView.budget, ...(budgetView.calcMode === "contracts-v2" ? { financeCalcMode:"contracts-v2" } : {}) } : fp);
+            const estimateTotal = estimatesForObject(estimatesRef.current, object.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0);
+            const contractsV2 = object.financeCalcMode === "contracts-v2" || existing.financeCalcMode === "contracts-v2";
+            const budget = contractsV2 ? finBudgetOfContract(main) : (estimateTotal || finBudgetOfContract(main) || Number(existing.budget) || 0);
+            updated = updated.map(fp => fp.id === existing.id ? { ...fp, objectId:object.id, budget, ...(contractsV2 ? { financeCalcMode:"contracts-v2" } : {}) } : fp);
             changed = true;
           }
           continue;
         }
-        const projectDraft = finProjDraftFromObject(object, main);
-        const budgetView = resolveFinanceProjectBudget({ project:projectDraft, object, estimates:estimatesRef.current, contractTotal:finBudgetOfContract(main) });
-        if (!main && budgetView.budget <= 0) continue;
-        updated.push({ ...projectDraft, id:genId(), objectId:object.id, budget:budgetView.budget });
+        const estimateTotal = estimatesForObject(estimatesRef.current, object.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0);
+        const budget = object.financeCalcMode === "contracts-v2" ? finBudgetOfContract(main) : (estimateTotal || finBudgetOfContract(main));
+        if (!main && budget <= 0) continue;
+        updated.push({ ...finProjDraftFromObject(object, main), id:genId(), objectId:object.id, budget });
         changed = true;
       }
       if (changed) saveFinanceProjects(updated);
@@ -8147,27 +8329,40 @@ ${reqBlock}`;
   // версией списка, поэтому параллельная правка сметы другого сотрудника не перезаписывается.
   // Само открытие приложения ничего не мигрирует. Если облако не подтвердило запись,
   // AdminPage блокирует изменение прайса.
+  // Заморозка цен в уже заполненных сметах ПЕРЕД изменением прайса: старые сметы не
+  // должны пересчитаться задним числом. Если заморозка не прошла — прайс не меняем.
+  //
+  // Возвращаем причину отказа, а не голое false: раньше шесть разных сбоев (другая
+  // вкладка держит редактирование, облако не ответило, таймаут, конфликт, битый JSON)
+  // показывались владельцу одной и той же фразой «не удалось», и понять, что чинить,
+  // было невозможно.
   const protectHistoricalEstimatePricing = useCallback(async () => {
     const catalog = getEffectiveCatalog().map(getEffectiveWork);
+    let sealError = "";
     const result = await storage.mutateTransaction(STORAGE_KEY, currentList => {
       let changed = false;
       const protectedList = currentList.map(estimate => {
-        const protectedRows = sealLegacyEstimateRows(estimate?.rows, catalog);
+        // Одна битая смета не должна ронять всю заморозку и блокировать прайс:
+        // оставляем её как есть и говорим об этом вслух.
+        let protectedRows;
+        try { protectedRows = sealLegacyEstimateRows(estimate?.rows, catalog); }
+        catch (e) { sealError = `смета ${estimate?.id || "?"}: ${e?.message || e}`; return estimate; }
         if (protectedRows === estimate?.rows) return estimate;
         changed = true;
         return { ...estimate, rows: protectedRows };
       });
       return changed ? protectedList : currentList;
     });
-    if (!result?.committed || !result.value) return false;
+    if (!result?.committed) return { ok: false, reason: result?.reason || "unknown", detail: sealError };
+    if (!result.value) return { ok: false, reason: "empty", detail: sealError };
     try {
       const protectedList = JSON.parse(result.value);
-      if (!Array.isArray(protectedList)) return false;
+      if (!Array.isArray(protectedList)) return { ok: false, reason: "not-array", detail: sealError };
       estimatesRef.current = protectedList;
       setEstimates(protectedList);
-      return true;
+      return { ok: true, detail: sealError };
     } catch {
-      return false;
+      return { ok: false, reason: "bad-json", detail: sealError };
     }
   }, []);
 
@@ -9167,9 +9362,9 @@ ${reqBlock}`;
   // выбранный на экране аналитики.
   const dashboardStats = useMemo(() => buildAnalytics(
     { objects, estimates, contracts, productions, financeTx,
-      accounts: financeMeta?.accounts || [], estimateCost: analyticsData.estCost },
+      accounts: financeMeta?.accounts || [], finProjects, estimateCost: analyticsData.estCost },
     { period: "month", users: allUsers },
-  ), [objects, estimates, contracts, productions, financeTx, financeMeta, analyticsData, allUsers]);
+  ), [objects, estimates, contracts, productions, financeTx, financeMeta, finProjects, analyticsData, allUsers]);
 
   // Блоки аналитики (продажи / портфель / производство / финансы / качество).
   // Считает чистая функция buildAnalytics — те же числа доступны и для «Главной».
@@ -9183,6 +9378,7 @@ ${reqBlock}`;
       productions,
       financeTx,
       accounts: financeMeta?.accounts || [],
+      finProjects,
       estimateCost: analyticsData.estCost,
     },
     {
@@ -9194,7 +9390,7 @@ ${reqBlock}`;
       // сотрудников: варианты («Сергей Ш.») сводятся к заведённому в системе.
       users: allUsers,
     },
-  ), [analyticsObjects, analyticsEstimates, contracts, productions, financeTx, financeMeta, analyticsData,
+  ), [analyticsObjects, analyticsEstimates, contracts, productions, financeTx, financeMeta, finProjects, analyticsData,
       statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers]);
 
   // Защита от краша: если activeCat не в Gdyn — берём первый
@@ -15032,6 +15228,30 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     </div>
                   )}
 
+                  {/* НОМЕР ДОГОВОРА — ключ, по которому к объекту цепляются деньги
+                      (у операции поле contractNo). Исторически он живёт в трёх местах:
+                      здесь, в документе-договоре и в финпроекте. Показываем, ОТКУДА
+                      он взят: пока источник «финпроект», объект держится на нём, и
+                      удалять раздел «Проекты» нельзя без потери связи с оплатами. */}
+                  {(() => {
+                    const resolved = contractNoOfObject(obj, contracts, finProjects);
+                    if (!resolved.number && !["signed","work","paused","done"].includes(unifiedStatusOf(obj))) return null;
+                    const srcLabel = { object:"указан вручную", contract:"из договора", project:"из финпроекта", none:"не найден" }[resolved.source];
+                    return (
+                      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <span style={{fontSize:11,color:"#64748b",fontWeight:700}}>Номер договора</span>
+                        <input className="fi" style={{width:"auto",minWidth:150,fontSize:12}}
+                          disabled={!canChangeStatus}
+                          placeholder={resolved.number || "не указан"}
+                          value={obj.contractNo||""}
+                          onChange={e=>saveObjField(obj,{contractNo:e.target.value})} />
+                        <span style={{fontSize:11,color:resolved.source==="project"?"#d97706":"#94a3b8"}}>
+                          {resolved.number ? `${resolved.number} · ${srcLabel}` : "по нему связываются оплаты"}
+                        </span>
+                      </div>
+                    );
+                  })()}
+
                   {/* Сводка клиента/объекта + сворачивание */}
                   <div onClick={()=>setObjInfoCollapsed(v=>!v)} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",padding:"2px 0",userSelect:"none"}}>
                     <span style={{fontSize:11,color:"#2563eb",fontWeight:700,letterSpacing:.5,textTransform:"uppercase"}}>👤 Клиент и объект</span>
@@ -15838,6 +16058,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           currentUser={currentUser}
           permissions={currentPermissions}
           presence={presence}
+          contractMigrationPlan={contractMigrationPlan}
+          onApplyContractMigration={applyContractMigration}
           rolePermissions={rolePermissions}
           onSaveRolePermissions={saveRolePermissions}
           onUsersChanged={async ()=>{
