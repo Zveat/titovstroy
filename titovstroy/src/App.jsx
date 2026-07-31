@@ -1408,6 +1408,9 @@ const PRICE_SEAL_REASONS = {
   empty: "облако вернуло пустой ответ",
   "bad-json": "список смет в облаке повреждён",
   "not-array": "список смет в облаке повреждён",
+  // Ошибки самого Firebase при транзакции.
+  set: "сметы в этот момент сохранялись из другого места — повторите",
+  maxretry: "сметы правятся слишком часто — повторите через пару секунд",
 };
 const BACKUPS_KEY        = "titovstroy-estimates-backups"; // снимки архива для восстановления
 const USERS_KEY          = "titovstroy-users";
@@ -2072,10 +2075,16 @@ const storage = {
   // ТОЛЬКО SDK: если транзакция не прошла (нет SDK/таймаут/не закоммичена) — возвращаем
   // committed:false, БЕЗ отката на обычный set (иначе теряется атомарность). Нужно для аудита:
   // параллельная запись между чтением и сохранением не должна затираться восстановлением.
-  async mutateTransaction(key, mutator) {
+  // ПОВТОР ПРИ ВНЕШНЕМ ПРЕРЫВАНИИ. Firebase отменяет выполняющуюся транзакцию, если в
+  // тот же путь параллельно прилетел обычный set() — и отдаёт ошибку с текстом "set"
+  // (а при исчерпании внутренних попыток — "maxretry"). Это НЕ конфликт данных и не
+  // повод отказывать пользователю: сохранение прайса падало именно так, потому что
+  // список смет параллельно дописывался автосохранением. Просто ждём и повторяем.
+  async mutateTransaction(key, mutator, _attempt = 0) {
     const op = _beginEditorWrite();
     if (op.fail) return { committed: false, reason: op.fail.reason };
     if (!_fbDb) { _endEditorWrite(); return { committed: false, reason: "no-sdk" }; }
+    let retrying = false;
     try {
       await _fbAuthReady;
       const res = await _race(runTransaction(ref(_fbDb, _fbKey(key)), (cur) => {
@@ -2114,9 +2123,19 @@ const storage = {
       }
       return { committed: false, reason: "aborted" };
     } catch(e) {
-      return { committed: false, reason: e?.message || String(e) };
+      const reason = e?.message || String(e);
+      // «set» / «maxretry» — транзакцию сбила параллельная запись. Повторяем до 3 раз
+      // с нарастающей паузой: к этому моменту соседняя запись обычно уже завершилась.
+      if ((reason === "set" || reason === "maxretry") && _attempt < 3) {
+        retrying = true;                       // release делаем здесь, finally пропускаем
+        _endEditorWrite();
+        await new Promise(r => setTimeout(r, 400 * (_attempt + 1)));
+        return storage.mutateTransaction(key, mutator, _attempt + 1);
+      }
+      return { committed: false, reason };
     } finally {
-      _endEditorWrite();
+      // Двойной release сломал бы счётчик незавершённых записей (logout ждёт по нему).
+      if (!retrying) _endEditorWrite();
     }
   },
   async set(key, value) {
@@ -2361,10 +2380,17 @@ function LoginScreen({ onLogin }) {
       const { password: _pw, ...safeUser } = candidate; // не храним пароль в сессии
       const sessUser = { ...safeUser, authAt: Date.now() }; // время входа — для инвалидации сессии при смене пароля
       try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: sessUser, savedAt: Date.now() })); } catch(e) {}
+      // Вход в систему — базовое событие журнала: без него нельзя понять, кто вообще
+      // мог что-то сделать в конкретный день, и не заходил ли уволенный сотрудник.
+      logChange(sessUser, { entity: "session", entityId: sessUser.id, label: sessUser.name || sessUser.login,
+        field: "вход", action: "вошёл в систему", old: "", new: sessUser.role || "" });
       onLogin(sessUser);
       return; // компонент размонтируется, setLoading вызывать нельзя
     } else {
       registerFailedLogin(login.trim());
+      // Неудачные попытки тоже пишем: подбор пароля должен быть виден.
+      logChange({ id: "?", name: login.trim() }, { entity: "session", entityId: "",
+        label: login.trim(), field: "вход", action: "неудачная попытка входа", old: "", new: "" });
       setError("Неверный логин или пароль");
     }
     setLoading(false);
@@ -2442,6 +2468,15 @@ const AUDIT_SECTION_META = {
   document:   { label: "Документы", color: "#4f46e5", bg: "#e0e7ff", icon: "📄" },
   client:     { label: "Клиенты",   color: "#db2777", bg: "#fce7f3", icon: "🧑" },
   user:       { label: "Польз-ли",  color: "#d97706", bg: "#fef3c7", icon: "👤" },
+  // Разделы, которые раньше вообще не писались в журнал и потому не имели вида.
+  session:    { label: "Входы",     color: "#475569", bg: "#e2e8f0", icon: "🔑" },
+  role:       { label: "Права",     color: "#b91c1c", bg: "#fee2e2", icon: "🔐" },
+  price:      { label: "Прайс",     color: "#a16207", bg: "#fef9c3", icon: "💲" },
+  contragent: { label: "Реквизиты", color: "#0369a1", bg: "#e0f2fe", icon: "🏢" },
+  worker:     { label: "Работники", color: "#65a30d", bg: "#ecfccb", icon: "👷" },
+  report:     { label: "Акты",      color: "#7e22ce", bg: "#f3e8ff", icon: "🧾" },
+  podryad:    { label: "Подряд",    color: "#c2410c", bg: "#ffedd5", icon: "🔨" },
+  document_template: { label: "Шаблоны", color: "#4f46e5", bg: "#e0e7ff", icon: "📑" },
 };
 const AUDIT_SOURCE_META = {
   manual:   { label: "вручную",  color: "#64748b" },
@@ -3151,7 +3186,7 @@ function RolePermissionsEditor({ rolePermissions, onSaveRolePermissions }) {
 }
 
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
-function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE_PERMISSIONS.admin, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], documentTemplateEnabled=false, documentTemplateService=null, documentTemplateData={}, fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBeforePriceChange=async()=>true, onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
+function AdminPageContent({ currentUser, presence = {}, onAuditPrice = null, permissions=DEFAULT_ROLE_PERMISSIONS.admin, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], documentTemplateEnabled=false, documentTemplateService=null, documentTemplateData={}, fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBeforePriceChange=async()=>true, onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
   const [tab, setTab] = useState("users");
   const hasAdminPermission = (key) => accessAllows(permissions[key], true);
   const adminTabs = [
@@ -3275,8 +3310,14 @@ function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE
   const removeUser = async (id) => {
     if (!hasAdminPermission("adminUsers")) return;
     if (id === currentUser.id) { setMsg("Нельзя удалить себя"); setTimeout(()=>setMsg(""),2000); return; }
+    const gone = users.find(u => u.id === id);
     const updated = users.filter(u => u.id !== id);
     setUsers(updated); await saveUsers(updated); await onUsersChanged();
+    // Доступы — самое чувствительное, что есть в системе: кто кого завёл, кому
+    // сменил роль и пароль, должно быть видно в журнале поимённо.
+    logChange(currentUser, { entity: "user", entityId: id, label: gone?.name || gone?.login || id,
+      field: "учётная запись", action: "удалил пользователя",
+      old: `${gone?.name || "?"} (${gone?.role || "?"})`, new: "—" });
   };
   const savePass = async (id) => {
     if (!hasAdminPermission("adminUsers")) return;
@@ -3286,6 +3327,10 @@ function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE
     const newHash = await hashPassword(editingPass.val.trim());
     const updated = users.map(u => u.id === id ? {...u, password: newHash, pwChangedAt: Date.now()} : u);
     setUsers(updated); await saveUsers(updated); await onUsersChanged();
+    const target = users.find(u => u.id === id);
+    // Сам пароль в журнал НЕ пишем — только факт смены и кому.
+    logChange(currentUser, { entity: "user", entityId: id, label: target?.name || target?.login || id,
+      field: "пароль", action: "сменил пароль", old: "", new: "" });
     setEditingPass(null); setMsg("✓ Пароль изменён"); setTimeout(() => setMsg(""), 2500);
   };
   const saveUser = async () => {
@@ -3295,6 +3340,14 @@ function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE
     if (conflict) { setMsg("Логин уже занят"); setTimeout(()=>setMsg(""),2000); return; }
     const updated = users.map(u => u.id === editingUser.id ? {...u, name: editingUser.name.trim(), login: editingUser.login.trim(), role: (editingUser.id===currentUser.id ? u.role : (editingUser.role||u.role||"user"))} : u);
     setUsers(updated); await saveUsers(updated); await onUsersChanged();
+    const before = users.find(u => u.id === editingUser.id);
+    const after = updated.find(u => u.id === editingUser.id);
+    // Пишем только реально изменившиеся поля — иначе журнал засоряется пустыми правками.
+    for (const [key, label] of [["name", "имя"], ["login", "логин"], ["role", "роль"]]) {
+      if (before?.[key] === after?.[key]) continue;
+      logChange(currentUser, { entity: "user", entityId: after.id, label: after.name || after.login,
+        field: label, action: "изменил", old: before?.[key] ?? "—", new: after?.[key] ?? "—" });
+    }
     setEditingUser(null); setMsg("✓ Сохранено"); setTimeout(() => setMsg(""), 2500);
   };
   const savePrices = async () => {
@@ -3350,6 +3403,19 @@ function AdminPageContent({ currentUser, presence = {}, permissions=DEFAULT_ROLE
       }
       return lp;
     });
+    // Что именно поменяли в прайсе — поработочно. Цена работы влияет на все будущие
+    // сметы, поэтому «кто и когда поднял себестоимость» обязано быть в журнале.
+    for (const [code, entry] of Object.entries(priceCardCache)) {
+      const w = getEffectiveCatalog().find(x => x.code === code);
+      const before = savedOverrides[code] || {};
+      const after = overrides[code] || {};
+      if (JSON.stringify(before) === JSON.stringify(after)) continue;
+      const fmtP = (e) => e && (e.cost != null || e.margin != null)
+        ? `себестоимость ${e.cost ?? "—"}, маржа ${Math.round((e.margin ?? 0) * 100)}%`
+        : (e?.fixedPrice != null ? `цена ${e.fixedPrice}` : "—");
+      onAuditPrice?.({ entity: "price", entityId: code, label: w?.name || code,
+        field: "цена работы", action: "изменил прайс", old: fmtP(before), new: fmtP(after) });
+    }
     Object.keys(priceCardCache).forEach(k => delete priceCardCache[k]);
     setPriceSaving(false); setPriceMsg("✓ Прайс сохранён!"); setTimeout(()=>setPriceMsg(""),3000);
   };
@@ -5720,6 +5786,9 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const allUsersRef = useRef(DEFAULT_USERS);
   useEffect(() => { allUsersRef.current = allUsers; }, [allUsers]);
   const [rolePermissions, setRolePermissions] = useState(() => normalizeRolePermissions());
+  // Ref, чтобы в saveRolePermissions сравнить «было → стало» без устаревшего замыкания.
+  const rolePermissionsRef = useRef(rolePermissions);
+  useEffect(() => { rolePermissionsRef.current = rolePermissions; }, [rolePermissions]);
   useEffect(() => {
     let cancelled = false;
     storage.getResult(ROLE_PERMISSIONS_KEY).then(result => {
@@ -5737,6 +5806,17 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     const normalized = normalizeRolePermissions(next);
     const res = await storage.set(ROLE_PERMISSIONS_KEY, JSON.stringify(normalized));
     if (res?.fbOk === false) return false;
+    // Что именно поменяли в правах — поимённо по ролям и ключам: «кто открыл финансы
+    // прорабу» это ровно тот вопрос, ради которого журнал и нужен.
+    const prev = rolePermissionsRef.current || {};
+    for (const role of Object.keys(normalized)) {
+      const a = prev[role] || {}, b = normalized[role] || {};
+      for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+        if (String(a[key]) === String(b[key])) continue;
+        logChange(currentUser, { entity: "role", entityId: role, label: `Роль: ${role}`,
+          field: key, action: "изменил право", old: String(a[key] ?? "—"), new: String(b[key] ?? "—") });
+      }
+    }
     setRolePermissions(normalized);
     return true;
   }, [currentPermissions.adminRoles]);
@@ -6686,10 +6766,51 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   };
   const saveContractClients = async (list, opts = {}) => {
     const patched = list.map(c=>({...c, createdAt: c.createdAt||Date.now()}));
+    _auditListDiff("client", clientsRef.current, patched, x => x?.name || x?.phone || "Клиент");
     const r = await saveListProtected(CLIENTS_KEY, CLIENTS_BACKUPS_KEY, patched, (fl)=>{ clientsRef.current = fl; setContractClients(fl); }, { loadedRef: _contractsLoaded, ...opts });
     return r;
   };
+  // ── ДИФФ СПИСКА В ЖУРНАЛ ────────────────────────────────────────────────────
+  // Справочники (клиенты, подрядчики, работники, акты, договоры подряда) сохраняются
+  // целым массивом, поэтому точку «что именно поменяли» ловим сравнением было/стало
+  // по id. Без этого целые разделы вообще не попадали в журнал: пропал подрядчик —
+  // и concов не найти.
+  const _auditListDiff = useCallback((entity, prev, next, labelOf, fields = null) => {
+    try {
+      const before = new Map((prev || []).filter(x => x?.id).map(x => [x.id, x]));
+      const after = new Map((next || []).filter(x => x?.id).map(x => [x.id, x]));
+      const ev = (o) => ({ entity, entityId: o?.id || "", label: labelOf(o) || o?.id || "" });
+      for (const [id, o] of after) {
+        if (before.has(id)) continue;
+        logChange(currentUser, { ...ev(o), field: "запись", action: "создал", old: "—", new: labelOf(o) });
+      }
+      for (const [id, o] of before) {
+        if (after.has(id)) continue;
+        // Мягкое удаление (deletedAt) прилетает как изменение — не путаем с созданием.
+        logChange(currentUser, { ...ev(o), field: "запись", action: "удалил", old: labelOf(o), new: "—" });
+      }
+      for (const [id, o] of after) {
+        const was = before.get(id);
+        if (!was) continue;
+        if (!was.deletedAt && o.deletedAt) {
+          logChange(currentUser, { ...ev(o), field: "запись", action: "удалил", old: labelOf(was), new: "—" });
+          continue;
+        }
+        // Пишем ТОЛЬКО значимые поля: иначе служебные updatedAt засорят журнал.
+        const keys = fields || Object.keys(o).filter(k => !["updatedAt", "id", "__ts"].includes(k));
+        for (const k of keys) {
+          const a = was[k], b = o[k];
+          if (a === b) continue;
+          if (typeof a === "object" || typeof b === "object") continue;   // вложенное не разбираем
+          logChange(currentUser, { ...ev(o), field: k, action: "изменил",
+            old: a === undefined || a === "" ? "—" : String(a), new: b === undefined || b === "" ? "—" : String(b) });
+        }
+      }
+    } catch (e) { console.warn("audit diff", entity, e); }
+  }, [currentUser]);
+
   const saveContragents = async (list, opts = {}) => {
+    _auditListDiff("contragent", contragentsRef.current, list, x => x?.name || x?.bin || "Реквизиты");
     const r = await saveListProtected(CONTRAGENTS_KEY, CONTRAGENTS_BACKUPS_KEY, list, (fl)=>{ contragentsRef.current = fl; setContragents(fl); }, { loadedRef: _contractsLoaded, ...opts });
     return r;
   };
@@ -6976,12 +7097,16 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   }, [flushAllProductionPending, _refreshProdUnsynced, setCurrentUser, currentUser?.id]);
   endSessionSafelyRef.current = endSessionSafely;
   const saveReports = async (list, opts = {}) => {
+    // Акты/АВР — документы под подпись, их появление и правки должны быть видны.
+    _auditListDiff("report", reportsRef.current, list, x => `${x?.type || "Акт"} ${x?.number || ""}`.trim());
     return await saveListProtected(REPORTS_KEY, REPORTS_BACKUPS_KEY, list, (fl)=>{ reportsRef.current = fl; setReports(fl); }, { loadedRef: _contractsLoaded, ...opts });
   };
   const saveWorkers = async (list, opts = {}) => {
+    _auditListDiff("worker", workersRef.current, list, x => x?.name || x?.phone || "Работник");
     return await saveListProtected(WORKERS_KEY, WORKERS_BACKUPS_KEY, list, (fl)=>{ workersRef.current = fl; setWorkers(fl); }, { loadedRef: _contractsLoaded, ...opts });
   };
   const savePodryads = async (list, opts = {}) => {
+    _auditListDiff("podryad", podryadsRef.current, list, x => `Подряд № ${x?.number || "?"} · ${x?.worker?.name || ""}`.trim());
     return await saveListProtected(PODRYADS_KEY, PODRYADS_BACKUPS_KEY, list, (fl)=>{ podryadsRef.current = fl; setPodryads(fl); }, { loadedRef: _contractsLoaded, ...opts });
   };
 
@@ -15861,6 +15986,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       {effScreen === "admin" && currentPermissions.admin === "full" && (
         <AdminPageContent
           currentUser={currentUser}
+          onAuditPrice={ev => logChange(currentUser, ev)}
           permissions={currentPermissions}
           presence={presence}
           rolePermissions={rolePermissions}
