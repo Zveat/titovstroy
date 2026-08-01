@@ -845,18 +845,20 @@ describe("качество данных — даты, которые проти�
     expect(gap(one({ startDate: day(2026, 4, 1) }), "startBeforeSale").count).toBe(0);
   });
 
+  it("архив из миграции не выкидывает объект из когорты, если он в работе", () => {
+    // Сырое object.status="archive" в карточке НЕ видно: кнопки подсвечиваются по
+    // производству, объект показывает «В работе». Считаем так же, как показываем.
+    const data = one({ prodStatus: "active" }, { status: "archive" });
+    const a = buildAnalytics(data, { period: "all", now: AUG });
+    expect(a.sales.cohortFunnel.stages[0].count).toBe(1);
+    // А настоящий архив (производства нет) из когорты по-прежнему исключается.
+    const real = { ...data, productions: [] };
+    expect(buildAnalytics(real, { period: "all", now: AUG }).sales.cohortFunnel.stages[0].count).toBe(0);
+  });
+
   it("сдали раньше, чем вышли на объект", () => {
     expect(gap(one({ startDate: day(2026, 2, 26), factEndDate: day(2026, 1, 28) }), "endBeforeStart").count).toBe(1);
     expect(gap(one({ startDate: day(2026, 1, 28), factEndDate: day(2026, 2, 26) }), "endBeforeStart").count).toBe(0);
   });
 
-  it("в архиве, но производство активно — объект всё равно считается рабочим", () => {
-    const data = one({ prodStatus: "active" }, { status: "archive" });
-    expect(gap(data, "archiveActive").count).toBe(1);
-    // и это не выдумка: он действительно попадает в «Сейчас в работе»
-    const a = buildAnalytics(data, { period: "month", now: AUG });
-    expect(a.funnels.production.current.find(r => r.label === "Сейчас в работе").count).toBe(1);
-    // архив с завершённым производством к этому пробелу отношения не имеет
-    expect(gap(one({ prodStatus: "done" }, { status: "archive" }), "archiveActive").count).toBe(0);
-  });
 });

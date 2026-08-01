@@ -274,7 +274,12 @@ export function makeManagerResolver(users = []) {
 function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => (v || "Без менеджера")) {
   const { liveObjects, objectValue, contractByObject, prodByObject } = idx;
   const cohort = liveObjects
-    .filter(o => o.status !== "archive")
+    // Архив смотрим по ИТОГОВОМУ статусу, как и весь остальной интерфейс. Раньше здесь
+    // читалось сырое object.status, а его в карточке не видно: кнопки статуса
+    // подсвечиваются по производству, поэтому объект показывает «В работе», хотя в поле
+    // лежит «archive» от миграции из финансов. Такой объект молча выпадал из когорты, и
+    // починить это из интерфейса было нельзя — он и так выглядел правильно.
+    .filter(o => statusOf(o, prodByObject) !== "archive")
     // Объекты, залитые миграцией из финансов, не имеют настоящей даты создания —
     // в периодах они исказили бы приток. Учитываем их только во «Всё время»
     // (ровно так же, как считают старые плитки аналитики).
@@ -977,12 +982,6 @@ function buildDataQuality(idx, financeTx, resolveManager, now = Date.now()) {
         const end = ts(prodByObject.get(o.id)?.factEndDate);
         return start && end && end < start;
       }) },
-    // Объект убран в архив, но карточка производства осталась активной. Статус
-    // производства ПЕРЕВЕШИВАЕТ статус объекта, поэтому такой объект everywhere
-    // считается рабочим: сидит в «Сейчас в работе» и тянет за собой суммы.
-    { key: "archiveActive", label: "В архиве, но производство активно",
-      items: liveObjects.filter(o => o.status === "archive"
-        && ["work", "paused"].includes(statusOf(o, prodByObject))) },
     // Дубль карточки производства: аналитика берёт одну (самую свежую), поэтому
     // правки, внесённые во вторую, в цифры не попадут. Это надо чинить руками.
     { key: "prodDup", label: "Несколько карточек производства",
