@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { monthLabel } from "./payrollModel.js";
 import { buildPayrollBalance, accrualKindMeta } from "./payrollAccruals.js";
-import { C, card, th, td, numCell, pill, avatarOf, avatarStyle } from "./payrollUi.js";
+import { C, card, cardTable, th, td, numCell, pill, avatarOf, avatarStyle, h1, h1sub, footNote } from "./payrollUi.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Вкладка «Долги»: начислено против выплаченного.
@@ -23,19 +23,20 @@ export function BalanceTab({ staff, accruals, report, money }) {
   const bal = useMemo(() => buildPayrollBalance({ staff, accruals, paidByStaff }), [staff, accruals, paidByStaff]);
   const months = bal.months.slice(-4);
 
-  const tile = (label, value, sub, color) => (
-    <div style={{ ...card, padding: 0, overflow: "hidden" }}>
-      <div style={{ height: 3, background: color || C.accent }} />
-      <div style={{ padding: "14px 16px 16px" }}>
-        <div style={{ fontSize: 10.5, color: C.faint, fontWeight: 700, marginBottom: 5 }}>{label}</div>
-        <div style={{ fontSize: 23, fontWeight: 900, color: color || C.ink, fontVariantNumeric: "tabular-nums", letterSpacing: "-.02em", lineHeight: 1.15 }}>{value}</div>
-        {sub && <div style={{ fontSize: 11.5, color: C.faint, marginTop: 6 }}>{sub}</div>}
-      </div>
+  const tile = (mark, markColor, markBg, label, value, sub, valueColor) => (
+    <div style={card}>
+      <div style={{ width: 40, height: 40, borderRadius: 12, background: markBg, color: markColor,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontWeight: 800, fontSize: 17, marginBottom: 16 }}>{mark}</div>
+      <div style={{ fontSize: 14, color: C.mute2, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 32, fontWeight: 800, color: valueColor || C.ink, letterSpacing: "-.01em",
+        fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 13, color: C.faint, marginTop: 8 }}>{sub}</div>}
     </div>
   );
 
   if (bal.rows.length === 0) return (
-    <div style={{ ...card, fontSize: 12.5, color: C.faint }}>
+    <div style={{ ...card, fontSize: 14, color: C.mute2, lineHeight: 1.55 }}>
       Сверять пока нечего: начислений ещё нет. Сначала задайте схемы мотивации на вкладке «Сотрудники»,
       затем начислите месяц на вкладке «Начисления» — здесь появится разница между заработанным и выплаченным.
     </div>
@@ -43,14 +44,19 @@ export function BalanceTab({ staff, accruals, report, money }) {
 
   return (
     <>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
-        {tile("Начислено", money(bal.accrued), `${bal.rows.length} человек`)}
-        {tile("Выплачено", money(bal.paid), "зарплатой, с первого месяца начислений")}
-        {tile("Должны людям", money(bal.debt), bal.debt ? "не выплачено" : "всё закрыто", bal.debt ? C.red : C.green)}
-        {tile("Выдано авансом", money(bal.advance), bal.advance ? "выплачено сверх начисленного" : "нет", bal.advance ? C.amber : C.green)}
+      <div>
+        <h1 style={h1}>Долги</h1>
+        <p style={h1sub}>Начислено против выплаченного. Плюс — должны человеку, минус — он взял авансом.</p>
       </div>
 
-      <div style={{ ...card, padding: 0, overflow: "hidden" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 20 }}>
+        {tile("Н", C.accentInk, C.accentSoft, "Начислено", money(bal.accrued), `${bal.rows.length} человек`)}
+        {tile("В", C.green, C.greenSoft, "Выплачено", money(bal.paid), "зарплатой, с первого месяца начислений")}
+        {tile("Д", C.red, C.redSoft, "Должны людям", money(bal.debt), bal.debt ? "не выплачено" : "всё закрыто", bal.debt ? C.red : C.green)}
+        {tile("А", C.amberText, "#ffe9d4", "Выдано авансом", money(bal.advance), bal.advance ? "выплачено сверх начисленного" : "нет", bal.advance ? C.amberText : C.green)}
+      </div>
+
+      <div style={cardTable}>
         <div style={{ overflowX: "auto" }}>
           <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 680 }}>
             <thead>
@@ -67,10 +73,10 @@ export function BalanceTab({ staff, accruals, report, money }) {
                 <tr key={r.staffId}>
                   <td style={td}>
                     <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-                      {(() => { const a = avatarOf(r.name); return <span style={avatarStyle(a.color)}>{a.initials}</span>; })()}
-                      <div style={{ fontWeight: 700, color: C.ink, fontSize: 13.5 }}>{r.name}</div>
+                      {(() => { const a = avatarOf(r.name); return <span style={avatarStyle(a)}>{a.initials}</span>; })()}
+                      <div style={{ fontWeight: 700, color: C.ink, fontSize: 15 }}>{r.name}</div>
                     </div>
-                    <div style={{ fontSize: 11, color: C.faint, marginTop: 6, display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 11, color: C.faint, marginTop: 8, display: "flex", gap: 5, flexWrap: "wrap" }}>
                       {Object.entries(r.kinds).map(([k, v]) => {
                         const meta = accrualKindMeta(k);
                         return <span key={k} style={pill(meta.color, meta.bg)}>{meta.label} {money(v)}</span>;
@@ -83,13 +89,13 @@ export function BalanceTab({ staff, accruals, report, money }) {
                     return (
                       <td key={m} style={numCell}>
                         <div style={{ color: C.ink2, fontWeight: 600 }}>{money(c.accrued)}</div>
-                        <div style={{ fontSize: 11, color: c.delta > 0 ? C.red : C.faint }}>выпл. {money(c.paid)}</div>
+                        <div style={{ fontSize: 12, color: c.delta > 0 ? C.red : C.faint, marginTop: 2 }}>выпл. {money(c.paid)}</div>
                       </td>
                     );
                   })}
-                  <td style={{ ...numCell, fontWeight: 700 }}>{money(r.accrued)}</td>
+                  <td style={{ ...numCell, fontWeight: 800, fontSize: 16, color: C.ink }}>{money(r.accrued)}</td>
                   <td style={{ ...numCell, color: C.mute }}>{money(r.paid)}</td>
-                  <td style={{ ...numCell, fontWeight: 900, color: r.balance > 0 ? C.red : r.balance < 0 ? C.amber : C.green }}>
+                  <td style={{ ...numCell, fontWeight: 800, fontSize: 15, color: r.balance > 0 ? C.red : r.balance < 0 ? C.amberText : C.green }}>
                     {r.balance > 0 ? `должны ${money(r.balance)}`
                       : r.balance < 0 ? `аванс ${money(-r.balance)}`
                       : "в расчёте"}
@@ -101,7 +107,7 @@ export function BalanceTab({ staff, accruals, report, money }) {
         </div>
       </div>
 
-      <div style={{ fontSize: 11.5, color: C.faint }}>
+      <div style={footNote}>
         Выплаты берутся из тех же операций, что и в отчёте «Кому сколько ушло», но только
         зарплатные: подкатегории, отмеченные «не зарплата» (дивиденды и подобное), в разницу
         не идут. Считаем с первого месяца, где есть начисления, — платежи до начала учёта

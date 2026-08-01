@@ -5,8 +5,9 @@ import {
   monthAccruals, accrualKindMeta, normalizeScheme,
 } from "./payrollAccruals.js";
 import {
-  C, card, cardFlat, inp, lab, th, td, numCell, pill, btnPrimary, btnGhost, btnDanger,
-  avatarOf, avatarStyle, sectionTitle, sectionHint, monthOptions, runSave,
+  C, card, cardTable, inp, lab, th, td, numCell, tdTight, numCellTight, pill,
+  btnPrimary, btnGhost, btnDanger, avatarOf, avatarStyle, h1, h1sub, notice,
+  monthOptions, runSave,
 } from "./payrollUi.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -82,12 +83,12 @@ export function AccrualsTab({
   return (
     <>
       {err && (
-        <div style={{ background: C.redSoft, border: `1px solid ${C.redLine}`, borderRadius: 12, padding: "12px 15px", fontSize: 12.5, color: "#b91c1c" }}>{err}</div>
+        <div style={notice("red")}>{err}</div>
       )}
       <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <div style={sectionTitle}>Начисления за месяц</div>
-          <div style={sectionHint}>Сколько человек заработал. Выплаты считаются отдельно — на вкладке «Долги» видно разницу.</div>
+          <h1 style={h1}>Начисления</h1>
+          <p style={h1sub}>Сколько человек заработал за месяц. Выплаты считаются отдельно — на вкладке «Долги» видно разницу.</p>
         </div>
         <span style={{ flex: 1 }} />
         <div style={{ minWidth: 150 }}>
@@ -100,13 +101,13 @@ export function AccrualsTab({
 
       {/* ── Предложения ── */}
       {proposal.items.length > 0 && (
-        <div style={{ ...card, borderColor: C.accentLine, background: "#fbfcff", padding: 0, overflow: "hidden" }}>
-          <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ ...cardTable, borderColor: C.accentLine, background: "#fafbff" }}>
+          <div style={{ padding: "20px 24px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "#3730a3" }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: C.accentInk }}>
                 Можно начислить: {proposal.items.length} шт на {money(proposal.items.reduce((s, i) => s + i.amount, 0))}
               </div>
-              <div style={{ fontSize: 11.5, color: C.mute, marginTop: 2 }}>
+              <div style={{ fontSize: 13, color: C.mute, marginTop: 3 }}>
                 Посчитано по схемам мотивации. Снимите галочку с того, что начислять не нужно.
               </div>
             </div>
@@ -137,16 +138,16 @@ export function AccrualsTab({
                       </td>
                       <td style={td}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          {(() => { const a = avatarOf(i.staffName); return <span style={avatarStyle(a.color)}>{a.initials}</span>; })()}
-                          <span style={{ fontWeight: 700, color: C.ink, fontSize: 13.5 }}>{i.staffName}</span>
+                          {(() => { const a = avatarOf(i.staffName); return <span style={avatarStyle(a)}>{a.initials}</span>; })()}
+                          <span style={{ fontWeight: 700, color: C.ink, fontSize: 15 }}>{i.staffName}</span>
                         </div>
                       </td>
                       <td style={td}>
                         <span style={pill(meta.color, meta.bg)}>{meta.label}</span>
                         {i.objectLabel && <div style={{ fontSize: 11, color: C.mute, marginTop: 3 }}>{i.objectLabel}</div>}
                       </td>
-                      <td style={{ ...td, color: C.mute, fontSize: 11.5 }}>{i.note || i.reason}</td>
-                      <td style={{ ...numCell, fontWeight: 800 }}>{money(i.amount)}</td>
+                      <td style={{ ...td, color: C.mute, fontSize: 13 }}>{i.note || i.reason}</td>
+                      <td style={{ ...numCell, fontWeight: 800, fontSize: 16, color: C.ink }}>{money(i.amount)}</td>
                     </tr>
                   );
                 })}
@@ -158,21 +159,21 @@ export function AccrualsTab({
 
       {/* ── С чем нужно разобраться ── */}
       {proposal.issues.length > 0 && (
-        <div style={{ background: C.amberSoft, border: `1px solid ${C.amberLine}`, borderRadius: 14, padding: "14px 16px" }}>
-          <div style={{ fontSize: 12.5, fontWeight: 800, color: "#92400e", marginBottom: 7 }}>
+        <div style={notice()}>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 9 }}>
             Событий месяца без бонуса: {proposal.issues.length}
           </div>
-          <div style={{ fontSize: 11.5, color: "#78350f", marginBottom: 9 }}>
+          <div style={{ fontSize: 13.5, marginBottom: 12, lineHeight: 1.5 }}>
             Объект закрылся или подписан в этом месяце, но начислить некому. Ни объекты, ни производство
             система не правит — исправьте данные там, где они ведутся, либо начислите вручную.
           </div>
           {proposal.issues.slice(0, 12).map(x => (
-            <div key={x.objectId} style={{ display: "flex", gap: 10, justifyContent: "space-between",
-              fontSize: 11.5, padding: "5px 0", borderTop: "1px solid #fde68a" }}>
-              <span style={{ color: "#78350f", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <div key={x.objectId} style={{ display: "flex", gap: 12, justifyContent: "space-between",
+              fontSize: 13, padding: "7px 0", borderTop: `1px solid ${C.amberLine}` }}>
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 <b>{x.label}</b> — {x.reason}
               </span>
-              <span style={{ color: "#92400e", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+              <span style={{ fontWeight: 700, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
                 {x.budget ? money(x.budget) : "сумма не задана"}
               </span>
             </div>
@@ -181,7 +182,7 @@ export function AccrualsTab({
       )}
 
       {proposal.items.length === 0 && proposal.issues.length === 0 && (
-        <div style={{ ...card, fontSize: 12.5, color: C.faint }}>
+        <div style={{ ...card, fontSize: 14, color: C.mute2, lineHeight: 1.5 }}>
           За {monthLabel(month)} предлагать нечего: либо всё уже начислено, либо схемы мотивации ещё не заданы
           (вкладка «Сотрудники» → «Изменить» → блок «Мотивация»).
         </div>
@@ -189,8 +190,8 @@ export function AccrualsTab({
 
       {/* ── Ручное начисление ── */}
       {!readOnly && (manual ? (
-        <div style={{ ...card, borderColor: C.accentLine, background: "#fbfcff" }}>
-          <div style={{ fontSize: 14, fontWeight: 800, color: C.ink, marginBottom: 12 }}>
+        <div style={{ ...card, borderColor: C.accentLine, background: "#fafbff" }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: C.ink, marginBottom: 16, letterSpacing: "-.01em" }}>
             Начислить вручную · {monthLabel(month)}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 11 }}>
@@ -247,14 +248,15 @@ export function AccrualsTab({
       ))}
 
       {/* ── Уже начислено за месяц ── */}
-      <div style={{ ...card, padding: 0, overflow: "hidden" }}>
-        <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <div style={{ fontSize: 14, fontWeight: 800, color: C.ink }}>Начислено за {monthLabel(month)}</div>
+      <div style={cardTable}>
+        <div style={{ padding: "20px 24px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+          borderBottom: current.list.length ? `1px solid ${C.lineHead}` : "none" }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: C.ink }}>Начислено за {monthLabel(month)}</div>
           <span style={{ flex: 1 }} />
-          <div style={{ fontSize: 18, fontWeight: 900, color: C.ink, fontVariantNumeric: "tabular-nums", letterSpacing: "-.02em" }}>{money(current.total)}</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: C.ink, fontVariantNumeric: "tabular-nums", letterSpacing: "-.01em" }}>{money(current.total)}</div>
         </div>
         {current.list.length === 0 ? (
-          <div style={{ padding: "0 16px 16px", fontSize: 12.5, color: C.faint }}>За этот месяц ещё ничего не начислено.</div>
+          <div style={{ padding: "0 24px 24px", fontSize: 14, color: C.faint }}>За этот месяц ещё ничего не начислено.</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 620 }}>
@@ -269,10 +271,10 @@ export function AccrualsTab({
                     <tr key={a.id}>
                       <td style={td}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          {(() => { const av = avatarOf(a.staffName); return <span style={avatarStyle(av.color)}>{av.initials}</span>; })()}
+                          {(() => { const av = avatarOf(a.staffName); return <span style={avatarStyle(av)}>{av.initials}</span>; })()}
                           <div>
-                            <div style={{ fontWeight: 700, color: C.ink, fontSize: 13.5 }}>{a.staffName}</div>
-                            {a.position && <div style={{ fontSize: 11, color: C.faint, marginTop: 1 }}>{a.position}</div>}
+                            <div style={{ fontWeight: 700, color: C.ink, fontSize: 15 }}>{a.staffName}</div>
+                            {a.position && <div style={{ fontSize: 13, color: C.faint, marginTop: 2 }}>{a.position}</div>}
                           </div>
                         </div>
                       </td>
@@ -280,11 +282,11 @@ export function AccrualsTab({
                         <span style={pill(meta.color, meta.bg)}>{meta.label}</span>
                         {a.source === "auto" && <span style={{ ...pill(C.mute, C.lineSoft), marginLeft: 6 }}>по схеме</span>}
                       </td>
-                      <td style={{ ...td, color: C.mute, fontSize: 11.5 }}>
+                      <td style={{ ...td, color: C.mute, fontSize: 13 }}>
                         {a.objectLabel && <div style={{ color: C.ink2 }}>{a.objectLabel}</div>}
                         {a.note}
                       </td>
-                      <td style={{ ...numCell, fontWeight: 800 }}>{money(a.amount)}</td>
+                      <td style={{ ...numCell, fontWeight: 800, fontSize: 16, color: C.ink }}>{money(a.amount)}</td>
                       <td style={{ ...td, textAlign: "right" }}>
                         {!readOnly && (
                           <button onClick={() => removeAccrual(a)}
