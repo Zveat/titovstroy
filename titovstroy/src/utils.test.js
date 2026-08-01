@@ -1544,3 +1544,71 @@ describe("compactLocalStorageMirrors — освобождение места б�
     expect(ls.getItem("foreign")).toBe("other-value");
   });
 });
+
+describe("реестр несохранённого — отказ записи больше не молчит", () => {
+  it("на каждую причину отказа есть человеческий текст, а не код", () => {
+    for (const r of ["read-only-tab","bad-list","not-loaded","db-unavailable","empty-over-data","cloud-failed"]) {
+      const t = utils.saveFailReasonText(r);
+      expect(t).not.toBe(r);
+      expect(t.length).toBeGreaterThan(10);
+    }
+  });
+
+  it("неизвестную причину не теряет и не падает", () => {
+    expect(utils.saveFailReasonText("что-то новое")).toBe("что-то новое");
+    expect(utils.saveFailReasonText(undefined)).toBe("неизвестная ошибка");
+    expect(utils.saveFailReasonText("")).toBe("неизвестная ошибка");
+  });
+
+  it("раздел называет по-человечески, незнакомый ключ — без служебного префикса", () => {
+    expect(utils.saveFailLabel("titovstroy-finance-tx")).toBe("Финансовые операции");
+    expect(utils.saveFailLabel("titovstroy-objects")).toBe("Объекты");
+    expect(utils.saveFailLabel("titovstroy-что-то")).toBe("что-то");
+  });
+
+  it("повтор той же беды не плодит строки, а считает попытки", () => {
+    let l = [];
+    l = utils.mergeSaveFail(l, { key:"titovstroy-objects", reason:"cloud-failed", ts:1 });
+    l = utils.mergeSaveFail(l, { key:"titovstroy-objects", reason:"cloud-failed", ts:2 });
+    l = utils.mergeSaveFail(l, { key:"titovstroy-objects", reason:"cloud-failed", ts:3 });
+    expect(l).toHaveLength(1);
+    expect(l[0].count).toBe(3);
+    expect(l[0].ts).toBe(3);              // время последней попытки, а не первой
+    expect(l[0].label).toBe("Объекты");
+  });
+
+  it("разные причины одного раздела и разные разделы — отдельные строки", () => {
+    let l = [];
+    l = utils.mergeSaveFail(l, { key:"titovstroy-objects", reason:"cloud-failed" });
+    l = utils.mergeSaveFail(l, { key:"titovstroy-objects", reason:"db-unavailable" });
+    l = utils.mergeSaveFail(l, { key:"titovstroy-estimates", reason:"cloud-failed" });
+    expect(l).toHaveLength(3);
+    expect(new Set(l.map(x=>x.id)).size).toBe(3);
+  });
+
+  it("успешная запись раздела снимает ВСЕ его строки, чужие не трогает", () => {
+    let l = [];
+    l = utils.mergeSaveFail(l, { key:"titovstroy-objects", reason:"cloud-failed" });
+    l = utils.mergeSaveFail(l, { key:"titovstroy-objects", reason:"db-unavailable" });
+    l = utils.mergeSaveFail(l, { key:"titovstroy-estimates", reason:"cloud-failed" });
+    const after = utils.clearSaveFailsFor(l, "titovstroy-objects");
+    expect(after).toHaveLength(1);
+    expect(after[0].key).toBe("titovstroy-estimates");
+  });
+
+  it("id повторов чистятся только по своему ключу — похожее имя раздела не задевается", () => {
+    const ids = ["titovstroy-finance-tx|cloud-failed","titovstroy-finance-tx|not-loaded",
+                 "titovstroy-finance-projects|cloud-failed","titovstroy-objects|cloud-failed"];
+    expect(utils.saveFailIdsFor(ids, "titovstroy-finance-tx")).toEqual(
+      ["titovstroy-finance-tx|cloud-failed","titovstroy-finance-tx|not-loaded"]);
+    expect(utils.saveFailIdsFor(ids, "titovstroy-finance-projects")).toEqual(
+      ["titovstroy-finance-projects|cloud-failed"]);
+  });
+
+  it("не падает на пустом/битом входе", () => {
+    expect(utils.mergeSaveFail(null, { key:"titovstroy-objects", reason:"cloud-failed" })).toHaveLength(1);
+    expect(utils.clearSaveFailsFor(null, "titovstroy-objects")).toEqual([]);
+    expect(utils.clearSaveFailsFor([null, undefined], "titovstroy-objects")).toEqual([]);
+    expect(utils.saveFailIdsFor(undefined, "titovstroy-objects")).toEqual([]);
+  });
+});

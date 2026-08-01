@@ -1621,3 +1621,57 @@ export function mayUseLocalCopy(dirtyRaw, uid, tab) {
   if (isLegacyDirtyMarker(dirtyRaw)) return false;
   return isOwnDirtyMarker(dirtyRaw, uid, tab);
 }
+
+// ── РЕЕСТР НЕСОХРАНЁННОГО ────────────────────────────────────────────────────
+// Раньше отказ записи списка (read-only-вкладка, раздел не догрузился, база не ответила,
+// защита «пусто поверх», облако не подтвердило) возвращал undefined и нигде не всплывал —
+// отсюда «внёс операцию, вышел, зашёл, а её нет». Тексты и слияние строк держим здесь,
+// чтобы их можно было проверить тестами отдельно от гигантского App.jsx.
+export const SAVE_FAIL_REASONS = {
+  "read-only-tab":   "сервис редактируется в другой вкладке — эта только смотрит",
+  "bad-list":        "внутренняя ошибка: список повреждён",
+  "not-loaded":      "раздел ещё не догрузился из облака",
+  "db-unavailable":  "база не ответила при чтении — запись отменена, чтобы не затереть чужое",
+  "empty-over-data": "защита: попытка записать пустой список поверх заполненного",
+  "cloud-failed":    "облако не подтвердило запись",
+};
+export const SAVE_FAIL_LABELS = {
+  "titovstroy-objects":          "Объекты",
+  "titovstroy-estimates":        "Сметы",
+  "titovstroy-contracts":        "Договоры",
+  "titovstroy-clients":          "Клиенты",
+  "titovstroy-contragents":      "Реквизиты",
+  "titovstroy-deals":            "Сделки",
+  "titovstroy-reports":          "Акты",
+  "titovstroy-workers":          "Подрядчики",
+  "titovstroy-podryads":         "Договоры подряда",
+  "titovstroy-finance-tx":       "Финансовые операции",
+  "titovstroy-finance-projects": "Финансовые проекты",
+};
+export function saveFailReasonText(reason) {
+  return SAVE_FAIL_REASONS[reason] || String(reason || "неизвестная ошибка");
+}
+export function saveFailLabel(key) {
+  return SAVE_FAIL_LABELS[key] || String(key || "").replace(/^titovstroy-/, "");
+}
+export const saveFailId = (key, reason) => `${key}|${reason}`;
+// Добавляет отказ в список. Одна строка на пару ключ+причина: повтор той же беды не плодит
+// строки, а увеличивает счётчик — иначе при недоступной базе баннер за минуту раздувается
+// до сотни одинаковых сообщений и в нём нельзя ничего разобрать.
+export function mergeSaveFail(list, { key, reason, ts = Date.now() }) {
+  const cur = Array.isArray(list) ? list : [];
+  const id = saveFailId(key, reason);
+  const i = cur.findIndex(f => f && f.id === id);
+  const row = { id, key, reason, ts, count: (i >= 0 ? (cur[i].count || 0) : 0) + 1, label: saveFailLabel(key) };
+  return i < 0 ? [...cur, row] : cur.map(f => (f && f.id === id ? row : f));
+}
+// Успешная запись раздела снимает ВСЕ его строки: причина могла смениться между попытками
+// (сначала «база не ответила», потом «облако не подтвердило») — иначе висел бы хвост.
+export function clearSaveFailsFor(list, key) {
+  const cur = Array.isArray(list) ? list : [];
+  return cur.filter(f => f && f.key !== key);
+}
+export function saveFailIdsFor(ids, key) {
+  const prefix = key + "|";
+  return (ids || []).filter(id => String(id).startsWith(prefix));
+}

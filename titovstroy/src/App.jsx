@@ -18,7 +18,7 @@ import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restore
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -1412,6 +1412,9 @@ const PRICE_SEAL_REASONS = {
   set: "сметы в этот момент сохранялись из другого места — повторите",
   maxretry: "сметы правятся слишком часто — повторите через пару секунд",
 };
+const CLIENT_SAVE_FAIL_TEXT = (reason) =>
+  `Клиент НЕ сохранён: ${saveFailReasonText(reason)}. Данные в форме на месте — нажмите «Создать и выбрать» ещё раз.`;
+
 const BACKUPS_KEY        = "titovstroy-estimates-backups"; // снимки архива для восстановления
 const USERS_KEY          = "titovstroy-users";
 const USERS_BACKUPS_KEY  = "titovstroy-users-backups";
@@ -2477,6 +2480,9 @@ const AUDIT_SECTION_META = {
   report:     { label: "Акты",      color: "#7e22ce", bg: "#f3e8ff", icon: "🧾" },
   podryad:    { label: "Подряд",    color: "#c2410c", bg: "#ffedd5", icon: "🔨" },
   document_template: { label: "Шаблоны", color: "#4f46e5", bg: "#e0e7ff", icon: "📑" },
+  // Восстановления, импорт и выгрузка бэкапов. Самые опасные операции в системе — раньше
+  // не оставляли в журнале вообще ничего: кто, когда и на какой момент откатил базу.
+  backup:     { label: "Бэкапы",    color: "#0f766e", bg: "#ccfbf1", icon: "💾" },
 };
 const AUDIT_SOURCE_META = {
   manual:   { label: "вручную",  color: "#64748b" },
@@ -3241,6 +3247,9 @@ function AdminPageContent({ currentUser, presence = {}, onAuditPrice = null, per
     let cat; try { cat = JSON.parse(snap.data); } catch { window.alert("Бэкап повреждён"); return; }
     if (!confirmDangerous(`Восстановить каталог на ${new Date(snap.ts).toLocaleString("ru-RU")}?\nТекущий каталог уйдёт в бэкап.`)) return;
     await saveCatalog(cat);
+    logChange(currentUser, { entity: "backup", label: "Каталог работ", action: "восстановил из бэкапа",
+      field: "снимок", old: new Date(snap.ts).toLocaleString("ru-RU"),
+      new: `позиций: ${Array.isArray(cat) ? cat.length : "?"}`, detail: `автор снимка: ${snap.by || "—"}` });
     setCatalogBackupsModal(null);
     window.alert("Каталог восстановлен ✓");
   };
@@ -4359,6 +4368,8 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
   const [showClientForm, setShowClientForm] = useState(false);
   const [showNewClientForm, setShowNewClientForm] = useState(false);
   const [newClientData, setNewClientData] = useState({ name:"", phone:"", type:"физ" });
+  const [savingClient, setSavingClient] = useState(false);   // кнопка «Создать и выбрать» ждёт запись
+  const [newClientErr, setNewClientErr] = useState("");      // причина, по которой клиент не сохранился
   const [showNewWorker, setShowNewWorker] = useState(false);
   const [newWorkerData, setNewWorkerData] = useState({ name:"", iin:"", doc:"", phone:"", address:"" });
   const [impSearch, setImpSearch] = useState("");
@@ -4634,19 +4645,29 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
                 <input className="fi" value={newClientData.address||""} onChange={e=>setNewClientData(p=>({...p,address:e.target.value}))} placeholder="г. Алматы ..."/>
               </div>
             </div>
+            {newClientErr && (
+              <div style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#b91c1c",borderRadius:8,padding:"7px 11px",fontSize:11.5,fontWeight:600,marginBottom:8}}>
+                {newClientErr}
+              </div>
+            )}
             <div style={{display:"flex",gap:8}}>
               <button onClick={async ()=>{
-                if(!newClientData.name.trim()) return;
+                if(!newClientData.name.trim() || savingClient) return;
                 const nc = {id:Date.now().toString(),createdAt:Date.now(),...newClientData,name:newClientData.name.trim()};
-                await onCreateClient(nc);
+                setSavingClient(true); setNewClientErr("");
+                // Раньше форма закрывалась не глядя на результат: при отказе записи договор
+                // оставался с clientId несуществующего клиента, а введённое исчезало.
+                const res = await onCreateClient(nc);
+                setSavingClient(false);
+                if (res && res.ok === false) { setNewClientErr(CLIENT_SAVE_FAIL_TEXT(res.reason)); return; }
                 upd({clientId:nc.id});
                 setShowNewClientForm(false);
                 setNewClientData({name:"",phone:"",type:"физ"});
                 setShowClientForm(true);
-              }} style={{background:"#059669",color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                Создать и выбрать
+              }} disabled={savingClient} style={{background:savingClient?"#6ee7b7":"#059669",color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:12,fontWeight:700,cursor:savingClient?"default":"pointer",fontFamily:"inherit"}}>
+                {savingClient?"Сохраняю…":"Создать и выбрать"}
               </button>
-              <button onClick={()=>{setShowNewClientForm(false);setNewClientData({name:"",phone:"",type:"физ"});}}
+              <button onClick={()=>{setShowNewClientForm(false);setNewClientData({name:"",phone:"",type:"физ"});setNewClientErr("");}}
                 style={{background:"#f3f4f6",color:"#64748b",border:"none",borderRadius:8,padding:"7px 14px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
                 Отмена
               </button>
@@ -5721,6 +5742,36 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [dirtyCount, setDirtyCount] = useState(0); // СВОИ незасинканные dirty-записи storage (этот пользователь+вкладка) — участвует в баннере
   const [legacyDirtyN, setLegacyDirtyN] = useState(0); // legacy-маркеры без владельца (карантин — не авто-отправляются)
   const [cloudError, setCloudError] = useState(false); // последнее сохранение не ушло в облако (только локально)
+  // ── РЕЕСТР НЕСОХРАНЁННОГО ───────────────────────────────────────────────────
+  // Отказ записи внутри saveListProtected/saveEstimates возвращал undefined, и почти
+  // все вызывающие это молча проглатывали (фоновый .catch, оптимистичный UI). Итог —
+  // «внёс, вышел, зашёл, а данных нет». Теперь КАЖДЫЙ отказ попадает сюда: видно, какой
+  // раздел не сохранился и почему, а payload остаётся в памяти и уходит по «Повторить».
+  // Одна запись на пару ключ+причина (повторы только считаются), payload — самый свежий.
+  const [saveFails, setSaveFails] = useState([]);        // [{key,label,reason,ts,count}]
+  const _saveFailPayloads = useRef(new Map());           // failId -> функция повтора
+  const _saveListProtectedQueued = useRef(null);         // ссылка на saveListProtected (объявлен ниже)
+  const _retryFailedSavesRef = useRef(null);             // ссылка на retryFailedSaves (объявлен ниже)
+  const _saveFailsRef = useRef([]);                      // для endSessionSafely — без пересоздания колбэка
+  // Одна строка на пару ключ+причина: повторные отказы только увеличивают счётчик, а
+  // payload заменяется свежим, чтобы «Повторить» отправило РОВНО те данные, что не ушли
+  // (слияние по id внутри сейва не даст откатить чужие правки).
+  const _reportSaveFail = useCallback((key, reason, runRetry) => {
+    // read-only-tab уже объяснён отдельным серым баннером наверху, а формы получают причину
+    // через opts.onBlocked — вторая красная плашка про то же самое была бы просто шумом.
+    if (reason === "read-only-tab") return;
+    if (runRetry) _saveFailPayloads.current.set(`${key}|${reason}`, runRetry);
+    const next = mergeSaveFail(_saveFailsRef.current, { key, reason });
+    _saveFailsRef.current = next;
+    setSaveFails(next);
+  }, []);
+  const _clearSaveFails = useCallback((key) => {
+    // Map и ref чистим СИНХРОННО: выход из сессии спрашивает про остаток сразу после await,
+    // когда React ещё не успел перерисовать состояние.
+    for (const id of saveFailIdsFor([..._saveFailPayloads.current.keys()], key)) _saveFailPayloads.current.delete(id);
+    _saveFailsRef.current = clearSaveFailsFor(_saveFailsRef.current, key);
+    setSaveFails(prev => prev.some(f => f.key === key) ? clearSaveFailsFor(prev, key) : prev);
+  }, []);
   const [listBackups, setListBackups] = useState(null); // {label, items, onRestore}
   const [documentSnapshotsById, setDocumentSnapshotsById] = useState(() => new Map());
   const [documentInstanceSnapshot, setDocumentInstanceSnapshot] = useState(null);
@@ -6809,6 +6860,18 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     } catch (e) { console.warn("audit diff", entity, e); }
   }, [currentUser]);
 
+  // ── БЭКАПЫ / ИМПОРТ / ЭКСПОРТ В ЖУРНАЛ ──────────────────────────────────────
+  // Откат базы и импорт — единственные операции, которые могут разом заменить данные
+  // целого раздела, и до сих пор они не оставляли следа. Пишем: что за операция, какой
+  // раздел, на какой момент откатили и сколько записей приехало.
+  // Возвращает промис: там, где после операции идёт reload, запись надо дождаться.
+  const logBackupOp = useCallback((action, label, ev = {}) => {
+    return logChange(currentUser, { entity: "backup", label, action, source: ev.source || "manual",
+      field: ev.field || "", old: ev.old ?? "", new: ev.new ?? "", detail: ev.detail || "",
+      entityId: ev.entityId || "", objectId: ev.objectId || "" });
+  }, [currentUser]);
+  const _snapMoment = (ts) => { try { return new Date(ts).toLocaleString("ru-RU"); } catch { return String(ts || "?"); } };
+
   const saveContragents = async (list, opts = {}) => {
     _auditListDiff("contragent", contragentsRef.current, list, x => x?.name || x?.bin || "Реквизиты");
     const r = await saveListProtected(CONTRAGENTS_KEY, CONTRAGENTS_BACKUPS_KEY, list, (fl)=>{ contragentsRef.current = fl; setContragents(fl); }, { loadedRef: _contractsLoaded, ...opts });
@@ -7061,12 +7124,17 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       // вкладке не должен снимать dirty другой вкладки или другого пользователя.
       const ownedDirty = storage.dirtyKeysOwned(); // точный список ДО удаления
       const dirtyLeft = ownedDirty.length;
+      // Отбитые записи (реестр несохранённого) живут только в памяти вкладки — при выходе
+      // они исчезнут вместе с ней. Пробуем дожать, остаток предъявляем в том же вопросе.
+      try { await _retryFailedSavesRef.current?.(); } catch(e) { console.warn("logout retry fails err", e); }
+      const failsLeft = _saveFailsRef.current || [];
       const savedBgIds = new Set(listProductionRetries(localStorage, currentUser?.id).map(c => c.changeId));
       const bgDurable = Array.from(_prodRetryCmds.current.keys()).every(id => savedBgIds.has(id));
       const prodAtRisk = prodLeft > 0 && (!productionDraftsAreDurable() || !bgDurable);
-      const atRisk = (prodAtRisk ? prodLeft : 0) + dirtyLeft;
+      const atRisk = (prodAtRisk ? prodLeft : 0) + dirtyLeft + failsLeft.length;
       if (atRisk > 0) {
-        const what = [prodAtRisk ? `производство без резервного черновика: ${prodLeft}` : "", dirtyLeft > 0 ? `сметы/финансы/прочее: ${dirtyLeft}` : ""].filter(Boolean).join("; ");
+        const what = [prodAtRisk ? `производство без резервного черновика: ${prodLeft}` : "", dirtyLeft > 0 ? `сметы/финансы/прочее: ${dirtyLeft}` : "",
+                      failsLeft.length ? `не принято базой: ${failsLeft.map(f => f.label).join(", ")}` : ""].filter(Boolean).join("; ");
         if (forced) {
           alert(`Внимание: несинхронизированные изменения (${what}) не удалось отправить — они будут потеряны. Выход принудительный: пароль был изменён.`);
         } else {
@@ -8011,7 +8079,12 @@ ${reqBlock}`;
         let list; try { list = JSON.parse(snap.data); } catch { window.alert("Бэкап повреждён"); return; }
         if (!Array.isArray(list)) { window.alert("Бэкап повреждён"); return; }
         if (!window.confirm(`Восстановить список ${cfg.label} на ${new Date(snap.ts).toLocaleString("ru-RU")}? Записей: ${list.length}.`)) return;
+        const wasN = ({ list: contractsRef, contracts: contractsRef, clients: clientsRef,
+                        contragents: contragentsRef, objects: objectsRef }[kind]?.current || []).length;
         await cfg.save(list);
+        logBackupOp("восстановил из бэкапа", `Список ${cfg.label}`,
+          { field: "снимок", old: `${_snapMoment(snap.ts)} · было записей: ${wasN}`,
+            new: `записей в снимке: ${list.length}`, detail: `автор снимка: ${snap.by || "—"}` });
         setListBackups(null);
         window.alert("Восстановлено ✓");
       },
@@ -8168,6 +8241,9 @@ ${reqBlock}`;
       // раньше кнопка «Повторить сейчас» гоняла только flushDirty. await: спиннер «Синхронизирую…»
       // держится, пока попытки реально не завершились.
       try { await flushAllProductionPending(); } catch(e) { console.warn("flush prod pending err", e); }
+      // Отклонённые записи (реестр несохранённого) — тоже часть «повторить»: без этого
+      // кнопка чинила только dirty-очередь, а отбитый сейв так и лежал мёртвым.
+      try { await _retryFailedSavesRef.current?.(); } catch(e) { console.warn("retry fails err", e); }
       await storage.flushDirty();
       await Promise.all([loadEstimates(), loadContracts()]);
       if (currentPermissions.finance !== "none" || currentPermissions.financialDetails || currentPermissions.objectFinanceSummary) await loadFinance();
@@ -8201,9 +8277,16 @@ ${reqBlock}`;
   // opts.replace=true — записать ровно `list` (восстановление из бэкапа)
   // opts.removedIds — id, которые нужно удалить из объединённого набора (явное удаление)
   const saveEstimates = useCallback(async (list, opts = {}) => {
-    if (storage.isReadOnlyTab()) return;
-    if (!_estimatesLoaded.current) { console.warn("saveEstimates заблокирован: данные ещё не загружены/недоступны"); return; }
-    if (!Array.isArray(list)) { console.error("saveEstimates: список не массив — отмена"); return; }
+    // Те же молчаливые выходы, что и в saveListProtected: смета «сохранена» в интерфейсе,
+    // а в базу не ушла. Теперь каждый отказ виден в реестре несохранённого и повторяем.
+    const _blocked = (reason) => {
+      try { opts.onBlocked?.(reason); } catch {}
+      _reportSaveFail(STORAGE_KEY, reason, reason === "bad-list" ? null : () => saveEstimatesRef.current(list, opts));
+      return undefined;
+    };
+    if (storage.isReadOnlyTab()) return _blocked("read-only-tab");
+    if (!_estimatesLoaded.current) { console.warn("saveEstimates заблокирован: данные ещё не загружены/недоступны"); return _blocked("not-loaded"); }
+    if (!Array.isArray(list)) { console.error("saveEstimates: список не массив — отмена"); return _blocked("bad-list"); }
     const { replace = false, removedIds = [] } = opts;
 
     // Читаем актуальное состояние базы (могли изменить другие устройства)
@@ -8218,7 +8301,7 @@ ${reqBlock}`;
         // База недоступна — не рискуем перезаписывать, чтобы не затереть чужие данные
         console.error("saveEstimates ЗАБЛОКИРОВАН: база недоступна");
         setCloudError(true);
-        return;
+        return _blocked("db-unavailable");
       }
     } catch(e) { console.warn("guard check err", e); }
 
@@ -8252,7 +8335,7 @@ ${reqBlock}`;
     // ФИНАЛЬНЫЙ ПРЕДОХРАНИТЕЛЬ: не затирать непустую базу пустым результатом без явного разрешения
     if (stored.length > 0 && finalList.length === 0 && !_allowEmptySave.current) {
       console.error("saveEstimates ЗАБЛОКИРОВАН: результат пустой поверх", stored.length, "смет");
-      return;
+      return _blocked("empty-over-data");
     }
 
     // Синхронизируем UI с объединённым набором (чтобы не потерять подтянутые чужие сметы)
@@ -8278,12 +8361,23 @@ ${reqBlock}`;
         }
       } catch(e) { console.warn("backup err", e); }
       const res = await storage.set(STORAGE_KEY, JSON.stringify(finalList));
-      if (res && res.fbOk === false) { console.error("Firebase save FAILED:", res.fbError); setCloudError(true); setSyncStatus("error"); setSaving(false); return false; }
+      if (res && res.fbOk === false) {
+        console.error("Firebase save FAILED:", res.fbError); setCloudError(true); setSyncStatus("error"); setSaving(false);
+        if (opts.requireCloud) return _blocked(res.fbError === "read-only-tab" ? "read-only-tab" : "cloud-failed");
+        return false;
+      }
       else { _clearCloudErrorIfAllClean(); setSyncStatus("saved"); setTimeout(()=>setSyncStatus("idle"), 3000); }
-    } catch(e) { console.error(e); setCloudError(true); setSyncStatus("error"); setSaving(false); return false; }
+    } catch(e) {
+      console.error(e); setCloudError(true); setSyncStatus("error"); setSaving(false);
+      if (opts.requireCloud) return _blocked("cloud-failed");
+      return false;
+    }
     setSaving(false);
+    _clearSaveFails(STORAGE_KEY);
     return finalList;
-  }, [currentUser, _clearCloudErrorIfAllClean]);
+  }, [currentUser, _clearCloudErrorIfAllClean, _reportSaveFail, _clearSaveFails]);
+  const saveEstimatesRef = useRef(null);
+  saveEstimatesRef.current = saveEstimates;
 
   // Перед изменением прайса закрепляем действующие на этот момент цену и себестоимость
   // только в заполненных legacy-строках. Транзакция работает с самой свежей облачной
@@ -8335,7 +8429,15 @@ ${reqBlock}`;
     // МОЛЧАЛИВЫЕ ОТКАЗЫ — главная причина «внёс операцию, вышел, а её нет». Пять веток
     // ниже возвращали undefined без единого слова наружу, а вызывающий код это не
     // проверял. Теперь причина уходит в opts.onBlocked, и вызывающий может показать её.
-    const _blocked = (reason) => { try { opts.onBlocked?.(reason); } catch {} return undefined; };
+    // Причина уходит и вызывающему (opts.onBlocked — форма покажет её у себя), и в общий
+    // реестр несохранённого, чтобы фоновые сохранения без обработчика тоже были видны.
+    const _blocked = (reason) => {
+      try { opts.onBlocked?.(reason); } catch {}
+      // bad-list — программная ошибка, повторять тот же мусор смысла нет.
+      _reportSaveFail(key, reason, reason === "bad-list" ? null
+        : () => _saveListProtectedQueued.current(key, backupKey, list, applyState, opts));
+      return undefined;
+    };
     if (storage.isReadOnlyTab()) return _blocked("read-only-tab");
     if (!Array.isArray(list)) { console.error("saveListProtected: не массив", key); return _blocked("bad-list"); }
     // identityKey — по какому полю мерджить (по умолчанию "id"; у production записей его нет,
@@ -8418,8 +8520,10 @@ ${reqBlock}`;
       console.error(e); setCloudError(true);
       if (opts.requireCloud) return _blocked("cloud-failed");
     }
+    // Дошли до конца — раздел записан, старые строки «не сохранено» по нему снимаем.
+    _clearSaveFails(key);
     return finalList;
-  }, [currentUser, _clearCloudErrorIfAllClean]);
+  }, [currentUser, _clearCloudErrorIfAllClean, _reportSaveFail, _clearSaveFails]);
 
   // Обёртка-очередь: каждый вызов встаёт в хвост очереди СВОЕГО ключа и запускается только
   // после завершения предыдущего вызова того же ключа. Возвращаемый промис резолвится тем же,
@@ -8431,6 +8535,19 @@ ${reqBlock}`;
     _saveQueues.current.set(key, next.then(() => {}, () => {})); // хвост никогда не «падает», чтобы цепочка не рвалась
     return next;
   }, [_saveListProtectedRaw]);
+  _saveListProtectedQueued.current = saveListProtected;
+
+  // «Повторить» на плашке: гоняем сохранённые payload'ы заново. Строка исчезает сама —
+  // успешный сейв того же ключа снимает её через _clearSaveFails.
+  const [retryingSaves, setRetryingSaves] = useState(false);
+  const retryFailedSaves = useCallback(async () => {
+    const jobs = [...(_saveFailPayloads.current?.values() || [])];
+    if (!jobs.length) { _saveFailsRef.current = []; setSaveFails([]); return; }
+    setRetryingSaves(true);
+    try { for (const run of jobs) { try { await run(); } catch (e) { console.warn("retry save", e); } } }
+    finally { setRetryingSaves(false); }
+  }, []);
+  _retryFailedSavesRef.current = retryFailedSaves;
 
   // Сколько позиций (с qty>0) в наборе rows
   const countFilled = (rws) => Object.values(rws||{}).filter(r => Number(r?.qty) > 0).length;
@@ -8472,10 +8589,14 @@ ${reqBlock}`;
     // Отфильтровываем мусор (null/undefined/без id), чтобы не записать битые записи
     list = list.filter(e => e && typeof e==="object" && e.id);
     if (!confirmDangerous(`Восстановить архив на момент ${new Date(snap.ts).toLocaleString("ru-RU")}?\nСметы: ${list.length}. Текущая версия уйдёт в бэкап и её можно вернуть обратно.`)) return;
+    const wasN = estimatesRef.current.length;
     _allowEmptySave.current = true; // восстановление может заменить на меньший набор
     estimatesRef.current = list;
     setEstimates(list);
     await saveEstimates(list, { replace: true }); // ровно снимок, текущая версия уйдёт в бэкап
+    logBackupOp("восстановил из бэкапа", "Архив смет",
+      { field: "снимок", old: `${_snapMoment(snap.ts)} · было смет: ${wasN}`,
+        new: `смет в снимке: ${list.length}`, detail: `автор снимка: ${snap.by || "—"}` });
     setTimeout(() => { _allowEmptySave.current = false; }, 1500);
     setBackupsModal(null);
     const objIds = new Set(objectsRef.current.map(o=>o.id));
@@ -8653,6 +8774,11 @@ ${reqBlock}`;
     a.href = url; a.download = `titovstroy-backup-${IS_DEV_ENV ? "dev" : "prod"}-${stamp}${failed.length ? "-НЕПОЛНЫЙ" : ""}.json`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 2000);
+    // Выгрузка = копия всей базы уходит на чужой диск. Кто и когда её сделал — должно быть видно.
+    logBackupOp(failed.length ? "выгрузил НЕПОЛНЫЙ бэкап" : "выгрузил полный бэкап", "Экспорт базы (JSON)",
+      { field: "файл", new: a.download,
+        detail: Object.entries(snapshot._counts || {}).map(([k, n]) => `${k}: ${n}`).join(", ")
+                + (failed.length ? ` · НЕ прочитано: ${failed.join(", ")}` : "") });
   };
   // Безопасное восстановление журнала аудита: ОБЪЕДИНЕНИЕ (не замена). Записи из бэкапа,
   // которых нет в текущем журнале (по сигнатуре), добавляются; существующие не трогаются;
@@ -8781,6 +8907,13 @@ ${reqBlock}`;
       window.alert("❌ Отменено: за время подтверждения появились несохранённые изменения производства. Дождитесь синхронизации и повторите.");
       return;
     }
+    // Пишем НАМЕРЕНИЕ до первой записи: если восстановление развалится на середине,
+    // в журнале всё равно останется, кто и каким файлом его запускал.
+    await logBackupOp("начал восстановление ВСЕЙ базы из файла", "Импорт базы (JSON)",
+      { field: "файл", old: `текущая база: ${firebaseConfig.projectId || "?"}`,
+        new: `${snap._exportedAt || "?"} · база «${snap._env || "?"}»${snap.databaseProject ? " · проект " + snap.databaseProject : ""}`,
+        detail: Object.entries(snap._counts || {}).map(([k, n]) => `${k}: ${n}`).join(", ")
+                + (snap._incomplete ? ` · файл НЕПОЛНЫЙ: ${snap._incomplete.join(", ")}` : ""), source: "import" });
     let done = 0, pubDone = 0, fail = 0; const cloudFailed = [], skipped = [];
     // Восстановление одного ключа: пред-бэкап ТЕКУЩЕГО значения в облако с проверкой fbOk;
     // если текущее значение или список пред-бэкапов недоступны/битые — раздел НЕ трогаем
@@ -8878,6 +9011,14 @@ ${reqBlock}`;
     const auditMsg = auditMerged ? `\nЖурнал изменений: +${auditMerged} записей.` : "";
     const pubMsg = pubDone ? `\nПубличных нод (КП/кабинеты): ${pubDone}.` : "";
     const okMsg = (cloudFailed.length || skipped.length || fail) ? "Восстановление завершено ЧАСТИЧНО" : "Восстановление завершено УСПЕШНО";
+    // Ждём записи журнала ДО перезагрузки — иначе итог операции просто не успевал сохраниться.
+    await logBackupOp(okMsg === "Восстановление завершено УСПЕШНО" ? "восстановил ВСЮ базу из файла" : "восстановил базу ЧАСТИЧНО",
+      "Импорт базы (JSON)",
+      { field: "результат", old: `${snap._exportedAt || "?"} · база «${snap._env || "?"}»`,
+        new: `разделов: ${done}${pubDone ? `, публичных нод: ${pubDone}` : ""}${auditMerged ? `, журнал +${auditMerged}` : ""}`,
+        detail: [fail ? `ошибок: ${fail}` : "", skipped.length ? `пропущено: ${skipped.join(", ")}` : "",
+                 cloudFailed.length ? `не записано в облако: ${cloudFailed.join(", ")}` : ""].filter(Boolean).join(" · "),
+        source: "import" });
     window.alert(`${okMsg}: восстановлено разделов — ${done}.${pubMsg}${auditMsg}${failWarn}${skippedWarn}${cloudFailedWarn}\nСтраница сейчас перезагрузится.`);
     setTimeout(() => window.location.reload(), 1000);
   };
@@ -8910,6 +9051,9 @@ ${reqBlock}`;
     downloadCSV(`сметы-${new Date().toISOString().slice(0, 10)}.csv`,
       ["Название", "Телефон", "Адрес объекта", "Тип", "Площадь м²", "Дата", "Вид", "Статус", "Позиций", "Сумма клиенту ₸"],
       rows);
+    logBackupOp("выгрузил сметы в таблицу", "Экспорт смет (CSV)",
+      { field: "файл", new: `сметы-${new Date().toISOString().slice(0, 10)}.csv`,
+        detail: `строк: ${rows.length}${(!estsR.ok || !objsR.ok) ? " · база отвечала не полностью" : ""}` });
   };
 
   // Точечно вытащить ТОЛЬКО пропавшие сметы из снимка рабочего пространства,
@@ -8923,6 +9067,9 @@ ${reqBlock}`;
     const names = missing.slice(0, 12).map(e => `• ${e.proj?.name || "Без названия"}${e.proj?.address ? ` — ${e.proj.address}` : ""}`).join("\n");
     if (!window.confirm(`Вернуть недостающие сметы из снимка ${new Date(snap.ts).toLocaleString("ru-RU")}?\n\nБудет ДОБАВЛЕНО смет: ${missing.length}\n${names}${missing.length > 12 ? `\n…и ещё ${missing.length - 12}` : ""}\n\nФинансы, объекты и договоры НЕ трогаем — добавятся только пропавшие сметы.`)) return;
     await saveEstimates([...estimatesRef.current, ...missing]);
+    logBackupOp("вернул недостающие сметы из снимка", "Снимок рабочего пространства",
+      { field: "сметы", old: _snapMoment(snap.ts), new: `добавлено: ${missing.length}`,
+        detail: missing.slice(0, 10).map(e => e.proj?.name || e.id).join(", ") + (missing.length > 10 ? "…" : "") });
     setWsBackupsModal(null);
     window.alert(`Возвращено смет: ${missing.length} ✓\nФинансы и всё остальное не тронуты.`);
   };
@@ -8933,6 +9080,8 @@ ${reqBlock}`;
     const c = Array.isArray(snap.contracts) ? snap.contracts : [];
     const f = Array.isArray(snap.financeTx) ? snap.financeTx : [];
     if (!confirmDangerous(`Восстановить рабочее пространство на ${new Date(snap.ts).toLocaleString("ru-RU")}?\n\nОбъектов: ${o.length}\nСмет: ${e.length}\nДоговоров: ${c.length}\nФин. операций: ${f.length}\n\nТекущее состояние уйдёт в бэкап.`)) return;
+    const wasO = objectsRef.current.length, wasE = estimatesRef.current.length,
+          wasC = contractsRef.current.length, wasF = financeTxRef.current.length;
     _allowEmptySave.current = true;
     objectsRef.current = o; setObjects(o);
     estimatesRef.current = e; setEstimates(e);
@@ -8942,6 +9091,10 @@ ${reqBlock}`;
     await saveEstimates(e, { replace: true });
     await saveContracts(c, { replace: true, allowEmpty: true });
     if (f.length > 0) await saveFinanceTx(f, { replace: true });
+    logBackupOp("восстановил рабочее пространство", "Снимок рабочего пространства",
+      { field: "снимок", old: `${_snapMoment(snap.ts)} · было: объектов ${wasO}, смет ${wasE}, договоров ${wasC}, фин. операций ${wasF}`,
+        new: `стало: объектов ${o.length}, смет ${e.length}, договоров ${c.length}, фин. операций ${f.length || wasF}`,
+        detail: f.length ? "" : "финансы в снимке пусты — не тронуты" });
     setTimeout(() => { _allowEmptySave.current = false; }, 1500);
     setWsBackupsModal(null);
     window.alert(`Восстановлено ✓\nОбъектов: ${o.length} · Смет: ${e.length} · Договоров: ${c.length} · Фин. операций: ${f.length}`);
@@ -8983,6 +9136,11 @@ ${reqBlock}`;
       estimatesRef.current = newList;
       setEstimates(newList);
       await saveEstimates(newList);
+      logBackupOp("импортировал сметы из JSON", "Импорт смет",
+        { field: "сметы", old: `было: ${cur.length}`, new: `добавлено: ${toAdd.length}`,
+          detail: [`в файле: ${incoming.length}`, customWorks.length ? `позиций в каталог: ${customWorks.length}` : "",
+                   `id: ${toAdd.slice(0, 10).map(x => x.id).join(", ")}${toAdd.length > 10 ? "…" : ""}`].filter(Boolean).join(" · "),
+          source: "import" });
       setImportBusy(false);
       setImportModal(false);
       setImportText("");
@@ -9386,7 +9544,15 @@ ${reqBlock}`;
       if (e.id===est.id || childIds.has(e.id)) return {...e, objectId: objId};
       return e;
     });
-    await saveObjects([newObj, ...objectsRef.current]);
+    // Порядок важен: сначала объект, потом привязка смет. Если объект не записался, а
+    // сметы уже получили его objectId — они повисли бы на несуществующем объекте, при
+    // этом пользователю сказали бы «Объект создан ✓».
+    let blockedReason = "";
+    const savedObj = await saveObjects([newObj, ...objectsRef.current], { onBlocked: (r)=>{ blockedReason = r; } });
+    if (!savedObj) {
+      window.alert(`Объект НЕ создан: ${saveFailReasonText(blockedReason)}.\n\nСмета осталась на месте, ничего не перенесено. Повторите после «Повторить сохранение» в красной плашке сверху.`);
+      return;
+    }
     await saveEstimates(newList, { replace:true });
     window.alert(`Объект создан ✓ Смета перенесена в «Объекты»`);
   };
@@ -11128,6 +11294,23 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             ? "Режим просмотра — изменения недоступны для этой учётной записи."
             : "Сервис открыт для редактирования в другой вкладке — здесь только просмотр (изменения не сохраняются)."}
           {!_isViewer && <button onClick={takeoverEditLease} style={{background:"#fff",color:"#475569",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Перехватить редактирование</button>}
+        </div>
+      )}
+      {/* НЕ СОХРАНЕНО. Оранжевый баннер ниже — про «ушло локально, дожмём»; этот про «не ушло
+          вообще». Красный, не прячется сам и держит payload: «Повторить» шлёт те же данные. */}
+      {saveFails.length > 0 && (
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:502,background:"#b91c1c",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.25)",flexWrap:"wrap"}}>
+          <span>⛔ НЕ СОХРАНЕНО:{" "}
+            {saveFails.map((f,i)=>(
+              <span key={f.id}>{i>0?" · ":" "}<b>{f.label}</b> — {saveFailReasonText(f.reason)}{f.count>1?` (×${f.count})`:""}</span>
+            ))}
+          </span>
+          <button onClick={retryFailedSaves} disabled={retryingSaves}
+            style={{background:"#fff",color:"#b91c1c",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:retryingSaves?"default":"pointer",fontFamily:"inherit"}}>
+            {retryingSaves?"Повторяю…":"🔄 Повторить сохранение"}</button>
+          <button onClick={()=>{ _saveFailPayloads.current.clear(); _saveFailsRef.current = []; setSaveFails([]); }}
+            style={{background:"rgba(255,255,255,.2)",color:"#fff",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            Отклонить</button>
         </div>
       )}
       {!loadError && !syncBannerHidden && (cloudError || prodUnsyncedN > 0 || dirtyCount > 0 || legacyDirtyN > 0) && (
@@ -14162,8 +14345,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                 const norm=data.projects.map(p=>({...p,id:p.id||genId()}));
                                 await saveFinanceProjects(norm);
                               }
+                              logBackupOp("импортировал финансы из JSON", "Импорт финансов",
+                                { field: "файл", old: file.name,
+                                  new: `операций: ${data.transactions?.length||0}${data.projects?`, проектов: ${data.projects.length}`:""}`,
+                                  detail: data.meta?.accounts ? "настройки финансов заменены файлом" : "", source: "import" });
                               alert("Импортировано операций: "+(data.transactions?.length||0)+(data.projects?" | проектов: "+data.projects.length:""));
-                            } catch(err){ alert("Ошибка импорта: "+err.message); }
+                            } catch(err){
+                              logBackupOp("ОШИБКА импорта финансов", "Импорт финансов", { field: "файл", old: file.name, new: "—", detail: String(err?.message||err), source: "import" });
+                              alert("Ошибка импорта: "+err.message);
+                            }
                             setFinImportBusy(false); e.target.value="";
                           }}/>
                       </label>
@@ -14173,6 +14363,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         const url=URL.createObjectURL(blob); const a=document.createElement("a");
                         a.href=url; a.download="titovstroy-finance-"+new Date().toISOString().slice(0,10)+".json";
                         document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(()=>URL.revokeObjectURL(url),5000);
+                        logBackupOp("выгрузил финансы", "Экспорт финансов (JSON)",
+                          { field: "файл", new: a.download, detail: `операций: ${financeTx.length}, проектов: ${finProjects.length}` });
                       }} style={{background:"#fff",color:"#475569",border:"1px solid #e2e8f0",borderRadius:9,padding:"9px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💾 Экспорт ({financeTx.length})</button>
                     </div>
                   </div>
@@ -15033,10 +15225,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 const fill = e.budget>0?Math.min(100,Math.round(e.income/e.budget*100)):0;
                 const mCol = e.margin==null?"#94a3b8":e.margin>=30?"#059669":e.margin>=0?"#f59e0b":"#dc2626";
                 return (
-                  <div key={e.key} onClick={()=>{
+                  <div key={e.key} onClick={async ()=>{
                       if(!window.confirm(`«${e.name}» — проект из Финансов, объекта у него ещё нет.\nСоздать объект со статусом «${st.label}»?`)) return;
                       const newObj = { id: Date.now().toString(), clientName: e.name||"Проект", clientPhone:"", address: e.address||"", objType:"Вторичка", status: usKey, manager: currentUser.name, createdAt: Date.now(), createdById: currentUser.id, updatedAt: Date.now(), _fromFinProject: e.fpId };
-                      saveObjects([...objectsRef.current, newObj]);
+                      // Раньше уходили в карточку не дождавшись записи: при отказе пользователь
+                      // работал в объекте, которого в базе нет, и всё введённое в нём терялось.
+                      let blockedReason = "";
+                      const saved = await saveObjects([...objectsRef.current, newObj], { onBlocked: (r)=>{ blockedReason = r; } });
+                      if (!saved) { window.alert(`Объект НЕ создан: ${saveFailReasonText(blockedReason)}. Проект в Финансах не тронут.`); return; }
                       writeAudit(currentUser,"создал объект из финпроекта","object",newObj.id,newObj.clientName);
                       setCurrentObject(newObj); setObjectTab("workspace");
                     }}
@@ -15963,7 +16159,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 onSave={async ()=>{
                   const _oldC = contracts.find(x=>x.id===currentContract.id) || null;
                   const list = contracts.filter(x=>x.id!==currentContract.id);
-                  await saveContracts([...list, currentContract]);
+                  // Договор живёт в currentContract, а не в списке: уйти к списку при
+                  // неудавшейся записи означало потерять правки. Остаёмся в редакторе.
+                  let blockedReason = "";
+                  const savedC = await saveContracts([...list, currentContract], { onBlocked: (r)=>{ blockedReason = r; } });
+                  if (!savedC) {
+                    window.alert(`Договор НЕ сохранён: ${saveFailReasonText(blockedReason)}.\n\nОстаёмся в редакторе — данные на месте. Нажмите «Сохранить» ещё раз или «Повторить сохранение» в красной плашке сверху.`);
+                    return;
+                  }
                   logContractSave(currentUser, _oldC, currentContract);
                   if (objectReturnId) {
                     const obj = objectsRef.current.find(x=>x.id===objectReturnId);
@@ -15995,11 +16198,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 onUpdateClient={(updated)=>{
                   saveContractClients(contractClients.map(x=>x.id===updated.id?updated:x));
                 }}
-                onCreateClient={(newClient)=>{
-                  // Оптимистично добавляем клиента в список, запись — в фон (без подвисания кнопки)
+                onCreateClient={async (newClient)=>{
+                  // Клиент сразу в списке (кнопка не подвисает), но результат записи
+                  // возвращаем форме: договор не должен ссылаться на клиента, которого
+                  // в базе нет — форма покажет причину и не закроется.
                   const next = [...contractClients, newClient];
                   clientsRef.current = next; setContractClients(next);
-                  saveContractClients(next).catch(e=>console.warn("bg client save err", e));
+                  let blockedReason = "";
+                  const saved = await saveContractClients(next, { onBlocked: (r)=>{ blockedReason = r; } }).catch(e=>{ console.warn("bg client save err", e); return undefined; });
+                  return saved ? { ok: true } : { ok: false, reason: blockedReason };
                 }}
                 workers={workers}
                 onCreateWorker={(w)=>{
