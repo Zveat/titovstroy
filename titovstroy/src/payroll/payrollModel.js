@@ -91,6 +91,10 @@ export function buildPayrollReport(financeTx = [], opts = {}) {
 
   const rows = new Map();
   const monthSet = new Set();
+  // Помесячные итоги считаем и для «не разложено», и для всего расхода: иначе колонка
+  // месяца в таблице показывала бы только именованные строки и не сходилась бы с «Всего».
+  const unassignedByMonth = {};
+  const totalByMonth = {};
   let total = 0, unassigned = 0, unassignedCount = 0;
 
   for (const t of financeTx) {
@@ -100,10 +104,14 @@ export function buildPayrollReport(financeTx = [], opts = {}) {
     const amount = num(t.amount);
     total += amount;
     const mk = payrollMonthKey(t.date);
-    if (mk) monthSet.add(mk);
+    if (mk) { monthSet.add(mk); totalByMonth[mk] = (totalByMonth[mk] || 0) + amount; }
 
     const who = resolvePayee(t, { staffById, workersById, subcategoryMap });
-    if (!who) { unassigned += amount; unassignedCount++; continue; }
+    if (!who) {
+      unassigned += amount; unassignedCount++;
+      if (mk) unassignedByMonth[mk] = (unassignedByMonth[mk] || 0) + amount;
+      continue;
+    }
 
     const key = `${who.kind}:${who.id}`;
     if (!rows.has(key)) rows.set(key, {
@@ -125,7 +133,9 @@ export function buildPayrollReport(financeTx = [], opts = {}) {
     rows: list,
     months,
     total,
+    totalByMonth,
     unassigned,
+    unassignedByMonth,
     unassignedCount,
     staffTotal: list.filter(r => r.kind === "staff").reduce((s, r) => s + r.total, 0),
     workerTotal: list.filter(r => r.kind === "worker").reduce((s, r) => s + r.total, 0),

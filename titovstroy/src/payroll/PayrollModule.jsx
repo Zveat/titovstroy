@@ -157,7 +157,11 @@ function ReportTab({ report, lastMonths, money, share, onOpen }) {
                 <tr style={{ background: "#fffdf7" }}>
                   <td style={td}><div style={{ fontWeight: 700, color: "#92400e" }}>Не разложено</div></td>
                   <td style={td}><span style={pill("#d97706", "#fffbeb")}>получатель не указан</span></td>
-                  {lastMonths.map(m => <td key={m} style={numCell}>—</td>)}
+                  {lastMonths.map(m => (
+                    <td key={m} style={numCell}>
+                      {report.unassignedByMonth[m] ? money(report.unassignedByMonth[m]) : "—"}
+                    </td>
+                  ))}
                   <td style={{ ...numCell, fontWeight: 800, color: "#92400e" }}>{money(report.unassigned)}</td>
                   <td style={numCell}>{report.unassignedCount}</td>
                 </tr>
@@ -166,9 +170,11 @@ function ReportTab({ report, lastMonths, money, share, onOpen }) {
             <tfoot>
               <tr style={{ background: "#fafbfd" }}>
                 <td style={{ ...td, fontWeight: 800, borderTop: "1px solid #e2e8f0" }} colSpan={2}>Итого расходов</td>
+                {/* Итог месяца — ВЕСЬ расход месяца, вместе с «не разложено»: столбец,
+                    считающий только именованные строки, врал бы в меньшую сторону. */}
                 {lastMonths.map(m => (
                   <td key={m} style={{ ...numCell, fontWeight: 800, borderTop: "1px solid #e2e8f0" }}>
-                    {money(report.rows.reduce((s, r) => s + (r.byMonth[m] || 0), 0))}
+                    {money(report.totalByMonth[m] || 0)}
                   </td>
                 ))}
                 <td style={{ ...numCell, fontWeight: 900, borderTop: "1px solid #e2e8f0" }}>{money(report.total)}</td>
@@ -180,6 +186,7 @@ function ReportTab({ report, lastMonths, money, share, onOpen }) {
       </div>
       <div style={{ fontSize: 11.5, color: "#94a3b8" }}>
         Итог таблицы равен итогу расходов: операции без получателя не выброшены, а показаны отдельной строкой.
+        {report.months.length > lastMonths.length && " Колонки месяцев — последние три; «Всего» — за всю историю."}
       </div>
     </>
   );

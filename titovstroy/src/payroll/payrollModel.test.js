@@ -72,6 +72,18 @@ describe("отчёт «кому сколько ушло»", () => {
     expect(named + r.unassigned).toBe(r.total);
   });
 
+  it("итог месяца включает нераспознанные, иначе колонка врёт в меньшую сторону", () => {
+    expect(r.totalByMonth["2026-07"]).toBe(310000 + 400000 + 900000);
+    expect(r.unassignedByMonth["2026-07"]).toBe(900000);
+    expect(r.unassignedByMonth["2026-06"]).toBeUndefined();
+    // Каждый месяц: именованные + нераспознанные = итог месяца.
+    for (const m of r.months) {
+      const named = r.rows.reduce((s, x) => s + (x.byMonth[m] || 0), 0);
+      expect(named + (r.unassignedByMonth[m] || 0)).toBe(r.totalByMonth[m]);
+    }
+    expect(Object.values(r.totalByMonth).reduce((s, v) => s + v, 0)).toBe(r.total);
+  });
+
   it("суммы раскладываются по людям и по месяцам", () => {
     const rop = r.rows.find(x => x.id === "s1");
     expect(rop.total).toBe(560000);
