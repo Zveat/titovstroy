@@ -14601,9 +14601,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                           подкатегории («ФОТ РОП»), поэтому на каждого нового сотрудника
                           заводилась новая подкатегория, а 24 млн подрядчикам шли одной
                           строкой на всех. Операции без получателя работают как раньше. */}
-                      {m.type==="expense" && (staff.length > 0 || workers.length > 0) && (
+                      {/* Дивиденды исключены намеренно: это не ФОТ, и у них ВЫШЕ есть своё
+                          поле «Получатель (учредитель)». Два поля с одинаковым названием
+                          подряд — ровно та путаница, на которую пожаловался владелец. */}
+                      {m.type==="expense" && m.subcategory!=="Дивиденды учредителям" && (staff.length > 0 || workers.length > 0) && (
                         <div>
-                          <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Получатель <span style={{color:"#cbd5e1"}}>· необязательно</span></div>
+                          <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Кому выплата <span style={{color:"#cbd5e1"}}>· для раздела ФОТ, необязательно</span></div>
                           <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
                             <select className="fi" style={{width:130,flexShrink:0}}
                               value={m.payee?.kind || "staff"}
