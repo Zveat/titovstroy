@@ -7862,7 +7862,13 @@ ${reqBlock}`;
         const obj = objectsRef.current.find(o => o?.id === p.objectId && !o.deletedAt);
         // Автоматически приводим к актуальным сметам только действующие объекты. Закрытые,
         // потерянные и архивные карточки являются историей и без явного действия не меняются.
-        if (!obj || !["signed", "work", "paused"].includes(obj.status)) continue;
+        // Статус — ЕДИНЫЙ (карточка производства перевешивает поле объекта), а не сырое
+        // obj.status: у объекта из миграции в поле лежит «archive», хотя на экране он
+        // «В работе», и синк его молча пропускал. Считаем прямо из p — колбэк
+        // unifiedStatusOf сюда тащить нельзя, он зависит от productions и зациклил бы эффект.
+        if (!obj) continue;
+        const objStatus = PROD_TO_DEAL[p.prodStatus] || obj.status || "new";
+        if (!["signed", "work", "paused"].includes(objStatus)) continue;
         // Каждой сметной позиции даём стабильный estimateKey (cat|name) и заранее — id. Синк
         // сопоставляет этапы по estimateKey, а НЕ по названию: ручной этап с именем как в смете
         // (без estimateKey) не будет ни обновлён, ни удалён.
@@ -9327,8 +9333,6 @@ ${reqBlock}`;
       .filter(o => statsPeriod==="all" || o.createdBy!=="migration")
       .filter(o => inRange(o.createdAt||0))   // когорта строго по дате СОЗДАНИЯ (без отката на updatedAt — иначе правка/архивация тянет объект в период)
       .filter(o => !statsManager || (o.manager||"")===statsManager);
-    // Рабочее множество — БЕЗ архива (как на дашборде); архив виден только в разбивке «по статусам»
-    const baseObjs = baseObjsAll.filter(o => o.status!=="archive");
     // Статус для аналитики берём ЕДИНЫЙ (как на экране объектов): карточка производства
     // перевешивает статус сделки. Иначе подписанный объект, ушедший в работу, пропадал
     // из выручки и из воронки — цифры занижались, как только начинались работы.
@@ -9336,6 +9340,10 @@ ${reqBlock}`;
     const uStatus = (o) => PROD_TO_DEAL[_prodByObjAn.get(o.id)?.prodStatus] || o.status || "new";
     // Подписанным считаем всё, что дошло до договора и дальше (в работе, на паузе, сдано).
     const SIGNED_SET = new Set(["signed","work","paused","done"]);
+    // Рабочее множество — БЕЗ архива (как на дашборде); архив виден только в разбивке «по статусам».
+    // Архив тоже по ЕДИНОМУ статусу: у объектов из миграции в поле лежит «archive», хотя на
+    // экране они «В работе»/«Выполнен», и раньше они молча выпадали отсюда целиком.
+    const baseObjs = baseObjsAll.filter(o => uStatus(o)!=="archive");
     // Договора, сформированные ВНУТРИ объектов (привязаны к объекту), без «Прочих договоров»
     const baseCon = contracts
       .filter(c => !c.deletedAt)
@@ -9381,7 +9389,7 @@ ${reqBlock}`;
     });
     const signedB = funnel.find(f=>f.key==="signed") || {count:0,sum:0,profit:0};
     const refuseB = funnel.find(f=>f.key==="refuse") || {count:0,sum:0,profit:0};
-    const activeObjsCount = baseObjs.filter(o=>o.status!=="archive").length;
+    const activeObjsCount = baseObjs.filter(o=>uStatus(o)!=="archive").length;
     // Общая конверсия = подписано / все активные объекты
     const winRateOverall = activeObjsCount>0 ? Math.round(signedB.count/activeObjsCount*100) : 0;
     // Close-rate = подписано / решённые (подписано + отказ)
@@ -9417,9 +9425,11 @@ ${reqBlock}`;
       const sum = withSum.reduce((s,o)=>s+objVal(o),0);
       const cost = withSum.reduce((s,o)=>s+objCost(o),0);
       const profit = sum-cost;
-      const inwork = mos.filter(o=>o.status==="approval").length;
-      const done = mos.filter(o=>o.status==="signed").length;
-      const activeLeads = mos.filter(o=>o.status!=="archive").length;
+      const inwork = mos.filter(o=>uStatus(o)==="approval").length;
+      // «Договорились» — дошли до договора и дальше. По сырому «signed» объект переставал
+      // считаться, как только уходил в работу, и конверсия менеджера падала на ровном месте.
+      const done = mos.filter(o=>SIGNED_SET.has(uStatus(o))).length;
+      const activeLeads = mos.filter(o=>uStatus(o)!=="archive").length;
       const conv = activeLeads>0 ? Math.round(done/activeLeads*100) : 0;
       return {name:m, count:mos.length, sum, profit, margin: sum>0?Math.round(profit/sum*100):0, sent:inwork, agreed:done, conv};
     }).sort((a,b)=>b.profit-a.profit);
@@ -9427,14 +9437,14 @@ ${reqBlock}`;
     // ── E. Динамика по месяцам (по объектам, их сумме и конверсии) ──
     const monthMap = {};
     for(const o of baseObjs){
-      if(o.status==="archive") continue;
+      if(uStatus(o)==="archive") continue;
       const d = new Date(o.createdAt||o.updatedAt||0);
       const key = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
       if(!monthMap[key]) monthMap[key]={key, revenue:0, cost:0, total:0, signed:0};
       monthMap[key].revenue += objVal(o);
       monthMap[key].cost += objCost(o);
       monthMap[key].total += 1;
-      if(o.status==="signed") monthMap[key].signed += 1;
+      if(SIGNED_SET.has(uStatus(o))) monthMap[key].signed += 1;
     }
     const MONTH_RU = ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"];
     const monthly = Object.values(monthMap).sort((a,b)=>a.key.localeCompare(b.key)).slice(-12).map(m=>{
@@ -9446,7 +9456,7 @@ ${reqBlock}`;
     const STALE_DAYS = 14;
     const nowMs = Date.now();
     const staleSent = liveObjects
-      .filter(o=>o.status==="approval")
+      .filter(o=>uStatus(o)==="approval")
       .map(o=>({e:{id:o.id, proj:{name:o.clientName||o.address||"Объект", phone:o.clientPhone}, total:objVal(o), _obj:o}, days: Math.floor((nowMs-(o.updatedAt||0))/864e5)}))
       .filter(x=>x.days>=STALE_DAYS)
       .sort((a,b)=>b.days-a.days)
@@ -9455,21 +9465,21 @@ ${reqBlock}`;
     const byConType = {}; for(const c of baseCon){ const t=TYPE_L2[c.type||"repair_fiz"]||"--"; byConType[t]=(byConType[t]||0)+1; }
 
     // ── G. Средний цикл сделки (от создания до подписания, в днях) ──
-    const signedObjs = baseObjs.filter(o=>o.status==="signed"&&o.createdAt&&o.updatedAt&&o.updatedAt>o.createdAt);
+    const signedObjs = baseObjs.filter(o=>SIGNED_SET.has(uStatus(o))&&o.createdAt&&o.updatedAt&&o.updatedAt>o.createdAt);
     const avgDealDays = signedObjs.length>0 ? Math.round(signedObjs.reduce((s,o)=>s+Math.floor((o.updatedAt-o.createdAt)/864e5),0)/signedObjs.length) : null;
     // Среднее время «зависания» открытых сделок в согласовании (от создания до сейчас)
-    const approvalOpen = liveObjects.filter(o=>o.status==="approval"&&(!statsManager||(o.manager||"")===statsManager));
+    const approvalOpen = liveObjects.filter(o=>uStatus(o)==="approval"&&(!statsManager||(o.manager||"")===statsManager));
     const avgApprovalDays = approvalOpen.length>0 ? Math.round(approvalOpen.reduce((s,o)=>s+Math.floor((nowMs-(o.createdAt||o.updatedAt||nowMs))/864e5),0)/approvalOpen.length) : null;
 
     // ── H. Конверсия по типу объекта (архив не в знаменателе — искажал бы конверсию) ──
     const convByType = {};
     for(const o of baseObjs){
-      if(o.status==="archive") continue;
+      if(uStatus(o)==="archive") continue;
       const t = o.objType||"Вторичка";
       if(!convByType[t]) convByType[t]={total:0,signed:0,sumAll:0,sumSigned:0};
       convByType[t].total++;
       convByType[t].sumAll += objVal(o);
-      if(o.status==="signed"){ convByType[t].signed++; convByType[t].sumSigned+=objVal(o); }
+      if(SIGNED_SET.has(uStatus(o))){ convByType[t].signed++; convByType[t].sumSigned+=objVal(o); }
     }
 
     // ── I. Топ-5 объектов периода по сумме ──
@@ -11586,12 +11596,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         const _objVal = o => (_estByObjId[o.id]||[]).reduce((s,e)=>s+(e.total||0),0);
         const _objCost = o => { const cat = getEffectiveCatalog(); const lk = new Map(); for(const w of cat){ if(w?.name)lk.set(w.name,w); if(w?.code)lk.set(w.code,w); } let c=0; for(const e of (_estByObjId[o.id]||[])){ for(const [k,r] of Object.entries(e.rows||{})){ const q=Number(r?.qty||0); if(!q) continue; const w=lk.get(k); if(w)c+=rowCostPerUnit(r,w)*q; } } return c; };
         // Только реально созданные в этом месяце объекты (импортированные миграцией исключаем — у них дата создания искусственная)
-        const objectsThisMonth = liveObjects.filter(o=>o.status!=="archive"&&o.createdBy!=="migration"&&_inMonth(o.createdAt||0));
+        const objectsThisMonth = liveObjects.filter(o=>unifiedStatusOf(o)!=="archive"&&o.createdBy!=="migration"&&_inMonth(o.createdAt||0));
         const objectsWithSum = objectsThisMonth.filter(o=>_objVal(o)>0);
         const totalSumMonth = objectsWithSum.reduce((s,o)=>s+_objVal(o), 0);
         // Прибыль/маржа — по сделкам, ПОДПИСАННЫМ в этом месяце (updatedAt ≈ дата подписания);
         // импортированные миграцией исключаем — их updatedAt = дата импорта, а не реального подписания
-        const signedMonth = liveObjects.filter(o=>o.status==="signed"&&o.createdBy!=="migration"&&_inMonth(o.updatedAt||o.createdAt||0)&&_objVal(o)>0);
+        // «Подписанные» — дошедшие до договора и дальше: по сырому «signed» сделка выпадала
+        // из прибыли месяца, как только уходила в работу.
+        const signedMonth = liveObjects.filter(o=>["signed","work","paused","done"].includes(unifiedStatusOf(o))&&o.createdBy!=="migration"&&_inMonth(o.updatedAt||o.createdAt||0)&&_objVal(o)>0);
         const signedRevMonth = signedMonth.reduce((s,o)=>s+_objVal(o), 0);
         const signedCostMonth = signedMonth.reduce((s,o)=>s+_objCost(o), 0);
         const profitMonth = signedRevMonth - signedCostMonth;

@@ -1612,3 +1612,53 @@ describe("реестр несохранённого — отказ записи 
     expect(utils.saveFailIdsFor(undefined, "titovstroy-objects")).toEqual([]);
   });
 });
+
+// Сырое object.status в интерфейсе НЕ ВИДНО: кнопки статуса подсвечиваются по карточке
+// производства. Объект показывает «В работе», а в поле лежит «archive» от миграции —
+// и проверки молча пропускали живые объекты (ловили на боевой: два объекта в работе
+// без прораба не попадали в «Что горит»).
+describe("статус объекта — единый, а не сырое поле", () => {
+  it("производство перевешивает поле объекта", () => {
+    expect(utils.objectStatusOf({ status:"archive" }, { prodStatus:"active" })).toBe("work");
+    expect(utils.objectStatusOf({ status:"signed" },  { prodStatus:"active" })).toBe("work");
+    expect(utils.objectStatusOf({ status:"archive" }, { prodStatus:"done" })).toBe("done");
+    expect(utils.objectStatusOf({ status:"work" },    { prodStatus:"cancel" })).toBe("cancel");
+  });
+
+  it("без карточки производства берётся поле объекта", () => {
+    expect(utils.objectStatusOf({ status:"archive" }, null)).toBe("archive");
+    expect(utils.objectStatusOf({ status:"approval" }, undefined)).toBe("approval");
+    // prodStatus "new" не отображается в статус сделки — остаётся поле объекта
+    expect(utils.objectStatusOf({ status:"approval" }, { prodStatus:"new" })).toBe("approval");
+    expect(utils.objectStatusOf({}, null)).toBe("new");
+    expect(utils.objectStatusOf(null, null)).toBe("new");
+  });
+
+  it("«Не назначен прораб» видит объект, у которого в поле «archive», а на деле работа", () => {
+    const data = {
+      objects: [{ id:"o1", clientName:"Из миграции", status:"archive", createdBy:"migration" }],
+      productions: [{ objectId:"o1", prodStatus:"active", responsible:"" }],
+      finProjects: [{ id:"fp1", objectId:"o1" }],
+      financeTx: [], contracts: [], estimates: [], clients: [],
+    };
+    const ids = computeIssues(data, { now: Date.now() }).map(i => i.id);
+    expect(ids).toContain("no-foreman:o1");
+  });
+
+  it("настоящий архив (производства нет) в «Что горит» не лезет", () => {
+    const data = {
+      objects: [{ id:"o1", clientName:"Архив", status:"archive" }],
+      productions: [], finProjects: [], financeTx: [], contracts: [], estimates: [], clients: [],
+    };
+    expect(computeIssues(data, { now: Date.now() }).map(i => i.id)).not.toContain("no-foreman:o1");
+  });
+
+  it("«подписан без финпроекта» ловится и когда статус живёт в производстве", () => {
+    const data = {
+      objects: [{ id:"o1", clientName:"Ушёл в работу", status:"archive" }],
+      productions: [{ objectId:"o1", prodStatus:"active", responsible:"Пётр" }],
+      finProjects: [], financeTx: [], contracts: [], estimates: [], clients: [],
+    };
+    expect(computeIssues(data, { now: Date.now() }).map(i => i.id)).toContain("signed-nofin:o1");
+  });
+});

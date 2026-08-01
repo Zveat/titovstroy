@@ -106,6 +106,20 @@ export function isDashboardActiveObject(object) {
   return !!object && !object.deletedAt && (object.status === "work" || object.status === "signed");
 }
 
+// ── СТАТУС ОБЪЕКТА ДЛЯ ЛЮБОЙ ЛОГИКИ ────────────────────────────────────────
+// Карточка производства ПЕРЕВЕШИВАЕТ поле объекта — ровно так же, как это видно на
+// экране: кнопки статуса в карточке, чипы в списке и аналитика считают по нему.
+// Читать сырое object.status в проверках нельзя: расхождение в интерфейсе не видно
+// НИКАК (кнопка «В работе» подсвечена, а в поле лежит «archive» от миграции), и
+// починить его кликом невозможно — объект и так выглядит правильно. Ловили на боевой:
+// два объекта в работе без прораба не попадали в «Что горит», а расхождение было у 19.
+// Расхождение возникает не только от миграции: если статус сменили из модуля
+// производства, поле объекта остаётся прежним.
+export const PROD_STATUS_TO_OBJECT = { active: "work", paused: "paused", done: "done", cancel: "cancel" };
+export function objectStatusOf(object, production) {
+  return PROD_STATUS_TO_OBJECT[production?.prodStatus] || object?.status || "new";
+}
+
 export function findFinanceProjectForObject(object, contracts = [], finProjects = []) {
   if (!object) return null;
   const direct = finProjects.find(fp => fp?.objectId === object.id);
@@ -516,8 +530,7 @@ export function buildEstimatorDashboard({ objects = [], estimates = [], producti
     ),
   );
   const prodByObject = new Map(productions.filter(Boolean).map(p => [p.objectId, p]));
-  const prodStatus = { active:"work", paused:"paused", done:"done", cancel:"cancel" };
-  const statusOf = o => prodStatus[prodByObject.get(o.id)?.prodStatus] || o.status || "new";
+  const statusOf = o => objectStatusOf(o, prodByObject.get(o.id));
   const statusCounts = {};
   for (const o of ownObjects) {
     const status = statusOf(o);
@@ -996,7 +1009,10 @@ export function computeIssues(data = {}, opts = {}) {
   // Связка финпроект ↔ объект: objectId, номера основного/доп. договоров,
   // затем только однозначное совпадение по полному имени или телефону.
   const finProjForObject = (o) => findFinanceProjectForObject(o, contracts, finProjects);
-  const objIsActive = (o) => !["done","cancel","archive","refuse"].includes(o.status);
+  // Статус берём ЕДИНЫЙ (производство перевешивает поле объекта) — как на экране.
+  // По сырому object.status проверки молча пропускали живые объекты.
+  const st = (o) => objectStatusOf(o, prodByObj[o?.id]);
+  const objIsActive = (o) => !["done","cancel","archive","refuse"].includes(st(o));
 
   for (const project of finProjects) {
     if (!project || !hasInvalidFinanceProjectDate(project.createdAt, now)) continue;
@@ -1024,16 +1040,16 @@ export function computeIssues(data = {}, opts = {}) {
   }
   // 2. Объект в работе/подписан без назначенного прораба
   for (const o of objects) {
-    if (!["signed","work","paused"].includes(o.status)) continue;
+    if (!["signed","work","paused"].includes(st(o))) continue;
     const p = prodByObj[o.id];
     if ((p && (p.responsible||"").trim())) continue;
     out.push({ id:`no-foreman:${o.id}`, group:"Производство", sev:"yellow", scope:"today", dismissable:true,
-      title:"Не назначен прораб", detail:`${_objLabel(o)} · статус «${o.status==="signed"?"договор подписан":o.status==="paused"?"приостановлен":"в работе"}»`,
+      title:"Не назначен прораб", detail:`${_objLabel(o)} · статус «${st(o)==="signed"?"договор подписан":st(o)==="paused"?"приостановлен":"в работе"}»`,
       nav:{ object:o.id, tab:"info" } });
   }
   // 3. Договор подписан, но нет финпроекта (важно: не скрываемая — это дыра в данных)
   for (const o of objects) {
-    if (!["signed","work"].includes(o.status)) continue;
+    if (!["signed","work"].includes(st(o))) continue;
     if (finProjForObject(o)) continue;
     out.push({ id:`signed-nofin:${o.id}`, group:"Финансы", sev:"red", scope:"today", dismissable:false,
       title:"Договор подписан, но нет финпроекта", detail:_objLabel(o),
@@ -1055,7 +1071,7 @@ export function computeIssues(data = {}, opts = {}) {
   }
   // 6. Близко к сдаче, но есть незакрытые этапы
   for (const o of objects) {
-    if (o.status!=="work") continue;
+    if (st(o)!=="work") continue;
     const p = prodByObj[o.id]; if (!p || !p.planEndDate || p.factEndDate) continue;
     const d = _dayStartTs(p.planEndDate); if (!d) continue;
     const left = Math.round((d - today)/864e5);
@@ -1090,7 +1106,7 @@ export function computeIssues(data = {}, opts = {}) {
     if (String(p.objectId).startsWith("fp:")) continue;
     const o = objById[p.objectId]; if (!o) continue;
     const empty = !(p.stages||[]).length && !p.startDate && !p.planEndDate && !(p.responsible||"").trim();
-    if (empty && !["work","done"].includes(o.status)) out.push({ id:`empty-prod:${p.objectId}`, group:"Данные", sev:"yellow", scope:"check", dismissable:false,
+    if (empty && !["work","done"].includes(st(o))) out.push({ id:`empty-prod:${p.objectId}`, group:"Данные", sev:"yellow", scope:"check", dismissable:false,
       title:"Пустая производственная карточка", detail:`${_objLabel(o)} — карточка есть, но не заполнена`, nav:{ object:o.id, tab:"info" } });
   }
   // 12. Production-запись без объекта (объект удалён/не существует)
@@ -1148,7 +1164,8 @@ export function buildCalendarStages(objects = [], productions = [], opts = {}) {
   for (const p of (productions||[])) {
     if (!p || String(p.objectId).startsWith("fp:")) continue;
     const o = objById[p.objectId]; if (!o) continue;
-    if (["archive","refuse","cancel"].includes(o.status)) continue;
+    // Статус единый: карточка производства перевешивает поле объекта (как на экране).
+    if (["archive","refuse","cancel"].includes(objectStatusOf(o, p))) continue;
     for (const s of (p.stages||[])) {
       if (!s) continue;
       const startRaw = s.planStart || s.factStart || s.planEnd || s.factEnd;
