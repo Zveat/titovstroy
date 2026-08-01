@@ -6549,6 +6549,18 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     const derived = pr && PROD_TO_DEAL[pr.prodStatus];
     return derived || o.status || "new";
   }, [productions, pendingObjectStatuses]);
+  // Отбор по чипу статуса. ОДНА функция на список, счётчик и выгрузку: раньше условие
+  // было продублировано в двух местах, и «На гарантии» попало только в экспорт —
+  // на экране чип показывал 22, а список давал 0.
+  const matchesObjectChip = useCallback((o) => {
+    if (!objectFilterStatus) return true;
+    // «На гарантии» — не статус объекта, а срез по сроку от факт-даты сдачи.
+    if (objectFilterStatus === "__warranty") {
+      const pr = productions.find(p => p.objectId === o.id);
+      return !!pr && warrantyState(pr).status === "active";
+    }
+    return unifiedStatusOf(o) === objectFilterStatus;
+  }, [objectFilterStatus, productions, unifiedStatusOf]);
   useEffect(() => {
     setPendingObjectStatuses(prev => {
       let changed = false;
@@ -14885,15 +14897,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 {currentPermissions.objectExport !== "none" && <button onClick={()=>downloadCSV(
                   "objects_"+new Date().toISOString().slice(0,10)+".csv",
                   ["Статус","Клиент","Телефон","Адрес","Тип","Площадь","Менеджер","Дата создания","Смет (шт)","Сумма смет","Договоров"],
-                  filteredObjects.filter(o=>{
-                    if(!objectFilterStatus) return true;
-                    // «На гарантии» — не статус объекта, а срез по сроку от даты сдачи.
-                    if(objectFilterStatus==="__warranty"){
-                      const pr = productions.find(p=>p.objectId===o.id);
-                      return !!pr && warrantyState(pr).status==="active";
-                    }
-                    return unifiedStatusOf(o)===objectFilterStatus;
-                  }).map(o=>{
+                  filteredObjects.filter(matchesObjectChip).map(o=>{
                     const ests=estimates.filter(e=>e.objectId===o.id);
                     const cons=contracts.filter(c=>c.objectId===o.id && !c.deletedAt && c.type!=="podryad" && c.type!=="podryad_annex");
                     const st=DEAL_STATUSES.find(s=>s.key===unifiedStatusOf(o))||DEAL_STATUSES[0];
@@ -14977,7 +14981,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 
               {/* Плитки объектов — как в «Производстве». Статус единый: производство перевешивает сделку. */}
               {(()=>{
-              const usRows = filteredObjects.filter(o=>!objectFilterStatus||unifiedStatusOf(o)===objectFilterStatus);
+              const usRows = filteredObjects.filter(matchesObjectChip);
               // Та же математика, что в «Финансы → Проекты», но только по объектам,
               // оставшимся после текущих фильтров списка. Без отдельного права
               // финансовые значения не вычисляются для интерфейса и не выводятся в DOM.
