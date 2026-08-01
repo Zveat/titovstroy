@@ -14,7 +14,9 @@ import { card, th, td, numCell, pill } from "./payrollUi.js";
 export function BalanceTab({ staff, accruals, report, money }) {
   const paidByStaff = useMemo(() => {
     const m = {};
-    for (const r of report.rows) if (r.kind === "staff") m[r.id] = { byMonth: r.byMonth, total: r.total };
+    // Только зарплатная часть: дивиденды и прочие «не зарплата» — деньги человеку,
+    // но не выплата по начислениям. Иначе у учредителя вечная переплата.
+    for (const r of report.rows) if (r.kind === "staff") m[r.id] = { byMonth: r.wageByMonth || r.byMonth, total: r.wage ?? r.total };
     return m;
   }, [report]);
 
@@ -40,7 +42,7 @@ export function BalanceTab({ staff, accruals, report, money }) {
     <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
         {tile("Начислено", money(bal.accrued), `${bal.rows.length} человек`)}
-        {tile("Выплачено", money(bal.paid), "с первого месяца начислений")}
+        {tile("Выплачено", money(bal.paid), "зарплатой, с первого месяца начислений")}
         {tile("Должны людям", money(bal.debt), bal.debt ? "не выплачено" : "всё закрыто", bal.debt ? "#dc2626" : "#059669")}
         {tile("Выдано авансом", money(bal.advance), bal.advance ? "выплачено сверх начисленного" : "нет", bal.advance ? "#d97706" : "#059669")}
       </div>
@@ -94,9 +96,10 @@ export function BalanceTab({ staff, accruals, report, money }) {
       </div>
 
       <div style={{ fontSize: 11.5, color: "#94a3b8" }}>
-        Выплаты берутся из тех же операций, что и в отчёте «Кому сколько ушло», и считаются
-        с первого месяца, где есть начисления: платежи до начала учёта в разницу не попадают,
-        иначе у всех была бы огромная «переплата» за прошлые годы.
+        Выплаты берутся из тех же операций, что и в отчёте «Кому сколько ушло», но только
+        зарплатные: подкатегории, отмеченные «не зарплата» (дивиденды и подобное), в разницу
+        не идут. Считаем с первого месяца, где есть начисления, — платежи до начала учёта
+        в разницу не попадают, иначе у всех была бы огромная «переплата» за прошлые годы.
       </div>
     </>
   );

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   resolvePayee, buildPayrollReport, expenseSubcategoryTotals, buildStaffDetail,
-  normalizeStaff, payrollMonthKey, monthLabel, listExpenseOps,
+  normalizeStaff, payrollMonthKey, monthLabel, listExpenseOps, NON_WAGE_KEY,
 } from "./payrollModel.js";
 
 const staff = [
@@ -113,6 +113,48 @@ describe("отчёт «кому сколько ушло»", () => {
     expect(empty.total).toBe(0);
     expect(empty.rows).toEqual([]);
     expect(buildPayrollReport(null || [], {}).unassigned).toBe(0);
+  });
+});
+
+describe("«не зарплата» — деньги человеку, но не ФОТ", () => {
+  const tx = [
+    { id: "1", type: "expense", amount: 300000, date: "2026-07-01", subcategory: "ФОТ РОП" },
+    { id: "2", type: "expense", amount: 1856113, date: "2026-07-02", subcategory: "Дивиденды учредителям",
+      payee: { kind: "staff", id: "s1" } },
+  ];
+  const opts = { staff, workers, subcategoryMap: { ...map, [NON_WAGE_KEY]: ["Дивиденды учредителям"] } };
+
+  it("сумма видна в разрезе по людям, но зарплатой не считается", () => {
+    // Иначе дивиденды учредителю выглядят как фонд оплаты труда, а в сверке долгов
+    // дают вечную переплату на миллионы.
+    const r = buildPayrollReport(tx, opts);
+    const rop = r.rows.find(x => x.id === "s1");
+    expect(rop.total).toBe(2156113);
+    expect(rop.wage).toBe(300000);
+    expect(rop.nonWage).toBe(1856113);
+    expect(rop.wageByMonth["2026-07"]).toBe(300000);
+    expect(r.wageTotal).toBe(300000);
+    expect(r.nonWageTotal).toBe(1856113);
+    expect(r.wageTotal + r.nonWageTotal).toBe(r.total);
+  });
+
+  it("служебный ключ не путается с настоящей подкатегорией", () => {
+    // Имя подкатегории не может начинаться с «__», пересечься они не могут.
+    const r = buildPayrollReport(tx, opts);
+    expect(r.rows.some(x => x.name === NON_WAGE_KEY)).toBe(false);
+  });
+
+  it("без отметки всё считается зарплатой, как раньше", () => {
+    const r = buildPayrollReport(tx, { staff, workers, subcategoryMap: map });
+    expect(r.nonWageTotal).toBe(0);
+    expect(r.wageTotal).toBe(r.total);
+  });
+
+  it("карточка человека тоже делит зарплату и не зарплату", () => {
+    const d = buildStaffDetail(tx, { staffId: "s1", ...opts });
+    expect(d.wage).toBe(300000);
+    expect(d.nonWage).toBe(1856113);
+    expect(d.ops.find(o => o.subcategory === "Дивиденды учредителям").nonWage).toBe(true);
   });
 });
 

@@ -18,6 +18,15 @@ export const STAFF_BACKUPS_KEY = "titovstroy-staff-backups";
 export const PAYROLL_MAP_KEY = "titovstroy-payroll-map";
 
 export const PAYEE_KINDS = { staff: "Сотрудник", worker: "Подрядчик" };
+
+// Подкатегории, которые ДЕНЬГИ человеку, но НЕ зарплата: дивиденды, возврат займа
+// и т.п. Видеть их в разрезе по людям нужно, считать зарплатой — нельзя, иначе
+// сверка «начислено / выплачено» покажет вечную переплату.
+// Живут в той же карте правил под служебным ключом: имя подкатегории никогда не
+// начинается с «__», поэтому пересечься они не могут.
+export const NON_WAGE_KEY = "__nonWage";
+export const nonWageSet = (map) => new Set(Array.isArray(map?.[NON_WAGE_KEY]) ? map[NON_WAGE_KEY] : []);
+export const isNonWage = (tx, map) => nonWageSet(map).has(String(tx?.subcategory || "").trim());
 export const STAFF_STATUSES = [
   { key: "active", label: "Работает", color: "#059669", bg: "#ecfdf5" },
   { key: "fired",  label: "Уволен",   color: "#94a3b8", bg: "#f1f5f9" },
@@ -95,13 +104,14 @@ export function buildPayrollReport(financeTx = [], opts = {}) {
   const staffById = new Map(staff.filter(s => s && s.id).map(s => [s.id, s]));
   const workersById = new Map(workers.filter(w => w && w.id).map(w => [w.id, w]));
 
+  const nonWage = nonWageSet(subcategoryMap);
   const rows = new Map();
   const monthSet = new Set();
   // Помесячные итоги считаем и для «не разложено», и для всего расхода: иначе колонка
   // месяца в таблице показывала бы только именованные строки и не сходилась бы с «Всего».
   const unassignedByMonth = {};
   const totalByMonth = {};
-  let total = 0, unassigned = 0, unassignedCount = 0;
+  let total = 0, unassigned = 0, unassignedCount = 0, wageTotal = 0, nonWageTotal = 0;
 
   for (const t of financeTx) {
     if (!t || t.deletedAt || t.included === false || t.type !== "expense") continue;
@@ -111,6 +121,9 @@ export function buildPayrollReport(financeTx = [], opts = {}) {
     total += amount;
     const mk = payrollMonthKey(t.date);
     if (mk) { monthSet.add(mk); totalByMonth[mk] = (totalByMonth[mk] || 0) + amount; }
+
+    const nw = nonWage.has(String(t.subcategory || "").trim());
+    if (nw) nonWageTotal += amount; else wageTotal += amount;
 
     const who = resolvePayee(t, { staffById, workersById, subcategoryMap });
     if (!who) {
@@ -123,11 +136,15 @@ export function buildPayrollReport(financeTx = [], opts = {}) {
     if (!rows.has(key)) rows.set(key, {
       key, kind: who.kind, id: who.id, name: who.name, position: who.position,
       source: who.source, total: 0, count: 0, byMonth: {},
+      // wage* — только зарплатная часть. Именно она сверяется с начислениями.
+      wage: 0, nonWage: 0, wageByMonth: {},
     });
     const r = rows.get(key);
     r.total += amount;
     r.count += 1;
     if (mk) r.byMonth[mk] = (r.byMonth[mk] || 0) + amount;
+    if (nw) r.nonWage += amount;
+    else { r.wage += amount; if (mk) r.wageByMonth[mk] = (r.wageByMonth[mk] || 0) + amount; }
     // Если хотя бы одна операция человека размечена явно — помечаем строку как явную:
     // так видно, кто уже переведён на новое поле, а кто держится на соответствиях.
     if (who.source === "operation") r.source = "operation";
@@ -139,6 +156,8 @@ export function buildPayrollReport(financeTx = [], opts = {}) {
     rows: list,
     months,
     total,
+    wageTotal,
+    nonWageTotal,
     totalByMonth,
     unassigned,
     unassignedByMonth,
@@ -210,12 +229,13 @@ export function buildStaffDetail(financeTx = [], opts = {}) {
   const { staffId, workerId, staff = [], workers = [], subcategoryMap = {}, from = 0, to = Number.MAX_SAFE_INTEGER } = opts;
   const staffById = new Map(staff.filter(s => s && s.id).map(s => [s.id, s]));
   const workersById = new Map(workers.filter(w => w && w.id).map(w => [w.id, w]));
+  const nonWage = nonWageSet(subcategoryMap);
   const wantKind = workerId ? "worker" : "staff";
   const wantId = workerId || staffId;
   const ops = [];
   const byMonth = {};
   const byContract = {};
-  let total = 0;
+  let total = 0, wage = 0, nonWageSum = 0;
   for (const t of financeTx) {
     if (!t || t.deletedAt || t.included === false || t.type !== "expense") continue;
     const when = ts(t.date);
@@ -223,14 +243,16 @@ export function buildStaffDetail(financeTx = [], opts = {}) {
     const who = resolvePayee(t, { staffById, workersById, subcategoryMap });
     if (!who || who.kind !== wantKind || who.id !== wantId) continue;
     const amount = num(t.amount);
+    const nw = nonWage.has(String(t.subcategory || "").trim());
     total += amount;
+    if (nw) nonWageSum += amount; else wage += amount;
     const mk = payrollMonthKey(t.date);
     if (mk) byMonth[mk] = (byMonth[mk] || 0) + amount;
     const cn = String(t.contractNo || "").trim() || "— без договора —";
     byContract[cn] = (byContract[cn] || 0) + amount;
     ops.push({ id: t.id, date: when, amount, subcategory: t.subcategory || "", contractNo: t.contractNo || "",
-      comment: txComment(t), source: who.source });
+      comment: txComment(t), source: who.source, nonWage: nw });
   }
   ops.sort((a, b) => b.date - a.date);
-  return { total, count: ops.length, byMonth, byContract, ops };
+  return { total, wage, nonWage: nonWageSum, count: ops.length, byMonth, byContract, ops };
 }

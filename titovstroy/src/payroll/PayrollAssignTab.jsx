@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { listExpenseOps, normalizeStaff } from "./payrollModel.js";
+import { listExpenseOps, normalizeStaff, NON_WAGE_KEY, nonWageSet } from "./payrollModel.js";
 import { card, inp, lab, th, td, numCell, pill, btnPrimary, btnGhost, runSave } from "./payrollUi.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -79,6 +79,17 @@ export function AssignTab({
   const [rules, setRules] = useState(subcategoryMap);
   const rulesDirty = JSON.stringify(rules) !== JSON.stringify(subcategoryMap);
   const setRule = (sub, id) => setRules(m => { const n = { ...m }; if (id) n[sub] = id; else delete n[sub]; return n; });
+  // «Не зарплата» — деньги человеку, но не ФОТ (дивиденды, возврат займа). В разрезе
+  // по людям они видны, но в сверку «начислено / выплачено» не идут: иначе у учредителя
+  // была бы вечная переплата на миллионы.
+  const nw = nonWageSet(rules);
+  const toggleNonWage = (sub) => setRules(m => {
+    const cur = new Set(Array.isArray(m[NON_WAGE_KEY]) ? m[NON_WAGE_KEY] : []);
+    cur.has(sub) ? cur.delete(sub) : cur.add(sub);
+    const n = { ...m };
+    if (cur.size) n[NON_WAGE_KEY] = [...cur]; else delete n[NON_WAGE_KEY];
+    return n;
+  });
   const pickRule = async (sub, value) => {
     if (value !== "__new__") { setRule(sub, value); return; }
     const suggested = sub.replace(/^ФОТ\s*/i, "").replace(/^%\s*/, "").trim();
@@ -237,6 +248,8 @@ export function AssignTab({
             <div style={{ fontSize: 11.5, color: "#94a3b8", marginTop: 2 }}>
               Годится только там, где вся подкатегория уходит одному человеку — «ФОТ РОП», «ФОТ таргетолог».
               Правило действует и на будущие операции, сами операции не переписывает.
+              Галочка «не зарплата» — для дивидендов и подобного: в разрезе по людям сумма видна,
+              но зарплатой не считается и в сверку долгов не идёт.
             </div>
           </div>
           <span style={{ flex: 1 }} />
@@ -251,6 +264,7 @@ export function AssignTab({
             <thead><tr>
               <th style={th}>Подкатегория</th><th style={{ ...th, textAlign: "right" }}>Операций</th>
               <th style={{ ...th, textAlign: "right" }}>Сумма</th><th style={th}>Кому</th>
+              <th style={th}>Не зарплата</th>
             </tr></thead>
             <tbody>
               {ruleRows.map(s => (
@@ -266,6 +280,11 @@ export function AssignTab({
                       {staff.map(p => <option key={p.id} value={p.id}>{p.name || "Без имени"}{p.position ? ` · ${p.position}` : ""}</option>)}
                       {!readOnly && <option value="__new__">+ Завести сотрудника…</option>}
                     </select>
+                  </td>
+                  <td style={{ ...td, textAlign: "center" }}>
+                    <input type="checkbox" disabled={readOnly} checked={nw.has(s.subcategory)}
+                      onChange={() => toggleNonWage(s.subcategory)} style={{ cursor: "pointer" }}
+                      title="Деньги человеку, но не зарплата — в сверку долгов не пойдут" />
                   </td>
                 </tr>
               ))}

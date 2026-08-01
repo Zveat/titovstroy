@@ -130,7 +130,10 @@ function ReportTab({ report, lastMonths, money, share, onOpen, monthsShown, setM
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
-        {tile("Всего расходов", money(report.total), `${report.rows.length} получателей`)}
+        {tile("Всего расходов", money(report.total),
+          report.nonWageTotal > 0
+            ? `${report.rows.length} получателей · не зарплата ${money(report.nonWageTotal)}`
+            : `${report.rows.length} получателей`)}
         {tile("Сотрудникам", money(report.staffTotal), share(report.staffTotal) === null ? "" : `${share(report.staffTotal)}% расходов`, "#059669")}
         {tile("Подрядчикам", money(report.workerTotal), share(report.workerTotal) === null ? "" : `${share(report.workerTotal)}% расходов`, "#d97706")}
         {tile("Не разложено", money(report.unassigned),
@@ -180,6 +183,13 @@ function ReportTab({ report, lastMonths, money, share, onOpen, monthsShown, setM
                   <td style={td}>
                     <div style={{ fontWeight: 700, color: "#0f172a" }}>{r.name}</div>
                     {r.position && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 1 }}>{r.position}</div>}
+                    {/* Дивиденды и подобное — деньги человеку, но не зарплата. Показываем
+                        отдельно, иначе 4,4 млн дивидендов выглядят как фонд оплаты труда. */}
+                    {r.nonWage > 0 && (
+                      <div style={{ fontSize: 10.5, color: "#d97706", marginTop: 3 }}>
+                        в т.ч. не зарплата {money(r.nonWage)}
+                      </div>
+                    )}
                   </td>
                   <td style={td}>
                     <span style={r.kind === "staff" ? pill("#059669", "#ecfdf5") : pill("#d97706", "#fffbeb")}>
@@ -244,7 +254,14 @@ function PersonCard({ person, detail, money, onBack }) {
         <button onClick={onBack} style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", color: "#64748b", fontFamily: "inherit" }}>← Назад</button>
         <div>
           <div style={{ fontSize: 16, fontWeight: 900, color: "#0f172a" }}>{person.name}</div>
-          <div style={{ fontSize: 12, color: "#94a3b8" }}>{detail?.count || 0} операций · {money(detail?.total || 0)}</div>
+          <div style={{ fontSize: 12, color: "#94a3b8" }}>
+            {detail?.count || 0} операций · {money(detail?.total || 0)}
+            {detail?.nonWage > 0 && (
+              <span style={{ color: "#d97706" }}>
+                {" "}· зарплата {money(detail.wage)}, не зарплата {money(detail.nonWage)}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -288,7 +305,10 @@ function PersonCard({ person, detail, money, onBack }) {
               {(detail?.ops || []).map(o => (
                 <tr key={o.id}>
                   <td style={{ ...td, whiteSpace: "nowrap", color: "#64748b" }}>{dt(o.date)}</td>
-                  <td style={td}>{o.subcategory || "—"}</td>
+                  <td style={td}>
+                    {o.subcategory || "—"}
+                    {o.nonWage && <span style={{ ...pill("#d97706", "#fffbeb"), marginLeft: 6 }}>не зарплата</span>}
+                  </td>
                   <td style={{ ...td, color: "#64748b" }}>{o.contractNo || "—"}</td>
                   <td style={{ ...td, color: "#94a3b8", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.comment || ""}</td>
                   <td style={{ ...numCell, fontWeight: 700 }}>{money(o.amount)}</td>
