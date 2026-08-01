@@ -11718,7 +11718,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             financialDetails={hasFinancialDetails}
             permissions={currentPermissions}
             onNavFinance={currentPermissions.finance !== "none" ? () => setScreen("finance") : undefined}
-            onOpenObject={item => { const o = objects.find(x => x.id === item.id); if (o) { setCurrentObject({ ...o }); setObjectTab("workspace"); setScreen("objects"); } }}
+            // objectId — у просроченных этапов id составной («объект:этап»), поиск по нему
+            // не находил объект и клик молча не срабатывал.
+            onOpenObject={item => openIssue({ object: item?.objectId || item?.id, tab: item?.stageTab || "info" })}
           />
 
           {/* ── ЧТО ГОРИТ СЕГОДНЯ ── */}
@@ -12923,6 +12925,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               fmt={fmt}
               financialDetails={hasFinancialDetails}
               catProfit={catProfit}
+              // Клик по строке любого списка (в т.ч. «Качество данных») открывает объект:
+              // раньше список только называл проблему, а искать её приходилось руками.
+              onOpenObject={(it) => openIssue({ object: it?.objectId || it?.id, tab: it?.stageTab || "info" })}
             />
 
             {totalEst===0&&<div style={{textAlign:"center",color:"#334155",fontSize:13,padding:"60px 0"}}><div style={{fontSize:32,marginBottom:12}}>📊</div>Нет данных за выбранный период</div>}
