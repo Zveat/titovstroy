@@ -74,9 +74,11 @@ export const btnGhost = {
 export const btnDanger = { ...btnGhost, borderColor: C.redLine, color: C.red };
 
 // Сегмент-контрол: одна капсула с подсветкой активного, вместо россыпи кнопок.
+// alignSelf обязателен: во flex-колонке inline-flex всё равно растягивается на всю
+// ширину и капсула превращается в пустую серую полосу через весь экран.
 export const segWrap = {
   display: "inline-flex", gap: 3, padding: 3, background: C.lineSoft,
-  borderRadius: 12, border: `1px solid ${C.line}`,
+  borderRadius: 12, border: `1px solid ${C.line}`, alignSelf: "flex-start",
 };
 export const seg = (on) => ({
   border: "none", borderRadius: 9, padding: "7px 15px", fontSize: 12.5, fontWeight: 700,
@@ -102,12 +104,18 @@ export const avatarStyle = (color) => ({
   background: `${color}14`, color, fontSize: 11.5, fontWeight: 800, letterSpacing: ".02em",
 });
 
-// Полоска доли — читается быстрее числа, когда строк много.
-export const barTrack = { height: 4, background: C.lineSoft, borderRadius: 999, overflow: "hidden", marginTop: 6 };
-export const barFill = (pct, color) => ({
-  width: `${Math.max(0, Math.min(100, pct))}%`, height: "100%",
-  background: color, borderRadius: 999,
+// Доля в итоге — компактным бейджем у суммы. Полоска под именем читалась как
+// обрывок линии: у большинства людей доля 1–5%, и заливка была почти невидимой.
+export const sharePill = (pct) => ({
+  display: "inline-block", marginLeft: 8, padding: "2px 7px", borderRadius: 999,
+  fontSize: 10.5, fontWeight: 800, fontVariantNumeric: "tabular-nums",
+  color: pct >= 20 ? C.accent : C.faint,
+  background: pct >= 20 ? C.accentSoft : C.lineSoft,
 });
+
+// Ширина рабочей области. Без ограничения таблица растягивается на два монитора,
+// колонки разъезжаются к краям и между ними остаётся пустота.
+export const shell = { maxWidth: 1360, width: "100%", margin: "0 auto" };
 
 export const sectionTitle = { fontSize: 16, fontWeight: 800, color: C.ink, letterSpacing: "-.01em" };
 export const sectionHint = { fontSize: 12.5, color: C.faint, marginTop: 2 };

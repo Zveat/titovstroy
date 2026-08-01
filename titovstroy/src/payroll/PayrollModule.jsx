@@ -9,8 +9,8 @@ import { AssignTab } from "./PayrollAssignTab.jsx";
 import { BalanceTab } from "./PayrollBalanceTab.jsx";
 import {
   C, card, cardFlat, inp, lab, th, td, numCell, pill, btnPrimary, btnGhost, btnDanger,
-  segWrap, seg, avatarOf, avatarStyle, barTrack, barFill, sectionTitle, sectionHint,
-  shadow, runSave,
+  segWrap, seg, avatarOf, avatarStyle, sectionTitle, sectionHint,
+  shadow, shell, sharePill, runSave,
 } from "./payrollUi.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -67,7 +67,7 @@ export function PayrollModule({
   const lastMonths = monthsShown === 0 ? report.months : report.months.slice(-monthsShown);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <div style={{ ...shell, display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ ...segWrap, flexWrap: "wrap", maxWidth: "100%" }}>
         {TABS.map(t => (
           <button key={t.key} onClick={() => { setTab(t.key); setOpenPerson(null); }} style={seg(tab === t.key)}>
@@ -145,13 +145,17 @@ function ReportTab({ report, lastMonths, money, onOpen, monthsShown, setMonthsSh
   const visibleRows = report.rows.filter(r => B.rowTotal(r) > 0);
   // Плитка с цветной шапкой-полоской: смысл цифры читается до того, как прочитан
   // заголовок. Крупный кегль и tabular-nums — чтобы суммы сравнивались взглядом.
-  const tile = (label, value, sub, color) => (
-    <div style={{ ...card, padding: 0, overflow: "hidden" }}>
-      <div style={{ height: 3, background: color || C.accent }} />
-      <div style={{ padding: "14px 16px 16px" }}>
+  // Иконка слева даёт плитке центр тяжести: без неё цифра болталась в пустоте,
+  // особенно на широком мониторе.
+  const tile = (icon, label, value, sub, color) => (
+    <div style={{ ...card, padding: 16, display: "flex", gap: 13, alignItems: "flex-start" }}>
+      <span style={{ width: 36, height: 36, borderRadius: 11, flexShrink: 0, fontSize: 16,
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        background: `${color || C.accent}12` }}>{icon}</span>
+      <div style={{ minWidth: 0 }}>
         <div style={lab}>{label}</div>
-        <div style={{ fontSize: 23, fontWeight: 900, color: color || C.ink, fontVariantNumeric: "tabular-nums", letterSpacing: "-.02em", lineHeight: 1.15 }}>{value}</div>
-        {sub && <div style={{ fontSize: 11.5, color: C.faint, marginTop: 6 }}>{sub}</div>}
+        <div style={{ fontSize: 21, fontWeight: 900, color: color || C.ink, fontVariantNumeric: "tabular-nums", letterSpacing: "-.02em", lineHeight: 1.2 }}>{value}</div>
+        {sub && <div style={{ fontSize: 11.5, color: C.faint, marginTop: 5 }}>{sub}</div>}
       </div>
     </div>
   );
@@ -160,19 +164,26 @@ function ReportTab({ report, lastMonths, money, onOpen, monthsShown, setMonthsSh
   );
   return (
     <>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
-        {tile(B.grandLabel, money(B.grand),
+      <div>
+        <div style={sectionTitle}>Кому сколько ушло</div>
+        <div style={sectionHint}>
+          {wage ? "Зарплатная часть расходов в разрезе по людям." : "Все выплаты людям, включая не зарплатные."}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 12 }}>
+        {tile("💰", B.grandLabel, money(B.grand),
           wage && hasNonWage ? `не зарплата отдельно: ${money(report.nonWageTotal)}` : `${visibleRows.length} получателей`)}
-        {tile("Сотрудникам", money(B.staff), share(B.staff) === null ? "" : `${share(B.staff)}% от итога`, C.green)}
-        {tile("Подрядчикам", money(B.worker), share(B.worker) === null ? "" : `${share(B.worker)}% от итога`, C.amber)}
-        {tile("Не разложено", money(B.unassigned),
+        {tile("🧑‍💼", "Сотрудникам", money(B.staff), share(B.staff) === null ? "" : `${share(B.staff)}% от итога`, C.green)}
+        {tile("🔧", "Подрядчикам", money(B.worker), share(B.worker) === null ? "" : `${share(B.worker)}% от итога`, C.amber)}
+        {tile("❓", "Не разложено", money(B.unassigned),
           `${B.unassignedCount} операций${share(B.unassigned) === null ? "" : ` · ${share(B.unassigned)}%`}`,
           B.unassigned > 0 ? C.red : C.green)}
       </div>
 
       {/* Переключатель основы. Отдельная строка, а не мелкая ссылка: от неё зависит
           КАЖДАЯ цифра в таблице. */}
-      <div style={{ ...cardFlat, padding: "12px 16px", display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", padding: "0 2px" }}>
         {hasNonWage && (
           <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
             <span style={{ fontSize: 11.5, color: C.faint, fontWeight: 700 }}>Считать</span>
@@ -214,7 +225,6 @@ function ReportTab({ report, lastMonths, money, onOpen, monthsShown, setMonthsSh
             <thead>
               <tr>
                 <th style={th}>Получатель</th>
-                <th style={th}>Кто это</th>
                 {lastMonths.map(m => <th key={m} style={{ ...th, textAlign: "right" }}>{monthLabel(m)}</th>)}
                 <th style={{ ...th, textAlign: "right" }}>Всего</th>
                 <th style={{ ...th, textAlign: "right" }}>Операций</th>
@@ -226,40 +236,38 @@ function ReportTab({ report, lastMonths, money, onOpen, monthsShown, setMonthsSh
                   style={{ cursor: "pointer", transition: "background .1s" }}
                   onMouseEnter={e => { e.currentTarget.style.background = "#fafbff"; }}
                   onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
-                  <td style={{ ...td, minWidth: 220 }}>
+                  {/* Всё о человеке — в одной ячейке. Отдельная колонка «кто это» держала
+                      треть ширины ради двух пилюль и оставляла пустоту между данными. */}
+                  <td style={{ ...td, minWidth: 260 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
                       {(() => { const a = avatarOf(r.name); return <span style={avatarStyle(a.color)}>{a.initials}</span>; })()}
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontWeight: 700, color: C.ink, fontSize: 13.5 }}>{r.name}</div>
-                        {r.position && <div style={{ fontSize: 11, color: C.faint, marginTop: 1 }}>{r.position}</div>}
-                        {/* В зарплатной основе дивиденды в цифру не входят вовсе — просто
-                            сообщаем, что у человека они есть, чтобы это не выглядело потерей. */}
-                        {r.nonWage > 0 && (
-                          <div style={{ fontSize: 10.5, color: C.amber, marginTop: 3 }}>
-                            {wage ? `не зарплата (вне расчёта): ${money(r.nonWage)}` : `в т.ч. не зарплата ${money(r.nonWage)}`}
-                          </div>
-                        )}
-                        {/* Доля человека в итоге — глазом ловится быстрее числа. */}
-                        <div style={barTrack}>
-                          <div style={barFill(B.grand ? B.rowTotal(r) / B.grand * 100 : 0,
-                            r.kind === "staff" ? C.green : C.amber)} />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                          <span style={{ fontWeight: 700, color: C.ink, fontSize: 13.5 }}>{r.name}</span>
+                          <span style={r.kind === "staff" ? pill(C.green, C.greenSoft) : pill(C.amber, C.amberSoft)}>
+                            {r.kind === "staff" ? "сотрудник" : "подрядчик"}
+                          </span>
+                          {/* Откуда взялась привязка: из самой операции или из соответствий. */}
+                          {r.source === "map" && <span style={pill(C.mute, C.lineSoft)}>по категории</span>}
+                        </div>
+                        <div style={{ fontSize: 11, color: C.faint, marginTop: 2 }}>
+                          {r.position || "—"}
+                          {/* В зарплатной основе дивиденды в цифру не входят вовсе — просто
+                              сообщаем, что у человека они есть, чтобы это не выглядело потерей. */}
+                          {r.nonWage > 0 && (
+                            <span style={{ color: C.amber }}>
+                              {" · "}{wage ? `не зарплата вне расчёта ${money(r.nonWage)}` : `в т.ч. не зарплата ${money(r.nonWage)}`}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
-                  </td>
-                  <td style={td}>
-                    <span style={r.kind === "staff" ? pill(C.green, C.greenSoft) : pill(C.amber, C.amberSoft)}>
-                      {r.kind === "staff" ? "сотрудник" : "подрядчик"}
-                    </span>
-                    {/* Откуда взялась привязка: из самой операции или из соответствий.
-                        Видно, кто уже переведён на новое поле, а кто держится на истории. */}
-                    {r.source === "map" && <span style={{ ...pill(C.mute, C.lineSoft), marginLeft: 6 }}>по категории</span>}
                   </td>
                   {lastMonths.map(m => <td key={m} style={numCell}>{B.rowByMonth(r)[m] ? money(B.rowByMonth(r)[m]) : "—"}</td>)}
                   <td style={{ ...numCell, fontWeight: 800, fontSize: 14, color: C.ink }}>
                     {money(B.rowTotal(r))}
                     {share(B.rowTotal(r)) !== null && (
-                      <div style={{ fontSize: 10.5, color: C.faint, fontWeight: 600 }}>{share(B.rowTotal(r))}%</div>
+                      <span style={sharePill(share(B.rowTotal(r)))}>{share(B.rowTotal(r))}%</span>
                     )}
                   </td>
                   <td style={{ ...numCell, color: C.faint }}>{r.count}</td>
@@ -270,10 +278,12 @@ function ReportTab({ report, lastMonths, money, onOpen, monthsShown, setMonthsSh
                   <td style={td}>
                     <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
                       <span style={{ ...avatarStyle(C.amber), borderRadius: 10 }}>?</span>
-                      <div style={{ fontWeight: 700, color: "#92400e", fontSize: 13.5 }}>Не разложено</div>
+                      <div>
+                        <div style={{ fontWeight: 700, color: "#92400e", fontSize: 13.5 }}>Не разложено</div>
+                        <div style={{ fontSize: 11, color: C.amber, marginTop: 2 }}>получатель не указан</div>
+                      </div>
                     </div>
                   </td>
-                  <td style={td}><span style={pill(C.amber, C.amberSoft)}>получатель не указан</span></td>
                   {lastMonths.map(m => (
                     <td key={m} style={numCell}>
                       {B.unassignedByMonth[m] ? money(B.unassignedByMonth[m]) : "—"}
@@ -286,7 +296,7 @@ function ReportTab({ report, lastMonths, money, onOpen, monthsShown, setMonthsSh
             </tbody>
             <tfoot>
               <tr style={{ background: "#fbfcfe" }}>
-                <td style={{ ...td, fontWeight: 800, borderTop: `1px solid ${C.line}` }} colSpan={2}>{B.footLabel}</td>
+                <td style={{ ...td, fontWeight: 800, borderTop: `1px solid ${C.line}` }} >{B.footLabel}</td>
                 {/* Итог месяца — ВЕСЬ расход месяца, вместе с «не разложено»: столбец,
                     считающий только именованные строки, врал бы в меньшую сторону. */}
                 {lastMonths.map(m => (
