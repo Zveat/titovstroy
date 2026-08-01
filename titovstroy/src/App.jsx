@@ -13937,7 +13937,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             </>)}
 
             {/* ───── ПРОЕКТЫ ───── */}
-            {/* ФОТ — отдельный модуль src/payroll. App только отдаёт данные и сейверы. */}
+            {/* ФОТ — отдельный модуль src/payroll. App только отдаёт данные и сейверы.
+                readOnly: право «Финансы» имеет значения none/view/edit, писать может
+                только edit. Сравнение с несуществующим "all" держало раздел в режиме
+                чтения вообще у всех, включая админа. */}
             {financeTab==="payroll" && (
               <PayrollModule
                 financeTx={financeTx}
@@ -13955,7 +13958,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 contracts={contracts}
                 fmt={fmt}
                 genId={genId}
-                readOnly={!editorTab || currentPermissions.finance !== "all"}
+                readOnly={!editorTab || !financeWritable}
               />
             )}
 
