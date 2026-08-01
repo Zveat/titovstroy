@@ -1694,3 +1694,159 @@ describe("кабинет клиента после закрытия объект
     expect(has(mk("cancel", { progressExpiresAt: Date.now() - 86400e3 }))).toBe(false);
   });
 });
+
+// График работ. Раньше раскладка жила внутри JSX и врала молча: порядок строк повторял
+// список этапов, а не время, а работы без дат просто исчезали (на боевом объекте из 27
+// этапов на графике было 9, и нигде ни слова про остальные 18).
+describe("график работ — раскладка", () => {
+  const AUG7 = Date.UTC(2026, 7, 7);
+  const rows = [
+    { id:"s1", name:"Стяжка",  status:"done", planStart:"2026-08-05", planEnd:"2026-08-08" },
+    { id:"s2", name:"Демонтаж",status:"done", planStart:"2026-08-01", planEnd:"2026-08-03" },
+    { id:"s3", name:"Без дат", status:"todo" },
+  ];
+
+  it("работы без дат не теряются, а возвращаются отдельно", () => {
+    const l = utils.buildGanttLayout(rows, { now: AUG7 });
+    expect(l.rows).toHaveLength(2);
+    expect(l.undated).toHaveLength(1);
+    expect(l.undated[0].name).toBe("Без дат");
+  });
+
+  it("когда дат нет вообще — пустой график, но список работ отдан", () => {
+    const l = utils.buildGanttLayout([{ id:"x", name:"Работа" }], { now: AUG7 });
+    expect(l.empty).toBe(true);
+    expect(l.undated).toHaveLength(1);
+  });
+
+  it("сортировка хронологическая, а не по порядку в списке", () => {
+    const l = utils.buildGanttLayout(rows, { now: AUG7 });
+    expect(utils.sortGanttRows(l.rows).map(r => r.name)).toEqual(["Демонтаж", "Стяжка"]);
+  });
+
+  it("«сегодня» всегда внутри диапазона, даже если все работы в прошлом", () => {
+    const l = utils.buildGanttLayout(
+      [{ id:"s", name:"Старое", planStart:"2026-06-01", planEnd:"2026-06-05" }], { now: AUG7 });
+    expect(l.todayX).toBeGreaterThan(0);
+    expect(l.todayX).toBeLessThanOrEqual(l.width);
+  });
+
+  it("шаг сетки подбирается под длину проекта", () => {
+    expect(utils.pickGanttScale(14)).toBe("day");
+    expect(utils.pickGanttScale(90)).toBe("week");
+    expect(utils.pickGanttScale(400)).toBe("month");
+    expect(utils.pickGanttScale(400, "day")).toBe("day");   // выбор владельца сильнее
+  });
+
+  it("однодневная работа не схлопывается в ноль", () => {
+    const l = utils.buildGanttLayout(
+      [{ id:"s", name:"День", planStart:"2026-08-06", planEnd:"2026-08-06" }], { now: AUG7 });
+    expect(l.rows[0].plan.width).toBeGreaterThan(0);
+  });
+
+  it("просрочка считается по плановому окончанию и не трогает завершённые", () => {
+    const late = utils.buildGanttLayout(
+      [{ id:"s", name:"Горит", status:"work", planStart:"2026-08-01", planEnd:"2026-08-03" }], { now: AUG7 });
+    expect(late.rows[0].overdue).toBe(true);
+    expect(late.rows[0].lateDays).toBe(4);
+    const done = utils.buildGanttLayout(
+      [{ id:"s", name:"Сдан", status:"done", planStart:"2026-08-01", planEnd:"2026-08-03" }], { now: AUG7 });
+    expect(done.rows[0].overdue).toBe(false);
+  });
+
+  it("работа с одним только фактом тоже попадает на график", () => {
+    const l = utils.buildGanttLayout(
+      [{ id:"s", name:"Без плана", status:"work", factStart:"2026-08-02" }], { now: AUG7 });
+    expect(l.rows).toHaveLength(1);
+    expect(l.rows[0].plan).toBeNull();
+    expect(l.rows[0].fact.width).toBeGreaterThan(0);
+  });
+
+  it("битые даты не роняют расчёт", () => {
+    const l = utils.buildGanttLayout(
+      [{ id:"s", name:"Кривая", planStart:"не дата", planEnd:"" },
+       { id:"s2", name:"Норм", planStart:"2026-08-02", planEnd:"2026-08-03" }], { now: AUG7 });
+    expect(l.rows).toHaveLength(1);
+    expect(l.undated).toHaveLength(1);
+  });
+});
+
+// Договор даёт 12 месяцев гарантии и 3 рабочих дня на устранение, но сданный объект
+// просто исчезал из системы: ни срока, ни обращений, ни затрат. Срок НЕ хранится —
+// считается от факт-даты сдачи, поэтому появляется сам по всем уже сданным объектам.
+describe("гарантия", () => {
+  const d = (ms) => (ms ? new Date(ms).toISOString().slice(0, 10) : null);
+
+  it("срок считается от даты сдачи", () => {
+    expect(d(utils.warrantyUntil("2025-10-13"))).toBe("2026-10-13");
+    expect(d(utils.warrantyUntil("2026-01-31"))).toBe("2027-01-31");
+  });
+
+  it("конец месяца не перескакивает через месяц", () => {
+    // 31 августа + 6 месяцев — это 28 февраля, а не 3 марта.
+    expect(d(utils.warrantyUntil("2026-08-31", 6))).toBe("2027-02-28");
+    expect(d(utils.warrantyUntil("2024-02-29", 12))).toBe("2025-02-28");
+  });
+
+  it("без даты сдачи гарантии нет", () => {
+    expect(utils.warrantyUntil("")).toBeNull();
+    expect(utils.warrantyUntil("не дата")).toBeNull();
+    expect(utils.warrantyState({}).status).toBe("none");
+  });
+
+  it("состояние и остаток дней", () => {
+    const NOW = Date.UTC(2026, 7, 1);
+    const a = utils.warrantyState({ factEndDate: "2025-10-13" }, { now: NOW });
+    expect(a.status).toBe("active");
+    expect(a.daysLeft).toBe(73);
+    const e = utils.warrantyState({ factEndDate: "2024-01-01" }, { now: NOW });
+    expect(e.status).toBe("expired");
+    expect(e.daysLeft).toBeLessThan(0);
+  });
+
+  it("гарантия только у сданных: расторгнутый объект в неё не попадает", () => {
+    // У расторгнутого объекта факт-дата тоже стоит — это день, когда прекратили работы.
+    // На боевой так проходила Псарева с расторгнутым договором.
+    const NOW = Date.UTC(2026, 7, 1);
+    expect(utils.warrantyState({ factEndDate: "2026-07-20", prodStatus: "cancel" }, { now: NOW }).status).toBe("none");
+    expect(utils.warrantyState({ factEndDate: "2026-07-20", prodStatus: "active" }, { now: NOW }).status).toBe("none");
+    expect(utils.warrantyState({ factEndDate: "2026-07-20", prodStatus: "done" }, { now: NOW }).status).toBe("active");
+    // Старые карточки без prodStatus, но с датой сдачи — считаем сданными.
+    expect(utils.warrantyState({ factEndDate: "2026-07-20" }, { now: NOW }).status).toBe("active");
+  });
+
+  it("свой срок в карточке сильнее умолчания", () => {
+    const s = utils.warrantyState({ factEndDate: "2026-01-01", warrantyMonths: 24 }, { now: Date.UTC(2026, 7, 1) });
+    expect(d(s.until)).toBe("2028-01-01");
+    expect(s.months).toBe(24);
+  });
+
+  it("рабочие дни считаются без выходных", () => {
+    // 01.08.2026 — суббота. До четверга 06.08 это 4 рабочих дня.
+    expect(utils.workdaysBetween(Date.UTC(2026, 7, 1), Date.UTC(2026, 7, 6))).toBe(4);
+    expect(utils.workdaysBetween(Date.UTC(2026, 7, 1), Date.UTC(2026, 7, 3))).toBe(1);
+    expect(utils.workdaysBetween(0, Date.UTC(2026, 7, 6))).toBe(0);
+  });
+
+  it("сводка обращений: открытые, просроченные по SLA и затраты", () => {
+    const NOW = Date.UTC(2026, 7, 10);
+    const claims = [
+      { id:"1", ts: Date.UTC(2026, 7, 3), status:"new" },                       // 5 раб. дней — просрочено
+      { id:"2", ts: Date.UTC(2026, 7, 9), status:"inWork" },                    // 1 раб. день — в норме
+      { id:"3", ts: Date.UTC(2026, 6, 1), status:"done", cost: 15000 },
+      { id:"4", ts: Date.UTC(2026, 6, 1), status:"rejected" },
+      { id:"5", ts: Date.UTC(2026, 6, 1), status:"new", deletedAt: 1 },         // удалённое не считаем
+    ];
+    const s = utils.summarizeWarrantyClaims(claims, { now: NOW });
+    expect(s.total).toBe(4);
+    expect(s.open).toBe(2);
+    expect(s.overdue).toBe(1);
+    expect(s.overdueList[0].id).toBe("1");
+    expect(s.cost).toBe(15000);
+  });
+
+  it("пустой вход не роняет сводку", () => {
+    expect(utils.summarizeWarrantyClaims().total).toBe(0);
+    expect(utils.summarizeWarrantyClaims(null).open).toBe(0);
+  });
+});

@@ -1147,6 +1147,32 @@ export function computeIssues(data = {}, opts = {}) {
   // 17. Публичная ссылка клиента без срока действия
   for (const o of objects) { if (o.progressShared && o.progressToken && !o.progressExpiresAt) out.push({ id:`link-noexp:${o.id}`, group:"Данные", sev:"yellow", scope:"check", dismissable:false,
     title:"Публичная ссылка без срока действия", detail:`${_objLabel(o)} — доступ клиента открыт бессрочно (нет 60-дневного лимита)`, nav:{ object:o.id, tab:"info" } }); }
+  // 18-бис. ГАРАНТИЯ. Договор обещает устранить дефект за 3 рабочих дня, а сданный
+  // объект до сих пор просто исчезал из системы. Считаем срок от факт-даты сдачи —
+  // ничего не храним и не мигрируем.
+  for (const o of objects) {
+    const p = prodByObj[o.id];
+    if (!p) continue;
+    const w = warrantyState(p, { now });
+    if (w.status === "none") continue;
+    const claims = summarizeWarrantyClaims(p.warrantyClaims, { now });
+    // Просроченное обращение — красное и не скрывается: это прямое нарушение договора.
+    for (const c of claims.overdueList) {
+      out.push({ id:`warranty-sla:${o.id}:${c.id}`, group:"Гарантия", sev:"red", scope:"today", dismissable:false,
+        title:"Гарантийное обращение просрочено",
+        detail:`${_objLabel(o)} · «${String(c.text||"без описания").slice(0,60)}» — обещали 3 рабочих дня`,
+        nav:{ object:o.id, tab:"handover" } });
+    }
+    // Открытые в срок — тоже показываем, но мягко.
+    const inTime = claims.open - claims.overdue;
+    if (inTime > 0) out.push({ id:`warranty-open:${o.id}`, group:"Гарантия", sev:"yellow", scope:"today", dismissable:true,
+      title:`Гарантийных обращений в работе: ${inTime}`, detail:_objLabel(o), nav:{ object:o.id, tab:"handover" } });
+    // Гарантия заканчивается — это не проблема, а повод позвонить клиенту.
+    if (w.status === "active" && w.daysLeft <= 30) out.push({ id:`warranty-ends:${o.id}`, group:"Гарантия", sev:"yellow", scope:"today", dismissable:true,
+      title:`Гарантия заканчивается через ${w.daysLeft} дн`,
+      detail:`${_objLabel(o)} · до ${new Date(w.until).toLocaleDateString("ru-RU", { timeZone: "UTC" })}`,
+      nav:{ object:o.id, tab:"handover" } });
+  }
   // 18. Работы закончились, а кабинет клиента открыт. Расторгли договор или убрали объект
   // в архив — а клиент до конца 60 дней продолжает видеть этапы, прогресс и историю оплат.
   // Само по себе это не чинится: срок ссылки на статус объекта никак не завязан.
@@ -1705,4 +1731,173 @@ export function clearSaveFailsFor(list, key) {
 export function saveFailIdsFor(ids, key) {
   const prefix = key + "|";
   return (ids || []).filter(id => String(id).startsWith(prefix));
+}
+
+// ── ГРАФИК РАБОТ (Гант) ──────────────────────────────────────────────────────
+// Раскладка вынесена из компонента, чтобы её можно было проверить тестами: раньше
+// весь расчёт жил внутри JSX и врал молча (порядок строк — как в списке этапов, а не
+// по времени; работы без дат просто исчезали с графика, и на объекте из 27 этапов
+// было видно 9).
+//
+// Шаг сетки подбираем под длину проекта: ремонт на две недели и стройка на полгода
+// не могут рисоваться одной линейкой. «auto» выбирает сам, но владелец может
+// переключить вручную — иногда нужно рассмотреть неделю в деталях.
+export const GANTT_SCALES = [
+  { key: "day",   label: "Дни",    minPx: 26 },
+  { key: "week",  label: "Недели", minPx: 12 },
+  { key: "month", label: "Месяцы", minPx: 4  },
+];
+export function pickGanttScale(spanDays, wanted = "auto") {
+  if (wanted && wanted !== "auto") return wanted;
+  if (spanDays <= 45) return "day";
+  if (spanDays <= 210) return "week";
+  return "month";
+}
+const _gDay = (v) => { const t = new Date(v); return isNaN(t) ? null : Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate()); };
+// Понедельник недели, в которую попадает дата (в РФ/КЗ неделя начинается с понедельника).
+const _gMonday = (ms) => { const d = new Date(ms); const wd = (d.getUTCDay() + 6) % 7; return ms - wd * 864e5; };
+
+// Готовит всё, что нужно графику: диапазон, шаг, подписи шкалы и строки с координатами.
+// rows — этапы производства. Возвращает и те, что БЕЗ дат: их нельзя нарисовать, но
+// молчать о них нельзя тем более.
+export function buildGanttLayout(rows = [], opts = {}) {
+  const now = opts.now || Date.now();
+  const today = _gDay(now);
+  const withDates = [], undated = [];
+  for (const s of rows) {
+    if (!s) continue;
+    const pS = _gDay(s.planStart), pE = _gDay(s.planEnd), fS = _gDay(s.factStart), fE = _gDay(s.factEnd);
+    if (pS || pE || fS || fE) withDates.push({ ...s, pS, pE: pE || pS, fS, fE });
+    else undated.push(s);
+  }
+  if (!withDates.length) return { empty: true, undated, rows: [], ticks: [], scale: "day", pxPerDay: 0, width: 0, todayX: 0, from: null, to: null };
+
+  const all = withDates.flatMap(s => [s.pS, s.pE, s.fS, s.fE].filter(Boolean));
+  let from = Math.min(...all), to = Math.max(...all);
+  // «Сегодня» показываем всегда: без этого линия текущего дня уезжает за край и
+  // становится непонятно, опаздываем мы или нет.
+  from = Math.min(from, today); to = Math.max(to, today);
+  const spanDays = Math.max(1, Math.round((to - from) / 864e5) + 1);
+  const scale = pickGanttScale(spanDays, opts.scale);
+  const cfg = GANTT_SCALES.find(s => s.key === scale) || GANTT_SCALES[0];
+  const usable = Math.max(320, (opts.viewWidth || 900));
+  const pxPerDay = Math.max(cfg.minPx / (scale === "day" ? 1 : scale === "week" ? 7 : 30), usable / spanDays);
+  const width = Math.round(spanDays * pxPerDay);
+  const xOf = (ms) => Math.round(((ms - from) / 864e5) * pxPerDay);
+
+  // Подписи шкалы. День — число, неделя — «дд.мм», месяц — «авг. 26».
+  const ticks = [];
+  if (scale === "day") {
+    for (let t = from; t <= to; t += 864e5) {
+      const d = new Date(t), wd = d.getUTCDay();
+      ticks.push({ x: xOf(t), label: String(d.getUTCDate()), sub: t === from || d.getUTCDate() === 1
+        ? d.toLocaleDateString("ru-RU", { month: "short", timeZone: "UTC" }) : "", weekend: wd === 0 || wd === 6, ms: t });
+    }
+  } else if (scale === "week") {
+    for (let t = _gMonday(from); t <= to; t += 7 * 864e5) {
+      const d = new Date(t);
+      ticks.push({ x: xOf(t), label: `${String(d.getUTCDate()).padStart(2, "0")}.${String(d.getUTCMonth() + 1).padStart(2, "0")}`,
+        sub: d.getUTCDate() <= 7 ? d.toLocaleDateString("ru-RU", { month: "short", timeZone: "UTC" }) : "", weekend: false, ms: t });
+    }
+  } else {
+    const c = new Date(from); let t = Date.UTC(c.getUTCFullYear(), c.getUTCMonth(), 1);
+    while (t <= to) {
+      const d = new Date(t);
+      ticks.push({ x: xOf(t), label: d.toLocaleDateString("ru-RU", { month: "short", year: "2-digit", timeZone: "UTC" }), sub: "", weekend: false, ms: t });
+      t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
+    }
+  }
+
+  // Ширина полосы — минимум один день, иначе однодневная работа исчезает в ноль.
+  const barOf = (a, b) => { if (!a) return null; const e = b || a; return { left: xOf(a), width: Math.max(Math.round(pxPerDay), xOf(e) - xOf(a) + Math.round(pxPerDay)) }; };
+  const out = withDates.map(s => {
+    const plan = barOf(s.pS, s.pE);
+    const fact = s.fS ? barOf(s.fS, s.fE || today) : null;
+    const overdue = s.status !== "done" && s.pE && s.pE < today;
+    // Насколько факт «съел» план — для заливки внутри плановой полосы.
+    let progress = null;
+    if (plan && s.fS) {
+      const doneTo = s.status === "done" ? (s.fE || s.fS) : Math.min(today, s.fE || today);
+      progress = Math.max(0, Math.min(1, (doneTo - s.pS) / Math.max(864e5, (s.pE || s.pS) - s.pS + 864e5)));
+    }
+    return { ...s, plan, fact, overdue, progress,
+      lateDays: overdue ? Math.round((today - s.pE) / 864e5) : 0 };
+  });
+  return { empty: false, undated, rows: out, ticks, scale, pxPerDay, width,
+           todayX: xOf(today), from, to, spanDays };
+}
+// Хронологический порядок внутри блока: сначала по началу (план, иначе факт), затем по
+// окончанию. Раньше строки шли в порядке списка этапов, и демонтаж оказывался ниже стяжки.
+export function sortGanttRows(rows = []) {
+  const key = (s) => s.pS || s.fS || Number.MAX_SAFE_INTEGER;
+  const end = (s) => s.pE || s.fE || key(s);
+  return [...rows].sort((a, b) => key(a) - key(b) || end(a) - end(b));
+}
+
+// ── ГАРАНТИЯ ─────────────────────────────────────────────────────────────────
+// Договор даёт 12 месяцев гарантии и 3 рабочих дня на устранение дефекта, но в системе
+// сданный объект просто исчезал из работы: ни срока, ни обращений, ни затрат. На боевой
+// базе это 21 объект, сданный меньше года назад, про которые система не знала ничего.
+//
+// Срок НЕ хранится — считается от факт-даты окончания. Поэтому он появляется сам по всем
+// уже сданным объектам, без единой записи в боевые данные.
+export const WARRANTY_DEFAULT_MONTHS = 12;
+export function warrantyUntil(factEndDate, months = WARRANTY_DEFAULT_MONTHS) {
+  const t = factEndDate ? new Date(factEndDate) : null;
+  if (!t || isNaN(t)) return null;
+  const m = Number(months);
+  const use = isFinite(m) && m > 0 ? Math.round(m) : WARRANTY_DEFAULT_MONTHS;
+  // Через UTC-компоненты: 30 января + 1 месяц не должно превращаться в 2 марта.
+  const y = t.getUTCFullYear(), mo = t.getUTCMonth(), d = t.getUTCDate();
+  const end = new Date(Date.UTC(y, mo + use, 1));
+  const lastDay = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0)).getUTCDate();
+  return Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), Math.min(d, lastDay));
+}
+// Состояние гарантии объекта. status: none (не сдан / нет даты) | active | expired.
+export function warrantyState(production, opts = {}) {
+  const now = opts.now || Date.now();
+  // Гарантия — только у СДАННЫХ. У расторгнутого объекта факт-дата окончания тоже стоит
+  // (это день, когда прекратили работы), и без этой проверки он попадал в «на гарантии»:
+  // на боевой так проходила Псарева с расторгнутым договором.
+  if (production?.prodStatus && production.prodStatus !== "done") return { status: "none", until: null, daysLeft: null, months: WARRANTY_DEFAULT_MONTHS };
+  const factEnd = production?.factEndDate || "";
+  const months = production?.warrantyMonths || opts.months || WARRANTY_DEFAULT_MONTHS;
+  const until = warrantyUntil(factEnd, months);
+  if (!until) return { status: "none", until: null, daysLeft: null, months };
+  const daysLeft = Math.ceil((until - now) / 864e5);
+  return { status: daysLeft >= 0 ? "active" : "expired", until, daysLeft, months };
+}
+export const WARRANTY_CLAIM_STATUSES = [
+  { key: "new",      label: "Новое",       color: "#dc2626" },
+  { key: "inWork",   label: "В работе",    color: "#d97706" },
+  { key: "done",     label: "Устранено",   color: "#059669" },
+  { key: "rejected", label: "Отклонено",   color: "#64748b" },
+];
+export const isOpenWarrantyClaim = (c) => !!c && !["done", "rejected"].includes(c.status || "new");
+// Сводка по обращениям: сколько открыто, сколько просрочено против обещанных 3 рабочих
+// дней, сколько всего потратили на устранение.
+export function summarizeWarrantyClaims(claims = [], opts = {}) {
+  const now = opts.now || Date.now();
+  const slaDays = opts.slaDays == null ? 3 : opts.slaDays;
+  const live = (claims || []).filter(c => c && !c.deletedAt);
+  const open = live.filter(isOpenWarrantyClaim);
+  const overdue = open.filter(c => {
+    const t = Number(c.ts) || 0;
+    return t > 0 && workdaysBetween(t, now) > slaDays;
+  });
+  const cost = live.reduce((s, c) => s + (Number(c.cost) || 0), 0);
+  return { total: live.length, open: open.length, overdue: overdue.length, cost, openList: open, overdueList: overdue };
+}
+// Рабочие дни между датами (суббота и воскресенье не считаются) — срок в договоре
+// назван именно в рабочих днях.
+export function workdaysBetween(fromMs, toMs) {
+  if (!fromMs || !toMs || toMs <= fromMs) return 0;
+  let n = 0;
+  const a = new Date(fromMs); a.setUTCHours(0, 0, 0, 0);
+  const b = new Date(toMs); b.setUTCHours(0, 0, 0, 0);
+  for (let t = +a + 864e5; t <= +b; t += 864e5) {
+    const wd = new Date(t).getUTCDay();
+    if (wd !== 0 && wd !== 6) n++;
+  }
+  return n;
 }

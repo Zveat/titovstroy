@@ -18,7 +18,7 @@ import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restore
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor } from "./utils.js";
+import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -108,8 +108,8 @@ function DangerConfirmModal() {
 // группы по умолчанию показывают несколько первых с «показать все» — чтобы панель не
 // растягивалась в бесконечный вертикальный список. Клик по карточке — onNav; «×» —
 // скрыть до завтра (если dismissable и передан onDismiss).
-const _ISSUE_GROUPS = ["Производство", "Финансы", "Клиенты", "Данные"];
-const _GRP_ICON = { "Производство":"🔨", "Финансы":"💰", "Клиенты":"👤", "Данные":"🗂" };
+const _ISSUE_GROUPS = ["Гарантия", "Производство", "Финансы", "Клиенты", "Данные"];
+const _GRP_ICON = { "Гарантия":"🛡", "Производство":"🔨", "Финансы":"💰", "Клиенты":"👤", "Данные":"🗂" };
 const _ISSUE_CAP = 6;
 function IssuePanel({ issues, onNav, onDismiss, emptyText = "✓ Всё чисто — проблем не найдено" }) {
   const [openGroups, setOpenGroups] = useState({});
@@ -14885,7 +14885,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 {currentPermissions.objectExport !== "none" && <button onClick={()=>downloadCSV(
                   "objects_"+new Date().toISOString().slice(0,10)+".csv",
                   ["Статус","Клиент","Телефон","Адрес","Тип","Площадь","Менеджер","Дата создания","Смет (шт)","Сумма смет","Договоров"],
-                  filteredObjects.filter(o=>!objectFilterStatus||unifiedStatusOf(o)===objectFilterStatus).map(o=>{
+                  filteredObjects.filter(o=>{
+                    if(!objectFilterStatus) return true;
+                    // «На гарантии» — не статус объекта, а срез по сроку от даты сдачи.
+                    if(objectFilterStatus==="__warranty"){
+                      const pr = productions.find(p=>p.objectId===o.id);
+                      return !!pr && warrantyState(pr).status==="active";
+                    }
+                    return unifiedStatusOf(o)===objectFilterStatus;
+                  }).map(o=>{
                     const ests=estimates.filter(e=>e.objectId===o.id);
                     const cons=contracts.filter(c=>c.objectId===o.id && !c.deletedAt && c.type!=="podryad" && c.type!=="podryad_annex");
                     const st=DEAL_STATUSES.find(s=>s.key===unifiedStatusOf(o))||DEAL_STATUSES[0];
@@ -14919,6 +14927,22 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     </button>
                   );
                 })}
+                {/* Гарантия — не статус объекта, а отдельный срез: сданный объект живёт
+                    ещё 12 месяцев, и раньше он просто пропадал из поля зрения. */}
+                {(()=>{
+                  const cnt = liveObjects.filter(o=>{
+                    const pr = productions.find(p=>p.objectId===o.id);
+                    return pr && warrantyState(pr).status==="active";
+                  }).length;
+                  if(!cnt && objectFilterStatus!=="__warranty") return null;
+                  const on = objectFilterStatus==="__warranty";
+                  return (
+                    <button onClick={()=>setObjectFilterStatus(v=>v==="__warranty"?"":"__warranty")}
+                      style={{background:on?"#ecfdf5":"rgba(0,0,0,.03)",color:on?"#059669":"#94a3b8",border:`1px solid ${on?"#059669":"#e2e8f0"}`,borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                      🛡 На гарантии {cnt>0&&<span style={{opacity:.6}}>({cnt})</span>}
+                    </button>
+                  );
+                })()}
               </div>
               {/* Фильтр по типу объекта */}
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
