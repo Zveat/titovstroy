@@ -48,7 +48,7 @@ export function AccrualsTab({
     setBusy(true);
     try {
       const r = await runSave(saveAccruals, next);
-      setErr(r.ok ? "" : `Не сохранено: ${r.reason}.`);
+      setErr(r.ok ? "" : `Не сохранено: ${r.reason}. ${r.hint || ""}`.trim());
       return r.ok;
     } finally { setBusy(false); }
   };

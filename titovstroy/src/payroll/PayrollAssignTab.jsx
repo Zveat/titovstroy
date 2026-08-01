@@ -69,7 +69,7 @@ export function AssignTab({
       });
       // Заблокированная запись возвращает undefined, а не false — на false проверять мало.
       const r = await runSave(saveFinanceTx, next);
-      if (!r.ok) { setErr(`Не сохранено: ${r.reason}. Выделение осталось — попробуйте ещё раз.`); return; }
+      if (!r.ok) { setErr(`Не сохранено: ${r.reason}. Выделение осталось. ${r.hint || "Попробуйте ещё раз."}`); return; }
       setErr("");
       clearSel();
     } finally { setBusy(false); }

@@ -325,7 +325,7 @@ function StaffTab({ staff, users, report, money, genId, readOnly, saveStaff }) {
       const rec = { ...normalizeStaff({ ...draft, updatedAt: Date.now() }), scheme: normalizeScheme(draft.scheme) };
       const exists = staff.some(s => s.id === rec.id);
       const r = await runSave(saveStaff, exists ? staff.map(s => s.id === rec.id ? rec : s) : [...staff, rec]);
-      if (!r.ok) { setErr(`Не сохранено: ${r.reason}. Введённое осталось в форме — попробуйте ещё раз.`); return; }
+      if (!r.ok) { setErr(`Не сохранено: ${r.reason}. Введённое осталось в форме. ${r.hint || "Попробуйте ещё раз."}`); return; }
       setDraft(null);
     } finally { setBusy(false); }
   };

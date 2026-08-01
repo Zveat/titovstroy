@@ -30,10 +30,22 @@ export async function runSave(saver, list, { requireCloud = true } = {}) {
     console.error(e);
     return { ok: false, reason: "неожиданная ошибка при сохранении" };
   }
-  if (blocked) return { ok: false, reason: saveFailReasonText(blocked) };
-  if (res === undefined || res === false || res === null) return { ok: false, reason: "запись не подтверждена" };
+  if (blocked) return { ok: false, reason: saveFailReasonText(blocked), hint: SAVE_FAIL_HINTS[blocked] || "" };
+  if (res === undefined || res === false || res === null) {
+    return { ok: false, reason: "запись не подтверждена", hint: "Обновите страницу и попробуйте ещё раз." };
+  }
   return { ok: true };
 }
+
+// Что делать пользователю. Без этого сообщение «сервис редактируется в другой вкладке»
+// подталкивало жать кнопку снова — а помогает там совсем другое.
+const SAVE_FAIL_HINTS = {
+  "read-only-tab":   "Закройте другие вкладки сервиса и обновите страницу — жать кнопку снова бесполезно.",
+  "not-loaded":      "Обновите страницу: раздел не дочитался из облака, и запись запрещена, чтобы не затереть данные.",
+  "db-unavailable":  "Проверьте связь и повторите.",
+  "cloud-failed":    "Проверьте связь и повторите.",
+  "empty-over-data": "Это защита от затирания. Обновите страницу и посмотрите, что в списке.",
+};
 
 export const btnGhost = {
   background: "none", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 13px",
