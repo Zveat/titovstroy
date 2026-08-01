@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   resolvePayee, buildPayrollReport, expenseSubcategoryTotals, buildStaffDetail,
-  normalizeStaff, payrollMonthKey, monthLabel,
+  normalizeStaff, payrollMonthKey, monthLabel, listExpenseOps,
 } from "./payrollModel.js";
 
 const staff = [
@@ -128,6 +128,54 @@ describe("подкатегории расходов для разбора ист
     expect(t[0].total).toBe(300);
     expect(t[0].count).toBe(2);
     expect(t.find(x => x.subcategory === "— без подкатегории —").total).toBe(50);
+  });
+});
+
+describe("список операций для разбора", () => {
+  const tx = [
+    { id: "1", type: "expense", amount: 100000, date: "2026-07-01", subcategory: "Зарплаты рабочих / подрядчиков", note: "бригада Ержана, стяжка" },
+    { id: "2", type: "expense", amount: 200000, date: "2026-07-02", subcategory: "Зарплаты рабочих / подрядчиков", note: "бригада Асхата" },
+    { id: "3", type: "expense", amount: 300000, date: "2026-07-03", subcategory: "ФОТ РОП" },
+    { id: "4", type: "expense", amount: 50000,  date: "2026-07-04", subcategory: "Материалы" },
+    { id: "5", type: "expense", amount: 70000,  date: "2026-07-05", subcategory: "Зарплаты рабочих / подрядчиков", payee: { kind: "worker", id: "w1" } },
+    { id: "6", type: "income",  amount: 999,    date: "2026-07-06", subcategory: "ФОТ РОП" },
+  ];
+  const opts = { staff, workers, subcategoryMap: map };
+
+  it("возвращает операции, а не подкатегории — свежие сверху", () => {
+    const r = listExpenseOps(tx, opts);
+    expect(r.rows.map(x => x.id)).toEqual(["5", "4", "3", "2", "1"]);
+    expect(r.count).toBe(5);
+    expect(r.total).toBe(720000);
+  });
+
+  it("фильтр «только без получателя» убирает уже размеченное", () => {
+    const r = listExpenseOps(tx, { ...opts, onlyUnassigned: true });
+    // 3 читается по подкатегории, 5 размечен явно — оба уже с получателем.
+    expect(r.rows.map(x => x.id)).toEqual(["4", "2", "1"]);
+    expect(r.allCount).toBe(5);          // общий счётчик не зависит от фильтров
+    expect(r.allTotal).toBe(720000);
+  });
+
+  it("фильтр по подкатегории и поиск по комментарию", () => {
+    expect(listExpenseOps(tx, { ...opts, subcategory: "Материалы" }).rows.map(x => x.id)).toEqual(["4"]);
+    // Комментарий в боевой базе лежит в note — поиск обязан читать именно его.
+    expect(listExpenseOps(tx, { ...opts, query: "ержан" }).rows.map(x => x.id)).toEqual(["1"]);
+    expect(listExpenseOps(tx, { ...opts, query: "ержан" }).rows[0].comment).toBe("бригада Ержана, стяжка");
+    expect(listExpenseOps(tx, { ...opts, query: "нет такого" }).rows).toEqual([]);
+  });
+
+  it("видно, откуда взялся получатель", () => {
+    const r = listExpenseOps(tx, opts);
+    expect(r.rows.find(x => x.id === "5").explicit).toBe(true);
+    expect(r.rows.find(x => x.id === "3").explicit).toBe(false);
+    expect(r.rows.find(x => x.id === "3").payee.source).toBe("map");
+    expect(r.rows.find(x => x.id === "4").payee).toBe(null);
+  });
+
+  it("приход и удалённые не попадают", () => {
+    const r = listExpenseOps([...tx, { id: "7", type: "expense", amount: 1, date: "2026-07-07", deletedAt: 1 }], opts);
+    expect(r.rows.some(x => x.id === "6" || x.id === "7")).toBe(false);
   });
 });
 

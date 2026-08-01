@@ -24,6 +24,9 @@ export const STAFF_STATUSES = [
 ];
 export const staffStatusMeta = (k) => STAFF_STATUSES.find(s => s.key === k) || STAFF_STATUSES[0];
 
+// Комментарий операции. В боевой базе он лежит в note (559 расходов из 578), а не в
+// comment/description — поиск по нему не находил ничего.
+export const txComment = (t) => String(t?.note || t?.comment || t?.description || "").trim();
 const num = (v) => { const n = Number(String(v ?? "").replace(/\s/g, "").replace(",", ".")); return isFinite(n) ? n : 0; };
 const ts = (v) => { if (!v) return 0; const d = new Date(v); return isNaN(d) ? 0 : d.getTime(); };
 // Месяц в UTC — той же зоной, что и остальная аналитика, иначе операция, внесённая
@@ -161,6 +164,47 @@ export function expenseSubcategoryTotals(financeTx = []) {
   return [...g.values()].sort((a, b) => b.total - a.total);
 }
 
+// Расходные операции с уже разобранным получателем — для экрана массовой простановки.
+// Возвращаем именно ОПЕРАЦИИ, а не подкатегории: в «Зарплатах рабочих / подрядчиков»
+// 184 операции на разные бригады, и одним человеком такую подкатегорию не закрыть.
+export function listExpenseOps(financeTx = [], opts = {}) {
+  const { staff = [], workers = [], subcategoryMap = {},
+    subcategory = "", onlyUnassigned = false, query = "",
+    from = 0, to = Number.MAX_SAFE_INTEGER } = opts;
+  const staffById = new Map(staff.filter(s => s && s.id).map(s => [s.id, s]));
+  const workersById = new Map(workers.filter(w => w && w.id).map(w => [w.id, w]));
+  const q = String(query || "").trim().toLowerCase();
+
+  const rows = [];
+  let total = 0, allCount = 0, allTotal = 0;
+  for (const t of financeTx) {
+    if (!t || t.deletedAt || t.included === false || t.type !== "expense") continue;
+    const when = ts(t.date);
+    if (!when || when < from || when > to) continue;
+    const amount = num(t.amount);
+    allCount++; allTotal += amount;
+
+    const who = resolvePayee(t, { staffById, workersById, subcategoryMap });
+    if (subcategory && String(t.subcategory || "").trim() !== subcategory) continue;
+    if (onlyUnassigned && who) continue;
+    if (q) {
+      const hay = `${t.subcategory || ""} ${txComment(t)} ${t.contractNo || ""} ${t.account || ""} ${t.recipient || ""}`.toLowerCase();
+      if (!hay.includes(q)) continue;
+    }
+    total += amount;
+    rows.push({
+      id: t.id, date: when, amount,
+      subcategory: t.subcategory || "", category: t.category || "",
+      contractNo: t.contractNo || "", comment: txComment(t),
+      payee: who,
+      // Явная разметка снимается кнопкой, разметка «по подкатегории» — только правилом.
+      explicit: !!(t.payee && t.payee.id),
+    });
+  }
+  rows.sort((a, b) => b.date - a.date);
+  return { rows, total, count: rows.length, allCount, allTotal };
+}
+
 // Сводка по одному человеку: помесячно и по объектам. Для карточки сотрудника.
 export function buildStaffDetail(financeTx = [], opts = {}) {
   const { staffId, workerId, staff = [], workers = [], subcategoryMap = {}, from = 0, to = Number.MAX_SAFE_INTEGER } = opts;
@@ -185,7 +229,7 @@ export function buildStaffDetail(financeTx = [], opts = {}) {
     const cn = String(t.contractNo || "").trim() || "— без договора —";
     byContract[cn] = (byContract[cn] || 0) + amount;
     ops.push({ id: t.id, date: when, amount, subcategory: t.subcategory || "", contractNo: t.contractNo || "",
-      comment: t.comment || t.description || "", source: who.source });
+      comment: txComment(t), source: who.source });
   }
   ops.sort((a, b) => b.date - a.date);
   return { total, count: ops.length, byMonth, byContract, ops };

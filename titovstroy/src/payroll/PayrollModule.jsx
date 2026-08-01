@@ -5,6 +5,7 @@ import {
 } from "./payrollModel.js";
 import { normalizeScheme, PERCENT_TRIGGERS, schemeIsEmpty } from "./payrollAccruals.js";
 import { AccrualsTab } from "./PayrollAccrualsTab.jsx";
+import { AssignTab } from "./PayrollAssignTab.jsx";
 import { BalanceTab } from "./PayrollBalanceTab.jsx";
 import { card, inp, lab, th, td, numCell, pill } from "./payrollUi.js";
 
@@ -16,7 +17,9 @@ import { card, inp, lab, th, td, numCell, pill } from "./payrollUi.js";
 // props:
 //   financeTx, workers, users — как есть из App
 //   staff, saveStaff(list)                 — справочник сотрудников
-//   subcategoryMap, saveSubcategoryMap(map) — соответствия «подкатегория → сотрудник»
+//   subcategoryMap, saveSubcategoryMap(map) — постоянные правила «подкатегория → сотрудник»
+//   accruals, saveAccruals(list)            — начисления
+//   saveFinanceTx(list)                     — нужен только для простановки получателя пачкой
 //   fmt, genId, readOnly
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -25,7 +28,7 @@ const TABS = [
   { key: "accruals", label: "Начисления" },
   { key: "balance",  label: "Долги" },
   { key: "staff",    label: "Сотрудники" },
-  { key: "map",      label: "Разбор истории" },
+  { key: "map",      label: "Разложить операции" },
 ];
 
 export function PayrollModule({
@@ -34,6 +37,7 @@ export function PayrollModule({
   // Начисления: свой список + справочные данные для расчёта бонусов. Всё только на чтение —
   // объекты, производство и финпроекты этот раздел не меняет никогда.
   accruals = [], saveAccruals, objects = [], productions = [], finProjects = [], contracts = [],
+  saveFinanceTx,
   fmt = (n) => Math.round(Number(n) || 0).toLocaleString("ru-RU"),
   genId = () => String(Date.now()) + Math.random().toString(36).slice(2, 8),
   readOnly = false,
@@ -99,9 +103,10 @@ export function PayrollModule({
           genId={genId} readOnly={readOnly} saveStaff={saveStaff} />
       )}
       {tab === "map" && (
-        <MapTab subTotals={subTotals} staff={staff} subcategoryMap={subcategoryMap}
-          money={money} readOnly={readOnly} saveSubcategoryMap={saveSubcategoryMap}
-          saveStaff={saveStaff} genId={genId} onGoStaff={() => setTab("staff")} />
+        <AssignTab financeTx={financeTx} saveFinanceTx={saveFinanceTx} staff={staff} workers={workers}
+          subTotals={subTotals} subcategoryMap={subcategoryMap} saveSubcategoryMap={saveSubcategoryMap}
+          saveStaff={saveStaff} genId={genId} money={money} readOnly={readOnly}
+          onGoStaff={() => setTab("staff")} />
       )}
     </div>
   );
@@ -133,7 +138,7 @@ function ReportTab({ report, lastMonths, money, share, onOpen }) {
       {report.unassigned > 0 && (
         <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "10px 13px", fontSize: 12, color: "#78350f" }}>
           <b style={{ color: "#92400e" }}>{money(report.unassigned)}</b> пока не привязаны ни к кому.
-          Разложить можно двумя способами: указать получателя в самой операции или связать подкатегорию с сотрудником во вкладке «Разбор истории».
+          Вкладка «Разложить операции» — отфильтровать, выделить пачкой и проставить получателя одним действием.
         </div>
       )}
 
@@ -428,97 +433,6 @@ function StaffTab({ staff, users, report, money, genId, readOnly, saveStaff }) {
             </table>
           </div>
         )}
-      </div>
-    </>
-  );
-}
-
-// ── Разбор истории ──────────────────────────────────────────────────────────
-function MapTab({ subTotals, staff, subcategoryMap, money, readOnly, saveSubcategoryMap, saveStaff, genId, onGoStaff }) {
-  const [local, setLocal] = useState(subcategoryMap);
-  const [saving, setSaving] = useState(false);
-  const dirty = JSON.stringify(local) !== JSON.stringify(subcategoryMap);
-  const set = (sub, id) => setLocal(m => { const n = { ...m }; if (id) n[sub] = id; else delete n[sub]; return n; });
-
-  // Завести человека прямо отсюда. Раньше приходилось уходить на другую вкладку,
-  // а с пустым справочником выпадашка выглядела просто сломанной.
-  const pick = async (sub, value) => {
-    if (value !== "__new__") { set(sub, value); return; }
-    const suggested = sub.replace(/^ФОТ\s*/i, "").replace(/^%\s*/, "").trim();
-    const name = window.prompt(`Кто получает «${sub}»?\n\nВведите имя сотрудника:`, suggested);
-    if (!name || !name.trim()) return;
-    const rec = normalizeStaff({ id: genId(), name: name.trim(), position: suggested, status: "active" });
-    if (saveStaff && (await saveStaff([...staff, rec])) === false) return;
-    set(sub, rec.id);
-  };
-  const apply = async () => {
-    if (!saveSubcategoryMap) return;
-    setSaving(true);
-    try { await saveSubcategoryMap(local); } finally { setSaving(false); }
-  };
-  const mappedSum = subTotals.filter(s => local[s.subcategory]).reduce((a, s) => a + s.total, 0);
-
-  return (
-    <>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <div>
-          <div style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>Кто стоит за подкатегорией</div>
-          <div style={{ fontSize: 12, color: "#94a3b8" }}>Сами операции не меняются. Соответствие используется только при чтении отчёта.</div>
-        </div>
-        <span style={{ flex: 1 }} />
-        {!readOnly && (
-          <button onClick={apply} disabled={!dirty || saving}
-            style={{ background: dirty && !saving ? "#2563eb" : "#cbd5e1", color: "#fff", border: "none", borderRadius: 9,
-              padding: "8px 18px", fontSize: 12.5, fontWeight: 700, cursor: dirty && !saving ? "pointer" : "default", fontFamily: "inherit" }}>
-            {saving ? "Сохраняю…" : dirty ? "Сохранить соответствия" : "Сохранено"}
-          </button>
-        )}
-      </div>
-
-      {staff.length === 0 ? (
-        <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 15px", fontSize: 12, color: "#78350f" }}>
-          <b style={{ color: "#92400e" }}>Справочник сотрудников пуст</b> — выбирать в столбце «Это» пока не из кого.
-          Заведите человека прямо здесь: в выпадающем списке нужной строки выберите «+ Завести сотрудника…».
-          {onGoStaff && <> Или сразу на вкладке <button onClick={onGoStaff} style={{ background: "none", border: "none", padding: 0, color: "#1d4ed8", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", fontSize: 12, textDecoration: "underline" }}>«Сотрудники»</button>.</>}
-        </div>
-      ) : (
-        <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "10px 13px", fontSize: 12, color: "#1e3a8a" }}>
-          Разложено по этой таблице: <b>{money(mappedSum)}</b>. Операции переписывать не нужно —
-          если у операции указан получатель явно, он всегда сильнее этой таблицы.
-        </div>
-      )}
-
-      <div style={{ ...card, padding: 0, overflow: "hidden" }}>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 620 }}>
-            <thead><tr>
-              <th style={th}>Подкатегория расхода</th><th style={th}>Категория</th>
-              <th style={{ ...th, textAlign: "right" }}>Операций</th><th style={{ ...th, textAlign: "right" }}>Сумма</th><th style={th}>Это</th>
-            </tr></thead>
-            <tbody>
-              {subTotals.map(s => (
-                <tr key={s.subcategory} style={local[s.subcategory] ? { background: "#f8fffb" } : undefined}>
-                  <td style={{ ...td, fontWeight: 600, color: "#0f172a" }}>{s.subcategory}</td>
-                  <td style={{ ...td, color: "#94a3b8", fontSize: 11.5 }}>{s.category || "—"}</td>
-                  <td style={numCell}>{s.count}</td>
-                  <td style={{ ...numCell, fontWeight: 700 }}>{money(s.total)}</td>
-                  <td style={{ ...td, minWidth: 210 }}>
-                    <select disabled={readOnly} value={local[s.subcategory] || ""} onChange={e => pick(s.subcategory, e.target.value)}
-                      style={{ ...inp, padding: "6px 9px", fontSize: 12 }}>
-                      <option value="">— не задано —</option>
-                      {staff.map(p => <option key={p.id} value={p.id}>{p.name || "Без имени"}{p.position ? ` · ${p.position}` : ""}</option>)}
-                      {!readOnly && <option value="__new__">+ Завести сотрудника…</option>}
-                    </select>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <div style={{ fontSize: 11.5, color: "#94a3b8" }}>
-        Подкатегорию, по которой платят разным людям (например «Зарплаты рабочих / подрядчиков»),
-        связывать с одним человеком не нужно — она разложится сама, когда в операциях начнут указывать получателя.
       </div>
     </>
   );
