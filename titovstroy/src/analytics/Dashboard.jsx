@@ -1,4 +1,5 @@
 import React from "react";
+import { formatTenge } from "./analyticsModel.js";
 
 // ─── «Главная» ────────────────────────────────────────────────────────────────
 // Принцип, по которому она отличается от «Аналитики»:
@@ -262,8 +263,8 @@ function ActionList({ title, items = [], empty, fmt, color = "#dc2626", onOpen, 
 export function Dashboard({ data, fmt, financialDetails = true, permissions = {}, onOpenObject, onNavFinance }) {
   if (!data) return null;
   const { sales, backlog, production, finance, cash, dataQuality, trend, funnels } = data;
-  const money = (v) => `${fmt(Math.round(v || 0))} ₸`;
-  const short = (v) => `${fmt(Math.round((Number(v) || 0) / 1000))}k ₸`;
+  const money = (v) => formatTenge(v);
+  const short = (v) => formatTenge(v, { thousands: true });
 
   // Права. Важное разделение, на котором раньше ошиблись: СУММЫ ПРОДАЖ (сколько
   // продали, средний чек) — это работа отдела продаж, их видит любой, кто работает

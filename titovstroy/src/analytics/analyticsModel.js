@@ -1186,3 +1186,14 @@ export function deltaPct(current, previous) {
   if (previous === null || previous === undefined || p === 0) return null;
   return Math.round(((c - p) / Math.abs(p)) * 100);
 }
+
+// Деньги для экрана. Отдельно от App-овского fmt, который на всём, что не больше нуля,
+// показывает «—»: для остатка на счёте это ложь — минус означает долг, а не «нет данных».
+// Ловили на боевой: «Наличные −201 868 ₸» в Финансах и «— ₸» в аналитике на той же цифре.
+// Ноль тоже пишем числом: «0 ₸» — это факт, а прочерк читается как пробел в данных.
+export function formatTenge(value, { thousands = false } = {}) {
+  const n = Math.round(Number(value) || 0);
+  const shown = thousands ? Math.round(n / 1000) : n;
+  const body = new Intl.NumberFormat("ru-RU").format(Math.abs(shown));
+  return `${shown < 0 ? "−" : ""}${body}${thousands ? "k" : ""} ₸`;
+}

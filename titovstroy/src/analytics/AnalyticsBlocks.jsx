@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ANALYTICS_BLOCKS, deltaPct, refuseReasonLabel } from "./analyticsModel.js";
+import { ANALYTICS_BLOCKS, deltaPct, refuseReasonLabel, formatTenge } from "./analyticsModel.js";
 import { FunnelChart } from "./Dashboard.jsx";
 
 // Блоки аналитики. Компонент только рисует — все числа приходят готовыми из
@@ -128,7 +128,7 @@ const EmptyNote = ({ text }) => (
 export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails = true, catProfit = [], onOpenObject }) {
   if (!data) return null;
   const { sales, backlog, production, finance, quality, cash, dataQuality, previous, funnels } = data;
-  const money = (v) => `${fmt(Math.round(v || 0))} ₸`;
+  const money = (v) => formatTenge(v);
   const can = (block) => permissions[block.permission] !== false;
   const d = (path, current) => (previous ? deltaPct(current, path) : undefined);
 
@@ -567,7 +567,7 @@ export default AnalyticsBlocks;
 export function DashboardKpis({ data, fmt, financialDetails = true }) {
   if (!data) return null;
   const { sales, backlog, production, finance, cash: cashData } = data;
-  const money = (v) => `${fmt(Math.round(v || 0))} ₸`;
+  const money = (v) => formatTenge(v);
 
   // Две группы: сверху «что происходит» (объекты и сроки), ниже «деньги».
   // Namely: одна цифра — один смысл, дублей между строками быть не должно.

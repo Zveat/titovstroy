@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildAnalytics, periodBounds, deltaPct, contractSum, ts, makeManagerResolver,
-  REFUSE_REASONS, refuseReasonLabel, ANALYTICS_BLOCKS,
+  REFUSE_REASONS, refuseReasonLabel, ANALYTICS_BLOCKS, formatTenge,
 } from "./analyticsModel.js";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -886,5 +886,35 @@ describe("списки аналитики — по строке можно пе�
     for (const list of [a.sales.cohortList, a.funnels.production.signedList, a.dataQuality.gaps[0]?.list || []]) {
       for (const row of list) expect(row.id).toBe("o1");
     }
+  });
+});
+
+// App-овский fmt показывает «—» для всего, что не больше нуля. Для остатка на счёте это
+// ложь: минус — это долг, а не «нет данных». На боевой было «Наличные −201 868 ₸» в
+// Финансах и «— ₸» в аналитике на той же самой цифре.
+describe("деньги на экране — минус это минус, а не прочерк", () => {
+  // Intl разделяет разряды неразрывным пробелом — сравниваем, приведя пробелы к обычным.
+  const m = (v, o) => formatTenge(v, o).replace(/\s/g, " ");
+
+  it("отрицательные показываются числом со знаком", () => {
+    expect(m(-201868)).toBe("−201 868 ₸");
+    expect(m(-52400)).toBe("−52 400 ₸");
+  });
+
+  it("ноль — это «0 ₸», а не прочерк: прочерк читается как пробел в данных", () => {
+    expect(m(0)).toBe("0 ₸");
+    expect(m(null)).toBe("0 ₸");
+    expect(m(undefined)).toBe("0 ₸");
+  });
+
+  it("положительные и тысячи", () => {
+    expect(m(789552)).toBe("789 552 ₸");
+    expect(m(789552, { thousands: true })).toBe("790k ₸");
+    expect(m(-201868, { thousands: true })).toBe("−202k ₸");
+  });
+
+  it("минус, округляющийся до нуля, знака не получает", () => {
+    expect(m(-0.4)).toBe("0 ₸");
+    expect(m(-400, { thousands: true })).toBe("0k ₸");
   });
 });
