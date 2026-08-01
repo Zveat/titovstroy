@@ -14,6 +14,7 @@ import { EstimateSuggestions, EstimateSuggestionRulesEditor } from "./estimate/E
 import { AnalyticsBlocks } from "./analytics/AnalyticsBlocks.jsx";
 import { PayrollModule } from "./payroll/PayrollModule.jsx";
 import { STAFF_KEY, STAFF_BACKUPS_KEY, PAYROLL_MAP_KEY } from "./payroll/payrollModel.js";
+import { ACCRUALS_KEY, ACCRUALS_BACKUPS_KEY } from "./payroll/payrollAccruals.js";
 import { Dashboard } from "./analytics/Dashboard.jsx";
 import { buildAnalytics, makeManagerResolver, REFUSE_REASONS } from "./analytics/analyticsModel.js";
 import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
@@ -6161,6 +6162,9 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const staffRef = useRef([]);
   const [payrollMap, setPayrollMap] = useState({});
   const payrollMapRef = useRef({});
+  // Начисления ФОТ («заработал») — отдельный список, к операциям кассы отношения не имеет.
+  const [accruals, setAccruals] = useState([]);
+  const accrualsRef = useRef([]);
   useEffect(() => { workersRef.current = workers; }, [workers]);
   const [podryads, setPodryads] = useState([]);
   const podryadsRef = useRef([]);
@@ -6810,7 +6814,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     let ok = true;
     let prodOk = true;
     try {
-      const [cr, cl, ca, ob, pd, rp, wk, py, stf, pmap] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY), storage.getResult(OBJECTS_KEY), storage.getResult(PRODUCTIONS_KEY), storage.getResult(REPORTS_KEY), storage.getResult(WORKERS_KEY), storage.getResult(PODRYADS_KEY), storage.getResult(STAFF_KEY), storage.getResult(PAYROLL_MAP_KEY)]);
+      const [cr, cl, ca, ob, pd, rp, wk, py, stf, pmap, acc] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY), storage.getResult(OBJECTS_KEY), storage.getResult(PRODUCTIONS_KEY), storage.getResult(REPORTS_KEY), storage.getResult(WORKERS_KEY), storage.getResult(PODRYADS_KEY), storage.getResult(STAFF_KEY), storage.getResult(PAYROLL_MAP_KEY), storage.getResult(ACCRUALS_KEY)]);
       // ФОТ. Раздел новый, у большинства баз этих ключей ещё нет — пустой ответ здесь
       // норма и НЕ должен ронять общий флаг загрузки ok (иначе заблокировалось бы
       // сохранение договоров и объектов из-за отсутствующего справочника сотрудников).
@@ -6818,6 +6822,8 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       else if (stf.status === "empty") { setStaff([]); staffRef.current = []; }
       if (pmap.status === "found" && pmap.value) { try { const p = JSON.parse(pmap.value); if (p && typeof p === "object" && !Array.isArray(p)) { setPayrollMap(p); payrollMapRef.current = p; } } catch {} }
       else if (pmap.status === "empty") { setPayrollMap({}); payrollMapRef.current = {}; }
+      if (acc.status === "found" && acc.value) { try { const p = JSON.parse(acc.value); if (Array.isArray(p)) { setAccruals(p); accrualsRef.current = p; } } catch {} }
+      else if (acc.status === "empty") { setAccruals([]); accrualsRef.current = []; }
       // Договоры
       if (cr.status === "found" && cr.value) { try { const p = JSON.parse(cr.value); if (Array.isArray(p)) { setContracts(p); contractsRef.current = p; } } catch {} }
       else if (cr.status === "empty") { setContracts([]); contractsRef.current = []; }
@@ -7220,6 +7226,13 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const saveStaff = async (list, opts = {}) => {
     _auditListDiff("staff", staffRef.current, list, x => x?.name || x?.position || "Сотрудник");
     return await saveListProtected(STAFF_KEY, STAFF_BACKUPS_KEY, list, (fl)=>{ staffRef.current = fl; setStaff(fl); }, { loadedRef: _contractsLoaded, ...opts });
+  };
+  // Начисления — обычный список со своим ключом: тот же мердж по id, бэкапы и защита
+  // «пусто поверх», что у остальных списков. Финансовые операции не трогаются.
+  const saveAccruals = async (list, opts = {}) => {
+    _auditListDiff("staff", accrualsRef.current, list,
+      x => `Начисление ${x?.month || ""} ${x?.amount ? `${x.amount} ₸` : ""}`.trim());
+    return await saveListProtected(ACCRUALS_KEY, ACCRUALS_BACKUPS_KEY, list, (fl)=>{ accrualsRef.current = fl; setAccruals(fl); }, { loadedRef: _contractsLoaded, ...opts });
   };
   // Соответствия «подкатегория → сотрудник» — это объект, а не список, поэтому пишем
   // напрямую. Сами операции при этом не меняются вообще.
@@ -13934,6 +13947,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 saveStaff={saveStaff}
                 subcategoryMap={payrollMap}
                 saveSubcategoryMap={savePayrollMap}
+                accruals={accruals}
+                saveAccruals={saveAccruals}
+                objects={objects}
+                productions={productions}
+                finProjects={finProjects}
+                contracts={contracts}
                 fmt={fmt}
                 genId={genId}
                 readOnly={!editorTab || currentPermissions.finance !== "all"}
