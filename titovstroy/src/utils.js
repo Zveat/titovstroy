@@ -1147,6 +1147,20 @@ export function computeIssues(data = {}, opts = {}) {
   // 17. Публичная ссылка клиента без срока действия
   for (const o of objects) { if (o.progressShared && o.progressToken && !o.progressExpiresAt) out.push({ id:`link-noexp:${o.id}`, group:"Данные", sev:"yellow", scope:"check", dismissable:false,
     title:"Публичная ссылка без срока действия", detail:`${_objLabel(o)} — доступ клиента открыт бессрочно (нет 60-дневного лимита)`, nav:{ object:o.id, tab:"info" } }); }
+  // 18. Работы закончились, а кабинет клиента открыт. Расторгли договор или убрали объект
+  // в архив — а клиент до конца 60 дней продолжает видеть этапы, прогресс и историю оплат.
+  // Само по себе это не чинится: срок ссылки на статус объекта никак не завязан.
+  for (const o of objects) {
+    if (!o.progressShared || !o.progressToken) continue;
+    if (o.progressExpiresAt && Date.now() > o.progressExpiresAt) continue;  // уже протухла
+    const s = st(o);
+    if (!["cancel", "refuse", "archive"].includes(s)) continue;
+    const why = s === "cancel" ? "договор расторгнут" : s === "refuse" ? "клиент отказался" : "объект в архиве";
+    out.push({ id:`share-after-end:${o.id}`, group:"Клиенты", sev:"red", scope:"today", dismissable:true,
+      title:"Кабинет клиента открыт после закрытия объекта",
+      detail:`${_objLabel(o)} — ${why}, а клиент всё ещё видит этапы и оплаты`,
+      nav:{ object:o.id, tab:"info" } });
+  }
 
   return out;
 }

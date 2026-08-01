@@ -9344,56 +9344,12 @@ ${reqBlock}`;
     // Архив тоже по ЕДИНОМУ статусу: у объектов из миграции в поле лежит «archive», хотя на
     // экране они «В работе»/«Выполнен», и раньше они молча выпадали отсюда целиком.
     const baseObjs = baseObjsAll.filter(o => uStatus(o)!=="archive");
-    // Договора, сформированные ВНУТРИ объектов (привязаны к объекту), без «Прочих договоров»
-    const baseCon = contracts
-      .filter(c => !c.deletedAt)
-      .filter(c => c.objectId)
-      .filter(c => accessibleObjectIds.has(c.objectId))
-      .filter(c => inRange(new Date(c.date||0).getTime()))
-      // Раньше брали только договоры, где заполнены «работы». Договор с ценой за м²
-      // или с общей суммой выпадал из счётчика и из объёма — теперь считаем все.
-      .filter(c => contractAmount(c) > 0)
-      .filter(c => !statsManager || (c.manager||"")=== statsManager);
 
-    // Сводка по объектам (заменяет старые «сметы»)
-    const totalEst = baseObjs.length;
-    const withSumEst = baseObjs.filter(o=>objVal(o)>0);
-    const totalSumEst = withSumEst.reduce((s,o)=>s+objVal(o),0);
-    const avgEst = withSumEst.length ? Math.round(totalSumEst/withSumEst.length) : 0;
-    const totalCon = baseCon.length;
-    const totalSumCon = baseCon.reduce((s,c)=>s+contractAmount(c),0);
-    const avgCon = totalCon ? Math.round(totalSumCon/totalCon) : 0;
-    const byStatus = {}; for(const s of DEAL_STATUSES) byStatus[s.key]=baseObjsAll.filter(o=>uStatus(o)===s.key).length;
-    const byType = {}; for(const o of baseObjs){ const t=objType(o); byType[t]=(byType[t]||0)+1; }
+    // Список менеджеров — для кнопок фильтра на экране аналитики.
+    const validManagerNames = new Set(nonViewerUsers.map(u=>u.name));
+    const managers = [...new Set(liveObjects.map(o=>o.manager||"").filter(m=>m&&validManagerNames.has(m)))];
 
-    // ── A. Финансовый обзор — по ПОДПИСАННЫМ объектам (статус объекта = источник правды) ──
-    const signedObjsFin = baseObjs.filter(o=>SIGNED_SET.has(uStatus(o))&&objVal(o)>0);
-    const wonRevenue  = signedObjsFin.reduce((s,o)=>s+objVal(o),0);
-    const wonCost     = signedObjsFin.reduce((s,o)=>s+objCost(o),0);
-    const wonProfit   = wonRevenue - wonCost;
-    const wonMargin   = wonRevenue>0 ? Math.round(wonProfit/wonRevenue*100) : 0;
-    // Потенциал — все активные объекты с суммой (кроме архива)
-    const potentialObjs = baseObjs.filter(o=>!["refuse","cancel"].includes(uStatus(o))&&objVal(o)>0);
-    const allRevenue  = potentialObjs.reduce((s,o)=>s+objVal(o),0);
-    const allCost     = potentialObjs.reduce((s,o)=>s+objCost(o),0);
-    const allProfit   = allRevenue - allCost;
-    const allMargin   = allRevenue>0 ? Math.round(allProfit/allRevenue*100) : 0;
-
-    // ── B. Воронка сделок по статусам ОБЪЕКТОВ (архив — терминал, не стадия) ──
-    const funnelStatusesAn = DEAL_STATUSES.filter(s=>s.key!=="archive");
-    const funnel = funnelStatusesAn.map(s=>{
-      const list = baseObjs.filter(o=>uStatus(o)===s.key);
-      const sum  = list.reduce((a,o)=>a+objVal(o),0);
-      const cost = list.reduce((a,o)=>a+objCost(o),0);
-      return { key:s.key, label:s.label, color:s.color, bg:s.bg, count:list.length, sum, profit:sum-cost };
-    });
-    const signedB = funnel.find(f=>f.key==="signed") || {count:0,sum:0,profit:0};
-    const refuseB = funnel.find(f=>f.key==="refuse") || {count:0,sum:0,profit:0};
-    const activeObjsCount = baseObjs.filter(o=>uStatus(o)!=="archive").length;
-    // Общая конверсия = подписано / все активные объекты
-    const winRateOverall = activeObjsCount>0 ? Math.round(signedB.count/activeObjsCount*100) : 0;
-    // Close-rate = подписано / решённые (подписано + отказ)
-    const winRateSent    = (signedB.count+refuseB.count)>0 ? Math.round(signedB.count/(signedB.count+refuseB.count)*100) : 0;
+    const totalEst = baseObjs.length;   // только для пустого состояния «нет данных за период»
 
     // ── D. Рентабельность по категориям (по сметам объектов в периоде) ──
     const objIdSet = new Set(baseObjs.map(o=>o.id));
@@ -9412,83 +9368,18 @@ ${reqBlock}`;
       }
     }
     const catProfit = Object.values(catFin)
-      .map(c=>({...c, profit:c.revenue-c.cost, margin:c.revenue>0?Math.round((c.revenue-c.cost)/c.revenue*100):0}))
+      // margin=null, а не 0, когда выручки нет: при нулевом знаменателе маржа не «нулевая»,
+      // она неизвестна. Ноль здесь ещё и красил категорию в красный, будто она убыточная.
+      .map(c=>({...c, profit:c.revenue-c.cost, margin:c.revenue>0?Math.round((c.revenue-c.cost)/c.revenue*100):null}))
       .sort((a,b)=>b.profit-a.profit).slice(0,8);
-    const topCats = catProfit.slice(0,5).map(c=>[c.cat, c.revenue]); // совместимость
 
-    // ── C. Менеджеры: объекты, оборот, прибыль, маржа, % сдачи ──
-    const validManagerNames = new Set(nonViewerUsers.map(u=>u.name));
-    const managers = [...new Set(liveObjects.map(o=>o.manager||"").filter(m=>m&&validManagerNames.has(m)))];
-    const managerStats = managers.map(m=>{
-      const mos = baseObjs.filter(o=>(o.manager||"")===m);
-      const withSum = mos.filter(o=>objVal(o)>0);
-      const sum = withSum.reduce((s,o)=>s+objVal(o),0);
-      const cost = withSum.reduce((s,o)=>s+objCost(o),0);
-      const profit = sum-cost;
-      const inwork = mos.filter(o=>uStatus(o)==="approval").length;
-      // «Договорились» — дошли до договора и дальше. По сырому «signed» объект переставал
-      // считаться, как только уходил в работу, и конверсия менеджера падала на ровном месте.
-      const done = mos.filter(o=>SIGNED_SET.has(uStatus(o))).length;
-      const activeLeads = mos.filter(o=>uStatus(o)!=="archive").length;
-      const conv = activeLeads>0 ? Math.round(done/activeLeads*100) : 0;
-      return {name:m, count:mos.length, sum, profit, margin: sum>0?Math.round(profit/sum*100):0, sent:inwork, agreed:done, conv};
-    }).sort((a,b)=>b.profit-a.profit);
-
-    // ── E. Динамика по месяцам (по объектам, их сумме и конверсии) ──
-    const monthMap = {};
-    for(const o of baseObjs){
-      if(uStatus(o)==="archive") continue;
-      const d = new Date(o.createdAt||o.updatedAt||0);
-      const key = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
-      if(!monthMap[key]) monthMap[key]={key, revenue:0, cost:0, total:0, signed:0};
-      monthMap[key].revenue += objVal(o);
-      monthMap[key].cost += objCost(o);
-      monthMap[key].total += 1;
-      if(SIGNED_SET.has(uStatus(o))) monthMap[key].signed += 1;
-    }
-    const MONTH_RU = ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"];
-    const monthly = Object.values(monthMap).sort((a,b)=>a.key.localeCompare(b.key)).slice(-12).map(m=>{
-      const [y,mo]=m.key.split("-");
-      return {...m, label: MONTH_RU[Number(mo)-1]+" "+y.slice(2), profit:m.revenue-m.cost, conv:m.total>0?Math.round(m.signed/m.total*100):0};
-    });
-
-    // ── F. «Зависшие» объекты в работе (без движения 14+ дней) ──
-    const STALE_DAYS = 14;
-    const nowMs = Date.now();
-    const staleSent = liveObjects
-      .filter(o=>uStatus(o)==="approval")
-      .map(o=>({e:{id:o.id, proj:{name:o.clientName||o.address||"Объект", phone:o.clientPhone}, total:objVal(o), _obj:o}, days: Math.floor((nowMs-(o.updatedAt||0))/864e5)}))
-      .filter(x=>x.days>=STALE_DAYS)
-      .sort((a,b)=>b.days-a.days)
-      .slice(0,10);
-    const TYPE_L2 = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронирование"};
-    const byConType = {}; for(const c of baseCon){ const t=TYPE_L2[c.type||"repair_fiz"]||"--"; byConType[t]=(byConType[t]||0)+1; }
-
-    // ── G. Средний цикл сделки (от создания до подписания, в днях) ──
-    const signedObjs = baseObjs.filter(o=>SIGNED_SET.has(uStatus(o))&&o.createdAt&&o.updatedAt&&o.updatedAt>o.createdAt);
-    const avgDealDays = signedObjs.length>0 ? Math.round(signedObjs.reduce((s,o)=>s+Math.floor((o.updatedAt-o.createdAt)/864e5),0)/signedObjs.length) : null;
-    // Среднее время «зависания» открытых сделок в согласовании (от создания до сейчас)
-    const approvalOpen = liveObjects.filter(o=>uStatus(o)==="approval"&&(!statsManager||(o.manager||"")===statsManager));
-    const avgApprovalDays = approvalOpen.length>0 ? Math.round(approvalOpen.reduce((s,o)=>s+Math.floor((nowMs-(o.createdAt||o.updatedAt||nowMs))/864e5),0)/approvalOpen.length) : null;
-
-    // ── H. Конверсия по типу объекта (архив не в знаменателе — искажал бы конверсию) ──
-    const convByType = {};
-    for(const o of baseObjs){
-      if(uStatus(o)==="archive") continue;
-      const t = o.objType||"Вторичка";
-      if(!convByType[t]) convByType[t]={total:0,signed:0,sumAll:0,sumSigned:0};
-      convByType[t].total++;
-      convByType[t].sumAll += objVal(o);
-      if(SIGNED_SET.has(uStatus(o))){ convByType[t].signed++; convByType[t].sumSigned+=objVal(o); }
-    }
-
-    // ── I. Топ-5 объектов периода по сумме ──
-    const topObjects = [...withSumEst].sort((a,b)=>objVal(b)-objVal(a)).slice(0,5);
-
-    return { baseEst: baseObjs, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType, TYPE_L2,
-      wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin,
-      funnel, winRateOverall, winRateSent, signedB, refuseB, catProfit, monthly, staleSent,
-      avgDealDays, avgApprovalDays, signedObjsCount: signedObjs.length, convByType, topObjects, objVal, estCost };
+    // ВНИМАНИЕ: здесь когда-то считались менеджерские сводки, конверсия по типам,
+    // динамика по месяцам, воронка, win rate, средний цикл сделки, топ объектов и
+    // зависшие сделки — около двухсот строк. Ни одно из этих значений на экран не
+    // выводилось: аналитика давно живёт на модуле buildAnalytics. Считалось это на
+    // каждый рендер и выбрасывалось, а любой, кто читал код, думал, что цифры живые.
+    // Нужен новый показатель — добавлять в analyticsModel.js, а не сюда.
+    return { totalEst, managers, catProfit, objVal, estCost };
   }, [analyticsObjects, analyticsEstimates, contracts, productions, statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers, catalogVersion]);
 
   // Показатели «Главной» считаются той же моделью, но всегда за текущий месяц и
@@ -11594,20 +11485,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         // объекты и их суммы
         const _estByObjId = {}; for(const e of accessibleEstimates){ if(e.objectId){ (_estByObjId[e.objectId]||(_estByObjId[e.objectId]=[])).push(e); } }
         const _objVal = o => (_estByObjId[o.id]||[]).reduce((s,e)=>s+(e.total||0),0);
-        const _objCost = o => { const cat = getEffectiveCatalog(); const lk = new Map(); for(const w of cat){ if(w?.name)lk.set(w.name,w); if(w?.code)lk.set(w.code,w); } let c=0; for(const e of (_estByObjId[o.id]||[])){ for(const [k,r] of Object.entries(e.rows||{})){ const q=Number(r?.qty||0); if(!q) continue; const w=lk.get(k); if(w)c+=rowCostPerUnit(r,w)*q; } } return c; };
-        // Только реально созданные в этом месяце объекты (импортированные миграцией исключаем — у них дата создания искусственная)
-        const objectsThisMonth = liveObjects.filter(o=>unifiedStatusOf(o)!=="archive"&&o.createdBy!=="migration"&&_inMonth(o.createdAt||0));
-        const objectsWithSum = objectsThisMonth.filter(o=>_objVal(o)>0);
-        const totalSumMonth = objectsWithSum.reduce((s,o)=>s+_objVal(o), 0);
-        // Прибыль/маржа — по сделкам, ПОДПИСАННЫМ в этом месяце (updatedAt ≈ дата подписания);
-        // импортированные миграцией исключаем — их updatedAt = дата импорта, а не реального подписания
-        // «Подписанные» — дошедшие до договора и дальше: по сырому «signed» сделка выпадала
-        // из прибыли месяца, как только уходила в работу.
-        const signedMonth = liveObjects.filter(o=>["signed","work","paused","done"].includes(unifiedStatusOf(o))&&o.createdBy!=="migration"&&_inMonth(o.updatedAt||o.createdAt||0)&&_objVal(o)>0);
-        const signedRevMonth = signedMonth.reduce((s,o)=>s+_objVal(o), 0);
-        const signedCostMonth = signedMonth.reduce((s,o)=>s+_objCost(o), 0);
-        const profitMonth = signedRevMonth - signedCostMonth;
-        const marginMonth = signedRevMonth>0 ? Math.round(profitMonth/signedRevMonth*100) : 0;
+        // Здесь считались плитки месяца: объекты, сумма, прибыль и маржа за текущий месяц.
+        // Ни одна из них не выводилась — шапка главной давно берёт эти цифры из buildAnalytics.
+        // Считалось на каждый рендер (в т.ч. полный обход каталога на каждый объект) и
+        // выбрасывалось. Удалено; новые показатели — в analyticsModel.js.
         const approvalObjs = liveObjects.filter(o=>unifiedStatusOf(o)==="approval");
         // Договоры считаем по самим документам. Статус объекта меняется после запуска
         // производства, поэтому он не может быть источником факта подписания договора.
@@ -12877,9 +12758,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       {/* ЭКРАН: АНАЛИТИКА */}
       {effScreen === "analytics" && currentPermissions.analytics === "none" && restrictedSection("Аналитика", "сотрудникам с соответствующим правом")}
       {effScreen === "analytics" && currentPermissions.analytics !== "none" && (()=>{
-        const { baseEst, baseCon, totalEst, withSumEst, totalSumEst, avgEst, totalCon, totalSumCon, avgCon, byStatus, byType, topCats, managers, managerStats, byConType, TYPE_L2,
-          wonRevenue, wonCost, wonProfit, wonMargin, allRevenue, allCost, allProfit, allMargin, funnel, winRateOverall, winRateSent, catProfit, monthly, staleSent,
-          avgDealDays, avgApprovalDays, signedObjsCount, convByType, topObjects, objVal } = analyticsData;
+        // Экран живёт на модуле buildAnalytics (<AnalyticsBlocks/>). Отсюда нужны только
+        // кнопки фильтра по менеджерам, рентабельность по категориям и признак пустого периода.
+        const { totalEst, managers, catProfit } = analyticsData;
         const PERIOD_BTNS = [["all","Всё время"],["month","Месяц"],["3month","3 месяца"],["week","Неделя"],["custom","Вручную"]];
         return (
           <div className="page" style={{maxWidth:1600}}>
@@ -14791,6 +14672,16 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           const permissionKey = Object.prototype.hasOwnProperty.call(patch, "status") ? "objectStatus" : "objectEdit";
           if (!accessAllows(currentPermissions[permissionKey], ownsObject)) return;
           const requestedStatus = patch.status || "";
+          // РАСТОРЖЕНИЕ / АРХИВ ПРИ ОТКРЫТОМ КАБИНЕТЕ. Ничего не закрываем сами (боевые
+          // данные меняем только по явному решению владельца), но и молчать нельзя:
+          // у расторгнутого объекта ссылка продолжала жить до конца 60 дней, и клиент
+          // всё это время видел этапы и историю оплат.
+          let revokeShareAfterSave = false;
+          if (["cancel", "archive"].includes(requestedStatus) && _progActive(obj)) {
+            const what = requestedStatus === "cancel" ? "расторгнут" : "уходит в архив";
+            revokeShareAfterSave = window.confirm(
+              `Объект ${what}, а кабинет клиента открыт — он продолжит видеть этапы, прогресс и историю оплат.\n\nЗакрыть клиенту доступ?\n\nOK — закрыть доступ.\nОтмена — оставить открытым.`);
+          }
           if (requestedStatus) {
             // Подсветка реагирует на клик немедленно. Это только UI-состояние:
             // подтверждение и повторы по-прежнему проходят через защищённые очереди.
@@ -14912,6 +14803,19 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             return;
           }
           logObjChange(currentUser, obj, patch);
+          // Доступ гасим ТОЛЬКО после подтверждённой записи статуса и только если владелец
+          // согласился. Обе ноды (прогресс и документы) и флаг у объекта — как в ручном
+          // «закрыть доступ», плюс запись в журнал: это видимое клиенту действие.
+          if (revokeShareAfterSave && obj.progressToken) {
+            try {
+              const fresh = objectsRef.current.find(x => x.id === obj.id) || obj;
+              const next = objectsRef.current.filter(x => x.id !== obj.id);
+              await saveObjects([...next, { ...fresh, progressShared: false, updatedAt: Date.now() }]);
+              await _revokeProgressAccess(obj.progressToken);
+              logChange(currentUser, { entity: "publish", entityId: obj.id, objectId: obj.id, label: _objLabel(obj),
+                action: "закрыл доступ клиенту", detail: `объект ${requestedStatus === "cancel" ? "расторгнут" : "в архиве"}` });
+            } catch (e) { console.warn("revoke on status err", e); }
+          }
         };
 
         return (

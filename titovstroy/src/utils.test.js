@@ -1662,3 +1662,35 @@ describe("статус объекта — единый, а не сырое по�
     expect(computeIssues(data, { now: Date.now() }).map(i => i.id)).toContain("signed-nofin:o1");
   });
 });
+
+// Срок публичной ссылки на статус объекта никак не завязан: расторгли договор — а клиент
+// до конца 60 дней продолжает видеть этапы, прогресс и историю оплат. На боевой так и
+// висел кабинет расторгнутого объекта.
+describe("кабинет клиента после закрытия объекта", () => {
+  const mk = (status, extra = {}) => ({
+    objects: [{ id:"o1", clientName:"Клиент", status,
+      progressShared:true, progressToken:"tok", progressExpiresAt: Date.now() + 5*86400e3, ...extra }],
+    productions: [], finProjects: [{ id:"fp", objectId:"o1" }],
+    financeTx: [], contracts: [], estimates: [], clients: [],
+  });
+  const has = (data) => computeIssues(data, { now: Date.now() }).some(i => i.id === "share-after-end:o1");
+
+  it("ловит расторжение, отказ и архив", () => {
+    for (const s of ["cancel", "refuse", "archive"]) expect(has(mk(s))).toBe(true);
+  });
+
+  it("по работающим объектам не ругается", () => {
+    for (const s of ["work", "signed", "approval", "done"]) expect(has(mk(s))).toBe(false);
+  });
+
+  it("статус из производства тоже учитывается", () => {
+    const data = mk("signed");
+    data.productions = [{ objectId:"o1", prodStatus:"cancel" }];
+    expect(has(data)).toBe(true);
+  });
+
+  it("закрытый доступ и протухшая ссылка не считаются", () => {
+    expect(has(mk("cancel", { progressShared:false }))).toBe(false);
+    expect(has(mk("cancel", { progressExpiresAt: Date.now() - 86400e3 }))).toBe(false);
+  });
+});
