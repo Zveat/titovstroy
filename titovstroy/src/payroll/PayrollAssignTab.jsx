@@ -1,6 +1,9 @@
 import { useState, useMemo } from "react";
 import { listExpenseOps, normalizeStaff, NON_WAGE_KEY, nonWageSet } from "./payrollModel.js";
-import { card, inp, lab, th, td, numCell, pill, btnPrimary, btnGhost, runSave } from "./payrollUi.js";
+import {
+  C, card, cardFlat, inp, lab, th, td, numCell, pill, btnPrimary, btnGhost, btnDanger,
+  sectionTitle, sectionHint, runSave,
+} from "./payrollUi.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // «Разложить операции» — простановка получателя ПАЧКОЙ.
@@ -119,21 +122,21 @@ export function AssignTab({
   return (
     <>
       <div>
-        <div style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>Разложить операции</div>
-        <div style={{ fontSize: 12, color: "#94a3b8" }}>
+        <div style={sectionTitle}>Разложить операции</div>
+        <div style={sectionHint}>
           Отфильтруйте, выделите нужные и проставьте получателя одним действием. По одной операции заходить не надо.
         </div>
       </div>
 
       {staff.length === 0 && workers.length === 0 && (
-        <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 15px", fontSize: 12, color: "#78350f" }}>
+        <div style={{ background: C.amberSoft, border: `1px solid ${C.amberLine}`, borderRadius: 14, padding: "13px 16px", fontSize: 12.5, color: "#78350f" }}>
           <b style={{ color: "#92400e" }}>Некого выбирать</b> — нет ни сотрудников, ни подрядчиков.
           {onGoStaff && <> Заведите людей на вкладке <button onClick={onGoStaff} style={{ background: "none", border: "none", padding: 0, color: "#1d4ed8", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", fontSize: 12, textDecoration: "underline" }}>«Сотрудники»</button>, подрядчики — в «Админке».</>}
         </div>
       )}
 
       {err && (
-        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "10px 13px", fontSize: 12, color: "#b91c1c" }}>{err}</div>
+        <div style={{ background: C.redSoft, border: `1px solid ${C.redLine}`, borderRadius: 12, padding: "12px 15px", fontSize: 12.5, color: "#b91c1c" }}>{err}</div>
       )}
 
       {/* ── Фильтры ── */}
@@ -148,24 +151,24 @@ export function AssignTab({
         <div><span style={lab}>Поиск по комментарию, договору</span>
           <input style={inp} value={query} onChange={e => { setQuery(e.target.value); clearSel(); }}
             placeholder="например: ержан" /></div>
-        <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "#334155", cursor: "pointer", paddingBottom: 8 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: C.ink2, cursor: "pointer", paddingBottom: 8 }}>
           <input type="checkbox" checked={onlyUnassigned}
             onChange={e => { setOnlyUnassigned(e.target.checked); clearSel(); }} style={{ cursor: "pointer" }} />
           Только без получателя
         </label>
-        <div style={{ textAlign: "right", fontSize: 12, color: "#64748b", paddingBottom: 6 }}>
-          Найдено <b style={{ color: "#0f172a" }}>{list.count}</b> из {list.allCount} · {money(list.total)}
+        <div style={{ textAlign: "right", fontSize: 12, color: C.mute, paddingBottom: 6 }}>
+          Найдено <b style={{ color: C.ink }}>{list.count}</b> из {list.allCount} · {money(list.total)}
         </div>
       </div>
 
       {/* ── Панель простановки ── */}
       {!readOnly && (
-        <div style={{ ...card, borderColor: selRows.length ? "#bfdbfe" : "#e2e8f0",
-          background: selRows.length ? "#f8fbff" : "#fff",
+        <div style={{ ...card, borderColor: selRows.length ? C.accentLine : C.line,
+          background: selRows.length ? "#fbfcff" : C.white,
           display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 11, alignItems: "end" }}>
           <div>
             <span style={lab}>Выделено</span>
-            <div style={{ fontSize: 15, fontWeight: 900, color: selRows.length ? "#0f172a" : "#cbd5e1", fontVariantNumeric: "tabular-nums" }}>
+            <div style={{ fontSize: 18, fontWeight: 900, color: selRows.length ? C.ink : "#cbd5e1", fontVariantNumeric: "tabular-nums", letterSpacing: "-.02em" }}>
               {selRows.length} оп · {money(selSum)}
             </div>
             <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
@@ -189,7 +192,7 @@ export function AssignTab({
               {busy ? "Сохраняю…" : `Проставить (${selRows.length})`}
             </button>
             <button onClick={() => apply(true)} disabled={!selRows.length || busy}
-              style={{ ...btnGhost, borderColor: "#fecaca", color: "#dc2626" }}>Убрать</button>
+              style={btnDanger}>Убрать</button>
           </div>
         </div>
       )}
@@ -197,7 +200,8 @@ export function AssignTab({
       {/* ── Операции ── */}
       <div style={{ ...card, padding: 0, overflow: "hidden" }}>
         {list.rows.length === 0 ? (
-          <div style={{ padding: 20, textAlign: "center", color: "#94a3b8", fontSize: 13 }}>
+          <div style={{ padding: "40px 20px", textAlign: "center", color: C.faint, fontSize: 13 }}>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>{onlyUnassigned ? "✅" : "🔎"}</div>
             {onlyUnassigned ? "Все операции по этому фильтру уже с получателем." : "По этому фильтру операций нет."}
           </div>
         ) : (
@@ -215,21 +219,21 @@ export function AssignTab({
               <tbody>
                 {list.rows.map(r => (
                   <tr key={r.id} onClick={() => !readOnly && toggle(r.id)}
-                    style={{ cursor: readOnly ? "default" : "pointer", background: sel.has(r.id) ? "#eff6ff" : undefined }}>
+                    style={{ cursor: readOnly ? "default" : "pointer", background: sel.has(r.id) ? C.accentSoft : undefined, transition: "background .1s" }}>
                     <td style={{ ...td, textAlign: "center" }}>
                       <input type="checkbox" checked={sel.has(r.id)} disabled={readOnly}
                         onChange={() => toggle(r.id)} onClick={e => e.stopPropagation()} style={{ cursor: "pointer" }} />
                     </td>
-                    <td style={{ ...td, whiteSpace: "nowrap", color: "#64748b" }}>{dt(r.date)}</td>
-                    <td style={{ ...td, color: "#334155" }}>{r.subcategory || "—"}</td>
-                    <td style={{ ...td, color: "#64748b", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.comment || ""}</td>
-                    <td style={{ ...td, color: "#94a3b8", whiteSpace: "nowrap" }}>{r.contractNo || "—"}</td>
+                    <td style={{ ...td, whiteSpace: "nowrap", color: C.mute }}>{dt(r.date)}</td>
+                    <td style={{ ...td, color: C.ink2 }}>{r.subcategory || "—"}</td>
+                    <td style={{ ...td, color: C.mute, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.comment || ""}</td>
+                    <td style={{ ...td, color: C.faint, whiteSpace: "nowrap" }}>{r.contractNo || "—"}</td>
                     <td style={td}>
                       {r.payee ? (
-                        <span style={r.payee.kind === "worker" ? pill("#d97706", "#fffbeb") : pill("#059669", "#ecfdf5")}>
+                        <span style={r.payee.kind === "worker" ? pill(C.amber, C.amberSoft) : pill(C.green, C.greenSoft)}>
                           {r.payee.name}{r.payee.source === "map" ? " · по правилу" : ""}
                         </span>
-                      ) : <span style={pill("#94a3b8", "#f8fafc")}>не указан</span>}
+                      ) : <span style={pill(C.faint, C.bg)}>не указан</span>}
                     </td>
                     <td style={{ ...numCell, fontWeight: 700 }}>{money(r.amount)}</td>
                   </tr>
@@ -244,8 +248,8 @@ export function AssignTab({
       <div style={{ ...card, padding: 0, overflow: "hidden" }}>
         <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>Постоянное правило по подкатегории</div>
-            <div style={{ fontSize: 11.5, color: "#94a3b8", marginTop: 2 }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: C.ink }}>Постоянное правило по подкатегории</div>
+            <div style={{ fontSize: 11.5, color: C.faint, marginTop: 3 }}>
               Годится только там, где вся подкатегория уходит одному человеку — «ФОТ РОП», «ФОТ таргетолог».
               Правило действует и на будущие операции, сами операции не переписывает.
               Галочка «не зарплата» — для дивидендов и подобного: в разрезе по людям сумма видна,
@@ -268,8 +272,8 @@ export function AssignTab({
             </tr></thead>
             <tbody>
               {ruleRows.map(s => (
-                <tr key={s.subcategory} style={rules[s.subcategory] ? { background: "#f8fffb" } : undefined}>
-                  <td style={{ ...td, fontWeight: 600, color: "#0f172a" }}>{s.subcategory}</td>
+                <tr key={s.subcategory} style={rules[s.subcategory] ? { background: "#f7fdfa" } : undefined}>
+                  <td style={{ ...td, fontWeight: 600, color: C.ink }}>{s.subcategory}</td>
                   <td style={numCell}>{s.count}</td>
                   <td style={{ ...numCell, fontWeight: 700 }}>{money(s.total)}</td>
                   <td style={{ ...td, minWidth: 210 }}>
@@ -291,8 +295,8 @@ export function AssignTab({
             </tbody>
           </table>
         </div>
-        <div style={{ padding: "10px 16px", borderTop: "1px solid #f4f7fb" }}>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 11.5, color: "#64748b", cursor: "pointer" }}>
+        <div style={{ padding: "10px 16px", borderTop: `1px solid ${C.lineSoft}` }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 11.5, color: C.mute, cursor: "pointer" }}>
             <input type="checkbox" checked={showRules} onChange={e => setShowRules(e.target.checked)} style={{ cursor: "pointer" }} />
             Показать все подкатегории расходов, а не только похожие на зарплату
           </label>

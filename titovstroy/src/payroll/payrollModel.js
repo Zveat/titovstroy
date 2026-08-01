@@ -111,7 +111,13 @@ export function buildPayrollReport(financeTx = [], opts = {}) {
   // месяца в таблице показывала бы только именованные строки и не сходилась бы с «Всего».
   const unassignedByMonth = {};
   const totalByMonth = {};
+  // Те же итоги, но по ЗАРПЛАТНОЙ базе. Нужны, чтобы вся таблица могла считаться
+  // только по ФОТ и при этом сходиться сама с собой: без этого зарплату пришлось бы
+  // вычитать в уме из «всего».
+  const wageByMonthTotal = {};
+  const unassignedWageByMonth = {};
   let total = 0, unassigned = 0, unassignedCount = 0, wageTotal = 0, nonWageTotal = 0;
+  let unassignedWage = 0, unassignedWageCount = 0;
 
   for (const t of financeTx) {
     if (!t || t.deletedAt || t.included === false || t.type !== "expense") continue;
@@ -123,12 +129,17 @@ export function buildPayrollReport(financeTx = [], opts = {}) {
     if (mk) { monthSet.add(mk); totalByMonth[mk] = (totalByMonth[mk] || 0) + amount; }
 
     const nw = nonWage.has(String(t.subcategory || "").trim());
-    if (nw) nonWageTotal += amount; else wageTotal += amount;
+    if (nw) nonWageTotal += amount;
+    else { wageTotal += amount; if (mk) wageByMonthTotal[mk] = (wageByMonthTotal[mk] || 0) + amount; }
 
     const who = resolvePayee(t, { staffById, workersById, subcategoryMap });
     if (!who) {
       unassigned += amount; unassignedCount++;
       if (mk) unassignedByMonth[mk] = (unassignedByMonth[mk] || 0) + amount;
+      if (!nw) {
+        unassignedWage += amount; unassignedWageCount++;
+        if (mk) unassignedWageByMonth[mk] = (unassignedWageByMonth[mk] || 0) + amount;
+      }
       continue;
     }
 
@@ -159,11 +170,17 @@ export function buildPayrollReport(financeTx = [], opts = {}) {
     wageTotal,
     nonWageTotal,
     totalByMonth,
+    wageByMonthTotal,
     unassigned,
     unassignedByMonth,
     unassignedCount,
+    unassignedWage,
+    unassignedWageByMonth,
+    unassignedWageCount,
     staffTotal: list.filter(r => r.kind === "staff").reduce((s, r) => s + r.total, 0),
     workerTotal: list.filter(r => r.kind === "worker").reduce((s, r) => s + r.total, 0),
+    staffWage: list.filter(r => r.kind === "staff").reduce((s, r) => s + r.wage, 0),
+    workerWage: list.filter(r => r.kind === "worker").reduce((s, r) => s + r.wage, 0),
   };
 }
 
