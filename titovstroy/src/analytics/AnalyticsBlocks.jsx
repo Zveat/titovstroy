@@ -79,7 +79,9 @@ function BarRow({ label, value, max, note, color = "#2563eb" }) {
 
 // Раскрывающийся список «что именно посчиталось». Нужен, чтобы цифру можно было
 // проверить глазами, а не верить на слово.
-function AuditList({ items, fmt, title = "Показать список" }) {
+// onOpen — переход в карточку объекта по клику на строку. Без него список только
+// называет проблему, а искать объект приходится руками через поиск.
+function AuditList({ items, fmt, title = "Показать список", onOpen }) {
   const [open, setOpen] = useState(false);
   if (!items?.length) return null;
   const dt = (t) => (t ? new Date(t).toLocaleDateString("ru-RU") : "—");
@@ -92,18 +94,27 @@ function AuditList({ items, fmt, title = "Показать список" }) {
       </button>
       {open && (
         <div style={{ marginTop: 6, maxHeight: 260, overflow: "auto", border: "1px solid #eef2f7", borderRadius: 8 }}>
-          {items.map((it, i) => (
-            <div key={it.id || i} style={{ display: "grid", gridTemplateColumns: "78px minmax(0,1fr) auto",
-              gap: 8, padding: "6px 9px", fontSize: 11, borderTop: i ? "1px solid #f4f7fb" : 0 }}>
+          {items.map((it, i) => {
+            const clickable = !!(onOpen && it.id);
+            return (
+            <div key={it.id || i}
+              onClick={clickable ? () => onOpen(it) : undefined}
+              title={clickable ? "Открыть объект" : undefined}
+              style={{ display: "grid", gridTemplateColumns: "78px minmax(0,1fr) auto",
+              gap: 8, padding: "6px 9px", fontSize: 11, borderTop: i ? "1px solid #f4f7fb" : 0,
+              cursor: clickable ? "pointer" : "default" }}
+              onMouseEnter={clickable ? (e) => { e.currentTarget.style.background = "#f8fafc"; } : undefined}
+              onMouseLeave={clickable ? (e) => { e.currentTarget.style.background = "transparent"; } : undefined}>
               <span style={{ color: "#94a3b8" }}>{dt(it.createdAt)}</span>
-              <span style={{ color: "#334155", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ color: clickable ? "#2563eb" : "#334155", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {it.name}{it.manager ? ` · ${it.manager}` : ""}
               </span>
               <span style={{ color: "#64748b", whiteSpace: "nowrap" }}>
                 {it.value > 0 ? `${fmt(Math.round(it.value))} ₸` : "без сметы"}
               </span>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -114,7 +125,7 @@ const EmptyNote = ({ text }) => (
   <div style={{ ...card, color: "#94a3b8", fontSize: 12 }}>{text}</div>
 );
 
-export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails = true, catProfit = [] }) {
+export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails = true, catProfit = [], onOpenObject }) {
   if (!data) return null;
   const { sales, backlog, production, finance, quality, cash, dataQuality, previous, funnels } = data;
   const money = (v) => `${fmt(Math.round(v || 0))} ₸`;
@@ -169,7 +180,7 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
           )}
         </div>
 
-        <AuditList items={sales.cohortList} fmt={fmt} title="Какие объекты посчитаны" />
+        <AuditList onOpen={onOpenObject} items={sales.cohortList} fmt={fmt} title="Какие объекты посчитаны" />
 
         <div style={{ ...grid(260), marginTop: 10 }}>
           {/* Когортная воронка: движение объектов, зашедших в выбранном периоде.
@@ -304,11 +315,11 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
             colors={["#a78bfa", "#f59e0b", "#059669"]} />
         </div>
         {/* Поимённо, чтобы цифры можно было сверить с объектами, а не верить на слово. */}
-        <AuditList items={funnels.production.doneList} fmt={fmt} title="Кого сдали за период" />
-        <AuditList items={funnels.production.startedList} fmt={fmt} title="Кто вышел на объект за период" />
-        <AuditList items={funnels.production.signedList} fmt={fmt} title="Кто подписал договор за период" />
-        <AuditList items={production.overdueStageList} fmt={fmt} title="Какие этапы просрочены" />
-        <AuditList items={production.staleObjects} fmt={fmt} title="Объекты без движения" />
+        <AuditList onOpen={onOpenObject} items={funnels.production.doneList} fmt={fmt} title="Кого сдали за период" />
+        <AuditList onOpen={onOpenObject} items={funnels.production.startedList} fmt={fmt} title="Кто вышел на объект за период" />
+        <AuditList onOpen={onOpenObject} items={funnels.production.signedList} fmt={fmt} title="Кто подписал договор за период" />
+        <AuditList onOpen={onOpenObject} items={production.overdueStageList} fmt={fmt} title="Какие этапы просрочены" />
+        <AuditList onOpen={onOpenObject} items={production.staleObjects} fmt={fmt} title="Объекты без движения" />
       </Block>
     ),
 
@@ -536,7 +547,7 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
                 <span style={{ color: "#334155", fontWeight: 700 }}>{g.label}</span>
                 <span style={{ color: "#dc2626", fontWeight: 700 }}>{g.count}</span>
               </div>
-              <AuditList items={g.list} fmt={fmt} title="Показать объекты" />
+              <AuditList onOpen={onOpenObject} items={g.list} fmt={fmt} title="Показать объекты" />
             </div>
           ))}
         </div>

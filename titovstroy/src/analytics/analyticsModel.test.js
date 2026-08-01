@@ -862,3 +862,29 @@ describe("качество данных — даты, которые проти�
   });
 
 });
+
+// Клик по строке списка должен открывать объект. У просроченных этапов id составной
+// («объект:этап») — по нему объект не находится, поэтому нужна отдельная ссылка.
+describe("списки аналитики — по строке можно перейти в объект", () => {
+  const NOW2 = new Date("2026-06-15T12:00:00Z").getTime();
+  const data = {
+    objects: [{ id:"o1", clientName:"Клиент", status:"work", createdAt: NOW2 - 40*DAY }],
+    productions: [{ objectId:"o1", prodStatus:"active", responsible:"Пётр",
+      stages:[{ id:"s1", name:"Демонтаж", status:"todo", planEnd:"2026-06-01", priceClient:1000 }] }],
+    contracts: [], estimates: [], financeTx: [],
+  };
+  const a = buildAnalytics(data, { period:"all", now: NOW2 });
+
+  it("у просроченного этапа есть отдельная ссылка на объект и вкладка", () => {
+    const row = a.production.overdueStageList[0];
+    expect(row.id).toBe("o1:s1");        // ключ строки остаётся составным
+    expect(row.objectId).toBe("o1");      // а переход идёт по объекту
+    expect(row.stageTab).toBe("stages");
+  });
+
+  it("в остальных списках id — это сам объект", () => {
+    for (const list of [a.sales.cohortList, a.funnels.production.signedList, a.dataQuality.gaps[0]?.list || []]) {
+      for (const row of list) expect(row.id).toBe("o1");
+    }
+  });
+});

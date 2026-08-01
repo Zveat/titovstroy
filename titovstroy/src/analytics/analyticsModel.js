@@ -609,7 +609,12 @@ function buildProduction(idx, { from, to, now }) {
         overdueStages += 1;
         // Поимённо: какие именно этапы горят и на каком объекте.
         overdueStageList.push({
+          // id составной (объект+этап) — он нужен как ключ списка и для «скрыть до завтра».
+          // Для перехода в карточку нужен ИМЕННО id объекта, иначе поиск по id ничего не
+          // находит и клик по строке молча не срабатывает.
+          objectId: o.id,
           id: `${o.id}:${st.id || st.name}`,
+          stageTab: "stages",
           name: `${st.name || "Этап"} · ${o.clientName || o.address || "объект"}`,
           createdAt: ts(st.planEnd),
           manager: st.responsible || prod.responsible || "",
