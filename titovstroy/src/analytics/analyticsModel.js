@@ -944,12 +944,22 @@ function buildDataQuality(idx, financeTx, resolveManager, now = Date.now()) {
   const endOfToday = Date.UTC(nd.getUTCFullYear(), nd.getUTCMonth(), nd.getUTCDate() + 1) - 1;
   const { liveObjects, objectValue, prodByObject, prodDuplicates, contractByObject } = idx;
   const active = liveObjects.filter(o => !["archive", "refuse"].includes(statusOf(o, prodByObject)));
+  // Объекты, с которыми ещё работают: сделка не закрыта и не похоронена.
+  const inPlay = liveObjects.filter(o => !["done", "cancel", "archive", "refuse"].includes(statusOf(o, prodByObject)));
   const signed = liveObjects.filter(o => ["signed", "work", "paused", "done"].includes(statusOf(o, prodByObject)));
 
   const gaps = [
     { key: "manager", label: "Без менеджера",
       items: active.filter(o => !o.manager || resolveManager(o.manager).includes("нет в сотрудниках")) },
     { key: "area", label: "Без площади", items: active.filter(o => !num(o.area)) },
+    // Контакты. Проверяем только по объектам, которые ещё в работе: у сданных и
+    // мигрированных телефона нет почти нигде, и в общей выборке эти строки превращаются
+    // в фон, который перестают читать. Клиент без телефона — это клиент, которому нельзя
+    // позвонить, и до сих пор система об этом не говорила вообще ничего.
+    { key: "clientPhone", label: "Нет телефона клиента",
+      items: inPlay.filter(o => String(o.clientPhone || "").replace(/\D/g, "").length < 6) },
+    { key: "objectAddress", label: "Нет адреса объекта",
+      items: inPlay.filter(o => !String(o.address || "").trim()) },
     { key: "estimate", label: "Без сметы", items: active.filter(o => objectValue(o) <= 0) },
     { key: "contract", label: "Подписан, но нет договора", items: signed.filter(o => !contractByObject.get(o.id)) },
     { key: "prodCard", label: "В работе без карточки производства",

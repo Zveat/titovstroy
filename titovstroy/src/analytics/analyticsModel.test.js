@@ -947,3 +947,46 @@ describe("месяц операции и границы периода — од�
     expect(Object.keys(aug.finance.cashflow || {})).not.toContain("2026-07");
   });
 });
+
+// Клиент без телефона — это клиент, которому нельзя позвонить. До сих пор система об
+// этом не говорила ничего: проверки были на менеджера, площадь, смету, прораба — но не
+// на контакты. Считаем только по объектам, с которыми ещё работают: у сданных и
+// мигрированных телефона нет почти нигде, и в общей выборке строка становится фоном.
+describe("качество данных — контакты клиента", () => {
+  const NOW3 = new Date("2026-08-01T12:00:00Z").getTime();
+  const mk = (o, prod = null) => buildAnalytics({
+    objects: [{ id:"o1", clientName:"Клиент", createdAt: NOW3 - 10*DAY, ...o }],
+    productions: prod ? [{ objectId:"o1", ...prod }] : [],
+    contracts: [], estimates: [], financeTx: [],
+  }, { period:"all", now: NOW3 }).dataQuality.gaps;
+  const cnt = (gaps, key) => (gaps.find(g => g.key === key) || { count: 0 }).count;
+
+  it("ловит пустой телефон и пустой адрес", () => {
+    const g = mk({ status:"approval" });
+    expect(cnt(g, "clientPhone")).toBe(1);
+    expect(cnt(g, "objectAddress")).toBe(1);
+  });
+
+  it("заполненные контакты не показывает", () => {
+    const g = mk({ status:"approval", clientPhone:"+7 777 123 45 67", address:"Абая 10" });
+    expect(cnt(g, "clientPhone")).toBe(0);
+    expect(cnt(g, "objectAddress")).toBe(0);
+  });
+
+  it("мусор вместо телефона считается пустым", () => {
+    expect(cnt(mk({ status:"approval", clientPhone:"—" }), "clientPhone")).toBe(1);
+    expect(cnt(mk({ status:"approval", clientPhone:"+7 77" }), "clientPhone")).toBe(1);
+  });
+
+  it("по сданным, расторгнутым, архивным и отказам не ругается", () => {
+    for (const s of ["done", "cancel", "archive", "refuse"]) {
+      expect(cnt(mk({ status:s }), "clientPhone")).toBe(0);
+      expect(cnt(mk({ status:s }), "objectAddress")).toBe(0);
+    }
+  });
+
+  it("статус из карточки производства тоже закрывает объект от проверки", () => {
+    expect(cnt(mk({ status:"work" }, { prodStatus:"done" }), "clientPhone")).toBe(0);
+    expect(cnt(mk({ status:"archive" }, { prodStatus:"active" }), "clientPhone")).toBe(1);
+  });
+});
