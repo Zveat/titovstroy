@@ -815,3 +815,48 @@ describe("«подписано за период» — одно число на 
     expect(a.sales.avgCheck).toBeNull();
   });
 });
+
+// Опечатка в дате не ломает ничего заметно: объект просто уезжает в чужой месяц и
+// тихо портит там «Подписано» и средний чек. Эти проверки ловят её сами.
+describe("качество данных — даты, которые противоречат друг другу", () => {
+  const AUG = new Date("2026-08-01T12:00:00Z").getTime();
+  const day = (y, m, d) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
+  // Пустые пробелы в результат не попадают вовсе — значит «нет строки» и есть «0».
+  const gap = (data, key) => buildAnalytics(data, { period: "month", now: AUG })
+    .dataQuality.gaps.find(g => g.key === key) || { count: 0, list: [] };
+  const one = (prod, obj = {}) => ({
+    objects: [{ id: "x", clientName: "Объект", status: "signed", createdAt: Date.UTC(2026, 3, 1), ...obj }],
+    productions: [{ objectId: "x", prodStatus: "active", ...prod }],
+    contracts: [], estimates: [], financeTx: [],
+  });
+
+  it("дата продажи в будущем", () => {
+    expect(gap(one({ saleDate: day(2026, 7, 8) }), "saleFuture").count).toBe(1);
+    expect(gap(one({ saleDate: day(2026, 7, 1) }), "saleFuture").count).toBe(0);  // сегодня — не будущее
+    expect(gap(one({ saleDate: day(2026, 6, 8) }), "saleFuture").count).toBe(0);
+  });
+
+  it("вышли на объект раньше, чем подписали", () => {
+    const bad = gap(one({ saleDate: day(2026, 7, 8), startDate: day(2026, 3, 8) }), "startBeforeSale");
+    expect(bad.count).toBe(1);
+    expect(bad.list[0].name).toBe("Объект");
+    expect(gap(one({ saleDate: day(2026, 3, 8), startDate: day(2026, 4, 1) }), "startBeforeSale").count).toBe(0);
+    // Пустая дата — это другой пробел (saleDate), здесь не ругаемся.
+    expect(gap(one({ startDate: day(2026, 4, 1) }), "startBeforeSale").count).toBe(0);
+  });
+
+  it("сдали раньше, чем вышли на объект", () => {
+    expect(gap(one({ startDate: day(2026, 2, 26), factEndDate: day(2026, 1, 28) }), "endBeforeStart").count).toBe(1);
+    expect(gap(one({ startDate: day(2026, 1, 28), factEndDate: day(2026, 2, 26) }), "endBeforeStart").count).toBe(0);
+  });
+
+  it("в архиве, но производство активно — объект всё равно считается рабочим", () => {
+    const data = one({ prodStatus: "active" }, { status: "archive" });
+    expect(gap(data, "archiveActive").count).toBe(1);
+    // и это не выдумка: он действительно попадает в «Сейчас в работе»
+    const a = buildAnalytics(data, { period: "month", now: AUG });
+    expect(a.funnels.production.current.find(r => r.label === "Сейчас в работе").count).toBe(1);
+    // архив с завершённым производством к этому пробелу отношения не имеет
+    expect(gap(one({ prodStatus: "done" }, { status: "archive" }), "archiveActive").count).toBe(0);
+  });
+});

@@ -923,7 +923,10 @@ function buildQuality(idx, { now }) {
 
 // Качество данных: почему показатели бывают пустыми. Не считает бизнес — считает,
 // насколько заполнена база. Одновременно это рабочий список «что дозаполнить».
-function buildDataQuality(idx, financeTx, resolveManager) {
+function buildDataQuality(idx, financeTx, resolveManager, now = Date.now()) {
+  // Конец СЕГОДНЯШНЕГО дня: дата, поставленная сегодня, будущей не считается.
+  const nd = new Date(now);
+  const endOfToday = Date.UTC(nd.getUTCFullYear(), nd.getUTCMonth(), nd.getUTCDate() + 1) - 1;
   const { liveObjects, objectValue, prodByObject, prodDuplicates, contractByObject } = idx;
   const active = liveObjects.filter(o => !["archive", "refuse"].includes(statusOf(o, prodByObject)));
   const signed = liveObjects.filter(o => ["signed", "work", "paused", "done"].includes(statusOf(o, prodByObject)));
@@ -952,6 +955,34 @@ function buildDataQuality(idx, financeTx, resolveManager) {
     { key: "factEnd", label: "Выполнен без даты окончания",
       items: liveObjects.filter(o => statusOf(o, prodByObject) === "done"
         && !ts(prodByObject.get(o.id)?.factEndDate)) },
+    // ── ДАТЫ, КОТОРЫЕ ПРОТИВОРЕЧАТ ДРУГ ДРУГУ ───────────────────────────────
+    // Опечатка в дате не ломает ничего заметно: объект просто уезжает в чужой
+    // месяц и тихо портит там и «Подписано», и средний чек. Ловим сами.
+    { key: "saleFuture", label: "Дата продажи в будущем",
+      items: signed.filter(o => {
+        const t = signedAtOf(o, prodByObject, contractByObject);
+        return t && t > endOfToday;
+      }) },
+    // Выйти на объект раньше, чем продали, нельзя. Обычно это либо опечатка в дате
+    // продажи, либо в поле старта лежит на самом деле дата продажи.
+    { key: "startBeforeSale", label: "Вышли на объект раньше, чем подписали",
+      items: signed.filter(o => {
+        const sale = signedAtOf(o, prodByObject, contractByObject);
+        const start = ts(prodByObject.get(o.id)?.startDate);
+        return sale && start && start < sale;
+      }) },
+    { key: "endBeforeStart", label: "Сдали раньше, чем вышли на объект",
+      items: liveObjects.filter(o => {
+        const start = ts(prodByObject.get(o.id)?.startDate);
+        const end = ts(prodByObject.get(o.id)?.factEndDate);
+        return start && end && end < start;
+      }) },
+    // Объект убран в архив, но карточка производства осталась активной. Статус
+    // производства ПЕРЕВЕШИВАЕТ статус объекта, поэтому такой объект everywhere
+    // считается рабочим: сидит в «Сейчас в работе» и тянет за собой суммы.
+    { key: "archiveActive", label: "В архиве, но производство активно",
+      items: liveObjects.filter(o => o.status === "archive"
+        && ["work", "paused"].includes(statusOf(o, prodByObject))) },
     // Дубль карточки производства: аналитика берёт одну (самую свежую), поэтому
     // правки, внесённые во вторую, в цифры не попадут. Это надо чинить руками.
     { key: "prodDup", label: "Несколько карточек производства",
@@ -1124,7 +1155,7 @@ export function buildAnalytics(data = {}, options = {}) {
       .filter(r => (current.backlog.closingThisMonthIds || []).includes(r.id))
       .reduce((s, r) => s + r.value, 0),
   });
-  current.dataQuality = buildDataQuality(idx, financeTx, resolveManager);
+  current.dataQuality = buildDataQuality(idx, financeTx, resolveManager, now);
   current.trend = buildTrend(idx, financeTx, now);
   current.funnels = buildFunnels(idx, bounds, period, manager, resolveManager, current.production);
 
