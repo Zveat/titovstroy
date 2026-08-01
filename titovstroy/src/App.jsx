@@ -4689,8 +4689,26 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
           const fields = isYur
             ? [["ФИО / Название","name"],["Телефон","phone"],["Адрес","address"],["БИН","iin"],["Директор (полностью)","director"],["Директор (кратко)","directorShort"],["Банк","bank"],["БИК","bik"],["ИИК (счёт)","account"],["Почта","email"]]
             : [["ФИО","name"],["Телефон","phone"],["Адрес","address"],["ИИН","iin"],["Документ (уд. личности)","doc"]];
+          // Реквизиты, без которых договор печатается с прочерками «_______». Раньше это
+          // всплывало только на бумаге: подписывать едешь, а в договоре пустое место.
+          // Список ровно тот, что подставляется в шаблон (см. генератор договора).
+          const required = isYur
+            ? [["ФИО / Название","name"],["Телефон","phone"],["Адрес","address"],["БИН","iin"],["Директор (полностью)","director"]]
+            : [["ФИО","name"],["Телефон","phone"],["Адрес","address"],["ИИН","iin"],["Документ (уд. личности)","doc"]];
+          const missing = required.filter(([,f])=>!String(cl[f]||"").trim()).map(([l])=>l);
           return (
             <div style={{marginTop:8,padding:"12px 14px",background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              {missing.length>0 && (
+                <div style={{gridColumn:"1 / -1",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 12px"}}>
+                  <div style={{fontSize:12.5,fontWeight:800,color:"#b91c1c",marginBottom:4}}>
+                    ⚠️ Не заполнены реквизиты клиента — в договоре встанут прочерки
+                  </div>
+                  <div style={{fontSize:11.5,color:"#b91c1c",lineHeight:1.5}}>{missing.join(" · ")}</div>
+                  <div style={{fontSize:10.5,color:"#94a3b8",marginTop:5}}>
+                    Заполните поля ниже — они сразу уйдут в карточку клиента и в договор.
+                  </div>
+                </div>
+              )}
               <div>
                 <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Тип</div>
                 <select className="fi" value={cl.type||"физ"} onChange={e=>updCl({type:e.target.value})}>
@@ -15310,9 +15328,17 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         const onClickStatus = () => {
                           if (isSigned && !isCur) {
                             const hasFp = finProjectsRef.current.some(p=>p.objectId===obj.id) || productionsRef.current.some(p=>p.objectId===obj.id);
-                            const msg = hasFp
+                            // К моменту подписания телефон и адрес обязаны быть: по ним звонят,
+                            // на них едут и они попадают в договор. Не блокируем — бывает, что
+                            // данные дозаполняют следом, — но говорим вслух, пока не поздно.
+                            const missing = [
+                              String(obj.clientPhone || "").replace(/\D/g, "").length < 6 ? "телефон клиента" : "",
+                              String(obj.address || "").trim() ? "" : "адрес объекта",
+                            ].filter(Boolean);
+                            const warn = missing.length ? `\n\n⚠️ Не заполнено: ${missing.join(", ")}. Эти данные нужны для договора и для связи с клиентом.` : "";
+                            const msg = (hasFp
                               ? "Перевести объект в статус «Договор подписан»?"
-                              : "Перевести объект в статус «Договор подписан»?\n\nБудут созданы финансовый проект (раздел «Финансы») и карточка производства для этого объекта.";
+                              : "Перевести объект в статус «Договор подписан»?\n\nБудут созданы финансовый проект (раздел «Финансы») и карточка производства для этого объекта.") + warn;
                             if (!window.confirm(msg)) return;
                           }
                           saveObjField(obj,{status:s.key});
@@ -16099,6 +16125,18 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 onPdf={(withStamp)=>{
                   const cl = contractClients.find(x=>x.id===currentContract.clientId);
                   const ca = contragents.find(x=>x.id===currentContract.contragentId);
+                  // Момент истины: дальше договор уходит на печать. Пустые реквизиты
+                  // превращаются в «___________» уже на бумаге, и это выясняется у клиента.
+                  if (!cl) {
+                    if (!window.confirm("Клиент не выбран — в договоре все его данные будут прочерками.\n\nВсё равно сформировать?")) return;
+                  } else {
+                    const isYur = cl.type === "юр";
+                    const req = isYur
+                      ? [["ФИО / Название","name"],["Телефон","phone"],["Адрес","address"],["БИН","iin"],["Директор (полностью)","director"]]
+                      : [["ФИО","name"],["Телефон","phone"],["Адрес","address"],["ИИН","iin"],["Документ (уд. личности)","doc"]];
+                    const miss = req.filter(([,f]) => !String(cl[f] || "").trim()).map(([l]) => l);
+                    if (miss.length && !window.confirm(`В договоре останутся прочерки — у клиента не заполнено:\n\n• ${miss.join("\n• ")}\n\nВсё равно сформировать?`)) return;
+                  }
                   generateContractPdf(currentContract, cl, ca, withStamp);
                 }}
                 onSamplePdf={()=>generateContractSamplePdf(currentContract)}
