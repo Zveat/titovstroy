@@ -12,6 +12,8 @@ import { MasterCrmButton, MasterCrmDatabase, MasterCrmEditor } from "./masters/M
 import { interactionsForContact, masterSourceKey, normalizeMasterCrm } from "./masters/masterCrm.js";
 import { EstimateSuggestions, EstimateSuggestionRulesEditor } from "./estimate/EstimateSuggestions.jsx";
 import { AnalyticsBlocks } from "./analytics/AnalyticsBlocks.jsx";
+import { PayrollModule } from "./payroll/PayrollModule.jsx";
+import { STAFF_KEY, STAFF_BACKUPS_KEY, PAYROLL_MAP_KEY } from "./payroll/payrollModel.js";
 import { Dashboard } from "./analytics/Dashboard.jsx";
 import { buildAnalytics, makeManagerResolver, REFUSE_REASONS } from "./analytics/analyticsModel.js";
 import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
@@ -6154,6 +6156,11 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   // Подрядчики (рабочие) и договоры подряда с ними
   const [workers, setWorkers] = useState([]);
   const workersRef = useRef([]);
+  // ФОТ: справочник сотрудников и таблица соответствий «подкатегория → сотрудник».
+  const [staff, setStaff] = useState([]);
+  const staffRef = useRef([]);
+  const [payrollMap, setPayrollMap] = useState({});
+  const payrollMapRef = useRef({});
   useEffect(() => { workersRef.current = workers; }, [workers]);
   const [podryads, setPodryads] = useState([]);
   const podryadsRef = useRef([]);
@@ -6803,7 +6810,14 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     let ok = true;
     let prodOk = true;
     try {
-      const [cr, cl, ca, ob, pd, rp, wk, py] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY), storage.getResult(OBJECTS_KEY), storage.getResult(PRODUCTIONS_KEY), storage.getResult(REPORTS_KEY), storage.getResult(WORKERS_KEY), storage.getResult(PODRYADS_KEY)]);
+      const [cr, cl, ca, ob, pd, rp, wk, py, stf, pmap] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY), storage.getResult(OBJECTS_KEY), storage.getResult(PRODUCTIONS_KEY), storage.getResult(REPORTS_KEY), storage.getResult(WORKERS_KEY), storage.getResult(PODRYADS_KEY), storage.getResult(STAFF_KEY), storage.getResult(PAYROLL_MAP_KEY)]);
+      // ФОТ. Раздел новый, у большинства баз этих ключей ещё нет — пустой ответ здесь
+      // норма и НЕ должен ронять общий флаг загрузки ok (иначе заблокировалось бы
+      // сохранение договоров и объектов из-за отсутствующего справочника сотрудников).
+      if (stf.status === "found" && stf.value) { try { const p = JSON.parse(stf.value); if (Array.isArray(p)) { setStaff(p); staffRef.current = p; } } catch {} }
+      else if (stf.status === "empty") { setStaff([]); staffRef.current = []; }
+      if (pmap.status === "found" && pmap.value) { try { const p = JSON.parse(pmap.value); if (p && typeof p === "object" && !Array.isArray(p)) { setPayrollMap(p); payrollMapRef.current = p; } } catch {} }
+      else if (pmap.status === "empty") { setPayrollMap({}); payrollMapRef.current = {}; }
       // Договоры
       if (cr.status === "found" && cr.value) { try { const p = JSON.parse(cr.value); if (Array.isArray(p)) { setContracts(p); contractsRef.current = p; } } catch {} }
       else if (cr.status === "empty") { setContracts([]); contractsRef.current = []; }
@@ -7198,6 +7212,33 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     // Акты/АВР — документы под подпись, их появление и правки должны быть видны.
     _auditListDiff("report", reportsRef.current, list, x => `${x?.type || "Акт"} ${x?.number || ""}`.trim());
     return await saveListProtected(REPORTS_KEY, REPORTS_BACKUPS_KEY, list, (fl)=>{ reportsRef.current = fl; setReports(fl); }, { loadedRef: _contractsLoaded, ...opts });
+  };
+  // ── ФОТ (модуль src/payroll) ──
+  // Только ДОБАВЛЕНИЕ: свои ключи, ничего существующего не трогаем. Справочник идёт
+  // через тот же saveListProtected, что и остальные списки, — мердж, бэкапы, защита
+  // «пусто поверх» работают как везде.
+  const saveStaff = async (list, opts = {}) => {
+    _auditListDiff("staff", staffRef.current, list, x => x?.name || x?.position || "Сотрудник");
+    return await saveListProtected(STAFF_KEY, STAFF_BACKUPS_KEY, list, (fl)=>{ staffRef.current = fl; setStaff(fl); }, { loadedRef: _contractsLoaded, ...opts });
+  };
+  // Соответствия «подкатегория → сотрудник» — это объект, а не список, поэтому пишем
+  // напрямую. Сами операции при этом не меняются вообще.
+  const savePayrollMap = async (map) => {
+    const prev = payrollMapRef.current;
+    payrollMapRef.current = map; setPayrollMap(map);
+    try {
+      const res = await storage.set(PAYROLL_MAP_KEY, JSON.stringify(map || {}));
+      if (res && res.fbOk === false) { setCloudError(true); }
+      else _clearCloudErrorIfAllClean();
+      logChange(currentUser, { entity: "staff", label: "Соответствия ФОТ", action: "изменил",
+        field: "подкатегории", old: `${Object.keys(prev || {}).length} шт`, new: `${Object.keys(map || {}).length} шт` });
+      return true;
+    } catch (e) {
+      console.error(e); setCloudError(true);
+      payrollMapRef.current = prev; setPayrollMap(prev);
+      window.alert("Соответствия не сохранены: облако не подтвердило запись.");
+      return false;
+    }
   };
   const saveWorkers = async (list, opts = {}) => {
     _auditListDiff("worker", workersRef.current, list, x => x?.name || x?.phone || "Работник");
@@ -12990,13 +13031,13 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 
             {/* Табы */}
             <div className="fin-tabs" style={{display:"flex",gap:6,marginBottom:18,flexWrap:"wrap"}}>
-              {[["dashboard","📊 Дашборд"],["dds","💸 ДДС месяц"],["opu","📈 ОПУ месяц"],["balance","⚖️ Баланс"],["ops","📋 Операции"],["projects","🏗 Проекты"],...(canFinanceDirectories?[ ["ref","⚙️ Справочник"] ]:[])].map(([k,l])=>(
+              {[["dashboard","📊 Дашборд"],["dds","💸 ДДС месяц"],["opu","📈 ОПУ месяц"],["balance","⚖️ Баланс"],["ops","📋 Операции"],["projects","🏗 Проекты"],["payroll","👥 ФОТ"],...(canFinanceDirectories?[ ["ref","⚙️ Справочник"] ]:[])].map(([k,l])=>(
                 <button key={k} onClick={()=>navigate(undefined, k)} style={{fontSize:13,fontWeight:700,padding:"9px 16px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(financeTab===k?"#2563eb":"#e2e8f0"),background:financeTab===k?"#2563eb":"#fff",color:financeTab===k?"#fff":"#64748b"}}>{l}</button>
               ))}
             </div>
 
             {/* Фильтр периода (для дашборда и операций) */}
-            {financeTab!=="ref" && financeTab!=="projects" && (
+            {financeTab!=="ref" && financeTab!=="projects" && financeTab!=="payroll" && (
               <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap",alignItems:"center"}}>
                 {PERIODS.map(([k,l])=>(
                   <button key={k} onClick={()=>setFinPeriod(k)} style={{fontSize:12,fontWeight:600,padding:"6px 13px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(finPeriod===k?"#2563eb":"#e2e8f0"),background:finPeriod===k?"#eff6ff":"#fff",color:finPeriod===k?"#2563eb":"#94a3b8"}}>{l}</button>
@@ -13883,6 +13924,22 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             </>)}
 
             {/* ───── ПРОЕКТЫ ───── */}
+            {/* ФОТ — отдельный модуль src/payroll. App только отдаёт данные и сейверы. */}
+            {financeTab==="payroll" && (
+              <PayrollModule
+                financeTx={financeTx}
+                workers={workers}
+                users={allUsers}
+                staff={staff}
+                saveStaff={saveStaff}
+                subcategoryMap={payrollMap}
+                saveSubcategoryMap={savePayrollMap}
+                fmt={fmt}
+                genId={genId}
+                readOnly={!editorTab || currentPermissions.finance !== "all"}
+              />
+            )}
+
             {financeTab==="projects" && (()=>{
               const projStats = {};
               for (const t of financeTx) {
@@ -14350,6 +14407,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 const tx={ id:m.id||genId(), type:m.type, date:ts, amount:amt, account:m.account, accountTo:m.type==="transfer"?m.accountTo:undefined,
                   category:m.type==="transfer"?"Перевод":m.category, subcategory:m.type==="transfer"?"":m.subcategory, note:m.note||"", contractNo:m.contractNo||"",
                   recipient:m.recipient||"",
+                  // Получатель — только у расхода и только если выбран. Иначе поля в записи
+                  // просто нет: старые операции и операции без получателя остаются как были.
+                  payee:(m.type==="expense" && m.payee && m.payee.id) ? { kind:m.payee.kind||"staff", id:m.payee.id } : undefined,
                   isAdvance:m.type==="income"?!!m.isAdvance:false,
                   included:m.included!==false, opuMonth:m.opuMonth, createdAt:m.createdAt||Date.now(), createdBy:m.createdBy||currentUser.name, createdById:m.createdById||currentUser.id, updatedAt:Date.now() };
                 const isNew = !m.id;
@@ -14503,6 +14563,32 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         <div>
                           <div style={{fontSize:11,color:"#d97706",marginBottom:4,fontWeight:700}}>👤 Получатель (учредитель)</div>
                           <input className="fi" value={m.recipient||""} onChange={e=>set("recipient",e.target.value)} placeholder="Имя учредителя"/>
+                        </div>
+                      )}
+                      {/* КОМУ УШЛИ ДЕНЬГИ. Поле необязательное и только для расхода: приход
+                          и переводы к ФОТ отношения не имеют. Раньше человек жил в НАЗВАНИИ
+                          подкатегории («ФОТ РОП»), поэтому на каждого нового сотрудника
+                          заводилась новая подкатегория, а 24 млн подрядчикам шли одной
+                          строкой на всех. Операции без получателя работают как раньше. */}
+                      {m.type==="expense" && (staff.length > 0 || workers.length > 0) && (
+                        <div>
+                          <div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Получатель <span style={{color:"#cbd5e1"}}>· необязательно</span></div>
+                          <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+                            <select className="fi" style={{width:130,flexShrink:0}}
+                              value={m.payee?.kind || "staff"}
+                              onChange={e=>set("payee", { kind:e.target.value, id:"" })}>
+                              <option value="staff">Сотрудник</option>
+                              <option value="worker">Подрядчик</option>
+                            </select>
+                            <select className="fi" style={{flex:1,minWidth:150}}
+                              value={m.payee?.id || ""}
+                              onChange={e=>set("payee", e.target.value ? { kind:m.payee?.kind || "staff", id:e.target.value } : null)}>
+                              <option value="">— не указан —</option>
+                              {((m.payee?.kind === "worker" ? workers : staff) || [])
+                                .filter(x => x && x.id && (x.status !== "fired"))
+                                .map(x => <option key={x.id} value={x.id}>{x.name || "Без имени"}{x.position ? ` · ${x.position}` : ""}</option>)}
+                            </select>
+                          </div>
                         </div>
                       )}
                       <div><div style={{fontSize:11,color:"#94a3b8",marginBottom:4}}>Комментарий</div><input className="fi" value={m.note} onChange={e=>set("note",e.target.value)} placeholder="комментарий"/></div>
