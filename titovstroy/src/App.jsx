@@ -6124,6 +6124,11 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   }, [currentPermissions.masters]);
   const _contractsLoaded = useRef(false);
   const _productionsLoaded = useRef(false); // отдельно от _contractsLoaded: productions грузится в том же запросе, но может не долететь, пока остальное — долетит
+  // ФОТ — тоже ОТДЕЛЬНЫЙ флаг. На _contractsLoaded завязывать нельзя: он падает в false,
+  // если не долетели договоры/объекты/клиенты, и тогда сохранение сотрудника молча
+  // блокировалось причиной «раздел ещё не догрузился» — при том, что справочник ФОТ
+  // прочитался нормально. Владелец видел это как «форма добавляет через раз».
+  const _payrollLoaded = useRef(false);
   // Флаги загрузки — это refs (не вызывают ре-рендер). Авто-синки (этапы←сметы, бюджет←договоры)
   // зависят по массивам [estimates]/[contracts], поэтому если данные, от которых зависит ГАРД
   // (productions/finance/contracts), долетают ПОЗЖЕ, чем в последний раз менялся массив-зависимость,
@@ -6818,6 +6823,9 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       // ФОТ. Раздел новый, у большинства баз этих ключей ещё нет — пустой ответ здесь
       // норма и НЕ должен ронять общий флаг загрузки ok (иначе заблокировалось бы
       // сохранение договоров и объектов из-за отсутствующего справочника сотрудников).
+      // Пустой ключ — нормальный исход (раздел новый), недоступный — нет: только он
+      // должен запрещать запись, чтобы не затереть облачный справочник пустым списком.
+      _payrollLoaded.current = stf.status !== "unavailable" && acc.status !== "unavailable";
       if (stf.status === "found" && stf.value) { try { const p = JSON.parse(stf.value); if (Array.isArray(p)) { setStaff(p); staffRef.current = p; } } catch {} }
       else if (stf.status === "empty") { setStaff([]); staffRef.current = []; }
       if (pmap.status === "found" && pmap.value) { try { const p = JSON.parse(pmap.value); if (p && typeof p === "object" && !Array.isArray(p)) { setPayrollMap(p); payrollMapRef.current = p; } } catch {} }
@@ -7225,14 +7233,14 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   // «пусто поверх» работают как везде.
   const saveStaff = async (list, opts = {}) => {
     _auditListDiff("staff", staffRef.current, list, x => x?.name || x?.position || "Сотрудник");
-    return await saveListProtected(STAFF_KEY, STAFF_BACKUPS_KEY, list, (fl)=>{ staffRef.current = fl; setStaff(fl); }, { loadedRef: _contractsLoaded, ...opts });
+    return await saveListProtected(STAFF_KEY, STAFF_BACKUPS_KEY, list, (fl)=>{ staffRef.current = fl; setStaff(fl); }, { loadedRef: _payrollLoaded, ...opts });
   };
   // Начисления — обычный список со своим ключом: тот же мердж по id, бэкапы и защита
   // «пусто поверх», что у остальных списков. Финансовые операции не трогаются.
   const saveAccruals = async (list, opts = {}) => {
     _auditListDiff("staff", accrualsRef.current, list,
       x => `Начисление ${x?.month || ""} ${x?.amount ? `${x.amount} ₸` : ""}`.trim());
-    return await saveListProtected(ACCRUALS_KEY, ACCRUALS_BACKUPS_KEY, list, (fl)=>{ accrualsRef.current = fl; setAccruals(fl); }, { loadedRef: _contractsLoaded, ...opts });
+    return await saveListProtected(ACCRUALS_KEY, ACCRUALS_BACKUPS_KEY, list, (fl)=>{ accrualsRef.current = fl; setAccruals(fl); }, { loadedRef: _payrollLoaded, ...opts });
   };
   // Соответствия «подкатегория → сотрудник» — это объект, а не список, поэтому пишем
   // напрямую. Сами операции при этом не меняются вообще.
