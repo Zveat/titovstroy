@@ -13956,6 +13956,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 productions={productions}
                 finProjects={finProjects}
                 contracts={contracts}
+                saveFinanceTx={saveFinanceTx}
                 fmt={fmt}
                 genId={genId}
                 readOnly={!editorTab || !financeWritable}
