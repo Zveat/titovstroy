@@ -26,6 +26,16 @@ describe("схема мотивации", () => {
       .toEqual(["Сергей Ш.", "Сергей Штанько"]);
     expect(normalizeScheme({}).managerNames).toEqual([]);
   });
+  it("сырой ввод разбирается при сохранении, а не на каждом нажатии", () => {
+    // В форме держим набранное как есть: запятая и пробел в конце нужны, чтобы
+    // начать второй вариант написания. Разбираем один раз, здесь.
+    expect(normalizeScheme({ managerNames: "Сергей Штанько, Сергей Ш., " }).managerNames)
+      .toEqual(["Сергей Штанько", "Сергей Ш."]);
+    expect(normalizeScheme({ managerNames: "  ,  " }).managerNames).toEqual([]);
+    expect(normalizeScheme({ salary: "300 000 " }).salary).toBe(300000);
+    expect(normalizeScheme({ percentRate: "5," }).percentRate).toBe(5);
+  });
+
   it("пустая схема видна как пустая", () => {
     expect(schemeIsEmpty({})).toBe(true);
     expect(schemeIsEmpty({ salary: 1 })).toBe(false);

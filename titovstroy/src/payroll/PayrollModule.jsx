@@ -309,8 +309,16 @@ function StaffTab({ staff, users, report, money, genId, readOnly, saveStaff }) {
   const [busy, setBusy] = useState(false);
   const paidOf = (id) => (report.rows.find(r => r.kind === "staff" && r.id === id) || {}).total || 0;
 
+  const isEdit = !!draft && staff.some(s => s.id === draft.id);
   const startNew = () => { setErr(""); setDraft({ ...normalizeStaff({ id: genId(), status: "active" }), scheme: normalizeScheme({}) }); };
-  const setScheme = (patch) => setDraft(d => ({ ...d, scheme: { ...normalizeScheme(d.scheme), ...patch } }));
+  // ВАЖНО: в черновике держим то, что человек НАБРАЛ, без нормализации. Раньше поле
+  // прогонялось через normalizeScheme на каждом нажатии, и запятая с пробелом в конце
+  // срезались мгновенно — второй вариант написания набрать было физически нельзя.
+  // Приводим к числам и спискам один раз, при сохранении.
+  const setScheme = (patch) => setDraft(d => ({ ...d, scheme: { ...(d.scheme || {}), ...patch } }));
+  const dsc = draft?.scheme || {};                       // схема В ЧЕРНОВИКЕ, как набрана
+  const rawNum = (v) => (v === 0 || v === undefined || v === null) ? "" : String(v);
+  const rawNames = Array.isArray(dsc.managerNames) ? dsc.managerNames.join(", ") : String(dsc.managerNames ?? "");
 
   // Форма НЕ закрывается, пока запись не подтверждена. Раньше результат сейва не
   // проверялся вообще: при заблокированной записи (другая вкладка, недогруженный
@@ -343,11 +351,25 @@ function StaffTab({ staff, users, report, money, genId, readOnly, saveStaff }) {
           <div style={{ fontSize: 12, color: "#94a3b8" }}>Кто получает зарплату. Подрядчики — в своём справочнике, в «Админке».</div>
         </div>
         <span style={{ flex: 1 }} />
-        {!readOnly && <button onClick={startNew} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 9, padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ Сотрудник</button>}
+        {/* Пока форма открыта, этой кнопки НЕТ. Она начинает новую пустую запись, то есть
+            стирает введённое, — а выглядит как «добавить». Владелец заполнял форму, жал
+            её вместо «Сохранить» и терял данные. */}
+        {!readOnly && !draft && (
+          <button onClick={startNew} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 9, padding: "8px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ Сотрудник</button>
+        )}
       </div>
 
       {draft && (
-        <div style={{ ...card, borderColor: "#bfdbfe", background: "#f8fbff" }}>
+        <div style={{ ...card, borderColor: "#bfdbfe", background: "#f8fbff" }}
+          onKeyDown={e => { if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") { e.preventDefault(); save(); } }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>
+              {isEdit ? `Изменение: ${draft.name || "без имени"}` : "Новый сотрудник"}
+            </div>
+            <div style={{ fontSize: 11.5, color: "#64748b" }}>
+              Заполните и нажмите «{isEdit ? "Сохранить изменения" : "Добавить в справочник"}» внизу формы.
+            </div>
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 11 }}>
             <div><span style={lab}>Имя</span>
               <input style={inp} value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} placeholder="Фамилия Имя" /></div>
@@ -377,24 +399,24 @@ function StaffTab({ staff, users, report, money, genId, readOnly, saveStaff }) {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 11 }}>
               <div><span style={lab}>Оклад, ₸ в месяц</span>
-                <input style={inp} inputMode="numeric" value={normalizeScheme(draft.scheme).salary || ""}
+                <input style={inp} inputMode="numeric" value={rawNum(dsc.salary)}
                   onChange={e => setScheme({ salary: e.target.value })} placeholder="0" /></div>
               <div><span style={lab}>% с объекта</span>
-                <input style={inp} inputMode="decimal" value={normalizeScheme(draft.scheme).percentRate || ""}
+                <input style={inp} inputMode="decimal" value={rawNum(dsc.percentRate)}
                   onChange={e => setScheme({ percentRate: e.target.value })} placeholder="напр. 5" /></div>
               <div><span style={lab}>Когда начисляется процент</span>
-                <select style={inp} value={normalizeScheme(draft.scheme).percentTrigger}
+                <select style={inp} value={dsc.percentTrigger === "signed" ? "signed" : "handover"}
                   onChange={e => setScheme({ percentTrigger: e.target.value })}>
                   {PERCENT_TRIGGERS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
                 </select></div>
               <div><span style={lab}>За единицу, ₸</span>
-                <input style={inp} inputMode="numeric" value={normalizeScheme(draft.scheme).pieceRate || ""}
+                <input style={inp} inputMode="numeric" value={rawNum(dsc.pieceRate)}
                   onChange={e => setScheme({ pieceRate: e.target.value })} placeholder="напр. 3000 за замер" /></div>
               <div><span style={lab}>Что за единица</span>
-                <input style={inp} value={normalizeScheme(draft.scheme).pieceLabel}
+                <input style={inp} value={dsc.pieceLabel ?? ""}
                   onChange={e => setScheme({ pieceLabel: e.target.value })} placeholder="целевой замер" /></div>
               <div style={{ gridColumn: "1 / -1" }}><span style={lab}>Как записан в поле «менеджер» на объектах</span>
-                <input style={inp} value={normalizeScheme(draft.scheme).managerNames.join(", ")}
+                <input style={inp} value={rawNames}
                   onChange={e => setScheme({ managerNames: e.target.value })}
                   placeholder="Сергей Штанько, Сергей Ш." /></div>
             </div>
@@ -410,7 +432,9 @@ function StaffTab({ staff, users, report, money, genId, readOnly, saveStaff }) {
           )}
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
             <button onClick={() => { setDraft(null); setErr(""); }} style={{ background: "#f3f4f6", color: "#64748b", border: "none", borderRadius: 9, padding: "8px 15px", fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }}>Отмена</button>
-            <button onClick={save} disabled={busy} style={btnPrimary(!busy)}>{busy ? "Сохраняю…" : "Сохранить"}</button>
+            <button onClick={save} disabled={busy} style={{ ...btnPrimary(!busy), padding: "9px 22px" }}>
+              {busy ? "Сохраняю…" : isEdit ? "Сохранить изменения" : "➕ Добавить в справочник"}
+            </button>
           </div>
         </div>
       )}
