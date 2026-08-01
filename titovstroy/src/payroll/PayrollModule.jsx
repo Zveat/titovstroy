@@ -3,6 +3,10 @@ import {
   buildPayrollReport, buildStaffDetail, expenseSubcategoryTotals,
   normalizeStaff, staffStatusMeta, STAFF_STATUSES, monthLabel,
 } from "./payrollModel.js";
+import { normalizeScheme, PERCENT_TRIGGERS, schemeIsEmpty } from "./payrollAccruals.js";
+import { AccrualsTab } from "./PayrollAccrualsTab.jsx";
+import { BalanceTab } from "./PayrollBalanceTab.jsx";
+import { card, inp, lab, th, td, numCell, pill } from "./payrollUi.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ФОТ — раздел «кому сколько ушло».
@@ -16,23 +20,20 @@ import {
 //   fmt, genId, readOnly
 // ─────────────────────────────────────────────────────────────────────────────
 
-const card = { background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 16 };
-const inp = { border: "1px solid #e2e8f0", borderRadius: 9, padding: "8px 11px", fontSize: 12.5, fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
-const lab = { fontSize: 10.5, color: "#94a3b8", fontWeight: 600, marginBottom: 4, display: "block" };
-const th = { textAlign: "left", fontSize: 10, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", color: "#94a3b8", padding: "9px 12px", background: "#fafbfd", borderBottom: "1px solid #eef2f7", whiteSpace: "nowrap" };
-const td = { padding: "10px 12px", fontSize: 12.5, borderBottom: "1px solid #f4f7fb", verticalAlign: "middle" };
-const numCell = { ...td, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
-const pill = (color, bg) => ({ display: "inline-flex", alignItems: "center", gap: 5, borderRadius: 20, padding: "3px 9px", fontSize: 10.5, fontWeight: 800, color, background: bg, whiteSpace: "nowrap" });
-
 const TABS = [
-  { key: "report", label: "Кому сколько ушло" },
-  { key: "staff",  label: "Сотрудники" },
-  { key: "map",    label: "Разбор истории" },
+  { key: "report",   label: "Кому сколько ушло" },
+  { key: "accruals", label: "Начисления" },
+  { key: "balance",  label: "Долги" },
+  { key: "staff",    label: "Сотрудники" },
+  { key: "map",      label: "Разбор истории" },
 ];
 
 export function PayrollModule({
   financeTx = [], workers = [], users = [], staff = [],
   saveStaff, subcategoryMap = {}, saveSubcategoryMap,
+  // Начисления: свой список + справочные данные для расчёта бонусов. Всё только на чтение —
+  // объекты, производство и финпроекты этот раздел не меняет никогда.
+  accruals = [], saveAccruals, objects = [], productions = [], finProjects = [], contracts = [],
   fmt = (n) => Math.round(Number(n) || 0).toLocaleString("ru-RU"),
   genId = () => String(Date.now()) + Math.random().toString(36).slice(2, 8),
   readOnly = false,
@@ -75,6 +76,14 @@ export function PayrollModule({
       )}
       {tab === "report" && openPerson && (
         <PersonCard person={openPerson} detail={detail} money={money} onBack={() => setOpenPerson(null)} />
+      )}
+      {tab === "accruals" && (
+        <AccrualsTab staff={staff} accruals={accruals} objects={objects} productions={productions}
+          finProjects={finProjects} contracts={contracts} money={money} genId={genId}
+          readOnly={readOnly} saveAccruals={saveAccruals} />
+      )}
+      {tab === "balance" && (
+        <BalanceTab staff={staff} accruals={accruals} report={report} money={money} />
       )}
       {tab === "staff" && (
         <StaffTab staff={staff} users={users} report={report} money={money}
@@ -267,10 +276,12 @@ function StaffTab({ staff, users, report, money, genId, readOnly, saveStaff }) {
   const paidOf = (id) => (report.rows.find(r => r.kind === "staff" && r.id === id) || {}).total || 0;
   const commit = async (next) => { if (saveStaff) await saveStaff(next); };
 
-  const startNew = () => setDraft(normalizeStaff({ id: genId(), status: "active" }));
+  const startNew = () => setDraft({ ...normalizeStaff({ id: genId(), status: "active" }), scheme: normalizeScheme({}) });
+  const setScheme = (patch) => setDraft(d => ({ ...d, scheme: { ...normalizeScheme(d.scheme), ...patch } }));
   const save = async () => {
     if (!draft || !draft.name.trim()) { window.alert("Укажите имя сотрудника."); return; }
-    const rec = normalizeStaff({ ...draft, updatedAt: Date.now() });
+    // Схема мотивации живёт в записи сотрудника: отдельный ключ ради пяти чисел заводить незачем.
+    const rec = { ...normalizeStaff({ ...draft, updatedAt: Date.now() }), scheme: normalizeScheme(draft.scheme) };
     const exists = staff.some(s => s.id === rec.id);
     await commit(exists ? staff.map(s => s.id === rec.id ? rec : s) : [...staff, rec]);
     setDraft(null);
@@ -310,10 +321,46 @@ function StaffTab({ staff, users, report, money, genId, readOnly, saveStaff }) {
                 {STAFF_STATUSES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
               </select></div>
           </div>
-          <div style={{ fontSize: 11, color: "#94a3b8", margin: "9px 0 12px" }}>
+          <div style={{ fontSize: 11, color: "#94a3b8", margin: "9px 0 4px" }}>
             Учётная запись нужна, чтобы связать человека с полем «менеджер» на объектах. Без неё сотрудник просто получает выплаты.
           </div>
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+
+          {/* ── Мотивация ── */}
+          <div style={{ borderTop: "1px solid #e2e8f0", marginTop: 12, paddingTop: 12 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: "#0f172a", marginBottom: 3 }}>Мотивация</div>
+            <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 10 }}>
+              По этим настройкам считаются предложения к начислению. Ноль — значит такой части в схеме нет.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 11 }}>
+              <div><span style={lab}>Оклад, ₸ в месяц</span>
+                <input style={inp} inputMode="numeric" value={normalizeScheme(draft.scheme).salary || ""}
+                  onChange={e => setScheme({ salary: e.target.value })} placeholder="0" /></div>
+              <div><span style={lab}>% с объекта</span>
+                <input style={inp} inputMode="decimal" value={normalizeScheme(draft.scheme).percentRate || ""}
+                  onChange={e => setScheme({ percentRate: e.target.value })} placeholder="напр. 5" /></div>
+              <div><span style={lab}>Когда начисляется процент</span>
+                <select style={inp} value={normalizeScheme(draft.scheme).percentTrigger}
+                  onChange={e => setScheme({ percentTrigger: e.target.value })}>
+                  {PERCENT_TRIGGERS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+                </select></div>
+              <div><span style={lab}>За единицу, ₸</span>
+                <input style={inp} inputMode="numeric" value={normalizeScheme(draft.scheme).pieceRate || ""}
+                  onChange={e => setScheme({ pieceRate: e.target.value })} placeholder="напр. 3000 за замер" /></div>
+              <div><span style={lab}>Что за единица</span>
+                <input style={inp} value={normalizeScheme(draft.scheme).pieceLabel}
+                  onChange={e => setScheme({ pieceLabel: e.target.value })} placeholder="целевой замер" /></div>
+              <div style={{ gridColumn: "1 / -1" }}><span style={lab}>Как записан в поле «менеджер» на объектах</span>
+                <input style={inp} value={normalizeScheme(draft.scheme).managerNames.join(", ")}
+                  onChange={e => setScheme({ managerNames: e.target.value })}
+                  placeholder="Сергей Штанько, Сергей Ш." /></div>
+            </div>
+            <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 8 }}>
+              Через запятую — все написания, которые встречаются на объектах. Без этого процент
+              с объекта начислить не на кого: в объектах менеджер хранится строкой, а не ссылкой.
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
             <button onClick={() => setDraft(null)} style={{ background: "#f3f4f6", color: "#64748b", border: "none", borderRadius: 9, padding: "8px 15px", fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }}>Отмена</button>
             <button onClick={save} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 9, padding: "8px 18px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Сохранить</button>
           </div>
@@ -329,21 +376,33 @@ function StaffTab({ staff, users, report, money, genId, readOnly, saveStaff }) {
           <div style={{ overflowX: "auto" }}>
             <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 620 }}>
               <thead><tr>
-                <th style={th}>Сотрудник</th><th style={th}>Должность</th><th style={th}>Учётная запись</th>
+                <th style={th}>Сотрудник</th><th style={th}>Должность</th><th style={th}>Мотивация</th>
                 <th style={{ ...th, textAlign: "right" }}>Выплачено</th><th style={th}>Статус</th><th style={th}></th>
               </tr></thead>
               <tbody>
                 {staff.map(s => {
                   const u = users.find(x => x.id === s.userId);
                   const meta = staffStatusMeta(s.status);
+                  const sc = normalizeScheme(s.scheme);
                   return (
                     <tr key={s.id}>
                       <td style={td}>
                         <div style={{ fontWeight: 700, color: "#0f172a" }}>{s.name || "Без имени"}</div>
-                        {s.hiredAt && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 1 }}>с {new Date(s.hiredAt).toLocaleDateString("ru-RU")}</div>}
+                        <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 1 }}>
+                          {s.hiredAt ? `с ${new Date(s.hiredAt).toLocaleDateString("ru-RU")}` : ""}
+                          {u ? `${s.hiredAt ? " · " : ""}вход: ${u.role}` : ""}
+                        </div>
                       </td>
                       <td style={td}>{s.position || "—"}</td>
-                      <td style={td}>{u ? <span style={pill("#2563eb", "#eff6ff")}>{u.role}</span> : <span style={pill("#64748b", "#f1f5f9")}>нет входа</span>}</td>
+                      <td style={td}>
+                        {schemeIsEmpty(sc) ? <span style={pill("#94a3b8", "#f8fafc")}>не задана</span> : (
+                          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                            {sc.salary > 0 && <span style={pill("#2563eb", "#eff6ff")}>оклад {money(sc.salary)}</span>}
+                            {sc.percentRate > 0 && <span style={pill("#059669", "#ecfdf5")}>{sc.percentRate}% {sc.percentTrigger === "handover" ? "при сдаче" : "при подписании"}</span>}
+                            {sc.pieceRate > 0 && <span style={pill("#7c3aed", "#f5f3ff")}>{money(sc.pieceRate)} / {sc.pieceLabel}</span>}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ ...numCell, fontWeight: 700 }}>{paidOf(s.id) ? money(paidOf(s.id)) : "—"}</td>
                       <td style={td}><span style={pill(meta.color, meta.bg)}>{meta.label}</span></td>
                       <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>

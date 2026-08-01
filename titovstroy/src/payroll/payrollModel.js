@@ -48,6 +48,9 @@ export function normalizeStaff(raw = {}) {
     hiredAt: raw.hiredAt || "",
     status: raw.status === "fired" ? "fired" : "active",
     note: String(raw.note || "").trim(),
+    // Схема мотивации живёт здесь же, но разбирает её payrollAccruals — тут только
+    // проносим как есть, чтобы правка любого другого поля её не стёрла.
+    scheme: raw.scheme && typeof raw.scheme === "object" ? raw.scheme : {},
     updatedAt: raw.updatedAt || Date.now(),
   };
 }

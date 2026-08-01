@@ -165,4 +165,9 @@ describe("служебное", () => {
     expect(s.status).toBe("active");
     expect(normalizeStaff({ status: "fired" }).status).toBe("fired");
   });
+  it("схема мотивации переживает правку остальных полей", () => {
+    // Иначе смена должности стирала бы оклад и проценты.
+    expect(normalizeStaff({ name: "П", scheme: { salary: 300000 } }).scheme).toEqual({ salary: 300000 });
+    expect(normalizeStaff({}).scheme).toEqual({});
+  });
 });
