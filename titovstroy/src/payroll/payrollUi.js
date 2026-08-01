@@ -1,3 +1,5 @@
+import { saveFailReasonText } from "../utils.js";
+
 // Общие стили раздела ФОТ. Вынесены отдельно, чтобы вкладки лежали в своих файлах
 // и при этом выглядели одинаково — раньше константы жили внутри PayrollModule.jsx.
 
@@ -13,6 +15,26 @@ export const btnPrimary = (on = true) => ({
   background: on ? "#2563eb" : "#cbd5e1", color: "#fff", border: "none", borderRadius: 9,
   padding: "8px 18px", fontSize: 12.5, fontWeight: 700, cursor: on ? "pointer" : "default", fontFamily: "inherit",
 });
+// Единая обработка сохранения для всех вкладок раздела.
+// saveListProtected возвращает МАССИВ при успехе и undefined, когда запись заблокирована
+// (другая вкладка редактирует, раздел не догрузился, облако не подтвердило). Форма,
+// которая не проверяет результат, закрывается и молча теряет введённое — ровно на это
+// жаловался владелец: «нажимаю, а бывает добавляет, бывает нет».
+export async function runSave(saver, list, { requireCloud = true } = {}) {
+  if (typeof saver !== "function") return { ok: false, reason: "нет обработчика сохранения" };
+  let blocked = "";
+  let res;
+  try {
+    res = await saver(list, { requireCloud, onBlocked: (r) => { blocked = r; } });
+  } catch (e) {
+    console.error(e);
+    return { ok: false, reason: "неожиданная ошибка при сохранении" };
+  }
+  if (blocked) return { ok: false, reason: saveFailReasonText(blocked) };
+  if (res === undefined || res === false || res === null) return { ok: false, reason: "запись не подтверждена" };
+  return { ok: true };
+}
+
 export const btnGhost = {
   background: "none", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 13px",
   fontSize: 12, cursor: "pointer", color: "#64748b", fontFamily: "inherit",

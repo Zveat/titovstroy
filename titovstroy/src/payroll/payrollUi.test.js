@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { monthOptions } from "./payrollUi.js";
+import { monthOptions, runSave } from "./payrollUi.js";
 
 describe("выбор месяца для начислений", () => {
   const now = new Date(Date.UTC(2026, 7, 1));   // 1 августа 2026
@@ -22,5 +22,34 @@ describe("выбор месяца для начислений", () => {
 
   it("месяц в будущем не появляется", () => {
     expect(monthOptions(["2027-01"], now)).not.toContain("2026-09");
+  });
+});
+
+describe("проверка результата сохранения", () => {
+  it("успех — только когда сейвер вернул список", async () => {
+    expect((await runSave(async () => [1, 2], [])).ok).toBe(true);
+  });
+
+  it("заблокированная запись — это НЕ успех, даже если вернулось undefined", async () => {
+    // saveListProtected при блокировке возвращает undefined, а не false: форма,
+    // проверявшая только false, закрывалась и теряла введённое.
+    const r = await runSave(async () => undefined, []);
+    expect(r.ok).toBe(false);
+  });
+
+  it("причина отказа переводится на человеческий", async () => {
+    const r = await runSave(async (_l, opts) => { opts.onBlocked("not-loaded"); return undefined; }, []);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("догрузился");
+  });
+
+  it("исключение внутри сейвера не роняет экран", async () => {
+    const r = await runSave(async () => { throw new Error("бум"); }, []);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBeTruthy();
+  });
+
+  it("отсутствующий обработчик — тоже отказ, а не молчание", async () => {
+    expect((await runSave(undefined, [])).ok).toBe(false);
   });
 });

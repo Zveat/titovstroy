@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { listExpenseOps, normalizeStaff } from "./payrollModel.js";
-import { card, inp, lab, th, td, numCell, pill, btnPrimary, btnGhost } from "./payrollUi.js";
+import { card, inp, lab, th, td, numCell, pill, btnPrimary, btnGhost, runSave } from "./payrollUi.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // «Разложить операции» — простановка получателя ПАЧКОЙ.
@@ -35,6 +35,7 @@ export function AssignTab({
   const [personId, setPersonId] = useState("");
   const [busy, setBusy] = useState(false);
   const [showRules, setShowRules] = useState(false);
+  const [err, setErr] = useState("");
 
   const list = useMemo(
     () => listExpenseOps(financeTx, { staff, workers, subcategoryMap, subcategory, onlyUnassigned, query }),
@@ -66,8 +67,10 @@ export function AssignTab({
         if (remove) { const { payee, ...rest } = t; return rest; }
         return { ...t, payee: { kind, id: personId } };
       });
-      const res = await saveFinanceTx(next);
-      if (res === false) return;         // сейвер сам сообщил о причине
+      // Заблокированная запись возвращает undefined, а не false — на false проверять мало.
+      const r = await runSave(saveFinanceTx, next);
+      if (!r.ok) { setErr(`Не сохранено: ${r.reason}. Выделение осталось — попробуйте ещё раз.`); return; }
+      setErr("");
       clearSel();
     } finally { setBusy(false); }
   };
@@ -82,13 +85,18 @@ export function AssignTab({
     const name = window.prompt(`Кто получает «${sub}»?\n\nВведите имя сотрудника:`, suggested);
     if (!name || !name.trim()) return;
     const rec = normalizeStaff({ id: genId(), name: name.trim(), position: suggested, status: "active" });
-    if (saveStaff && (await saveStaff([...staff, rec])) === false) return;
+    const r = await runSave(saveStaff, [...staff, rec]);
+    if (!r.ok) { setErr(`Сотрудник не сохранён: ${r.reason}.`); return; }
+    setErr("");
     setRule(sub, rec.id);
   };
   const saveRules = async () => {
     if (!saveSubcategoryMap) return;
     setBusy(true);
-    try { await saveSubcategoryMap(rules); } finally { setBusy(false); }
+    try {
+      const ok = await saveSubcategoryMap(rules);
+      setErr(ok === false ? "Правила не сохранены: облако не подтвердило запись." : "");
+    } finally { setBusy(false); }
   };
   // Показываем только те подкатегории, где выплата похожа на зарплату, либо правило
   // уже задано. «Материалы» и «Эквайринг» — не люди, и просить для них сотрудника
@@ -111,6 +119,10 @@ export function AssignTab({
           <b style={{ color: "#92400e" }}>Некого выбирать</b> — нет ни сотрудников, ни подрядчиков.
           {onGoStaff && <> Заведите людей на вкладке <button onClick={onGoStaff} style={{ background: "none", border: "none", padding: 0, color: "#1d4ed8", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", fontSize: 12, textDecoration: "underline" }}>«Сотрудники»</button>, подрядчики — в «Админке».</>}
         </div>
+      )}
+
+      {err && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "10px 13px", fontSize: 12, color: "#b91c1c" }}>{err}</div>
       )}
 
       {/* ── Фильтры ── */}

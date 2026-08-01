@@ -4,7 +4,7 @@ import {
   proposeAccruals, buildObjectEvents, normalizeAccrual, accrualKey,
   monthAccruals, accrualKindMeta, normalizeScheme,
 } from "./payrollAccruals.js";
-import { card, inp, lab, th, td, numCell, pill, btnPrimary, btnGhost, monthOptions } from "./payrollUi.js";
+import { card, inp, lab, th, td, numCell, pill, btnPrimary, btnGhost, monthOptions, runSave } from "./payrollUi.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Вкладка «Начисления»: что человек ЗАРАБОТАЛ за месяц.
@@ -41,10 +41,16 @@ export function AccrualsTab({
   const chosenItems = proposal.items.filter(i => chosen.has(accrualKey(i)));
   const chosenSum = chosenItems.reduce((s, i) => s + i.amount, 0);
 
+  const [err, setErr] = useState("");
+  // Заблокированная запись возвращает undefined, а не false: проверять на false мало —
+  // экран считал бы сохранённым то, что не сохранилось.
   const commit = async (next) => {
-    if (!saveAccruals) return false;
     setBusy(true);
-    try { return await saveAccruals(next); } finally { setBusy(false); }
+    try {
+      const r = await runSave(saveAccruals, next);
+      setErr(r.ok ? "" : `Не сохранено: ${r.reason}.`);
+      return r.ok;
+    } finally { setBusy(false); }
   };
 
   const applyProposal = async () => {
@@ -72,6 +78,9 @@ export function AccrualsTab({
 
   return (
     <>
+      {err && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "10px 13px", fontSize: 12, color: "#b91c1c" }}>{err}</div>
+      )}
       <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>Начисления за месяц</div>

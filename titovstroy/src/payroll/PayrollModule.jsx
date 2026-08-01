@@ -7,7 +7,7 @@ import { normalizeScheme, PERCENT_TRIGGERS, schemeIsEmpty } from "./payrollAccru
 import { AccrualsTab } from "./PayrollAccrualsTab.jsx";
 import { AssignTab } from "./PayrollAssignTab.jsx";
 import { BalanceTab } from "./PayrollBalanceTab.jsx";
-import { card, inp, lab, th, td, numCell, pill } from "./payrollUi.js";
+import { card, inp, lab, th, td, numCell, pill, btnPrimary, runSave } from "./payrollUi.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ФОТ — раздел «кому сколько ушло».
@@ -57,8 +57,10 @@ export function PayrollModule({
         staff, workers, subcategoryMap })
     : null, [openPerson, financeTx, staff, workers, subcategoryMap]);
 
-  // Последние месяцы — в таблице показываем три, остальное в «Всего».
-  const lastMonths = report.months.slice(-3);
+  // Сколько месяцев показывать колонками. Раньше жёстко три, и на вопрос «почему
+  // с мая, а не раньше» ответить было нечем: данных в базе 10 месяцев.
+  const [monthsShown, setMonthsShown] = useState(3);
+  const lastMonths = monthsShown === 0 ? report.months : report.months.slice(-monthsShown);
   const share = (v) => report.total > 0 ? Math.round((v / report.total) * 100) : null;
 
   return (
@@ -85,6 +87,7 @@ export function PayrollModule({
 
       {tab === "report" && !openPerson && (
         <ReportTab report={report} lastMonths={lastMonths} money={money} share={share}
+          monthsShown={monthsShown} setMonthsShown={setMonthsShown}
           onOpen={(r) => setOpenPerson({ kind: r.kind, id: r.id, name: r.name })} />
       )}
       {tab === "report" && openPerson && (
@@ -113,7 +116,7 @@ export function PayrollModule({
 }
 
 // ── Отчёт ───────────────────────────────────────────────────────────────────
-function ReportTab({ report, lastMonths, money, share, onOpen }) {
+function ReportTab({ report, lastMonths, money, share, onOpen, monthsShown, setMonthsShown }) {
   const tile = (label, value, sub, color) => (
     <div style={{ ...card, padding: 14 }}>
       <div style={lab}>{label}</div>
@@ -141,6 +144,20 @@ function ReportTab({ report, lastMonths, money, share, onOpen }) {
           Вкладка «Разложить операции» — отфильтровать, выделить пачкой и проставить получателя одним действием.
         </div>
       )}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11.5, color: "#94a3b8" }}>Колонок по месяцам:</span>
+        {[3, 6, 12, 0].map(n => (
+          <button key={n} onClick={() => setMonthsShown(n)}
+            style={{ border: `1px solid ${monthsShown === n ? "#2563eb" : "#e2e8f0"}`,
+              background: monthsShown === n ? "#eff6ff" : "#fff",
+              color: monthsShown === n ? "#2563eb" : "#64748b",
+              borderRadius: 7, padding: "3px 11px", fontSize: 11.5, fontWeight: 700,
+              cursor: "pointer", fontFamily: "inherit" }}>
+            {n === 0 ? `все (${report.months.length})` : n}
+          </button>
+        ))}
+      </div>
 
       <div style={{ ...card, padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
@@ -210,7 +227,7 @@ function ReportTab({ report, lastMonths, money, share, onOpen }) {
       </div>
       <div style={{ fontSize: 11.5, color: "#94a3b8" }}>
         Итог таблицы равен итогу расходов: операции без получателя не выброшены, а показаны отдельной строкой.
-        {report.months.length > lastMonths.length && " Колонки месяцев — последние три; «Всего» — за всю историю."}
+        {report.months.length > lastMonths.length && ` Показаны последние ${lastMonths.length} мес. из ${report.months.length}; «Всего» — за всю историю.`}
       </div>
     </>
   );
@@ -288,22 +305,34 @@ function PersonCard({ person, detail, money, onBack }) {
 // ── Справочник сотрудников ──────────────────────────────────────────────────
 function StaffTab({ staff, users, report, money, genId, readOnly, saveStaff }) {
   const [draft, setDraft] = useState(null);   // редактируемый сотрудник
+  const [err, setErr] = useState("");        // почему не сохранилось — прямо в форме
+  const [busy, setBusy] = useState(false);
   const paidOf = (id) => (report.rows.find(r => r.kind === "staff" && r.id === id) || {}).total || 0;
-  const commit = async (next) => { if (saveStaff) await saveStaff(next); };
 
-  const startNew = () => setDraft({ ...normalizeStaff({ id: genId(), status: "active" }), scheme: normalizeScheme({}) });
+  const startNew = () => { setErr(""); setDraft({ ...normalizeStaff({ id: genId(), status: "active" }), scheme: normalizeScheme({}) }); };
   const setScheme = (patch) => setDraft(d => ({ ...d, scheme: { ...normalizeScheme(d.scheme), ...patch } }));
+
+  // Форма НЕ закрывается, пока запись не подтверждена. Раньше результат сейва не
+  // проверялся вообще: при заблокированной записи (другая вкладка, недогруженный
+  // раздел, молчащее облако) форма закрывалась и введённое исчезало — отсюда
+  // «нажимаю, а бывает добавляет, бывает нет».
   const save = async () => {
-    if (!draft || !draft.name.trim()) { window.alert("Укажите имя сотрудника."); return; }
-    // Схема мотивации живёт в записи сотрудника: отдельный ключ ради пяти чисел заводить незачем.
-    const rec = { ...normalizeStaff({ ...draft, updatedAt: Date.now() }), scheme: normalizeScheme(draft.scheme) };
-    const exists = staff.some(s => s.id === rec.id);
-    await commit(exists ? staff.map(s => s.id === rec.id ? rec : s) : [...staff, rec]);
-    setDraft(null);
+    if (!draft) return;
+    if (!draft.name.trim()) { setErr("Укажите имя сотрудника — без него запись не сохранить."); return; }
+    setErr(""); setBusy(true);
+    try {
+      // Схема мотивации живёт в записи сотрудника: отдельный ключ ради пяти чисел заводить незачем.
+      const rec = { ...normalizeStaff({ ...draft, updatedAt: Date.now() }), scheme: normalizeScheme(draft.scheme) };
+      const exists = staff.some(s => s.id === rec.id);
+      const r = await runSave(saveStaff, exists ? staff.map(s => s.id === rec.id ? rec : s) : [...staff, rec]);
+      if (!r.ok) { setErr(`Не сохранено: ${r.reason}. Введённое осталось в форме — попробуйте ещё раз.`); return; }
+      setDraft(null);
+    } finally { setBusy(false); }
   };
   const remove = async (s) => {
     if (!window.confirm(`Удалить «${s.name}» из справочника?\n\nОперации и суммы останутся на месте — пропадёт только имя.`)) return;
-    await commit(staff.filter(x => x.id !== s.id));
+    const r = await runSave(saveStaff, staff.filter(x => x.id !== s.id));
+    if (!r.ok) window.alert(`Не удалено: ${r.reason}.`);
   };
 
   return (
@@ -375,9 +404,13 @@ function StaffTab({ staff, users, report, money, genId, readOnly, saveStaff }) {
             </div>
           </div>
 
+          {err && (
+            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 9, padding: "9px 12px",
+              fontSize: 12, color: "#b91c1c", marginTop: 12 }}>{err}</div>
+          )}
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
-            <button onClick={() => setDraft(null)} style={{ background: "#f3f4f6", color: "#64748b", border: "none", borderRadius: 9, padding: "8px 15px", fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }}>Отмена</button>
-            <button onClick={save} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 9, padding: "8px 18px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Сохранить</button>
+            <button onClick={() => { setDraft(null); setErr(""); }} style={{ background: "#f3f4f6", color: "#64748b", border: "none", borderRadius: 9, padding: "8px 15px", fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }}>Отмена</button>
+            <button onClick={save} disabled={busy} style={btnPrimary(!busy)}>{busy ? "Сохраняю…" : "Сохранить"}</button>
           </div>
         </div>
       )}
@@ -422,7 +455,7 @@ function StaffTab({ staff, users, report, money, genId, readOnly, saveStaff }) {
                       <td style={td}><span style={pill(meta.color, meta.bg)}>{meta.label}</span></td>
                       <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
                         {!readOnly && <>
-                          <button onClick={() => setDraft(normalizeStaff(s))} style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 7, padding: "4px 10px", fontSize: 11.5, cursor: "pointer", color: "#64748b", fontFamily: "inherit", marginRight: 6 }}>Изменить</button>
+                          <button onClick={() => setErr("") || setDraft(normalizeStaff(s))} style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 7, padding: "4px 10px", fontSize: 11.5, cursor: "pointer", color: "#64748b", fontFamily: "inherit", marginRight: 6 }}>Изменить</button>
                           <button onClick={() => remove(s)} style={{ background: "none", border: "1px solid #fecaca", borderRadius: 7, padding: "4px 10px", fontSize: 11.5, cursor: "pointer", color: "#dc2626", fontFamily: "inherit" }}>Удалить</button>
                         </>}
                       </td>
