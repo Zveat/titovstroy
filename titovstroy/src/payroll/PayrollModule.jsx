@@ -70,6 +70,15 @@ export function PayrollModule({
         ))}
       </div>
 
+      {/* Режим чтения раньше просто прятал кнопки, и раздел выглядел сломанным:
+          выпадашки не нажимаются, «+ Сотрудник» нет — а почему, неизвестно. */}
+      {readOnly && (
+        <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "9px 13px", fontSize: 12, color: "#64748b" }}>
+          Только просмотр: менять справочник, соответствия и начисления нельзя.
+          Нужны права «Финансы: редактирование», и вкладка должна быть активным редактором.
+        </div>
+      )}
+
       {tab === "report" && !openPerson && (
         <ReportTab report={report} lastMonths={lastMonths} money={money} share={share}
           onOpen={(r) => setOpenPerson({ kind: r.kind, id: r.id, name: r.name })} />
@@ -91,7 +100,8 @@ export function PayrollModule({
       )}
       {tab === "map" && (
         <MapTab subTotals={subTotals} staff={staff} subcategoryMap={subcategoryMap}
-          money={money} readOnly={readOnly} saveSubcategoryMap={saveSubcategoryMap} />
+          money={money} readOnly={readOnly} saveSubcategoryMap={saveSubcategoryMap}
+          saveStaff={saveStaff} genId={genId} onGoStaff={() => setTab("staff")} />
       )}
     </div>
   );
@@ -424,11 +434,23 @@ function StaffTab({ staff, users, report, money, genId, readOnly, saveStaff }) {
 }
 
 // ── Разбор истории ──────────────────────────────────────────────────────────
-function MapTab({ subTotals, staff, subcategoryMap, money, readOnly, saveSubcategoryMap }) {
+function MapTab({ subTotals, staff, subcategoryMap, money, readOnly, saveSubcategoryMap, saveStaff, genId, onGoStaff }) {
   const [local, setLocal] = useState(subcategoryMap);
   const [saving, setSaving] = useState(false);
   const dirty = JSON.stringify(local) !== JSON.stringify(subcategoryMap);
   const set = (sub, id) => setLocal(m => { const n = { ...m }; if (id) n[sub] = id; else delete n[sub]; return n; });
+
+  // Завести человека прямо отсюда. Раньше приходилось уходить на другую вкладку,
+  // а с пустым справочником выпадашка выглядела просто сломанной.
+  const pick = async (sub, value) => {
+    if (value !== "__new__") { set(sub, value); return; }
+    const suggested = sub.replace(/^ФОТ\s*/i, "").replace(/^%\s*/, "").trim();
+    const name = window.prompt(`Кто получает «${sub}»?\n\nВведите имя сотрудника:`, suggested);
+    if (!name || !name.trim()) return;
+    const rec = normalizeStaff({ id: genId(), name: name.trim(), position: suggested, status: "active" });
+    if (saveStaff && (await saveStaff([...staff, rec])) === false) return;
+    set(sub, rec.id);
+  };
   const apply = async () => {
     if (!saveSubcategoryMap) return;
     setSaving(true);
@@ -453,10 +475,18 @@ function MapTab({ subTotals, staff, subcategoryMap, money, readOnly, saveSubcate
         )}
       </div>
 
-      <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "10px 13px", fontSize: 12, color: "#1e3a8a" }}>
-        Разложено по этой таблице: <b>{money(mappedSum)}</b>. Операции переписывать не нужно —
-        если у операции указан получатель явно, он всегда сильнее этой таблицы.
-      </div>
+      {staff.length === 0 ? (
+        <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 15px", fontSize: 12, color: "#78350f" }}>
+          <b style={{ color: "#92400e" }}>Справочник сотрудников пуст</b> — выбирать в столбце «Это» пока не из кого.
+          Заведите человека прямо здесь: в выпадающем списке нужной строки выберите «+ Завести сотрудника…».
+          {onGoStaff && <> Или сразу на вкладке <button onClick={onGoStaff} style={{ background: "none", border: "none", padding: 0, color: "#1d4ed8", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", fontSize: 12, textDecoration: "underline" }}>«Сотрудники»</button>.</>}
+        </div>
+      ) : (
+        <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "10px 13px", fontSize: 12, color: "#1e3a8a" }}>
+          Разложено по этой таблице: <b>{money(mappedSum)}</b>. Операции переписывать не нужно —
+          если у операции указан получатель явно, он всегда сильнее этой таблицы.
+        </div>
+      )}
 
       <div style={{ ...card, padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
@@ -473,10 +503,11 @@ function MapTab({ subTotals, staff, subcategoryMap, money, readOnly, saveSubcate
                   <td style={numCell}>{s.count}</td>
                   <td style={{ ...numCell, fontWeight: 700 }}>{money(s.total)}</td>
                   <td style={{ ...td, minWidth: 210 }}>
-                    <select disabled={readOnly} value={local[s.subcategory] || ""} onChange={e => set(s.subcategory, e.target.value)}
+                    <select disabled={readOnly} value={local[s.subcategory] || ""} onChange={e => pick(s.subcategory, e.target.value)}
                       style={{ ...inp, padding: "6px 9px", fontSize: 12 }}>
                       <option value="">— не задано —</option>
                       {staff.map(p => <option key={p.id} value={p.id}>{p.name || "Без имени"}{p.position ? ` · ${p.position}` : ""}</option>)}
+                      {!readOnly && <option value="__new__">+ Завести сотрудника…</option>}
                     </select>
                   </td>
                 </tr>
