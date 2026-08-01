@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, Fragment } from "react";
 import { STAGE_STATUSES, emptyProduction } from "./constants.js";
-import { normCN, estimatesForObject, findFinanceProjectForObject, sortProductionStages, moveProductionStage } from "../utils.js";
+import { normCN, estimatesForObject, findFinanceProjectForObject, sortProductionStages, moveProductionStage, buildGanttLayout, sortGanttRows, GANTT_SCALES, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "../utils.js";
 import { buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, _stageKey } from "./commands.js";
 import { listProductionDrafts, removeProductionDraft, saveProductionDraft } from "./drafts.js";
 
@@ -527,7 +527,10 @@ export default function ProductionModule({
       {embedTab === "info" && <InfoTab prod={localProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={mainPatch} clientAccessPatch={clientAccessPatch} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} clientInfoCard={clientInfoCard} audit={audit} readOnly={mainReadOnly} clientAccessReadOnly={clientAccessReadOnly} staffOptions={staffOptions} />}
       {embedTab !== "info" && <fieldset disabled={tabReadOnly} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
       {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист запуска объекта" />}
-      {embedTab === "handover" && <ChecklistTab kind="checklistHandover" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист сдачи объекта" />}
+      {embedTab === "handover" && <>
+        <ChecklistTab kind="checklistHandover" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист сдачи объекта" />
+        <WarrantyTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} fmt={fmt} audit={audit} />
+      </>}
       {embedTab === "stages" && <StagesTab prod={localProd} patch={stagesPatch} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} audit={audit} />}
       {embedTab === "finance" && <FinanceTab prod={localProd} patch={mainPatch} fmt={fmt} finSummary={finSummary} />}
       {embedTab === "journal" && <JournalTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} />}
@@ -539,6 +542,16 @@ export default function ProductionModule({
 
 // ─── ВКЛАДКА: ИНФОРМАЦИЯ ───
 const _dayStart = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); };
+// Дата для подсказок на графике (в UTC — раскладка тоже считается в UTC).
+const _gd = (ms) => (ms ? new Date(ms).toLocaleDateString("ru-RU", { timeZone: "UTC" }) : "—");
+// «1 работа / 2 работы / 5 работ» — иначе счётчик выглядит как машинный вывод.
+const _plural = (n, one, few, many) => {
+  const a = Math.abs(n) % 100, b = a % 10;
+  if (a > 10 && a < 20) return many;
+  if (b > 1 && b < 5) return few;
+  if (b === 1) return one;
+  return many;
+};
 // Телефон → формат для wa.me (КЗ: 8XXXXXXXXXX → 7XXXXXXXXXX)
 const _waPhone = (p) => { let d = (p || "").replace(/\D/g, ""); if (d.length === 11 && d[0] === "8") d = "7" + d.slice(1); else if (d.length === 10) d = "7" + d; return d; };
 function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatch, onToggleClientShare, onSetClientVis, currentUser, clientInfoCard, audit, readOnly=false, clientAccessReadOnly=false, staffOptions=[] }) {
@@ -758,6 +771,121 @@ function Stat({ label, value }) {
 }
 
 // ─── ВКЛАДКА: ЧЕК-ЛИСТ (запуск / сдача) с разделами ───
+// ─── ГАРАНТИЯ ───
+// Договор даёт 12 месяцев гарантии и 3 рабочих дня на устранение дефекта. До сих пор
+// сданный объект просто исчезал из работы: срока не было нигде, обращения жили в
+// переписке, затраты на устранение не считались вообще.
+// Срок НЕ хранится — считается от факт-даты сдачи, поэтому он появился сам по всем уже
+// сданным объектам, без единой записи в боевые данные.
+function WarrantyTab({ prod, patch, genId, currentUser, fmt, audit }) {
+  const claims = prod.warrantyClaims || [];
+  const [text, setText] = useState("");
+  const w = warrantyState(prod);
+  const sum = summarizeWarrantyClaims(claims);
+  const live = claims.filter(c => c && !c.deletedAt).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  const upd = (id, p) => patch({ warrantyClaims: claims.map(c => c.id === id ? { ...c, ...p } : c) });
+  const add = () => {
+    const t = text.trim(); if (!t) return;
+    patch({ warrantyClaims: [...claims, { id: genId(), ts: Date.now(), text: t, status: "new",
+      source: "manager", author: currentUser?.name || "", assignee: "", fixedAt: "", cost: 0 }] });
+    try { audit && audit({ entity: "stage", field: "гарантия", action: "создал", old: "—", new: t.slice(0, 80), detail: "гарантийное обращение" }); } catch {}
+    setText("");
+  };
+  const dt = (v) => v ? new Date(v).toLocaleDateString("ru-RU") : "—";
+  const card = { background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 16, marginTop: 12 };
+
+  if (w.status === "none") return (
+    <div style={card}>
+      <div style={{ fontSize: 14, fontWeight: 800, color: "#0f172a", marginBottom: 6 }}>🛡 Гарантия</div>
+      <div style={{ fontSize: 12.5, color: "#94a3b8" }}>
+        Отсчёт начнётся с фактической даты окончания работ — заполните её во вкладке «Информация».
+      </div>
+    </div>
+  );
+
+  const active = w.status === "active";
+  const soon = active && w.daysLeft <= 30;
+  return (
+    <div style={card}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+        <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>🛡 Гарантия</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: active ? (soon ? "#d97706" : "#059669") : "#94a3b8" }}>
+          {active ? `действует до ${new Date(w.until).toLocaleDateString("ru-RU", { timeZone: "UTC" })} · осталось ${w.daysLeft} дн`
+                  : `истекла ${new Date(w.until).toLocaleDateString("ru-RU", { timeZone: "UTC" })}`}
+        </span>
+        <label style={{ marginLeft: "auto", fontSize: 11.5, color: "#64748b", display: "flex", alignItems: "center", gap: 6 }}>
+          срок, мес
+          <input type="number" min="1" value={prod.warrantyMonths || WARRANTY_DEFAULT_MONTHS}
+            onChange={e => patch({ warrantyMonths: Math.max(1, Number(e.target.value) || WARRANTY_DEFAULT_MONTHS) })}
+            style={{ width: 62, border: "1px solid #e2e8f0", borderRadius: 7, padding: "5px 8px", fontSize: 12, fontFamily: "inherit" }} />
+        </label>
+      </div>
+      {soon && (
+        <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 9, padding: "8px 12px", fontSize: 12, color: "#92400e", marginBottom: 10 }}>
+          Гарантия скоро закончится — хороший повод позвонить клиенту.
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: "#64748b", marginBottom: 12 }}>
+        <span>Обращений: <b style={{ color: "#0f172a" }}>{sum.total}</b></span>
+        <span>Открыто: <b style={{ color: sum.open ? "#d97706" : "#0f172a" }}>{sum.open}</b></span>
+        {sum.overdue > 0 && <span style={{ color: "#dc2626", fontWeight: 700 }}>Просрочено по сроку 3 раб. дня: {sum.overdue}</span>}
+        <span>Затраты на устранение: <b style={{ color: "#0f172a" }}>{fmt ? fmt(sum.cost) : sum.cost} ₸</b></span>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter") add(); }}
+          placeholder="Что предъявил клиент по гарантии…"
+          style={{ flex: 1, minWidth: 0, border: "1px solid #e2e8f0", borderRadius: 9, padding: "9px 12px", fontSize: 13, fontFamily: "inherit" }} />
+        <button onClick={add} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: 9, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ Обращение</button>
+      </div>
+
+      {live.length === 0
+        ? <div style={{ fontSize: 12.5, color: "#94a3b8" }}>Обращений нет.</div>
+        : <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {live.map(c => {
+              const meta = WARRANTY_CLAIM_STATUSES.find(s => s.key === (c.status || "new")) || WARRANTY_CLAIM_STATUSES[0];
+              const overdue = sum.overdueList.some(x => x.id === c.id);
+              return (
+                <div key={c.id} style={{ border: `1px solid ${overdue ? "#fecaca" : "#eef2f7"}`, background: overdue ? "#fef2f2" : "#fafbfd", borderRadius: 10, padding: "10px 12px" }}>
+                  <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11, color: "#94a3b8" }}>{dt(c.ts)}</span>
+                    <span style={{ fontSize: 11, color: "#94a3b8" }}>{c.source === "client" ? "от клиента" : c.author || "менеджер"}</span>
+                    {overdue && <span style={{ fontSize: 11, fontWeight: 800, color: "#dc2626" }}>просрочено</span>}
+                    <button onClick={() => { if (window.confirm("Удалить обращение?")) upd(c.id, { deletedAt: Date.now() }); }}
+                      style={{ marginLeft: "auto", border: 0, background: "transparent", color: "#cbd5e1", cursor: "pointer", fontSize: 15, lineHeight: 1, fontFamily: "inherit" }}>×</button>
+                  </div>
+                  <div style={{ fontSize: 13, color: "#0f172a", margin: "4px 0 8px", lineHeight: 1.4 }}>{c.text}</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <select value={c.status || "new"} onChange={e => {
+                        const st = e.target.value;
+                        upd(c.id, { status: st, fixedAt: st === "done" ? (c.fixedAt || new Date().toISOString().slice(0, 10)) : c.fixedAt });
+                      }}
+                      style={{ border: `1px solid ${meta.color}55`, color: meta.color, background: "#fff", borderRadius: 7, padding: "5px 9px", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>
+                      {WARRANTY_CLAIM_STATUSES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                    </select>
+                    <input value={c.assignee || ""} onChange={e => upd(c.id, { assignee: e.target.value })} placeholder="Кто устраняет"
+                      style={{ width: 150, border: "1px solid #e2e8f0", borderRadius: 7, padding: "5px 9px", fontSize: 12, fontFamily: "inherit" }} />
+                    <label style={{ fontSize: 11.5, color: "#64748b", display: "flex", alignItems: "center", gap: 5 }}>
+                      затраты
+                      <input type="number" min="0" value={c.cost || 0} onChange={e => upd(c.id, { cost: Math.max(0, Number(e.target.value) || 0) })}
+                        style={{ width: 100, border: "1px solid #e2e8f0", borderRadius: 7, padding: "5px 9px", fontSize: 12, fontFamily: "inherit" }} />₸
+                    </label>
+                    {c.status === "done" && (
+                      <label style={{ fontSize: 11.5, color: "#64748b", display: "flex", alignItems: "center", gap: 5 }}>
+                        устранено
+                        <input type="date" value={c.fixedAt || ""} onChange={e => upd(c.id, { fixedAt: e.target.value })}
+                          style={{ border: "1px solid #e2e8f0", borderRadius: 7, padding: "5px 9px", fontSize: 12, fontFamily: "inherit" }} />
+                      </label>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>}
+    </div>
+  );
+}
+
 function ChecklistTab({ kind, prod, patch, genId, title }) {
   const items = prod[kind] || [];
   const [newText, setNewText] = useState("");
@@ -859,6 +987,9 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
   const stages = prod.stages || [];
   const [newName, setNewName] = useState("");
   const [newCat, setNewCat] = useState("");
+  // Масштаб графика: "auto" подбирает шаг под длину проекта, остальные — выбор владельца.
+  const [ganttScale, setGanttScale] = useState("auto");
+  const [ganttShowUndated, setGanttShowUndated] = useState(false);
   const upd = (id, p) => patch({ stages: stages.map(s => s.id === id ? { ...s, ...p } : s) });
   // Журнал изменений этапа (прораб/срок) — пишем на blur, только если значение реально изменилось
   const _stFocus = useRef("");
@@ -1001,105 +1132,187 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
         </div>
       </div>
 
-      {/* Gantt — полноценный график */}
+      {/* ── ГРАФИК РАБОТ ────────────────────────────────────────────────────────
+          Переделан целиком. Что было не так на боевых объектах:
+          у «Сергея» из 27 работ на график попадали 9, а про остальные 18 не было ни
+          слова; у «Цоя» из 87 — ноль, и вместо графика висела заглушка. Строки шли в
+          порядке списка этапов, поэтому демонтаж оказывался ниже стяжки. Названия по
+          300–450 символов резались до 20. Шкала была только помесячной: на ремонте в
+          19 дней вся разметка сводилась к одной подписи «авг. 26 г.».
+          Раскладка теперь считается в buildGanttLayout (utils.js) и покрыта тестами. */}
       {stages.length > 0 && (() => {
-        const gantt = stages.filter(s => s.planStart || s.factStart);
-        if (!gantt.length) return (
-          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 8 }}>График работ</div>
-            <div style={{ textAlign: "center", color: "#94a3b8", padding: "20px 0", fontSize: 13 }}>Укажите плановые даты у работ выше — появится график.</div>
+        const scaleWanted = ganttScale;
+        const layout = buildGanttLayout(stages, { now: Date.now(), scale: scaleWanted, viewWidth: 980 });
+        const NAME_W = 260;   // было 164 — в него не помещалось даже короткое название
+        const ROW_H = 34;     // было 46: план и факт стояли двумя полосками друг под другом
+        const CAT_H = 26;
+
+        const Legend = () => (
+          <div style={{ display: "flex", gap: 14, fontSize: 11, color: "#64748b", flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <span style={{ display: "inline-block", width: 22, height: 11, background: "#eef2ff", border: "1.5px solid #a5b4fc", borderRadius: 4 }} />план</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <span style={{ display: "inline-block", width: 22, height: 11, background: "#34d399", borderRadius: 4 }} />факт</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <span style={{ display: "inline-block", width: 22, height: 11, background: "#fee2e2", border: "1.5px solid #f87171", borderRadius: 4 }} />просрочено</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <span style={{ display: "inline-block", width: 2, height: 13, background: "#ef4444" }} />сегодня</span>
           </div>
         );
-        const todayMs = _dayStart(new Date());
-        const allMs = gantt.flatMap(s => [s.planStart, s.planEnd, s.factStart, s.factEnd].filter(Boolean).map(d => +new Date(d)));
-        allMs.push(todayMs);
-        const pad = 3 * 864e5;
-        const startMs = Math.min(...allMs) - pad;
-        const endMs = Math.max(...allMs) + pad;
-        const totalDays = Math.max(1, Math.round((endMs - startMs) / 864e5));
-        const PX = Math.min(28, Math.max(14, Math.round(900 / totalDays)));
-        const chartW = totalDays * PX;
-        const NAME_W = 164;
-        const ROW_H = 46;
-        const xOf = (ms) => Math.round((ms - startMs) / 864e5) * PX;
-        const wOf = (a, b) => Math.max(PX, xOf(b) - xOf(a) + PX);
-        const todayX = xOf(todayMs);
-        // Месячные метки
-        const months = [];
-        const mc = new Date(startMs); mc.setDate(1); mc.setHours(0, 0, 0, 0);
-        while (+mc <= endMs) { months.push({ label: mc.toLocaleDateString("ru-RU", { month: "short", year: "2-digit" }), x: xOf(+mc) }); mc.setMonth(mc.getMonth() + 1); }
-        const ganttGrouped = groupByCat(gantt);
-        return (
-          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, overflowX: "auto" }}>
-            {/* Шапка */}
-            <div style={{ display: "flex", alignItems: "center", gap: 18, padding: "14px 16px 10px", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>График работ</span>
-              <div style={{ display: "flex", gap: 14, fontSize: 11, color: "#64748b", flexWrap: "wrap" }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ display: "inline-block", width: 22, height: 10, background: "#bfdbfe", border: "1.5px solid #3b82f6", borderRadius: 3 }} />план</span>
-                <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ display: "inline-block", width: 22, height: 9, background: "#6ee7b7", borderRadius: 3 }} />факт</span>
-                <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ display: "inline-block", width: 2, height: 14, background: "#ef4444", borderRadius: 1 }} />сегодня</span>
-              </div>
-            </div>
-            <div style={{ minWidth: NAME_W + chartW + 16, paddingBottom: 8 }}>
-              {/* Ось месяцев */}
-              <div style={{ display: "flex", borderBottom: "2px solid #e2e8f0" }}>
-                <div style={{ width: NAME_W, flexShrink: 0 }} />
-                <div style={{ position: "relative", width: chartW, height: 26, flexShrink: 0 }}>
-                  {months.map((m, i) => (
-                    <div key={i} style={{ position: "absolute", left: m.x, top: 0, bottom: 0, borderLeft: "1px solid #e2e8f0" }}>
-                      <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 700, paddingLeft: 4, lineHeight: "26px", whiteSpace: "nowrap" }}>{m.label}</span>
-                    </div>
-                  ))}
-                  <div style={{ position: "absolute", left: todayX, top: 0, bottom: 0, width: 2, background: "#ef4444", borderRadius: 1 }} />
-                </div>
-              </div>
-              {/* Строки по категориям */}
-              {ganttGrouped.map(([cat, list]) => (
-                <Fragment key={cat}>
-                  <div style={{ display: "flex", background: "#fffdf7" }}>
-                    <div style={{ width: NAME_W, flexShrink: 0, padding: "5px 12px 3px", fontSize: 10, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em" }}>{cat}</div>
-                    <div style={{ position: "relative", width: chartW, height: 20, flexShrink: 0 }}>
-                      {months.map((m, i) => <div key={i} style={{ position: "absolute", left: m.x, top: 0, bottom: 0, width: 1, background: "#f0ece0" }} />)}
-                      <div style={{ position: "absolute", left: todayX, top: 0, bottom: 0, width: 2, background: "rgba(239,68,68,.2)" }} />
-                    </div>
+        // Переключатель масштаба. «Авто» подбирает шаг под длину проекта, но иногда нужно
+        // рассмотреть неделю вблизи — тогда владелец ставит «дни» руками.
+        const ScalePicker = () => (
+          <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
+            {[{ key: "auto", label: "Авто" }, ...GANTT_SCALES].map(sc => {
+              const on = scaleWanted === sc.key;
+              return (
+                <button key={sc.key} onClick={() => setGanttScale(sc.key)}
+                  style={{ border: `1px solid ${on ? "#2563eb" : "#e2e8f0"}`, background: on ? "#eff6ff" : "#fff",
+                    color: on ? "#2563eb" : "#64748b", borderRadius: 7, padding: "4px 11px", fontSize: 11.5,
+                    fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{sc.label}</button>
+              );
+            })}
+          </div>
+        );
+        // Работы без дат. Раньше они просто исчезали — теперь график честно говорит,
+        // сколько его не видно, и открывает список, чтобы даты можно было проставить.
+        const UndatedNote = () => layout.undated.length === 0 ? null : (
+          <div style={{ margin: "0 16px 12px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "10px 13px" }}>
+            <button onClick={() => setGanttShowUndated(v => !v)}
+              style={{ border: 0, background: "transparent", padding: 0, cursor: "pointer", fontFamily: "inherit",
+                fontSize: 12.5, fontWeight: 700, color: "#92400e", textAlign: "left" }}>
+              {ganttShowUndated ? "▲" : "▼"} {layout.undated.length} {_plural(layout.undated.length, "работа", "работы", "работ")} без дат — {layout.undated.length === 1 ? "её не видно" : "их не видно"} на графике
+            </button>
+            {ganttShowUndated && (
+              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                {layout.undated.slice(0, 40).map(s => (
+                  <div key={s.id} style={{ fontSize: 11.5, color: "#78350f", display: "flex", gap: 8 }}>
+                    <span style={{ color: "#b45309", flexShrink: 0 }}>·</span>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || "Без названия"}</span>
                   </div>
-                  {list.map(s => {
-                    const st = stByKey(s.status);
-                    const pS = s.planStart ? +new Date(s.planStart) : null;
-                    const pE = s.planEnd ? +new Date(s.planEnd) : null;
-                    const fS = s.factStart ? +new Date(s.factStart) : null;
-                    const fE = s.factEnd ? +new Date(s.factEnd) : null;
-                    const overdue = s.status !== "done" && pE && pE < todayMs;
-                    return (
-                      <div key={s.id} style={{ display: "flex", alignItems: "center", borderBottom: "1px solid #f1f5f9", minHeight: ROW_H }}>
-                        <div style={{ width: NAME_W, flexShrink: 0, padding: "6px 12px", minWidth: 0 }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: overdue ? "#dc2626" : "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</div>
-                          <div style={{ fontSize: 10, color: st.color, fontWeight: 600 }}>{st.label}{overdue ? " ⚠" : ""}</div>
-                        </div>
-                        <div style={{ position: "relative", width: chartW, height: ROW_H, flexShrink: 0 }}>
-                          {months.map((m, i) => <div key={i} style={{ position: "absolute", left: m.x, top: 0, bottom: 0, width: 1, background: "#f1f5f9" }} />)}
-                          <div style={{ position: "absolute", left: todayX, top: 0, bottom: 0, width: 2, background: "rgba(239,68,68,.18)", zIndex: 1 }} />
-                          {/* Плановый бар */}
-                          {pS && pE && (
-                            <div title={`План: ${new Date(pS).toLocaleDateString("ru-RU")} — ${new Date(pE).toLocaleDateString("ru-RU")}`}
-                              style={{ position: "absolute", left: xOf(pS), width: wOf(pS, pE), top: 8, height: 14, borderRadius: 4, background: overdue ? "#fee2e2" : st.bg, border: `1.5px solid ${overdue ? "#f87171" : st.color}`, zIndex: 2, overflow: "hidden", display: "flex", alignItems: "center" }}>
-                              <span style={{ fontSize: 9, fontWeight: 700, color: overdue ? "#dc2626" : st.color, paddingLeft: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{wOf(pS, pE) > 50 ? s.name : ""}</span>
-                            </div>
-                          )}
-                          {/* Фактический бар */}
-                          {fS && (
-                            <div title={`Факт: ${new Date(fS).toLocaleDateString("ru-RU")}${fE ? " — " + new Date(fE).toLocaleDateString("ru-RU") : " (идёт)"}`}
-                              style={{ position: "absolute", left: xOf(fS), width: wOf(fS, fE || todayMs), top: 26, height: 12, borderRadius: 3, background: s.status === "done" ? "#34d399" : "#6ee7b7", zIndex: 2 }} />
-                          )}
-                        </div>
+                ))}
+                {layout.undated.length > 40 && <div style={{ fontSize: 11, color: "#b45309" }}>…и ещё {layout.undated.length - 40}</div>}
+                <div style={{ fontSize: 11, color: "#b45309", marginTop: 3 }}>Проставьте «Старт план» и «Конец план» в списке работ выше — они появятся на графике.</div>
+              </div>
+            )}
+          </div>
+        );
+
+        if (layout.empty) return (
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, paddingTop: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "0 16px 12px", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>График работ</span>
+            </div>
+            <UndatedNote />
+            <div style={{ textAlign: "center", color: "#94a3b8", padding: "10px 16px 24px", fontSize: 13 }}>
+              Ни у одной работы нет плановых дат — строить график не из чего.
+            </div>
+          </div>
+        );
+
+        const grouped = groupByCat(layout.rows).map(([cat, list]) => [cat, sortGanttRows(list)]);
+        const W = layout.width;
+        const gridLines = layout.ticks.map((t, i) => (
+          <div key={i} style={{ position: "absolute", left: t.x, top: 0, bottom: 0, width: 1,
+            background: t.weekend ? "#f1f5f9" : "#f8fafc" }} />
+        ));
+        const todayLine = (
+          <div style={{ position: "absolute", left: layout.todayX, top: 0, bottom: 0, width: 2, background: "#ef4444", opacity: .55, zIndex: 3 }} />
+        );
+
+        return (
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, paddingTop: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "0 16px 12px", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>График работ</span>
+              <Legend />
+              <ScalePicker />
+            </div>
+            <UndatedNote />
+            <div style={{ overflowX: "auto", borderTop: "1px solid #eef2f7" }}>
+              <div style={{ minWidth: NAME_W + W }}>
+                {/* Шкала: число + месяц. Раньше был только месяц — на коротком проекте
+                    это одна подпись на весь график, и понять сроки было нельзя. */}
+                <div style={{ display: "flex", position: "sticky", top: 0, zIndex: 4, background: "#fff", borderBottom: "1px solid #e2e8f0" }}>
+                  <div style={{ width: NAME_W, flexShrink: 0, borderRight: "1px solid #eef2f7",
+                    fontSize: 10.5, color: "#94a3b8", fontWeight: 700, display: "flex", alignItems: "flex-end", padding: "0 12px 5px" }}>
+                    Работа
+                  </div>
+                  <div style={{ position: "relative", width: W, height: 34, flexShrink: 0 }}>
+                    {layout.ticks.map((t, i) => (
+                      <div key={i} style={{ position: "absolute", left: t.x, top: 0, bottom: 0,
+                        borderLeft: "1px solid #eef2f7", paddingLeft: 3, minWidth: 0 }}>
+                        {t.sub && <div style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 800, lineHeight: "13px", whiteSpace: "nowrap" }}>{t.sub}</div>}
+                        <div style={{ fontSize: 10.5, color: t.weekend ? "#cbd5e1" : "#64748b", fontWeight: 700,
+                          lineHeight: t.sub ? "16px" : "29px", whiteSpace: "nowrap" }}>{t.label}</div>
                       </div>
-                    );
-                  })}
-                </Fragment>
-              ))}
-              {/* Метка «сегодня» внизу */}
-              <div style={{ position: "relative", height: 16, marginTop: 2 }}>
-                <div style={{ position: "absolute", left: NAME_W + todayX - 16, top: 0, fontSize: 9, color: "#ef4444", fontWeight: 700, whiteSpace: "nowrap" }}>▲ сегодня</div>
+                    ))}
+                    <div style={{ position: "absolute", left: layout.todayX, top: 0, bottom: 0, width: 2, background: "#ef4444", zIndex: 3 }} />
+                    <div style={{ position: "absolute", left: layout.todayX + 4, top: 2, fontSize: 9.5, fontWeight: 800, color: "#ef4444", whiteSpace: "nowrap", zIndex: 3 }}>сегодня</div>
+                  </div>
+                </div>
+
+                {grouped.map(([cat, list]) => (
+                  <Fragment key={cat}>
+                    <div style={{ display: "flex", background: "#fafbfd" }}>
+                      <div style={{ width: NAME_W, flexShrink: 0, borderRight: "1px solid #eef2f7", padding: "6px 12px",
+                        fontSize: 10, fontWeight: 800, color: "#94a3b8", textTransform: "uppercase", letterSpacing: ".05em",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={cat}>{cat}</div>
+                      <div style={{ position: "relative", width: W, height: CAT_H, flexShrink: 0 }}>{gridLines}{todayLine}</div>
+                    </div>
+                    {list.map(s => {
+                      const st = stByKey(s.status);
+                      const done = s.status === "done";
+                      const title = [
+                        s.name || "Без названия",
+                        s.plan ? `План: ${_gd(s.pS)} — ${_gd(s.pE)}` : "План: не задан",
+                        s.fact ? `Факт: ${_gd(s.fS)}${s.fE ? " — " + _gd(s.fE) : " (идёт)"}` : "",
+                        s.overdue ? `Просрочка ${s.lateDays} дн` : "",
+                        s.responsible ? `Ответственный: ${s.responsible}` : "",
+                      ].filter(Boolean).join("\n");
+                      return (
+                        <div key={s.id} style={{ display: "flex", borderBottom: "1px solid #f6f8fb", minHeight: ROW_H }}>
+                          {/* Колонка имени: 260px и перенос в две строки. Раньше 164px в одну —
+                              от «Электромонтажные работы (сумма…)» оставалось «Электромонтажные …». */}
+                          <div style={{ width: NAME_W, flexShrink: 0, borderRight: "1px solid #eef2f7", padding: "5px 12px", minWidth: 0 }} title={title}>
+                            <div style={{ fontSize: 11.5, fontWeight: 600, lineHeight: 1.25, color: s.overdue ? "#dc2626" : "#0f172a",
+                              display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{s.name || "Без названия"}</div>
+                            <div style={{ fontSize: 9.5, color: s.overdue ? "#dc2626" : st.color, fontWeight: 700, marginTop: 1 }}>
+                              {s.overdue ? `просрочка ${s.lateDays} дн` : st.label}
+                              {s.responsible ? <span style={{ color: "#94a3b8", fontWeight: 600 }}> · {s.responsible}</span> : null}
+                            </div>
+                          </div>
+                          <div style={{ position: "relative", width: W, height: ROW_H, flexShrink: 0 }}>
+                            {gridLines}{todayLine}
+                            {/* Плановая полоса — «дорожка», факт заливается ВНУТРЬ неё.
+                                Так отставание видно одним взглядом, и строка вдвое ниже. */}
+                            {s.plan && (
+                              <div style={{ position: "absolute", left: s.plan.left, width: s.plan.width, top: (ROW_H - 16) / 2, height: 16,
+                                borderRadius: 5, background: s.overdue ? "#fee2e2" : "#eef2ff",
+                                border: `1.5px solid ${s.overdue ? "#f87171" : "#a5b4fc"}`, overflow: "hidden", zIndex: 2 }}>
+                                {s.progress != null && (
+                                  <div style={{ position: "absolute", inset: 0, width: `${Math.round(s.progress * 100)}%`,
+                                    background: done ? "#34d399" : "#6ee7b7", opacity: done ? 1 : .85 }} />
+                                )}
+                              </div>
+                            )}
+                            {/* Факт без плана — отдельной полосой: иначе работа, начатая без
+                                плановых дат, не была бы видна вообще. */}
+                            {!s.plan && s.fact && (
+                              <div style={{ position: "absolute", left: s.fact.left, width: s.fact.width, top: (ROW_H - 14) / 2, height: 14,
+                                borderRadius: 5, background: done ? "#34d399" : "#6ee7b7", zIndex: 2 }} />
+                            )}
+                            {/* Факт, вылезший за план — хвост справа, сразу видно перерасход срока. */}
+                            {s.plan && s.fact && (s.fact.left + s.fact.width) > (s.plan.left + s.plan.width) && (
+                              <div title={`Вышли за план`} style={{ position: "absolute",
+                                left: s.plan.left + s.plan.width, width: (s.fact.left + s.fact.width) - (s.plan.left + s.plan.width),
+                                top: (ROW_H - 16) / 2 + 4, height: 8, borderRadius: 3, background: "#fca5a5", zIndex: 2 }} />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </Fragment>
+                ))}
               </div>
             </div>
           </div>
