@@ -207,6 +207,32 @@ function statusOf(o, prodByObject) {
   return PROD_TO_DEAL[prod?.prodStatus] || o.status || "new";
 }
 
+// ─── ОДНО определение «договор подписан в периоде» на весь дашборд ────────────
+// Было три разных числа про одни и те же договоры (проверено на июле 2026):
+//   3 — воронка продаж (когорта: только те, кто и зашёл в июле),
+//   5 — средний чек и сумма подписанного (без расторгнутых),
+//   6 — производство (все подписания июля).
+// Правильное — 6. «cancel» ВКЛЮЧЁН намеренно: расторгнутый договор всё равно был
+// подписан, и подписан именно в этом месяце; расторжение — отдельная строка
+// «Расторгли», а не повод задним числом стереть продажу. Когорта остаётся как есть,
+// но она отвечает на другой вопрос и подписана отдельно.
+const SIGNED_STATUSES = ["signed", "work", "paused", "done", "cancel"];
+// Дата подписания: поле «Дата продажи» карточки производства, запасной вариант —
+// дата договора.
+const signedAtOf = (o, prodByObject, contractByObject) =>
+  ts(prodByObject.get(o.id)?.saleDate)
+  || ts(contractByObject.get(o.id)?.date || contractByObject.get(o.id)?.contractDate);
+// Во «Всё время» дата подписания у части старых объектов не заполнена. Отбирать их
+// по дате — значит занижать итог из-за пробелов в данных, а не из-за продаж, поэтому
+// там берём по статусу.
+function signedInPeriod(idx, { from, to }, period, byManager = () => true) {
+  const { liveObjects, prodByObject, contractByObject } = idx;
+  return liveObjects
+    .filter(byManager)
+    .filter(o => SIGNED_STATUSES.includes(statusOf(o, prodByObject)))
+    .filter(o => period === "all" || inRange(signedAtOf(o, prodByObject, contractByObject), from, to));
+}
+
 
 // Менеджер у объекта — СВОБОДНЫЙ ТЕКСТ (приходит из формы сметы), поэтому один и тот
 // же человек попадает в базу как «Сергей Штанько», «Сергей Ш.» и «Сергей Ш». Сводим
@@ -263,24 +289,23 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
   const dealValue = (o) => contractSum(contractByObject.get(o.id)) || objectValue(o);
 
   const withEstimate = cohort.filter(o => objectValue(o) > 0);
-  // Когорта (создан в периоде) — правильная база для притока и конверсии.
-  const signedFromCohort = cohort.filter(o => ["signed", "work", "done", "paused"].includes(statusOf(o, prodByObject)));
+  // Когорта (создан в периоде) — правильная база для КОНВЕРСИИ: сколько из зашедших
+  // в этом месяце дошли до договора. Договор, подписанный в этом месяце по лиду
+  // прошлого, сюда НЕ входит — он попадёт в воронку своего месяца захода.
+  const signedFromCohort = cohort.filter(o => SIGNED_STATUSES.includes(statusOf(o, prodByObject)));
 
-  // А вот «Подписано за период» и срок сделки надо считать по ДАТЕ ПОДПИСАНИЯ,
-  // а не по дате создания объекта: договор, заключённый в июле по объекту с мая,
-  // — это июльская продажа. Раньше такие сделки выпадали, и средние считались
-  // по одной-двум записям.
-  const signedAt = (o) => ts(prodByObject.get(o.id)?.saleDate)
-    || ts(contractByObject.get(o.id)?.date || contractByObject.get(o.id)?.contractDate);
+  // А «Подписано за период» и все денежные средние считаются по ДАТЕ ПОДПИСАНИЯ:
+  // договор, заключённый в июле по объекту с мая, — это июльская продажа.
+  // Определение — общее с производством (signedInPeriod), чтобы «сколько договоров
+  // в июле» было ОДНИМ числом, а не тремя.
+  const signedAt = (o) => signedAtOf(o, prodByObject, contractByObject);
   // Отсева архивных и «миграционных» здесь НЕТ намеренно, в отличие от когорты выше.
   // Когорта отбирается по дате СОЗДАНИЯ объекта, а у мигрированных её фактически нет —
   // они бы исказили приток. Тут же отбор идёт по дате ПОДПИСАНИЯ, она настоящая:
   // договор, заключённый в июле, — июльская продажа, кем бы объект ни был заведён и
   // убрали ли его потом в архив. Из-за лишнего отсева такие сделки пропадали.
-  const signed = liveObjects
-    .filter(o => !manager || resolveManager(o.manager) === resolveManager(manager))
-    .filter(o => ["signed", "work", "done", "paused"].includes(statusOf(o, prodByObject)))
-    .filter(o => (period === "all" ? true : inRange(signedAt(o), from, to)));
+  const isSelectedManager = (o) => !manager || resolveManager(o.manager) === resolveManager(manager);
+  const signed = signedInPeriod(idx, { from, to }, period, isSelectedManager);
   const inApproval = cohort.filter(o => statusOf(o, prodByObject) === "approval");
   // «Потеряли» — это про отказ клиента ДО работ. Расторжение уже подписанного
   // договора — другая история, её сюда не мешаем.
@@ -358,12 +383,15 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
     // между шагами честная. Срез «кто где стоит сейчас» — это другая картинка,
     // она живёт отдельно и на вопрос «как отработали июль» не отвечает.
     cohortFunnel: {
+      // Все стадии считаются от одной когорты — тех, кто зашёл в периоде.
+      basisNote: "все три стадии — только те, кто зашёл в этом периоде",
       stages: [
         { key: "in", label: "Зашло новых", count: cohort.length,
           sum: cohort.reduce((s, o) => s + objectValue(o), 0) },
         { key: "estimate", label: "Посчитана смета", count: withEstimate.length, sum: estimatedSum },
         { key: "contract", label: "Договор подписан", count: signedFromCohort.length,
-          sum: signedFromCohort.reduce((s, o) => s + dealValue(o), 0) },
+          sum: signedFromCohort.reduce((s, o) => s + dealValue(o), 0),
+          note: "из зашедших в периоде" },
       ],
       lost: { count: lost.length, sum: lostSum },
       // Ещё в работе: зашли, но пока ни договора, ни отказа — это то, что можно дожать.
@@ -372,6 +400,16 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
         sum: cohort
           .filter(o => !signedSet.has(o.id) && statusOf(o, prodByObject) !== "refuse")
           .reduce((s, o) => s + objectValue(o), 0),
+      },
+      // Ответ на вопрос «а сколько мы вообще продали в этом месяце» — прямо здесь,
+      // а не только в блоке производства. Это ТО ЖЕ число, что «Подписали договор»
+      // справа: одно определение signedInPeriod на оба блока. Разница с когортной
+      // стадией выше — ровно те договоры, чьи лиды зашли в прошлых месяцах.
+      signedInPeriod: {
+        label: "Подписано в периоде всего",
+        count: signed.length,
+        sum: signedSum,
+        fromEarlier: Math.max(0, signed.length - signedFromCohort.length),
       },
     },
     // Список для проверки: по нему видно, ЧТО именно посчиталось в «Новых объектах».
@@ -900,8 +938,12 @@ function buildDataQuality(idx, financeTx, resolveManager) {
       items: liveObjects.filter(o => statusOf(o, prodByObject) === "work" && !prodByObject.get(o.id)) },
     { key: "planEnd", label: "В работе без плановой даты сдачи",
       items: liveObjects.filter(o => statusOf(o, prodByObject) === "work" && !ts(prodByObject.get(o.id)?.planEndDate)) },
-    { key: "saleDate", label: "Подписан без даты продажи",
-      items: signed.filter(o => !ts(prodByObject.get(o.id)?.saleDate)) },
+    // Раньше здесь смотрели ТОЛЬКО поле «Дата продажи» и ругались на объекты, у
+    // которых дата есть в договоре и всё считается нормально. Проверяем ровно то,
+    // чем пользуется воронка: без обеих дат объект не попадёт НИ В ОДИН месяц —
+    // ни в «Подписано за период», ни в средний чек, ни в срок сделки.
+    { key: "saleDate", label: "Подписан, но месяц продажи неизвестен",
+      items: signed.filter(o => !signedAtOf(o, prodByObject, contractByObject)) },
     { key: "foreman", label: "В работе без прораба",
       items: liveObjects.filter(o => statusOf(o, prodByObject) === "work" && !prodByObject.get(o.id)?.responsible) },
     // Сдача считается по факт-дате окончания. Без неё объект стоит «Выполнен», но
@@ -994,8 +1036,6 @@ function buildTrend(idx, financeTx, now, months = 6) {
 function buildFunnels(idx, { from, to }, period, manager, resolveManager = (v) => (v || "Без менеджера"), prod = {}) {
   const { liveObjects, objectValue, contractByObject, prodByObject } = idx;
   const dealValue = (o) => contractSum(contractByObject.get(o.id)) || objectValue(o);
-  const signedAt = (o) => ts(prodByObject.get(o.id)?.saleDate)
-    || ts(contractByObject.get(o.id)?.date || contractByObject.get(o.id)?.contractDate);
   const sum = (list) => list.reduce((s, o) => s + dealValue(o), 0);
   const brief = (list) => list.slice(0, 50).map(o => ({
     id: o.id,
@@ -1017,8 +1057,9 @@ function buildFunnels(idx, { from, to }, period, manager, resolveManager = (v) =
   const statusIn = (o, ...keys) => keys.includes(statusOf(o, prodByObject));
   const happened = (value) => inRange(value, from, to);
 
-  const signedNow = scope.filter(o => statusIn(o, "signed", "work", "paused", "done", "cancel")
-    && happened(signedAt(o)));
+  // ОДНО определение с блоком продаж (signedInPeriod): раньше здесь была своя копия
+  // условия, и «Подписали договор» справа не сходилось с «Подписано» слева.
+  const signedNow = signedInPeriod(idx, { from, to }, period, byManager);
   // Старт и сдача берутся ИЗ buildProduction — один расчёт на оба экрана.
   const startedNow = (prod.startedList || []).filter(byManager);
   const doneNow = (prod.doneList || []).filter(byManager);
@@ -1035,10 +1076,17 @@ function buildFunnels(idx, { from, to }, period, manager, resolveManager = (v) =
   return {
     production: {
       flow: true,   // график: без «% с прошлой стадии»
+      // Каждая стадия — своё событие своей даты, объекты в стадиях РАЗНЫЕ. Пишем это
+      // прямо на карточке, иначе читается как воронка и напрашивается вопрос
+      // «почему сдали меньше, чем подписали».
+      basisNote: "события месяца, у каждой стадии свои объекты — это не воронка",
       stages: [
-        { key: "signed", label: "Подписали договор", count: signedNow.length, sum: sum(signedNow) },
-        { key: "start", label: "Вышли на объект", count: startedNow.length, sum: sum(startedNow) },
-        { key: "done", label: "Сдали", count: doneNow.length, sum: sum(doneNow) },
+        { key: "signed", label: "Подписали договор", count: signedNow.length, sum: sum(signedNow),
+          note: "включая лиды прошлых месяцев" },
+        { key: "start", label: "Вышли на объект", count: startedNow.length, sum: sum(startedNow),
+          note: "по дате старта" },
+        { key: "done", label: "Сдали", count: doneNow.length, sum: sum(doneNow),
+          note: "по факт-дате окончания" },
       ],
       // Расторжения периода — исход потока, поэтому идут вместе со стадиями.
       terminal: { label: "Расторгли", count: cancelledNow.length, sum: sum(cancelledNow) },

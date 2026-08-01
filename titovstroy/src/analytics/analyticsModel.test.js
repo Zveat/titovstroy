@@ -729,3 +729,89 @@ describe("служебное", () => {
     expect(REFUSE_REASONS.length).toBeGreaterThan(3);
   });
 });
+
+// Ровно тот случай, из-за которого на боевой базе было ТРИ разных числа про одни и
+// те же июльские договоры: 3 в воронке продаж, 5 в среднем чеке, 6 в производстве.
+describe("«подписано за период» — одно число на весь дашборд", () => {
+  const M = (y, m, d) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
+  const AUG = new Date("2026-08-15T12:00:00Z").getTime();
+  // Три сделки, подписанные в августе: своя (лид августа), чужая (лид мая)
+  // и расторгнутая (подписана в августе, потом разорвана).
+  const base = () => ({
+    objects: [
+      { id:"a1", clientName:"Лид августа",   status:"signed", createdAt: Date.UTC(2026,7,3), area:50, manager:"Иван" },
+      { id:"a2", clientName:"Лид мая",       status:"work",   createdAt: Date.UTC(2026,4,3), area:50, manager:"Иван" },
+      { id:"a3", clientName:"Расторгнутый",  status:"cancel", createdAt: Date.UTC(2026,7,5), area:50, manager:"Иван" },
+      { id:"a4", clientName:"Ещё думает",    status:"approval", createdAt: Date.UTC(2026,7,7), area:50, manager:"Иван" },
+    ],
+    productions: [
+      { objectId:"a1", prodStatus:"active", saleDate: M(2026,7,10) },
+      { objectId:"a2", prodStatus:"active", saleDate: M(2026,7,12) },
+      { objectId:"a3", prodStatus:"cancel", saleDate: M(2026,7,14), factEndDate: M(2026,7,20) },
+    ],
+    contracts: [
+      { id:"c1", objectId:"a1", totalCost: 1000000 },
+      { id:"c2", objectId:"a2", totalCost: 2000000 },
+      { id:"c3", objectId:"a3", totalCost: 3000000 },
+    ],
+    estimates: [], financeTx: [],
+  });
+  const run = () => buildAnalytics(base(), { period:"month", now: AUG });
+
+  it("продажи и производство показывают ОДНО число подписанных", () => {
+    const a = run();
+    expect(a.sales.cohortFunnel.signedInPeriod.count).toBe(3);
+    expect(a.funnels.production.stages[0].count).toBe(3);
+  });
+
+  it("расторгнутый договор остаётся подписанным: расторжение — отдельная строка", () => {
+    const a = run();
+    expect(a.sales.cohortFunnel.signedInPeriod.count).toBe(3);   // a3 внутри
+    expect(a.funnels.production.terminal.count).toBe(1);          // и он же в «Расторгли»
+    expect(a.sales.signedSum).toBe(6000000);                      // 1 + 2 + 3 млн
+  });
+
+  it("когорта считает только своих, а разницу называет вслух", () => {
+    const a = run();
+    // Зашли в августе: a1, a3, a4 — из них подписали a1 и a3.
+    expect(a.sales.cohortFunnel.stages[0].count).toBe(3);
+    expect(a.sales.cohortFunnel.stages[2].count).toBe(2);
+    // Третий (a2) пришёл в мае — он в «подписано всего», но не в когорте.
+    expect(a.sales.cohortFunnel.signedInPeriod.fromEarlier).toBe(1);
+  });
+
+  it("средний чек считается по тем же сделкам, что и воронка", () => {
+    const a = run();
+    expect(a.sales.avgCheckSample).toBe(3);
+    expect(a.sales.avgCheck).toBe(2000000);
+  });
+
+  it("договор без даты подписания не попадает в месяц и виден в «качестве данных»", () => {
+    const data = base();
+    data.productions = data.productions.map(p => p.objectId === "a1" ? { ...p, saleDate: "" } : p);
+    data.contracts = data.contracts.filter(c => c.objectId !== "a1"); // и в договоре даты нет
+    const a = buildAnalytics(data, { period:"month", now: AUG });
+    expect(a.sales.cohortFunnel.signedInPeriod.count).toBe(2);       // a1 выпал из августа
+    const gap = a.dataQuality.gaps.find(g => g.key === "saleDate");
+    expect(gap.count).toBe(1);
+    expect(gap.list[0].name).toBe("Лид августа");
+  });
+
+  it("во «всё время» подписанные без даты НЕ теряются", () => {
+    const data = base();
+    data.productions = data.productions.map(p => ({ ...p, saleDate: "" }));
+    data.contracts = [];
+    const a = buildAnalytics(data, { period:"all", now: AUG });
+    expect(a.sales.cohortFunnel.signedInPeriod.count).toBe(3);
+    expect(a.funnels.production.stages[0].count).toBe(3);
+  });
+
+  it("пустой месяц: конверсий нет, а не «0%»", () => {
+    const a = buildAnalytics(base(), { period:"month", now: new Date("2026-12-15T12:00:00Z").getTime() });
+    expect(a.sales.cohortFunnel.stages[0].count).toBe(0);
+    expect(a.sales.convToEstimate).toBeNull();
+    expect(a.sales.convToSigned).toBeNull();
+    expect(a.sales.convTotal).toBeNull();
+    expect(a.sales.avgCheck).toBeNull();
+  });
+});

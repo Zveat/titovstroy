@@ -122,10 +122,15 @@ export function FunnelChart({ funnel, fmt, showMoney = true, title, hint, colors
   const terminal = funnel?.terminal;
   return (
     <div style={card}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, gap: 8 }}>
         <span style={{ fontSize: 13, fontWeight: 900, color: "#0f172a" }}>{title}</span>
-        <span style={{ fontSize: 11, color: "#94a3b8" }}>{hint}</span>
+        <span style={{ fontSize: 11, color: "#94a3b8", textAlign: "right" }}>{hint}</span>
       </div>
+      {/* На какой базе считается карточка. Две воронки стоят рядом и считают разное —
+          без этой строки они читаются как противоречие. */}
+      {funnel?.basisNote && (
+        <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 10, lineHeight: 1.35 }}>{funnel.basisNote}</div>
+      )}
       {stages.map((st, i) => {
         // Ширина считается от самой массовой стадии, но не уже 18% — иначе
         // подпись не читается, а стадия визуально «исчезает».
@@ -147,9 +152,15 @@ export function FunnelChart({ funnel, fmt, showMoney = true, title, hint, colors
                 <span style={{ fontSize: 11, opacity: .95 }}>{st.label}</span>
               </div>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#94a3b8", padding: "2px 2px 0" }}>
-              <span>{conv !== null ? `→ ${conv}% с прошлой стадии` : ""}</span>
-              <span>{showMoney && st.sum > 0 ? `${fmt(Math.round(st.sum / 1000))}k ₸` : ""}</span>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#94a3b8", padding: "2px 2px 0", gap: 8 }}>
+              {/* Слева — конверсия (когорта) или пояснение, ОТКУДА взялось число (поток).
+                  Без этого «Подписали договор» слева и справа выглядят как одно и то же. */}
+              <span>{[
+                conv !== null ? `→ ${conv}% с прошлой стадии`
+                  : (i > 0 && !funnel?.flow && stages[i - 1].count === 0) ? "→ не из чего считать" : "",
+                st.note || "",
+              ].filter(Boolean).join(" · ")}</span>
+              <span style={{ whiteSpace: "nowrap" }}>{showMoney && st.sum > 0 ? `${fmt(Math.round(st.sum / 1000))}k ₸` : ""}</span>
             </div>
           </div>
         );
@@ -157,8 +168,25 @@ export function FunnelChart({ funnel, fmt, showMoney = true, title, hint, colors
       {/* Для когортной воронки — исходы: кого потеряли и кто ещё в работе.
           Для потока событий — срез «сейчас», он отвечает на другой вопрос и
           поэтому отделён чертой. */}
-      {(funnel?.inProgress || terminal || funnel?.current?.length > 0) && (
+      {(funnel?.inProgress || terminal || funnel?.current?.length > 0 || funnel?.signedInPeriod) && (
         <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px dashed #e2e8f0", fontSize: 11.5 }}>
+          {/* «Сколько мы вообще продали в этом месяце» — то же число, что «Подписали
+              договор» в производстве. Разница со стадией выше — договоры по лидам
+              прошлых месяцев; называем её вслух, чтобы два числа не выглядели спором. */}
+          {funnel?.signedInPeriod && (
+            <div style={{ marginBottom: 6, paddingBottom: 6, borderBottom: "1px dashed #f1f5f9" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", color: "#1d4ed8", gap: 8 }}>
+                <span>{funnel.signedInPeriod.label}: <b>{funnel.signedInPeriod.count}</b></span>
+                {showMoney && funnel.signedInPeriod.sum > 0 &&
+                  <span style={{ whiteSpace: "nowrap" }}>{fmt(Math.round(funnel.signedInPeriod.sum / 1000))}k ₸</span>}
+              </div>
+              {funnel.signedInPeriod.fromEarlier > 0 && (
+                <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
+                  из них {funnel.signedInPeriod.fromEarlier} — по лидам прошлых месяцев
+                </div>
+              )}
+            </div>
+          )}
           {funnel?.inProgress && (
             <div style={{ display: "flex", justifyContent: "space-between", color: "#d97706", marginBottom: 4 }}>
               <span>Ещё в работе: <b>{funnel.inProgress.count}</b></span>
@@ -186,7 +214,9 @@ export function FunnelChart({ funnel, fmt, showMoney = true, title, hint, colors
     </div>
   );
 }
-const pctOf = (part, whole) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
+// null, а НЕ 0, когда делить не на что. «0% конверсии» при нуле заходов — это
+// утверждение, что мы никого не закрыли, хотя закрывать было некого.
+const pctOf = (part, whole) => (whole > 0 ? Math.round((part / whole) * 100) : null);
 
 // Компактный список дел: просроченное, забытое, долги. Клик — переход к объекту.
 function ActionList({ title, items = [], empty, fmt, color = "#dc2626", onOpen, unit = "" }) {
