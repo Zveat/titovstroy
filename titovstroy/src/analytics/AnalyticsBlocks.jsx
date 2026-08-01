@@ -436,8 +436,8 @@ export function AnalyticsBlocks({ data, permissions = {}, fmt, financialDetails 
               {catProfit.map(c => (
                 <BarRow key={c.cat} label={c.cat} value={Math.max(0, c.profit)}
                   max={Math.max(...catProfit.map(x => Math.max(0, x.profit)), 1)}
-                  note={`${money(c.profit)} · ${c.margin}%`}
-                  color={c.margin >= 35 ? "#059669" : c.margin >= 20 ? "#d97706" : "#dc2626"} />
+                  note={`${money(c.profit)} · ${c.margin === null ? "маржа —" : c.margin + "%"}`}
+                  color={c.margin === null ? "#94a3b8" : c.margin >= 35 ? "#059669" : c.margin >= 20 ? "#d97706" : "#dc2626"} />
               ))}
             </div>
           )}

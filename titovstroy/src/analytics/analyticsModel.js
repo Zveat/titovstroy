@@ -52,11 +52,15 @@ const days = (fromTs, toTs) => Math.round((toTs - fromTs) / DAY_MS);
 // Для просрочки округляем ВНИЗ: пока не прошли полные сутки после плановой даты,
 // это ещё «0 дней», а сутки с небольшим — «1 день», а не «2».
 const daysFull = (fromTs, toTs) => Math.max(0, Math.floor((toTs - fromTs) / DAY_MS));
+// Месяц считаем в UTC — в той же зоне, что и границы периода (periodBounds). Раньше
+// здесь была локальная зона: в Казахстане (UTC+5) запись, сделанная между полуночью и
+// пятью утра, у одного расчёта попадала в один месяц, у другого — в соседний. Одна
+// операция могла одновременно входить в период и числиться за прошлым месяцем.
 const monthKey = (value) => {
   const t = ts(value);
   if (!t) return "";
   const d = new Date(t);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 };
 
 // Границы периода + предыдущий период для сравнения ↑/↓.
@@ -77,8 +81,9 @@ export function periodBounds(period, { from, to, now = Date.now() } = {}) {
     const length = Math.max(0, end - start);
     if (length) { prevFrom = start - length; prevTo = start; }
   } else if (period === "week") {
+    // UTC, как и месяц: смешение зон сдвигало границу недели на пять часов.
     const d = new Date(now);
-    d.setDate(d.getDate() - 6);
+    d.setUTCDate(d.getUTCDate() - 6);
     start = d.getTime();
     prevFrom = start - 7 * DAY_MS;
     prevTo = start;
@@ -1025,8 +1030,9 @@ function buildTrend(idx, financeTx, now, months = 6) {
   const keys = [];
   const base = new Date(now);
   for (let i = months - 1; i >= 0; i--) {
-    const d = new Date(base.getFullYear(), base.getMonth() - i, 1);
-    keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    // Тоже UTC — ключи должны совпадать с monthKey, иначе месяц тренда не находит свои данные.
+    const d = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() - i, 1));
+    keys.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
   }
   const byMonth = {};
   for (const k of keys) byMonth[k] = { month: k, income: 0, expense: 0, signed: 0, signedSum: 0 };

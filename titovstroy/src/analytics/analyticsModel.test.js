@@ -918,3 +918,32 @@ describe("деньги на экране — минус это минус, а н
     expect(m(-400, { thousands: true })).toBe("0k ₸");
   });
 });
+
+// Границы периода считались в UTC, а месяц операции — в локальной зоне. В Казахстане
+// (UTC+5) запись, сделанная между полуночью и пятью утра, у одного расчёта попадала в
+// один месяц, у другого — в соседний: операция входила в период и числилась за прошлым.
+describe("месяц операции и границы периода — одна зона", () => {
+  // 01.08.2026 02:00 по Алматы = 31.07.2026 21:00 UTC — ровно опасное окно.
+  const NIGHT = Date.UTC(2026, 6, 31, 21, 0);
+  const data = {
+    objects: [{ id:"o1", clientName:"Ночной", status:"signed", createdAt: NIGHT }],
+    productions: [{ objectId:"o1", prodStatus:"active", saleDate:"2026-07-31" }],
+    contracts: [{ id:"c1", objectId:"o1", totalCost: 500000 }],
+    estimates: [], financeTx: [{ id:"t1", type:"income", amount:100000, date: new Date(NIGHT).toISOString(), account:"Касса" }],
+  };
+
+  it("операция попадает в тот же месяц, в котором её видит период", () => {
+    const july = buildAnalytics(data, { period:"month", now: Date.UTC(2026, 6, 15) });
+    // Приход июля виден и в итоге периода, и в помесячной разбивке денежного потока.
+    expect(july.finance.income).toBe(100000);
+    const keys = Object.keys(july.finance.cashflow || {});
+    expect(keys).toContain("2026-07");
+    expect(keys).not.toContain("2026-08");
+  });
+
+  it("в августе этой операции нет ни там, ни там", () => {
+    const aug = buildAnalytics(data, { period:"month", now: Date.UTC(2026, 7, 15) });
+    expect(aug.finance.income).toBe(0);
+    expect(Object.keys(aug.finance.cashflow || {})).not.toContain("2026-07");
+  });
+});
