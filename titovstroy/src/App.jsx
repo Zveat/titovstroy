@@ -2936,6 +2936,12 @@ const ROLE_PERMISSION_GROUPS = [
     ],
   },
   {
+    id:"payroll", icon:"👥", label:"ФОТ (зарплаты)",
+    actions:[
+      { key:"payroll", label:"Доступ к разделу", hint:"Кто сколько получил, справочник сотрудников, разбор истории. Раздел живёт внутри «Финансов», поэтому нужен и доступ к ним", type:"finance" },
+    ],
+  },
+  {
     id:"admin", icon:"⚙️", label:"Администрирование",
     actions:[
       { key:"admin", label:"Доступ к админке", hint:"Открытие раздела", type:"admin" },
@@ -11249,6 +11255,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
   })();
   const finReadonly = currentPermissions.finance === "view";
   const financeWritable = currentPermissions.finance === "edit";
+  // ФОТ — своё право, а не производная от «Финансов»: зарплаты всех сотрудников
+  // видеть должен не каждый, кому открыты деньги компании.
+  const canPayroll = currentPermissions.payroll !== "none";
+  const payrollWritable = currentPermissions.payroll === "edit";
   const isOwnFinanceRecord = rec => !!rec && (
     rec.createdById === currentUser.id
     || rec.createdBy === currentUser.name
@@ -13052,7 +13062,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 
             {/* Табы */}
             <div className="fin-tabs" style={{display:"flex",gap:6,marginBottom:18,flexWrap:"wrap"}}>
-              {[["dashboard","📊 Дашборд"],["dds","💸 ДДС месяц"],["opu","📈 ОПУ месяц"],["balance","⚖️ Баланс"],["ops","📋 Операции"],["projects","🏗 Проекты"],["payroll","👥 ФОТ"],...(canFinanceDirectories?[ ["ref","⚙️ Справочник"] ]:[])].map(([k,l])=>(
+              {[["dashboard","📊 Дашборд"],["dds","💸 ДДС месяц"],["opu","📈 ОПУ месяц"],["balance","⚖️ Баланс"],["ops","📋 Операции"],["projects","🏗 Проекты"],...(canPayroll?[ ["payroll","👥 ФОТ"] ]:[]),...(canFinanceDirectories?[ ["ref","⚙️ Справочник"] ]:[])].map(([k,l])=>(
                 <button key={k} onClick={()=>navigate(undefined, k)} style={{fontSize:13,fontWeight:700,padding:"9px 16px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",border:"1px solid "+(financeTab===k?"#2563eb":"#e2e8f0"),background:financeTab===k?"#2563eb":"#fff",color:financeTab===k?"#fff":"#64748b"}}>{l}</button>
               ))}
             </div>
@@ -13949,7 +13959,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 readOnly: право «Финансы» имеет значения none/view/edit, писать может
                 только edit. Сравнение с несуществующим "all" держало раздел в режиме
                 чтения вообще у всех, включая админа. */}
-            {financeTab==="payroll" && (
+            {financeTab==="payroll" && canPayroll && (
               <PayrollModule
                 financeTx={financeTx}
                 workers={workers}
@@ -13967,7 +13977,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 saveFinanceTx={saveFinanceTx}
                 fmt={fmt}
                 genId={genId}
-                readOnly={!editorTab || !financeWritable}
+                readOnly={!editorTab || !payrollWritable}
               />
             )}
 

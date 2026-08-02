@@ -1850,3 +1850,31 @@ describe("гарантия", () => {
     expect(utils.summarizeWarrantyClaims(null).open).toBe(0);
   });
 });
+
+describe("право на раздел ФОТ", () => {
+  it("у админа полный доступ, у остальных ролей закрыто", () => {
+    // Зарплаты всех сотрудников — не то, что видит каждый, кому открыты финансы.
+    const m = normalizeRolePermissions();
+    expect(m.admin.payroll).toBe("edit");
+    for (const role of ["manager", "sales_head", "user", "viewer"]) {
+      expect(m[role].payroll).toBe("none");
+    }
+  });
+
+  it("из права «Финансы» НЕ наследуется", () => {
+    // У менеджера финансы открыты на просмотр — ФОТ при этом остаётся закрытым.
+    const m = normalizeRolePermissions({ manager: { finance: "edit" } });
+    expect(m.manager.finance).toBe("edit");
+    expect(m.manager.payroll).toBe("none");
+  });
+
+  it("сохранённое значение уважается, мусор откатывается к пресету", () => {
+    const m = normalizeRolePermissions({ manager: { payroll: "view" }, user: { payroll: "чушь" } });
+    expect(m.manager.payroll).toBe("view");
+    expect(m.user.payroll).toBe("none");
+  });
+
+  it("админа нельзя лишить доступа к ФОТ", () => {
+    expect(normalizeRolePermissions({ admin: { payroll: "none" } }).admin.payroll).toBe("edit");
+  });
+});
