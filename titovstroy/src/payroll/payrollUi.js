@@ -11,7 +11,7 @@ import { saveFailReasonText } from "../utils.js";
 //   • объём даёт светлая граница, а не тень: в макете теней нет нигде, кроме
 //     активного сегмента;
 //   • один акцент (индиго), остальные цвета несут смысл — зелёный сотрудники,
-//     янтарный подрядчики и «не зарплата», красный долг и нераспознанное.
+//     бирюзовый подрядчики и «есть что разобрать», красный долг и ошибки.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const C = {
@@ -22,8 +22,11 @@ export const C = {
 
   accent: "#5358d6", accentInk: "#494fb5", accentSoft: "#e5eaff", accentLine: "#c6d0ff",
   green: "#00602a", greenSoft: "#d2f6dd",
-  amber: "#895800", amberInk: "#733d00", amberText: "#ae5600",
-  amberSoft: "#fef0d4", amberLine: "#ead5ab",
+  // Внимание/подрядчики — БИРЮЗОВЫЙ, не жёлтый. Жёлтые плашки владелец убрал:
+  // на светлом фоне они выглядят как предупреждение системы, а тут это просто
+  // «есть что разобрать». Оттенок из той же палитры макета (oklch 45%/92% 0.13 190).
+  warnInk: "#00504c", warnText: "#006a65", warn: "#006a65",
+  warnSoft: "#e6f7f5", warnLine: "#b5e3df", warnChip: "#bff0ec",
   red: "#b93004", redSoft: "#ffe6dd", redLine: "#ead1ca",
   violet: "#5f49ab", violetSoft: "#e3e0ff",
 };
@@ -114,8 +117,8 @@ export const seg = (on) => ({
 // быстрее, чем за текст. Цвет — устойчивый хеш имени, чтобы не прыгал между заходами.
 const AVA = [
   ["#494fb5", "#e5eaff"], ["#006a65", "#bff0ec"], ["#00602a", "#d2f6dd"],
-  ["#895800", "#fff0cc"], ["#aa2e4e", "#ffd5db"], ["#5f49ab", "#e3e0ff"],
-  ["#004d9a", "#c6e1ff"],
+  ["#aa2e4e", "#ffd5db"], ["#5f49ab", "#e3e0ff"], ["#004d9a", "#c6e1ff"],
+  ["#b93004", "#ffe6dd"],
 ];
 export function avatarOf(name = "") {
   const parts = String(name).trim().split(/\s+/).filter(Boolean);
@@ -149,12 +152,13 @@ export const sectionTitle = h1;
 export const sectionHint = h1sub;
 export const footNote = { fontSize: 13, color: C.faint2, lineHeight: 1.5 };
 
-// Полоса-уведомление (жёлтая/красная) — единый вид на весь раздел.
-export const notice = (tone = "amber") => ({
-  background: tone === "red" ? C.redSoft : C.amberSoft,
-  border: `1px solid ${tone === "red" ? C.redLine : C.amberLine}`,
+// Полоса-уведомление. Тонов два: «info» — что-то стоит разобрать (бирюзовый),
+// «red» — сохранить не удалось. Жёлтого в разделе нет.
+export const notice = (tone = "info") => ({
+  background: tone === "red" ? C.redSoft : C.warnSoft,
+  border: `1px solid ${tone === "red" ? C.redLine : C.warnLine}`,
   borderRadius: 14, padding: "16px 20px", fontSize: 14,
-  color: tone === "red" ? C.red : C.amberInk,
+  color: tone === "red" ? C.red : C.warnInk,
 });
 
 // Единая обработка сохранения для всех вкладок раздела.

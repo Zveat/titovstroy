@@ -230,7 +230,7 @@ export function AssignTab({
                     <td style={{ ...tdTight, color: C.faint, whiteSpace: "nowrap" }}>{r.contractNo || "—"}</td>
                     <td style={tdTight}>
                       {r.payee ? (
-                        <span style={r.payee.kind === "worker" ? pill(C.amber, C.amberSoft) : pill(C.green, C.greenSoft)}>
+                        <span style={r.payee.kind === "worker" ? pill(C.warn, C.warnSoft) : pill(C.green, C.greenSoft)}>
                           {r.payee.name}{r.payee.source === "map" ? " · по правилу" : ""}
                         </span>
                       ) : <span style={pill(C.faint, C.bg)}>не указан</span>}

@@ -169,7 +169,7 @@ export function AccrualsTab({
           </div>
           {proposal.issues.slice(0, 12).map(x => (
             <div key={x.objectId} style={{ display: "flex", gap: 12, justifyContent: "space-between",
-              fontSize: 13, padding: "7px 0", borderTop: `1px solid ${C.amberLine}` }}>
+              fontSize: 13, padding: "7px 0", borderTop: `1px solid ${C.warnLine}` }}>
               <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 <b>{x.label}</b> — {x.reason}
               </span>

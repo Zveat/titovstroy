@@ -176,7 +176,7 @@ function ReportTab({ report, lastMonths, money, onOpen, monthsShown, setMonthsSh
           wage && hasNonWage ? `не зарплата отдельно: ${money(report.nonWageTotal)}` : `${visibleRows.length} получателей`)}
         {tile("С", C.green, C.greenSoft, "Сотрудникам", money(B.staff),
           share(B.staff) === null ? "" : `${share(B.staff)}% от итога`, C.green)}
-        {tile("П", C.amberText, "#ffe9d4", "Подрядчикам", money(B.worker),
+        {tile("П", C.warnText, C.warnChip, "Подрядчикам", money(B.worker),
           share(B.worker) === null ? "" : `${share(B.worker)}% от итога`)}
         {tile("?", C.red, C.redSoft, "Не разложено", money(B.unassigned),
           `${B.unassignedCount} операций${share(B.unassigned) === null ? "" : ` · ${share(B.unassigned)}%`}`,
@@ -209,7 +209,7 @@ function ReportTab({ report, lastMonths, money, onOpen, monthsShown, setMonthsSh
           </div>
         </div>
         {hasNonWage && (
-          <div style={{ fontSize: 13, color: C.amberText, fontWeight: 600 }}>
+          <div style={{ fontSize: 13, color: C.warnText, fontWeight: 600 }}>
             {wage ? `не зарплата ${money(report.nonWageTotal)} — вне расчёта` : `включая не зарплату ${money(report.nonWageTotal)}`}
           </div>
         )}
@@ -247,7 +247,7 @@ function ReportTab({ report, lastMonths, money, onOpen, monthsShown, setMonthsSh
                       <div style={{ minWidth: 0 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           <span style={{ fontWeight: 700, color: C.ink, fontSize: 15 }}>{r.name}</span>
-                          <span style={r.kind === "staff" ? pill(C.green, C.greenSoft) : pill(C.amber, C.amberSoft)}>
+                          <span style={r.kind === "staff" ? pill(C.green, C.greenSoft) : pill(C.warn, C.warnSoft)}>
                             {r.kind === "staff" ? "сотрудник" : "подрядчик"}
                           </span>
                           {/* Откуда взялась привязка: из самой операции или из соответствий. */}
@@ -258,7 +258,7 @@ function ReportTab({ report, lastMonths, money, onOpen, monthsShown, setMonthsSh
                           {/* В зарплатной основе дивиденды в цифру не входят вовсе — просто
                               сообщаем, что у человека они есть, чтобы это не выглядело потерей. */}
                           {r.nonWage > 0 && (
-                            <span style={{ color: C.amberText, fontWeight: 600 }}>
+                            <span style={{ color: C.warnText, fontWeight: 600 }}>
                               {" · "}{wage ? `не зарплата вне расчёта ${money(r.nonWage)}` : `в т.ч. не зарплата ${money(r.nonWage)}`}
                             </span>
                           )}
@@ -277,13 +277,13 @@ function ReportTab({ report, lastMonths, money, onOpen, monthsShown, setMonthsSh
                 </tr>
               ))}
               {B.unassigned > 0 && (
-                <tr style={{ background: "#fffdf5" }}>
+                <tr style={{ background: C.warnSoft }}>
                   <td style={td}>
                     <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                      <span style={avatarStyle({ color: C.amberText, bg: "#ffe9d4" })}>?</span>
+                      <span style={avatarStyle({ color: C.warnText, bg: C.warnChip })}>?</span>
                       <div>
-                        <div style={{ fontWeight: 700, color: C.amberInk, fontSize: 15 }}>Не разложено</div>
-                        <div style={{ fontSize: 13, color: C.amberText, marginTop: 2 }}>получатель не указан</div>
+                        <div style={{ fontWeight: 700, color: C.warnInk, fontSize: 15 }}>Не разложено</div>
+                        <div style={{ fontSize: 13, color: C.warnText, marginTop: 2 }}>получатель не указан</div>
                       </div>
                     </div>
                   </td>
@@ -292,7 +292,7 @@ function ReportTab({ report, lastMonths, money, onOpen, monthsShown, setMonthsSh
                       {B.unassignedByMonth[m] ? money(B.unassignedByMonth[m]) : "—"}
                     </td>
                   ))}
-                  <td style={{ ...numCell, fontWeight: 800, fontSize: 16, color: C.amberInk }}>{money(B.unassigned)}</td>
+                  <td style={{ ...numCell, fontWeight: 800, fontSize: 16, color: C.warnInk }}>{money(B.unassigned)}</td>
                   <td style={{ ...numCell, fontSize: 14, fontWeight: 600, color: "#6e7278" }}>{B.unassignedCount}</td>
                 </tr>
               )}
@@ -353,7 +353,7 @@ function PersonCard({ person, detail, money, onBack }) {
           {detail?.nonWage > 0 && (
             <div>
               <div style={lab}>Не зарплата</div>
-              <div style={{ fontSize: 26, fontWeight: 800, color: C.amberText, fontVariantNumeric: "tabular-nums", letterSpacing: "-.01em" }}>{money(detail.nonWage)}</div>
+              <div style={{ fontSize: 26, fontWeight: 800, color: C.warnText, fontVariantNumeric: "tabular-nums", letterSpacing: "-.01em" }}>{money(detail.nonWage)}</div>
             </div>
           )}
           <div>
@@ -406,7 +406,7 @@ function PersonCard({ person, detail, money, onBack }) {
                   <td style={{ ...td, whiteSpace: "nowrap", color: C.mute }}>{dt(o.date)}</td>
                   <td style={td}>
                     {o.subcategory || "—"}
-                    {o.nonWage && <span style={{ ...pill("#d97706", "#fffbeb"), marginLeft: 6 }}>не зарплата</span>}
+                    {o.nonWage && <span style={{ ...pill(C.warnText, C.warnSoft), marginLeft: 6 }}>не зарплата</span>}
                   </td>
                   <td style={{ ...td, color: C.mute }}>{o.contractNo || "—"}</td>
                   <td style={{ ...td, color: C.faint, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.comment || ""}</td>

@@ -53,7 +53,7 @@ export function BalanceTab({ staff, accruals, report, money }) {
         {tile("Н", C.accentInk, C.accentSoft, "Начислено", money(bal.accrued), `${bal.rows.length} человек`)}
         {tile("В", C.green, C.greenSoft, "Выплачено", money(bal.paid), "зарплатой, с первого месяца начислений")}
         {tile("Д", C.red, C.redSoft, "Должны людям", money(bal.debt), bal.debt ? "не выплачено" : "всё закрыто", bal.debt ? C.red : C.green)}
-        {tile("А", C.amberText, "#ffe9d4", "Выдано авансом", money(bal.advance), bal.advance ? "выплачено сверх начисленного" : "нет", bal.advance ? C.amberText : C.green)}
+        {tile("А", C.warnText, C.warnChip, "Выдано авансом", money(bal.advance), bal.advance ? "выплачено сверх начисленного" : "нет", bal.advance ? C.warnText : C.green)}
       </div>
 
       <div style={cardTable}>
@@ -95,7 +95,7 @@ export function BalanceTab({ staff, accruals, report, money }) {
                   })}
                   <td style={{ ...numCell, fontWeight: 800, fontSize: 16, color: C.ink }}>{money(r.accrued)}</td>
                   <td style={{ ...numCell, color: C.mute }}>{money(r.paid)}</td>
-                  <td style={{ ...numCell, fontWeight: 800, fontSize: 15, color: r.balance > 0 ? C.red : r.balance < 0 ? C.amberText : C.green }}>
+                  <td style={{ ...numCell, fontWeight: 800, fontSize: 15, color: r.balance > 0 ? C.red : r.balance < 0 ? C.warnText : C.green }}>
                     {r.balance > 0 ? `должны ${money(r.balance)}`
                       : r.balance < 0 ? `аванс ${money(-r.balance)}`
                       : "в расчёте"}
