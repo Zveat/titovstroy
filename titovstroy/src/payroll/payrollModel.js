@@ -13,6 +13,8 @@
 //     лежит отдельным ключом и сами операции не трогает.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { normCN } from "../utils.js";   // нормализация номера договора — та же, что в финансах
+
 export const STAFF_KEY = "titovstroy-staff";
 export const STAFF_BACKUPS_KEY = "titovstroy-staff-backups";
 export const PAYROLL_MAP_KEY = "titovstroy-payroll-map";
@@ -244,7 +246,8 @@ export function buildStaffDetail(financeTx = [], opts = {}) {
   const ops = [];
   const byMonth = {};
   const byContract = {};
-  let total = 0;
+  const bySubcategory = {};
+  let total = 0, first = 0, last = 0;
   for (const t of financeTx) {
     if (!t || t.deletedAt || t.included === false || t.type !== "expense") continue;
     const when = ts(t.date);
@@ -254,13 +257,149 @@ export function buildStaffDetail(financeTx = [], opts = {}) {
     if (excluded.has(String(t.subcategory || "").trim())) continue;   // не ФОТ — не показываем
     const amount = num(t.amount);
     total += amount;
+    if (!first || when < first) first = when;
+    if (when > last) last = when;
     const mk = payrollMonthKey(t.date);
     if (mk) byMonth[mk] = (byMonth[mk] || 0) + amount;
     const cn = String(t.contractNo || "").trim() || "— без договора —";
     byContract[cn] = (byContract[cn] || 0) + amount;
-    ops.push({ id: t.id, date: when, amount, subcategory: t.subcategory || "", contractNo: t.contractNo || "",
+    const sub = String(t.subcategory || "").trim() || "— без подкатегории —";
+    bySubcategory[sub] = (bySubcategory[sub] || 0) + amount;
+    ops.push({ id: t.id, date: when, month: mk, amount, subcategory: t.subcategory || "", contractNo: t.contractNo || "",
       comment: txComment(t), source: who.source });
   }
   ops.sort((a, b) => b.date - a.date);
-  return { total, count: ops.length, byMonth, byContract, ops };
+  const monthsCount = Object.keys(byMonth).length;
+  return {
+    total, count: ops.length, byMonth, byContract, bySubcategory, ops,
+    months: Object.keys(byMonth).sort(),
+    first, last,
+    // Средняя выплата и средний месяц — разные вещи: человеку могут платить трижды
+    // в месяц частями, и «средняя выплата» тогда ни о чём не говорит.
+    avgOp: ops.length ? total / ops.length : 0,
+    avgMonth: monthsCount ? total / monthsCount : 0,
+    maxOp: ops.reduce((m, o) => Math.max(m, o.amount), 0),
+  };
+}
+
+// ── Динамика ────────────────────────────────────────────────────────────────
+// ФОТ по месяцам на фоне всех расходов и выручки. Считаем из тех же операций, что
+// и остальные финансы: переводы между своими счетами — не доход и не расход, они
+// мимо. Расходы берём ВСЕ, включая помеченные «не ФОТ»: доля ФОТ имеет смысл
+// только от полной суммы, которую компания потратила.
+//
+// basis — что считать зарплатой:
+//   "all"   — всё, что не отмечено «не ФОТ» (как в отчёте «Кому сколько ушло»);
+//   "named" — только выплаты с известным получателем.
+// Пока история не разобрана до конца, «всё» завышает долю (в неё попадают материалы
+// и эквайринг), а «только размеченное» её занижает — правда посередине, и владелец
+// должен видеть обе границы, а не одну цифру, выдающую себя за истину.
+export function buildPayrollDynamics(financeTx = [], report = null, opts = {}) {
+  const { monthsBack = 12, basis = "all" } = opts;
+  const payrollOf = (m) => basis === "named"
+    ? (report?.staffByMonth?.[m] || 0) + (report?.workerByMonth?.[m] || 0)
+    : (report?.totalByMonth?.[m] || 0);
+  const incomeByMonth = {};
+  const expenseByMonth = {};
+  const monthSet = new Set(report?.months || []);
+  for (const t of financeTx) {
+    if (!t || t.deletedAt || t.included === false) continue;
+    if (t.type !== "income" && t.type !== "expense") continue;
+    const mk = payrollMonthKey(t.date);
+    if (!mk) continue;
+    monthSet.add(mk);
+    const bag = t.type === "income" ? incomeByMonth : expenseByMonth;
+    bag[mk] = (bag[mk] || 0) + num(t.amount);
+  }
+
+  // Сколько человек получило деньги в месяце — по строкам отчёта, чтобы «средняя
+  // на человека» не делилась на всех подряд, включая тех, кто в этом месяце не работал.
+  const peopleByMonth = {};
+  for (const r of (report?.rows || [])) {
+    for (const [m, v] of Object.entries(r.byMonth || {})) if (v > 0) peopleByMonth[m] = (peopleByMonth[m] || 0) + 1;
+  }
+
+  const all = [...monthSet].sort();
+  const idx = new Map(all.map((m, i) => [m, i]));
+  const months = monthsBack > 0 ? all.slice(-monthsBack) : all;
+  const rows = months.map(m => {
+    const payroll = payrollOf(m);
+    const income = incomeByMonth[m] || 0;
+    const expense = expenseByMonth[m] || 0;
+    const people = peopleByMonth[m] || 0;
+    // Предыдущий месяц ищем во ВСЕЙ истории, а не в видимом окне: иначе у первой
+    // строки таблицы изменения не было бы никогда, хотя данные за него есть.
+    const prevKey = all[(idx.get(m) ?? 0) - 1] || null;
+    const prev = prevKey ? payrollOf(prevKey) : null;
+    return {
+      month: m, payroll, income, expense, people,
+      staff: report?.staffByMonth?.[m] || 0,
+      worker: report?.workerByMonth?.[m] || 0,
+      unassigned: report?.unassignedByMonth?.[m] || 0,
+      shareExpense: expense > 0 ? payroll / expense : null,
+      shareIncome: income > 0 ? payroll / income : null,
+      avgPerPerson: people > 0 ? payroll / people : 0,
+      prevMonth: prevKey, prevPayroll: prev,
+      delta: prev === null ? null : payroll - prev,
+      deltaPct: prev ? (payroll - prev) / prev : null,
+    };
+  });
+
+  const sum = (f) => rows.reduce((s, r) => s + f(r), 0);
+  const totalPayroll = sum(r => r.payroll);
+  const totalIncome = sum(r => r.income);
+  const totalExpense = sum(r => r.expense);
+  return {
+    rows, months, allMonths: all, basis,
+    last: rows[rows.length - 1] || null,
+    maxPayroll: rows.reduce((m, r) => Math.max(m, r.payroll), 0),
+    maxBar: rows.reduce((m, r) => Math.max(m, r.payroll, r.income), 0),
+    totalPayroll, totalIncome, totalExpense,
+    avgPayroll: rows.length ? totalPayroll / rows.length : 0,
+    shareExpense: totalExpense > 0 ? totalPayroll / totalExpense : null,
+    shareIncome: totalIncome > 0 ? totalPayroll / totalIncome : null,
+  };
+}
+
+// Кто вырос, кто просел: месяц к месяцу по людям.
+// Появившихся и переставших получать помечаем отдельно — «рост на 100%» от нуля
+// это не рост, а новый человек, и читать это как процент нельзя.
+export function payrollMovers(report = null, monthPrev = "", monthCur = "") {
+  const list = [];
+  for (const r of (report?.rows || [])) {
+    const prev = r.byMonth?.[monthPrev] || 0;
+    const cur = r.byMonth?.[monthCur] || 0;
+    if (!prev && !cur) continue;
+    list.push({
+      key: r.key, kind: r.kind, id: r.id, name: r.name, position: r.position,
+      prev, cur, delta: cur - prev,
+      pct: prev > 0 && cur > 0 ? (cur - prev) / prev : null,
+      appeared: !prev && cur > 0,
+      stopped: prev > 0 && !cur,
+    });
+  }
+  return {
+    up: list.filter(x => x.delta > 0).sort((a, b) => b.delta - a.delta),
+    down: list.filter(x => x.delta < 0).sort((a, b) => a.delta - b.delta),
+  };
+}
+
+// Номер договора → человеческое название объекта. В операции лежит только номер
+// («№0919#152»), а владельцу нужен адрес. Связь ищем ровно так же, как её ищут
+// финансы: сначала договоры, потом финпроекты, и только по номеру — имя и телефон
+// ключами связи не являются.
+export function contractObjectIndex({ objects = [], contracts = [], finProjects = [] } = {}) {
+  const objById = new Map(objects.filter(o => o && o.id).map(o => [o.id, o]));
+  const byNo = new Map();
+  const put = (no, objectId) => {
+    const k = normCN(no);
+    if (k && objectId && !byNo.has(k)) byNo.set(k, objectId);
+  };
+  for (const c of contracts) { if (!c || c.deletedAt) continue; put(c.number, c.objectId); put(c.mainNumber, c.objectId); }
+  for (const p of finProjects) { if (!p || p.deletedAt) continue; put(p.contractNo, p.objectId); }
+  return (no) => {
+    const o = objById.get(byNo.get(normCN(no)));
+    if (!o) return "";
+    return String(o.address || o.clientName || "").trim();
+  };
 }

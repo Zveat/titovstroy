@@ -1,12 +1,14 @@
 import { useState, useMemo } from "react";
 import {
-  buildPayrollReport, buildStaffDetail, expenseSubcategoryTotals,
+  buildPayrollReport, buildStaffDetail, expenseSubcategoryTotals, contractObjectIndex,
   normalizeStaff, staffStatusMeta, STAFF_STATUSES, monthLabel,
 } from "./payrollModel.js";
 import { normalizeScheme, PERCENT_TRIGGERS, schemeIsEmpty } from "./payrollAccruals.js";
 import { AssignTab } from "./PayrollAssignTab.jsx";
+import { DynamicsTab } from "./PayrollDynamicsTab.jsx";
 import {
-  C, card, cardTable, inp, lab, th, td, numCell, pill, btnPrimary, btnGhost, btnDanger,
+  C, card, cardTable, inp, lab, th, td, numCell, tdTight, numCellTight,
+  pill, btnPrimary, btnGhost, btnDanger,
   tabsWrap, tabBtn, segWrap, seg, avatarOf, avatarStyle, h1, h1sub, footNote, notice,
   shell, sharePill, runSave,
 } from "./payrollUi.js";
@@ -33,9 +35,10 @@ import {
 // получателя. Новые операции размечаются прямо при вводе, поэтому вкладка сама
 // сообщает, когда работа закончена, и больше ни о чём не просит.
 const TABS = [
-  { key: "report", label: "Кому сколько ушло" },
-  { key: "staff",  label: "Сотрудники" },
-  { key: "map",    label: "Разбор истории" },
+  { key: "report",   label: "Кому сколько ушло" },
+  { key: "dynamics", label: "Динамика" },
+  { key: "staff",    label: "Сотрудники" },
+  { key: "map",      label: "Разбор истории" },
 ];
 
 export function PayrollModule({
@@ -63,6 +66,11 @@ export function PayrollModule({
         workerId: openPerson.kind === "worker" ? openPerson.id : null,
         staff, workers, subcategoryMap })
     : null, [openPerson, financeTx, staff, workers, subcategoryMap]);
+  // Номер договора в операции → адрес объекта. Без этого в карточке человека
+  // стоят голые «№0919#152», по которым владельцу нечего вспомнить.
+  const objectLabel = useMemo(() => contractObjectIndex({ objects, contracts, finProjects }),
+    [objects, contracts, finProjects]);
+  const openCard = (kind, id, name) => { setTab("report"); setOpenPerson({ kind, id, name }); };
 
   // Сколько месяцев показывать колонками. Раньше жёстко три, и на вопрос «почему
   // с мая, а не раньше» ответить было нечем: данных в базе 10 месяцев.
@@ -99,11 +107,18 @@ export function PayrollModule({
           onOpen={(r) => setOpenPerson({ kind: r.kind, id: r.id, name: r.name })} />
       )}
       {tab === "report" && openPerson && (
-        <PersonCard person={openPerson} detail={detail} money={money} onBack={() => setOpenPerson(null)} />
+        <PersonCard person={openPerson} detail={detail} money={money} objectLabel={objectLabel}
+          staffRec={openPerson.kind === "staff" ? staff.find(s => s.id === openPerson.id) : null}
+          shareOfFot={report.total > 0 ? Math.round((detail?.total || 0) / report.total * 100) : null}
+          onBack={() => setOpenPerson(null)} />
+      )}
+      {tab === "dynamics" && (
+        <DynamicsTab financeTx={financeTx} report={report} money={money} />
       )}
       {tab === "staff" && (
         <StaffTab staff={staff} users={users} report={report} money={money}
-          genId={genId} readOnly={readOnly} saveStaff={saveStaff} />
+          genId={genId} readOnly={readOnly} saveStaff={saveStaff}
+          onOpenCard={(s) => openCard("staff", s.id, s.name || "Без имени")} />
       )}
       {tab === "map" && (
         <AssignTab financeTx={financeTx} saveFinanceTx={saveFinanceTx} staff={staff} workers={workers}
@@ -266,10 +281,34 @@ function ReportTab({ report, lastMonths, money, onOpen, monthsShown, setMonthsSh
 }
 
 // ── Карточка человека ───────────────────────────────────────────────────────
-function PersonCard({ person, detail, money, onBack }) {
-  const months = Object.keys(detail?.byMonth || {}).sort();
-  const contracts = Object.entries(detail?.byContract || {}).sort((a, b) => b[1] - a[1]);
+// Отвечает на вопрос «за что ему столько»: раньше в отчёте была только итоговая
+// сумма, и чтобы понять её состав, приходилось идти в Финансы и фильтровать руками.
+function PersonCard({ person, detail, staffRec, money, objectLabel, shareOfFot, onBack }) {
+  const [month, setMonth] = useState("");        // фильтр по месяцу: клик по столбику
+  const [allContracts, setAllContracts] = useState(false);
+  const months = detail?.months || [];
+  // У зарплатных операций договора обычно нет: оклад платят не «за объект».
+  // Показывать карточку «по объектам» с единственной строкой «— без договора —»
+  // незачем, как и пустую колонку в таблице.
+  const contracts = Object.entries(detail?.byContract || {})
+    .filter(([cn]) => cn !== "— без договора —").sort((a, b) => b[1] - a[1]);
+  const hasObjects = contracts.length > 0;
+  const subs = Object.entries(detail?.bySubcategory || {}).sort((a, b) => b[1] - a[1]);
   const dt = (ms) => ms ? new Date(ms).toLocaleDateString("ru-RU") : "—";
+  const ops = month ? (detail?.ops || []).filter(o => o.month === month) : (detail?.ops || []);
+  const scheme = staffRec ? normalizeScheme(staffRec.scheme) : null;
+  const meta = staffRec ? staffStatusMeta(staffRec.status) : null;
+  const maxMonth = Math.max(...months.map(x => detail.byMonth[x]), 1);
+
+  const tile = (label, value, sub, color) => (
+    <div style={card}>
+      <div style={{ fontSize: 12, color: C.mute2, marginBottom: 5 }}>{label}</div>
+      <div style={{ fontSize: 19, fontWeight: 800, color: color || C.ink, letterSpacing: "-.01em",
+        fontVariantNumeric: "tabular-nums", lineHeight: 1.2 }}>{value}</div>
+      {sub && <div style={{ fontSize: 11.5, color: C.faint, marginTop: 5 }}>{sub}</div>}
+    </div>
+  );
+
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -282,65 +321,134 @@ function PersonCard({ person, detail, money, onBack }) {
         ); })()}
         <div style={{ minWidth: 160 }}>
           <div style={{ fontSize: 19, fontWeight: 800, color: C.ink, letterSpacing: "-.02em" }}>{person.name}</div>
-          <div style={{ fontSize: 12.5, color: C.mute2, marginTop: 3 }}>{detail?.count || 0} операций</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 5, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12.5, color: C.mute2 }}>
+              {staffRec?.position || (person.kind === "worker" ? "Подрядчик" : "—")}
+            </span>
+            {meta && <span style={pill(meta.key === "fired" ? "#6e7278" : C.green, meta.key === "fired" ? C.lineSoft : C.greenSoft)}>{meta.label}</span>}
+            {scheme && scheme.salary > 0 && <span style={pill(C.accent, C.accentSoft)}>оклад {money(scheme.salary)}</span>}
+          </div>
         </div>
         <span style={{ flex: 1 }} />
-        <div>
+        <div style={{ textAlign: "right" }}>
           <div style={lab}>Выплачено в ФОТ</div>
           <div style={{ fontSize: 20, fontWeight: 800, color: C.ink, fontVariantNumeric: "tabular-nums", letterSpacing: "-.01em" }}>{money(detail?.total || 0)}</div>
+          {shareOfFot !== null && <div style={{ fontSize: 11.5, color: C.faint, marginTop: 3 }}>{shareOfFot}% всего ФОТ</div>}
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
+        {tile("Операций", `${detail?.count || 0}`,
+          detail?.first ? `${dt(detail.first)} — ${dt(detail.last)}` : "нет выплат")}
+        {tile("В среднем за месяц", money(detail?.avgMonth || 0),
+          `${months.length} мес. с выплатами${scheme && scheme.salary > 0
+            ? ` · оклад ${money(scheme.salary)}` : ""}`)}
+        {tile("Средняя выплата", money(detail?.avgOp || 0), `самая крупная ${money(detail?.maxOp || 0)}`)}
+        {tile("Последняя выплата", dt(detail?.last),
+          detail?.ops?.[0] ? money(detail.ops[0].amount) : "—")}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 12 }}>
         <div style={card}>
-          <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink, marginBottom: 12 }}>По месяцам</div>
-          {months.length === 0 ? <div style={{ fontSize: 12, color: C.faint }}>Нет данных</div> : months.map(m => {
-            const max = Math.max(...months.map(x => detail.byMonth[x]), 1);
-            return (
-              <div key={m} style={{ marginBottom: 8 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, marginBottom: 3 }}>
-                  <span style={{ color: C.ink2, fontWeight: 600 }}>{monthLabel(m)}</span>
-                  <span style={{ color: C.mute, fontVariantNumeric: "tabular-nums" }}>{money(detail.byMonth[m])}</span>
-                </div>
-                <div style={{ height: 7, background: C.lineSoft, borderRadius: 999, overflow: "hidden" }}>
-                  <div style={{ width: `${Math.round(detail.byMonth[m] / max * 100)}%`, height: "100%",
-                    background: C.accent, borderRadius: 999 }} />
-                </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 12 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink }}>По месяцам</div>
+            <div style={{ fontSize: 11.5, color: C.faint }}>клик — показать операции месяца</div>
+          </div>
+          {months.length === 0 ? <div style={{ fontSize: 12, color: C.faint }}>Нет данных</div> : months.map(m => (
+            <div key={m} onClick={() => setMonth(month === m ? "" : m)}
+              style={{ marginBottom: 8, cursor: "pointer", opacity: month && month !== m ? .45 : 1 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, marginBottom: 3 }}>
+                <span style={{ color: month === m ? C.accentInk : C.ink2, fontWeight: month === m ? 800 : 600 }}>{monthLabel(m)}</span>
+                <span style={{ color: C.mute, fontVariantNumeric: "tabular-nums" }}>{money(detail.byMonth[m])}</span>
               </div>
-            );
-          })}
+              <div style={{ height: 7, background: C.lineSoft, borderRadius: 999, overflow: "hidden" }}>
+                <div style={{ width: `${Math.round(detail.byMonth[m] / maxMonth * 100)}%`, height: "100%",
+                  background: month === m ? C.accentInk : C.accent, borderRadius: 999 }} />
+              </div>
+            </div>
+          ))}
         </div>
+
+        {hasObjects && <div style={card}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink, marginBottom: 12 }}>По объектам</div>
+          {(allContracts ? contracts : contracts.slice(0, 7)).map(([cn, v]) => {
+              const addr = objectLabel(cn);
+              return (
+                <div key={cn} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12,
+                  padding: "6px 0", borderBottom: `1px solid ${C.lineSoft}` }}>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ color: C.ink2, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {addr || cn}
+                    </span>
+                    {addr && <span style={{ color: C.faint, fontSize: 10.5 }}>{cn}</span>}
+                  </span>
+                  <span style={{ color: C.mute, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{money(v)}</span>
+                </div>
+              );
+            })}
+          {contracts.length > 7 && (
+            <button onClick={() => setAllContracts(v => !v)} style={{ ...btnGhost, marginTop: 10, padding: "5px 10px", fontSize: 11.5 }}>
+              {allContracts ? "Свернуть" : `Показать все · ${contracts.length}`}
+            </button>
+          )}
+        </div>}
+
         <div style={card}>
-          <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink, marginBottom: 12 }}>По договорам</div>
-          {contracts.length === 0 ? <div style={{ fontSize: 12, color: C.faint }}>Нет данных</div> : contracts.slice(0, 8).map(([cn, v]) => (
-            <div key={cn} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12, padding: "5px 0", borderBottom: `1px solid ${C.lineSoft}` }}>
-              <span style={{ color: C.ink2, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cn}</span>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink, marginBottom: 12 }}>По статьям</div>
+          {subs.length === 0 ? <div style={{ fontSize: 12, color: C.faint }}>Нет данных</div> : subs.slice(0, 8).map(([s, v]) => (
+            <div key={s} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12,
+              padding: "6px 0", borderBottom: `1px solid ${C.lineSoft}` }}>
+              <span style={{ color: C.ink2, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s}</span>
               <span style={{ color: C.mute, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{money(v)}</span>
             </div>
           ))}
         </div>
       </div>
 
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink }}>
+          Операции{month ? ` за ${monthLabel(month)}` : ""} · {ops.length}
+        </div>
+        {month && <button onClick={() => setMonth("")} style={btnGhost}>Показать все месяцы</button>}
+        <span style={{ flex: 1 }} />
+        <div style={{ fontSize: 12.5, color: C.mute, fontVariantNumeric: "tabular-nums" }}>
+          {money(ops.reduce((s, o) => s + o.amount, 0))}
+        </div>
+      </div>
+
       <div style={cardTable}>
-        <div style={{ overflowX: "auto", maxHeight: 460 }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 560 }}>
+        <div style={{ overflowX: "auto", maxHeight: 520 }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 640 }}>
             <thead><tr>
-              <th style={th}>Дата</th><th style={th}>Подкатегория</th><th style={th}>Договор</th>
+              <th style={th}>Дата</th><th style={th}>Статья</th>
+              {hasObjects && <th style={th}>Объект</th>}
               <th style={th}>Комментарий</th><th style={{ ...th, textAlign: "right" }}>Сумма</th>
             </tr></thead>
             <tbody>
-              {(detail?.ops || []).map(o => (
-                <tr key={o.id}>
-                  <td style={{ ...td, whiteSpace: "nowrap", color: C.mute }}>{dt(o.date)}</td>
-                  <td style={td}>
-                    {o.subcategory || "—"}
-
-                  </td>
-                  <td style={{ ...td, color: C.mute }}>{o.contractNo || "—"}</td>
-                  <td style={{ ...td, color: C.faint, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.comment || ""}</td>
-                  <td style={{ ...numCell, fontWeight: 700 }}>{money(o.amount)}</td>
-                </tr>
-              ))}
+              {ops.length === 0 && (
+                <tr><td colSpan={hasObjects ? 5 : 4} style={{ ...td, textAlign: "center", color: C.faint, padding: "30px 16px" }}>
+                  Операций нет.
+                </td></tr>
+              )}
+              {ops.map(o => {
+                const addr = objectLabel(o.contractNo);
+                return (
+                  <tr key={o.id}>
+                    <td style={{ ...tdTight, whiteSpace: "nowrap", color: C.mute }}>{dt(o.date)}</td>
+                    <td style={tdTight}>{o.subcategory || "—"}</td>
+                    {hasObjects && (
+                      <td style={{ ...tdTight, color: C.mute, maxWidth: 190 }}>
+                        <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{addr || o.contractNo || "—"}</div>
+                        {addr && o.contractNo && <div style={{ fontSize: 10.5, color: C.faint }}>{o.contractNo}</div>}
+                      </td>
+                    )}
+                    {/* Комментарий не обрезаем в одну строку: в боевой базе там и адрес,
+                        и что именно сделано, и расчёт суммы — ради этого карточку и открывают. */}
+                    <td style={{ ...tdTight, color: C.faint2, maxWidth: 340, whiteSpace: "normal", lineHeight: 1.45 }}>{o.comment || ""}</td>
+                    <td style={{ ...numCellTight, fontWeight: 700, color: C.ink }}>{money(o.amount)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -350,7 +458,7 @@ function PersonCard({ person, detail, money, onBack }) {
 }
 
 // ── Справочник сотрудников ──────────────────────────────────────────────────
-function StaffTab({ staff, users, report, money, genId, readOnly, saveStaff }) {
+function StaffTab({ staff, users, report, money, genId, readOnly, saveStaff, onOpenCard }) {
   const [draft, setDraft] = useState(null);   // редактируемый сотрудник
   const [err, setErr] = useState("");        // почему не сохранилось — прямо в форме
   const [busy, setBusy] = useState(false);
@@ -505,7 +613,10 @@ function StaffTab({ staff, users, report, money, genId, readOnly, saveStaff }) {
                   const sc = normalizeScheme(s.scheme);
                   return (
                     <tr key={s.id}>
-                      <td style={td}>
+                      {/* Клик по имени открывает карточку: все выплаты человека,
+                          по месяцам, объектам и статьям. */}
+                      <td style={{ ...td, cursor: "pointer" }} title="Открыть карточку"
+                        onClick={() => onOpenCard && onOpenCard(s)}>
                         <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
                           {(() => { const a = avatarOf(s.name || "?"); return <span style={avatarStyle(a)}>{a.initials}</span>; })()}
                           <div>
