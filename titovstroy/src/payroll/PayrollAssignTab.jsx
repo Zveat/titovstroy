@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { listExpenseOps, normalizeStaff, NON_WAGE_KEY, nonWageSet } from "./payrollModel.js";
+import { listExpenseOps, normalizeStaff, EXCLUDE_KEY, excludedSet } from "./payrollModel.js";
 import {
   C, card, cardTable, inp, lab, th, tdTight, numCellTight, td, numCell, pill,
   btnPrimary, btnGhost, btnDanger, h1, h1sub, notice, runSave,
@@ -82,15 +82,15 @@ export function AssignTab({
   const [rules, setRules] = useState(subcategoryMap);
   const rulesDirty = JSON.stringify(rules) !== JSON.stringify(subcategoryMap);
   const setRule = (sub, id) => setRules(m => { const n = { ...m }; if (id) n[sub] = id; else delete n[sub]; return n; });
-  // «Не зарплата» — деньги человеку, но не ФОТ (дивиденды, возврат займа). В разрезе
-  // по людям они видны, но в сверку «начислено / выплачено» не идут: иначе у учредителя
-  // была бы вечная переплата на миллионы.
-  const nw = nonWageSet(rules);
+  // «Не ФОТ» — подкатегория выкидывается из раздела целиком: дивиденды, материалы,
+  // аренда, эквайринг. Раньше они шли отдельной колонкой «не зарплата», но дивидендам
+  // в разделе про зарплату делать нечего вообще.
+  const nw = excludedSet(rules);
   const toggleNonWage = (sub) => setRules(m => {
-    const cur = new Set(Array.isArray(m[NON_WAGE_KEY]) ? m[NON_WAGE_KEY] : []);
+    const cur = new Set(Array.isArray(m[EXCLUDE_KEY]) ? m[EXCLUDE_KEY] : []);
     cur.has(sub) ? cur.delete(sub) : cur.add(sub);
     const n = { ...m };
-    if (cur.size) n[NON_WAGE_KEY] = [...cur]; else delete n[NON_WAGE_KEY];
+    if (cur.size) n[EXCLUDE_KEY] = [...cur]; else delete n[EXCLUDE_KEY];
     return n;
   });
   const pickRule = async (sub, value) => {
@@ -122,9 +122,10 @@ export function AssignTab({
   return (
     <>
       <div>
-        <h1 style={h1}>Разложить операции</h1>
+        <h1 style={h1}>Разбор истории</h1>
         <p style={h1sub}>
-          Отфильтруйте, выделите нужные и проставьте получателя одним действием. По одной операции заходить не надо.
+          Разовая работа: проставить получателя старым операциям, которые вносились до появления раздела.
+          Новые операции размечаются сразу при вводе — полем «Кому выплата» в карточке расхода.
         </p>
       </div>
 
@@ -137,6 +138,16 @@ export function AssignTab({
 
       {err && (
         <div style={notice("red")}>{err}</div>
+      )}
+
+      {/* Экран знает, когда он отработал. Дальше сюда заходят только за правилами. */}
+      {list.allCount > 0 && list.rows.length === 0 && onlyUnassigned && !subcategory && !query && (
+        <div style={{ ...notice(), display: "flex", gap: 10, alignItems: "flex-start" }}>
+          <span style={{ fontSize: 15 }}>✅</span>
+          <span><b>История разобрана.</b> У всех расходов есть получатель либо отметка «не ФОТ».
+          Этот экран больше не нужен — заходите сюда, только если появятся новые неразмеченные операции
+          или понадобится поправить правило.</span>
+        </div>
       )}
 
       {/* ── Фильтры ── */}
@@ -252,8 +263,8 @@ export function AssignTab({
             <div style={{ fontSize: 12, color: C.faint, marginTop: 3, lineHeight: 1.5 }}>
               Годится только там, где вся подкатегория уходит одному человеку — «ФОТ РОП», «ФОТ таргетолог».
               Правило действует и на будущие операции, сами операции не переписывает.
-              Галочка «не зарплата» — для дивидендов и подобного: в разрезе по людям сумма видна,
-              но зарплатой не считается и в сверку долгов не идёт.
+              Галочка «не ФОТ» — для дивидендов, материалов, аренды и прочего, что к зарплате
+              отношения не имеет: такие подкатегории раздел не считает вообще.
             </div>
           </div>
           <span style={{ flex: 1 }} />
@@ -268,7 +279,7 @@ export function AssignTab({
             <thead><tr>
               <th style={th}>Подкатегория</th><th style={{ ...th, textAlign: "right" }}>Операций</th>
               <th style={{ ...th, textAlign: "right" }}>Сумма</th><th style={th}>Кому</th>
-              <th style={th}>Не зарплата</th>
+              <th style={th}>Не ФОТ</th>
             </tr></thead>
             <tbody>
               {ruleRows.map(s => (
@@ -288,7 +299,7 @@ export function AssignTab({
                   <td style={{ ...tdTight, textAlign: "center" }}>
                     <input type="checkbox" disabled={readOnly} checked={nw.has(s.subcategory)}
                       onChange={() => toggleNonWage(s.subcategory)} style={{ cursor: "pointer" }}
-                      title="Деньги человеку, но не зарплата — в сверку долгов не пойдут" />
+                      title="Не входит в ФОТ: раздел эту подкатегорию не считает вовсе" />
                   </td>
                 </tr>
               ))}

@@ -4,6 +4,10 @@ import { buildPayrollBalance, accrualKindMeta } from "./payrollAccruals.js";
 import { C, card, cardTable, th, td, numCell, pill, avatarOf, avatarStyle, h1, h1sub, footNote } from "./payrollUi.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ⚠ ВКЛАДКА ОТКЛЮЧЕНА. Владелец снял «Долги» из интерфейса: механика работает, но
+// пользоваться ей неудобно и непонятно. Файл оставлен целиком — вернём, когда
+// переработаем сценарий. В PayrollModule.jsx не импортируется.
+// ─────────────────────────────────────────────────────────────────────────────
 // Вкладка «Долги»: начислено против выплаченного.
 //
 // Плюс — компания должна человеку, минус — человек взял авансом. Складывать их
@@ -14,9 +18,9 @@ import { C, card, cardTable, th, td, numCell, pill, avatarOf, avatarStyle, h1, h
 export function BalanceTab({ staff, accruals, report, money }) {
   const paidByStaff = useMemo(() => {
     const m = {};
-    // Только зарплатная часть: дивиденды и прочие «не зарплата» — деньги человеку,
-    // но не выплата по начислениям. Иначе у учредителя вечная переплата.
-    for (const r of report.rows) if (r.kind === "staff") m[r.id] = { byMonth: r.wageByMonth || r.byMonth, total: r.wage ?? r.total };
+    // Отчёт уже исключает всё, что помечено «не ФОТ», поэтому здесь просто берём
+    // его цифры: дивиденды в них не входят.
+    for (const r of report.rows) if (r.kind === "staff") m[r.id] = { byMonth: r.byMonth, total: r.total };
     return m;
   }, [report]);
 

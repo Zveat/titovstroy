@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   resolvePayee, buildPayrollReport, expenseSubcategoryTotals, buildStaffDetail,
-  normalizeStaff, payrollMonthKey, monthLabel, listExpenseOps, NON_WAGE_KEY,
+  normalizeStaff, payrollMonthKey, monthLabel, listExpenseOps, EXCLUDE_KEY,
 } from "./payrollModel.js";
 
 const staff = [
@@ -116,45 +116,50 @@ describe("отчёт «кому сколько ушло»", () => {
   });
 });
 
-describe("«не зарплата» — деньги человеку, но не ФОТ", () => {
+describe("«не ФОТ» — подкатегория выкидывается из раздела целиком", () => {
   const tx = [
     { id: "1", type: "expense", amount: 300000, date: "2026-07-01", subcategory: "ФОТ РОП" },
     { id: "2", type: "expense", amount: 1856113, date: "2026-07-02", subcategory: "Дивиденды учредителям",
       payee: { kind: "staff", id: "s1" } },
+    { id: "3", type: "expense", amount: 50000, date: "2026-07-03", subcategory: "Материалы" },
   ];
-  const opts = { staff, workers, subcategoryMap: { ...map, [NON_WAGE_KEY]: ["Дивиденды учредителям"] } };
+  const opts = { staff, workers, subcategoryMap: { ...map, [EXCLUDE_KEY]: ["Дивиденды учредителям", "Материалы"] } };
 
-  it("сумма видна в разрезе по людям, но зарплатой не считается", () => {
-    // Иначе дивиденды учредителю выглядят как фонд оплаты труда, а в сверке долгов
-    // дают вечную переплату на миллионы.
+  it("исключённое не попадает ни в итог, ни в строку человека", () => {
+    // Дивидендам в разделе про зарплату делать нечего вообще — даже отдельной
+    // колонкой: владелец на это прямо указал.
     const r = buildPayrollReport(tx, opts);
+    expect(r.total).toBe(300000);
+    expect(r.excludedTotal).toBe(1906113);
     const rop = r.rows.find(x => x.id === "s1");
-    expect(rop.total).toBe(2156113);
-    expect(rop.wage).toBe(300000);
-    expect(rop.nonWage).toBe(1856113);
-    expect(rop.wageByMonth["2026-07"]).toBe(300000);
-    expect(r.wageTotal).toBe(300000);
-    expect(r.nonWageTotal).toBe(1856113);
-    expect(r.wageTotal + r.nonWageTotal).toBe(r.total);
+    expect(rop.total).toBe(300000);
+    expect(r.unassigned).toBe(0);              // «Материалы» тоже вне раздела
   });
 
-  it("служебный ключ не путается с настоящей подкатегорией", () => {
-    // Имя подкатегории не может начинаться с «__», пересечься они не могут.
-    const r = buildPayrollReport(tx, opts);
-    expect(r.rows.some(x => x.name === NON_WAGE_KEY)).toBe(false);
+  it("сотрудники и подрядчики считаются отдельными разрезами", () => {
+    const t2 = [...tx, { id: "4", type: "expense", amount: 400000, date: "2026-07-04",
+      subcategory: "Зарплаты рабочих / подрядчиков", payee: { kind: "worker", id: "w1" } }];
+    const r = buildPayrollReport(t2, opts);
+    expect(r.staffRows.map(x => x.id)).toEqual(["s1"]);
+    expect(r.workerRows.map(x => x.id)).toEqual(["w1"]);
+    expect(r.staffTotal).toBe(300000);
+    expect(r.workerTotal).toBe(400000);
+    expect(r.staffByMonth["2026-07"]).toBe(300000);
+    expect(r.workerByMonth["2026-07"]).toBe(400000);
+    // Итог сходится: сотрудники + подрядчики + не разложено = всего.
+    expect(r.staffTotal + r.workerTotal + r.unassigned).toBe(r.total);
   });
 
-  it("без отметки всё считается зарплатой, как раньше", () => {
+  it("без отметок в расчёт идёт всё, как раньше", () => {
     const r = buildPayrollReport(tx, { staff, workers, subcategoryMap: map });
-    expect(r.nonWageTotal).toBe(0);
-    expect(r.wageTotal).toBe(r.total);
+    expect(r.excludedTotal).toBe(0);
+    expect(r.total).toBe(2206113);
   });
 
-  it("карточка человека тоже делит зарплату и не зарплату", () => {
+  it("карточка человека тоже не показывает исключённое", () => {
     const d = buildStaffDetail(tx, { staffId: "s1", ...opts });
-    expect(d.wage).toBe(300000);
-    expect(d.nonWage).toBe(1856113);
-    expect(d.ops.find(o => o.subcategory === "Дивиденды учредителям").nonWage).toBe(true);
+    expect(d.total).toBe(300000);
+    expect(d.ops.some(o => o.subcategory === "Дивиденды учредителям")).toBe(false);
   });
 });
 
