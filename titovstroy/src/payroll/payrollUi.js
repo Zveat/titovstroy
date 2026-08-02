@@ -2,9 +2,9 @@ import { saveFailReasonText } from "../utils.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Оформление раздела ФОТ — по макету владельца (Payroll_Dashboard).
-// Цвета переведены из oklch макета в hex один в один, размеры взяты оттуда же:
-// заголовок 30/800, плитка 28px с иконкой 40×40 сверху, число 32/800, строка
-// таблицы 20×24 с аватаром 40×40 и именем 15/700.
+// Цвета переведены из oklch макета в hex один в один. Размеры — пропорции макета,
+// уменьшенные примерно на четверть: макет рисовался как отдельная страница на
+// 1440px, внутри сервиса его кегли выпирали относительно остальных разделов.
 //
 // Правила:
 //   • деньги — tabular-nums, чтобы разряды в столбце стояли ровно;
@@ -35,32 +35,32 @@ export const shadowSeg = "0 1px 3px rgba(0,0,0,.08)";
 
 // Карточка. Радиус 20 и padding 28 — как в макете; тени нет.
 export const card = {
-  background: C.white, border: `1px solid ${C.line}`, borderRadius: 20, padding: 28,
+  background: C.white, border: `1px solid ${C.line}`, borderRadius: 16, padding: 20,
 };
-export const cardFlat = { ...card, padding: 20 };
+export const cardFlat = { ...card, padding: 16 };
 // Карточка-таблица: содержимое идёт до краёв, скруглённые углы обрезают строки.
 export const cardTable = {
-  background: C.white, border: `1px solid ${C.line}`, borderRadius: 20, overflow: "hidden",
+  background: C.white, border: `1px solid ${C.line}`, borderRadius: 16, overflow: "hidden",
 };
 
 export const inp = {
-  border: `1px solid ${C.line}`, borderRadius: 12, padding: "11px 14px", fontSize: 14,
+  border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 11px", fontSize: 13,
   fontFamily: "inherit", width: "100%", boxSizing: "border-box", background: C.white,
   color: C.ink, outline: "none",
 };
 export const lab = {
-  fontSize: 13, color: C.mute2, fontWeight: 600, marginBottom: 7, display: "block",
+  fontSize: 11.5, color: C.mute2, fontWeight: 600, marginBottom: 5, display: "block",
 };
 
 // Шапка и ячейки таблицы. В макете это grid, но у нас настоящая таблица —
 // повторяем метрики: 16×24 в шапке, 20×24 в строке.
 export const th = {
-  textAlign: "left", fontSize: 12, fontWeight: 700, letterSpacing: ".04em",
-  textTransform: "uppercase", color: C.faint, padding: "16px 24px",
+  textAlign: "left", fontSize: 10.5, fontWeight: 700, letterSpacing: ".04em",
+  textTransform: "uppercase", color: C.faint, padding: "11px 16px",
   borderBottom: `1px solid ${C.lineHead}`, whiteSpace: "nowrap", background: C.white,
 };
 export const td = {
-  padding: "20px 24px", fontSize: 15, borderBottom: `1px solid ${C.lineRow}`,
+  padding: "13px 16px", fontSize: 13.5, borderBottom: `1px solid ${C.lineRow}`,
   verticalAlign: "middle", color: C.ink2,
 };
 export const numCell = {
@@ -68,47 +68,47 @@ export const numCell = {
   whiteSpace: "nowrap", fontFeatureSettings: '"tnum"',
 };
 // Плотная строка — для длинных списков операций, где 20px по вертикали слишком много.
-export const tdTight = { ...td, padding: "13px 20px", fontSize: 14 };
+export const tdTight = { ...td, padding: "9px 14px", fontSize: 12.5 };
 export const numCellTight = { ...tdTight, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
 
 export const pill = (color, bg) => ({
   display: "inline-flex", alignItems: "center", gap: 5, borderRadius: 999,
-  padding: "3px 9px", fontSize: 11, fontWeight: 700, color, background: bg,
+  padding: "2px 8px", fontSize: 10, fontWeight: 700, color, background: bg,
   whiteSpace: "nowrap", lineHeight: 1.6,
 });
 
 export const btnPrimary = (on = true) => ({
-  background: on ? C.accent : "#c6cad4", color: "#fff", border: "none", borderRadius: 12,
-  padding: "12px 22px", fontSize: 14, fontWeight: 700, cursor: on ? "pointer" : "default",
+  background: on ? C.accent : "#c6cad4", color: "#fff", border: "none", borderRadius: 10,
+  padding: "9px 17px", fontSize: 13, fontWeight: 700, cursor: on ? "pointer" : "default",
   fontFamily: "inherit", transition: "background .12s",
 });
 export const btnGhost = {
-  background: C.white, border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 16px",
-  fontSize: 13, cursor: "pointer", color: C.mute, fontFamily: "inherit", fontWeight: 600,
+  background: C.white, border: `1px solid ${C.line}`, borderRadius: 9, padding: "7px 13px",
+  fontSize: 12.5, cursor: "pointer", color: C.mute, fontFamily: "inherit", fontWeight: 600,
 };
 export const btnDanger = { ...btnGhost, borderColor: C.redLine, color: C.red };
 
 // Вкладки раздела: белая полоса-контейнер по ширине содержимого.
 export const tabsWrap = {
-  display: "flex", gap: 6, padding: 6, background: C.white,
-  border: `1px solid ${C.line}`, borderRadius: 16, width: "fit-content",
+  display: "flex", gap: 4, padding: 5, background: C.white,
+  border: `1px solid ${C.line}`, borderRadius: 13, width: "fit-content",
   maxWidth: "100%", flexWrap: "wrap", alignSelf: "flex-start",
 };
 export const tabBtn = (on) => ({
   background: on ? C.accentSoft : "transparent",
   color: on ? C.accentInk : "#50565e",
   border: on ? `1.5px solid ${C.accent}` : "1.5px solid transparent",
-  borderRadius: 11, padding: "10px 19px", fontSize: 14, fontWeight: on ? 700 : 600,
+  borderRadius: 9, padding: "8px 15px", fontSize: 13, fontWeight: on ? 700 : 600,
   cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
 });
 
 // Сегменты внутри экрана («Считать», «Месяцев») — серая подложка, белый активный.
 export const segWrap = {
-  display: "flex", gap: 4, background: C.lineSoft, borderRadius: 10, padding: 4,
+  display: "flex", gap: 3, background: C.lineSoft, borderRadius: 9, padding: 3,
 };
 export const seg = (on) => ({
   background: on ? C.white : "transparent", color: on ? C.ink2 : "#6e7278",
-  border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 13,
+  border: "none", borderRadius: 7, padding: "6px 12px", fontSize: 12,
   fontWeight: on ? 700 : 600, cursor: "pointer", fontFamily: "inherit",
   boxShadow: on ? shadowSeg : "none", whiteSpace: "nowrap",
 });
@@ -128,36 +128,36 @@ export function avatarOf(name = "") {
   const [color, bg] = AVA[h % AVA.length];
   return { initials: initials.toUpperCase(), color, bg };
 }
-export const avatarStyle = (a, size = 40) => ({
+export const avatarStyle = (a, size = 32) => ({
   width: size, height: size, borderRadius: size >= 40 ? 12 : 10, flexShrink: 0,
   display: "inline-flex", alignItems: "center", justifyContent: "center",
-  background: a.bg, color: a.color, fontSize: size >= 40 ? 14 : 12, fontWeight: 700,
+  background: a.bg, color: a.color, fontSize: size >= 40 ? 15 : 11.5, fontWeight: 700,
 });
 
 // Доля в итоге — компактным бейджем у суммы. Полоска под именем читалась как
 // обрывок линии: у большинства людей доля 1–5%, и заливка была почти невидимой.
 export const sharePill = {
   display: "inline-block", padding: "2px 7px", borderRadius: 999,
-  fontSize: 11, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+  fontSize: 10, fontWeight: 700, fontVariantNumeric: "tabular-nums",
   background: C.lineSoft, color: "#6e7278",
 };
 
 // Рабочая область. Без ограничения таблица растягивается на два монитора,
 // колонки разъезжаются к краям и между ними зияет пустота.
-export const shell = { maxWidth: 1440, width: "100%", margin: "0 auto", paddingBottom: 40 };
+export const shell = { maxWidth: 1320, width: "100%", margin: "0 auto", paddingBottom: 28 };
 
-export const h1 = { fontSize: 30, fontWeight: 800, color: C.ink, letterSpacing: "-.02em", margin: 0 };
-export const h1sub = { fontSize: 16, color: C.mute, margin: "8px 0 0" };
+export const h1 = { fontSize: 21, fontWeight: 800, color: C.ink, letterSpacing: "-.02em", margin: 0 };
+export const h1sub = { fontSize: 13.5, color: C.mute, margin: "5px 0 0" };
 export const sectionTitle = h1;
 export const sectionHint = h1sub;
-export const footNote = { fontSize: 13, color: C.faint2, lineHeight: 1.5 };
+export const footNote = { fontSize: 12, color: C.faint2, lineHeight: 1.5 };
 
 // Полоса-уведомление. Тонов два: «info» — что-то стоит разобрать (бирюзовый),
 // «red» — сохранить не удалось. Жёлтого в разделе нет.
 export const notice = (tone = "info") => ({
   background: tone === "red" ? C.redSoft : C.warnSoft,
   border: `1px solid ${tone === "red" ? C.redLine : C.warnLine}`,
-  borderRadius: 14, padding: "16px 20px", fontSize: 14,
+  borderRadius: 11, padding: "11px 15px", fontSize: 12.5,
   color: tone === "red" ? C.red : C.warnInk,
 });
 

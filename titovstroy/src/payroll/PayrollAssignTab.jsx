@@ -131,7 +131,7 @@ export function AssignTab({
       {staff.length === 0 && workers.length === 0 && (
         <div style={notice()}>
           <b>Некого выбирать</b> — нет ни сотрудников, ни подрядчиков.
-          {onGoStaff && <> Заведите людей на вкладке <button onClick={onGoStaff} style={{ background: "none", border: "none", padding: 0, color: "#1d4ed8", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", fontSize: 12, textDecoration: "underline" }}>«Сотрудники»</button>, подрядчики — в «Админке».</>}
+          {onGoStaff && <> Заведите людей на вкладке <button onClick={onGoStaff} style={{ background: "none", border: "none", padding: 0, color: "#1d4ed8", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, textDecoration: "underline" }}>«Сотрудники»</button>, подрядчики — в «Админке».</>}
         </div>
       )}
 
@@ -140,7 +140,7 @@ export function AssignTab({
       )}
 
       {/* ── Фильтры ── */}
-      <div style={{ ...card, padding: 20, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 16, alignItems: "end" }}>
+      <div style={{ ...card, padding: 16, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 13, alignItems: "end" }}>
         <div><span style={lab}>Подкатегория</span>
           <select style={inp} value={subcategory} onChange={e => { setSubcategory(e.target.value); clearSel(); }}>
             <option value="">— все расходы —</option>
@@ -151,29 +151,29 @@ export function AssignTab({
         <div><span style={lab}>Поиск по комментарию, договору</span>
           <input style={inp} value={query} onChange={e => { setQuery(e.target.value); clearSel(); }}
             placeholder="например: ержан" /></div>
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: C.ink2, cursor: "pointer", paddingBottom: 10 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.ink2, cursor: "pointer", paddingBottom: 9 }}>
           <input type="checkbox" checked={onlyUnassigned}
             onChange={e => { setOnlyUnassigned(e.target.checked); clearSel(); }} style={{ cursor: "pointer" }} />
           Только без получателя
         </label>
-        <div style={{ textAlign: "right", fontSize: 13, color: C.mute, paddingBottom: 10 }}>
+        <div style={{ textAlign: "right", fontSize: 12, color: C.mute, paddingBottom: 9 }}>
           Найдено <b style={{ color: C.ink }}>{list.count}</b> из {list.allCount} · {money(list.total)}
         </div>
       </div>
 
       {/* ── Панель простановки ── */}
       {!readOnly && (
-        <div style={{ ...card, padding: 20, borderColor: selRows.length ? C.accentLine : C.line,
+        <div style={{ ...card, padding: 16, borderColor: selRows.length ? C.accentLine : C.line,
           background: selRows.length ? "#fafbff" : C.white,
-          display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 16, alignItems: "end" }}>
+          display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 13, alignItems: "end" }}>
           <div>
             <span style={lab}>Выделено</span>
-            <div style={{ fontSize: 22, fontWeight: 800, color: selRows.length ? C.ink : "#c6cad4", fontVariantNumeric: "tabular-nums", letterSpacing: "-.01em" }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: selRows.length ? C.ink : "#c6cad4", fontVariantNumeric: "tabular-nums", letterSpacing: "-.01em" }}>
               {selRows.length} оп · {money(selSum)}
             </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-              <button onClick={selectAll} disabled={!list.rows.length} style={{ ...btnGhost, padding: "6px 12px", fontSize: 12.5 }}>Выделить все</button>
-              <button onClick={clearSel} disabled={!selRows.length} style={{ ...btnGhost, padding: "6px 12px", fontSize: 12.5 }}>Снять</button>
+            <div style={{ display: "flex", gap: 7, marginTop: 8 }}>
+              <button onClick={selectAll} disabled={!list.rows.length} style={{ ...btnGhost, padding: "5px 11px", fontSize: 12 }}>Выделить все</button>
+              <button onClick={clearSel} disabled={!selRows.length} style={{ ...btnGhost, padding: "5px 11px", fontSize: 12 }}>Снять</button>
             </div>
           </div>
           <div><span style={lab}>Кто получил</span>
@@ -200,13 +200,13 @@ export function AssignTab({
       {/* ── Операции ── */}
       <div style={cardTable}>
         {list.rows.length === 0 ? (
-          <div style={{ padding: "56px 24px", textAlign: "center", color: C.faint, fontSize: 14 }}>
-            <div style={{ fontSize: 32, marginBottom: 10 }}>{onlyUnassigned ? "✅" : "🔎"}</div>
+          <div style={{ padding: "44px 20px", textAlign: "center", color: C.faint, fontSize: 13 }}>
+            <div style={{ fontSize: 26, marginBottom: 8 }}>{onlyUnassigned ? "✅" : "🔎"}</div>
             {onlyUnassigned ? "Все операции по этому фильтру уже с получателем." : "По этому фильтру операций нет."}
           </div>
         ) : (
           <div style={{ overflowX: "auto", maxHeight: 560 }}>
-            <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 760 }}>
+            <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 720 }}>
               <thead><tr>
                 <th style={{ ...th, width: 34, position: "sticky", top: 0 }}></th>
                 <th style={{ ...th, position: "sticky", top: 0 }}>Дата</th>
@@ -246,10 +246,10 @@ export function AssignTab({
 
       {/* ── Правило по подкатегории ── */}
       <div style={cardTable}>
-        <div style={{ padding: "20px 24px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", borderBottom: `1px solid ${C.lineHead}` }}>
+        <div style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", borderBottom: `1px solid ${C.lineHead}` }}>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: C.ink }}>Постоянное правило по подкатегории</div>
-            <div style={{ fontSize: 13, color: C.faint, marginTop: 4, lineHeight: 1.5 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>Постоянное правило по подкатегории</div>
+            <div style={{ fontSize: 12, color: C.faint, marginTop: 3, lineHeight: 1.5 }}>
               Годится только там, где вся подкатегория уходит одному человеку — «ФОТ РОП», «ФОТ таргетолог».
               Правило действует и на будущие операции, сами операции не переписывает.
               Галочка «не зарплата» — для дивидендов и подобного: в разрезе по людям сумма видна,
@@ -264,7 +264,7 @@ export function AssignTab({
           )}
         </div>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 620 }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 600 }}>
             <thead><tr>
               <th style={th}>Подкатегория</th><th style={{ ...th, textAlign: "right" }}>Операций</th>
               <th style={{ ...th, textAlign: "right" }}>Сумма</th><th style={th}>Кому</th>
@@ -273,13 +273,13 @@ export function AssignTab({
             <tbody>
               {ruleRows.map(s => (
                 <tr key={s.subcategory} style={rules[s.subcategory] ? { background: "#f7fdfa" } : undefined}>
-                  <td style={{ ...tdTight, fontWeight: 600, color: C.ink, fontSize: 15 }}>{s.subcategory}</td>
+                  <td style={{ ...tdTight, fontWeight: 600, color: C.ink, fontSize: 13.5 }}>{s.subcategory}</td>
                   <td style={numCellTight}>{s.count}</td>
-                  <td style={{ ...numCellTight, fontWeight: 800, fontSize: 15, color: C.ink }}>{money(s.total)}</td>
-                  <td style={{ ...tdTight, minWidth: 230 }}>
+                  <td style={{ ...numCellTight, fontWeight: 800, fontSize: 13.5, color: C.ink }}>{money(s.total)}</td>
+                  <td style={{ ...tdTight, minWidth: 200 }}>
                     <select disabled={readOnly} value={rules[s.subcategory] || ""}
                       onChange={e => pickRule(s.subcategory, e.target.value)}
-                      style={{ ...inp, padding: "8px 11px", fontSize: 13 }}>
+                      style={{ ...inp, padding: "7px 10px", fontSize: 12.5 }}>
                       <option value="">— не задано —</option>
                       {staff.map(p => <option key={p.id} value={p.id}>{p.name || "Без имени"}{p.position ? ` · ${p.position}` : ""}</option>)}
                       {!readOnly && <option value="__new__">+ Завести сотрудника…</option>}
@@ -295,7 +295,7 @@ export function AssignTab({
             </tbody>
           </table>
         </div>
-        <div style={{ padding: "16px 24px", borderTop: `1px solid ${C.lineRow}` }}>
+        <div style={{ padding: "12px 18px", borderTop: `1px solid ${C.lineRow}` }}>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: C.mute, cursor: "pointer" }}>
             <input type="checkbox" checked={showRules} onChange={e => setShowRules(e.target.checked)} style={{ cursor: "pointer" }} />
             Показать все подкатегории расходов, а не только похожие на зарплату
