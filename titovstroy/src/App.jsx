@@ -6215,6 +6215,10 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const finProjectsRef = useRef([]);
   useEffect(() => { finProjectsRef.current = finProjects; }, [finProjects]);
   const [finProjModal, setFinProjModal] = useState(null);
+  // Сохранение проекта асинхронное, а модалка закрывается только после await —
+  // второй клик по «Сохранить» успевал создать вторую карточку с тем же договором
+  // (ловили дубль по №1034). Ref держит признак «запись уже идёт».
+  const finProjSavingRef = useRef(false);
   const [finProjSearch, setFinProjSearch] = useState("");
   const [finProjStatusFilter, setFinProjStatusFilter] = useState("");
   const [finProjCatFilter, setFinProjCatFilter] = useState("");
@@ -6636,7 +6640,11 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const FIN_TO_PROD = { new:"new", approval:"new", signed:"new", work:"active", paused:"paused", done:"done", cancel:"cancel", refuse:"cancel", archive:"cancel" };
   const prodEntries = useMemo(() => {
     const txByCN = {};
-    for (const t of (financeTx || [])) { if (t.deletedAt || t.included === false) continue; const cn = normCN(t.contractNo); (txByCN[cn] || (txByCN[cn] = [])).push(t); }
+    // Операции без номера договора (зарплаты, аренда, реклама — общефирменные) НЕ
+    // складываем в ключ "": проект с пустым contractNo иначе забирал этот общий котёл
+    // себе целиком. Ловили на объекте без договора: карточка показывала расход 22,5 млн
+    // и маржу −4755%, хотя по объекту не было ни одной операции.
+    for (const t of (financeTx || [])) { if (t.deletedAt || t.included === false) continue; const cn = normCN(t.contractNo); if (!cn) continue; (txByCN[cn] || (txByCN[cn] = [])).push(t); }
     const entries = []; const usedObj = new Set();
     for (const fp of (finProjects || [])) {
       const o = matchFpToObject(fp);
@@ -11618,7 +11626,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         const _isActiveFin = isActiveFinanceProject;
         const _finKpi = hasFinancialDetails ? (() => {
           const active = (finProjects||[]).filter(_isActiveFin);
-          const txMap = {}; for(const t of (financeTx||[])){if(t.deletedAt||t.included===false) continue; const cn=normCN(t.contractNo); if(!txMap[cn])txMap[cn]={inc:0,exp:0}; if(t.type==="income")txMap[cn].inc+=(Number(t.amount)||0); else txMap[cn].exp+=(Number(t.amount)||0); }
+          // без номера договора — общефирменные операции, к конкретному проекту не
+          // относятся (иначе проект с пустым contractNo забирает их все, см. prodEntries)
+          const txMap = {}; for(const t of (financeTx||[])){if(t.deletedAt||t.included===false) continue; const cn=normCN(t.contractNo); if(!cn) continue; if(!txMap[cn])txMap[cn]={inc:0,exp:0}; if(t.type==="income")txMap[cn].inc+=(Number(t.amount)||0); else txMap[cn].exp+=(Number(t.amount)||0); }
           const totalInc = active.reduce((s,p)=>s+(txMap[normCN(p.contractNo)]?.inc||0),0);
           const totalExp = active.reduce((s,p)=>s+(txMap[normCN(p.contractNo)]?.exp||0),0);
           const totalBudget = active.reduce((s,p)=>s+financeBudgetOf(p),0);
@@ -14168,12 +14178,27 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     const savep = async () => {
                       if (mp.id ? !canFinanceEditRecord(mp) : !canFinanceCreate) return;
                       if (!mp.id && !mp.objectId) { window.alert("Сначала выберите объект. Новый финансовый проект без объекта создавать нельзя."); return; }
+                      if (finProjSavingRef.current) return; // двойной клик по «Сохранить»
+                      finProjSavingRef.current = true;
+                      try {
+                        const cur = finProjectsRef.current;
+                        // Один объект / один номер договора = один финпроект. Дубль ломает
+                        // сводки: бюджет и операции договора считаются дважды.
+                        let targetId = mp.id;
+                        if (!targetId) {
+                          const cn = normCN(mp.contractNo);
+                          const dup = cur.find(x => (mp.objectId && x.objectId === mp.objectId) || (cn && normCN(x.contractNo) === cn));
+                          if (dup) {
+                            if (!window.confirm("Для этого объекта (или номера договора) финансовый проект уже есть.\n\nОбновить существующий вместо создания второго?")) return;
+                            targetId = dup.id;
+                          }
+                        }
                         const { _virtual, ...mpClean } = mp; // служебный флаг виртуальной строки в базу не пишем
-                        const proj = {...mpClean, id: mp.id||genId(), budget:view.linked?view.budget:(Number(mp.budget)||0), paidFact:Number(mp.paidFact)||0, expenses:Number(mp.expenses)||0, createdBy:mp.createdBy||currentUser.name, createdById:mp.createdById||currentUser.id, updatedAt:Date.now()};
-                      const cur = finProjectsRef.current;
-                      const list = mp.id ? cur.map(x=>x.id===mp.id?proj:x) : [proj,...cur];
-                      await saveFinanceProjects(list);
-                      setFinProjModal(null);
+                        const proj = {...mpClean, id: targetId||genId(), budget:view.linked?view.budget:(Number(mp.budget)||0), paidFact:Number(mp.paidFact)||0, expenses:Number(mp.expenses)||0, createdBy:mp.createdBy||currentUser.name, createdById:mp.createdById||currentUser.id, updatedAt:Date.now()};
+                        const list = targetId ? cur.map(x=>x.id===targetId?{...x,...proj}:x) : [proj,...cur];
+                        await saveFinanceProjects(list);
+                        setFinProjModal(null);
+                      } finally { finProjSavingRef.current = false; }
                     };
                     const delp = async () => {
                       if (!canFinanceDeleteRecord(mp)) return;
