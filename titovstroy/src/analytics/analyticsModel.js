@@ -15,6 +15,7 @@ export const REFUSE_REASONS = Object.freeze([
   { key: "postponed",   label: "Отложили ремонт" },
   { key: "noAnswer",    label: "Пропал / не отвечает" },
   { key: "scope",       label: "Не наш профиль" },
+  { key: "scope",       label: "Не целевой" },
   { key: "other",       label: "Другое" },
 ]);
 
