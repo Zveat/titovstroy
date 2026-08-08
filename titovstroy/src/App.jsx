@@ -21,7 +21,7 @@ import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restore
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, contractNetTotal, applyDiscountToWorks, discountedUnitPrice, priceBeforeDiscount, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
+import { normCN, contractNetTotal, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -4384,7 +4384,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
   const [impSearch, setImpSearch] = useState("");
   const [impOpen, setImpOpen] = useState(false);
   const type = contract.type || "repair_fiz";
-  const total = (contract.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
+  const total = (contract.works||[]).reduce((s,w)=>s+lineTotal(w.quantity,w.price),0);
   const upd = (patch) => onUpdate(prev=>({...prev,...patch}));
 
   const isRepair   = type==="repair_fiz";
@@ -4777,7 +4777,7 @@ function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSa
                 style={{background:"#ffffff",border:"1px solid #e2e8f0",color:"#0f172a",fontSize:11,borderRadius:4,padding:"3px 5px",textAlign:"center",fontFamily:"inherit",width:"100%"}}/>
               <input type="number" value={w.price||""} onChange={e=>{const ws=[...(contract.works||[])];ws[i]={...ws[i],price:parseFloat(e.target.value)||0};upd({works:ws});}}
                 style={{background:"#ffffff",border:"1px solid #e2e8f0",color:"#0f172a",fontSize:11,borderRadius:4,padding:"3px 5px",textAlign:"right",fontFamily:"inherit",width:"100%"}}/>
-              <div style={{fontSize:12,fontWeight:700,color:"#0f172a",textAlign:"right"}}>{fmt(Number(w.quantity)*Number(w.price)||0)}</div>
+              <div style={{fontSize:12,fontWeight:700,color:"#0f172a",textAlign:"right"}}>{fmt(lineTotal(w.quantity,w.price))}</div>
               <button onClick={()=>{const ws=(contract.works||[]).filter((_,j)=>j!==i);upd({works:ws});}}
                 style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:14,padding:0}}>✕</button>
             </div>
@@ -7290,7 +7290,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     const cat = getEffectiveCatalog();
     const lk = new Map();
     for (const w of cat) { if (w?.name) lk.set(w.name, w); if (w?.code) lk.set(w.code, w); }
-    const mm = 1 + (Number(est.markup) || 0) / 100;
+    const pricing = { markupPercent: Number(est.markup) || 0, discountPercent: Number(est.discount) || 0 };
     const lines = [];
     for (const [key, r] of Object.entries(est.rows || {})) {
       const qty = Number(r?.qty || 0); if (qty <= 0) continue;
@@ -7301,11 +7301,10 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       if (!price) continue; // позиции «цена от» в акт не берём
       const name = r.manualName !== undefined ? r.manualName : w.name;
       const unit = r.manualUnit !== undefined ? r.manualUnit : w.unit;
-      lines.push({ cat: w.cat || "", name, unit: unit || "", qty, price: Math.round(price * mm), included: true, doneQty: qty });
+      // Цена в акте — ровно та же, что в смете и договоре (одна формула на всё).
+      lines.push({ cat: w.cat || "", name, unit: unit || "", qty, price: clientUnitPrice(price, pricing), included: true, doneQty: qty });
     }
-    // Акт выставляется по ценам договора, а в них уже сидит скидка сметы.
-    // Раньше наценка применялась, а скидка нет — акт выходил дороже договора.
-    return applyDiscountToWorks(lines, est.discount).works;
+    return lines;
   };
   // Открыть построитель акта по объекту и его смете
   const openAvrBuilder = (obj, est) => {
@@ -8233,7 +8232,7 @@ ${reqBlock}`;
     if (_dealAutoSave.current) clearTimeout(_dealAutoSave.current);
     _dealAutoSave.current = setTimeout(async () => {
       const list = dealsRef.current.filter(x=>x.id!==currentDeal.id);
-      const total = (currentDeal.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
+      const total = (currentDeal.works||[]).reduce((s,w)=>s+lineTotal(w.quantity,w.price),0);
       await saveDeals([...list, {...currentDeal, total, updatedAt: Date.now()}]);
     }, 1500);
     return () => clearTimeout(_dealAutoSave.current);
@@ -9311,18 +9310,16 @@ ${reqBlock}`;
   // то же число. Базовая (прайсовая) цена при этом не переписывается — она остаётся
   // в каталоге/manualPrice, поэтому процент скидки можно менять туда-обратно.
   const _discPct = Math.min(100, Math.max(0, Number(discount) || 0));
-  const withRowDiscount = (p) => discountedUnitPrice(p, _discPct);
+  const _markupPct = Math.max(0, Number(markup) || 0);
+  const _pricing = { markupPercent: _markupPct, discountPercent: _discPct };
   const rowBasePrice = (work) => {
     const r = rows[work.code] || rows[work.name] || {};
     const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
     return getEstimateRowPrice(r, work, Number(r.qty || 0), r.complexity || "std", cpxPct);
   };
-  const rowPrice = (work) => withRowDiscount(rowBasePrice(work));
-  const rowTotal = (work) => {
-    const qty = Number((rows[work.code] || rows[work.name] || {}).qty || 0);
-    const price = rowPrice(work);
-    return qty > 0 && price ? qty * price : 0;
-  };
+  // Цена в таблице — ровно та, что попадёт в КП, договор и акт.
+  const rowPrice = (work) => clientUnitPrice(rowBasePrice(work), _pricing);
+  const rowTotal = (work) => lineTotal((rows[work.code] || rows[work.name] || {}).qty, rowPrice(work));
   // Возвращает "цену от" если у работы нет точной цены (не идёт в расчёт)
   const rowPriceFrom = (work) => {
     const r = rows[work.code] || rows[work.name] || {};
@@ -9335,43 +9332,46 @@ ${reqBlock}`;
   const allSumMap = useMemo(() => {
     const subMap = {};
     const catMap = {};
-    let grandTotal = 0;      // со скидкой (то, что видит клиент)
-    let grandBaseTotal = 0;  // прайсовая сумма до скидки — нужна только чтобы показать размер скидки
+    let grandTotal = 0;      // итог для клиента: наценка + скидка
+    let grandBaseTotal = 0;  // с наценкой, но без скидки — чтобы показать размер скидки
+    let grandListTotal = 0;  // чистый прайс — чтобы показать размер наценки
     for (const cat of Object.keys(Gdyn)) {
-      let catTotal = 0; let catBase = 0;
+      let catTotal = 0; let catBase = 0; let catList = 0;
       for (const sub of Object.keys(Gdyn[cat]||{})) {
-        let subTotal = 0; let subBase = 0;
+        let subTotal = 0; let subBase = 0; let subList = 0;
         for (const w of (Gdyn[cat][sub]||[])) {
           const r = rows[w.code] || rows[w.name] || {};
           const qty = Number(r.qty || 0);
           if (!qty) continue;
           const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
           const base = getEstimateRowPrice(r, w, qty, r.complexity || "std", cpxPct);
-          if (base) { subTotal += qty * withRowDiscount(base); subBase += qty * base; }
+          if (base) {
+            subTotal += lineTotal(qty, clientUnitPrice(base, _pricing));
+            subBase  += lineTotal(qty, clientUnitPrice(base, { markupPercent: _markupPct }));
+            subList  += lineTotal(qty, base);
+          }
         }
         subMap[cat+"||"+sub] = subTotal;
-        catTotal += subTotal;
-        catBase += subBase;
+        catTotal += subTotal; catBase += subBase; catList += subList;
       }
       catMap[cat] = catTotal;
-      grandTotal += catTotal;
-      grandBaseTotal += catBase;
+      grandTotal += catTotal; grandBaseTotal += catBase; grandListTotal += catList;
     }
-    return { subMap, catMap, grand: grandTotal, grandBase: grandBaseTotal };
-  }, [rows, catalogVersion, _discPct]);
+    return { subMap, catMap, grand: grandTotal, grandBase: grandBaseTotal, grandList: grandListTotal };
+  }, [rows, catalogVersion, _discPct, _markupPct]);
   const subSum = (cat, sub) => allSumMap.subMap[cat+"||"+sub] || 0;
   const catSum = (cat) => allSumMap.catMap[cat] || 0;
   const grand = Number(allSumMap.grand) || 0;
-  const _markup = Number(markup) || 0;
-  const _discount = Number(discount) || 0;
-  const markupAmt = grand * _markup / 100;
-  const grandWithMarkup = grand + markupAmt; // база для клиента (markup скрыт)
-  // Скидка уже сидит в цене каждой позиции, поэтому из итога её НЕ вычитаем —
-  // discAmt считается лишь для строки «учтена в ценах» (размер скидки в деньгах).
-  const discAmt = Math.round((Number(allSumMap.grandBase) || 0) * (1 + _markup / 100) - grandWithMarkup);
-  const final = Math.round(grandWithMarkup);
+  const _markup = _markupPct;
+  const _discount = _discPct;
+  // И наценка, и скидка уже сидят в цене каждой позиции, поэтому к итогу ничего
+  // не применяется повторно: итог = сумма строк. markupAmt и discAmt нужны только
+  // для справочных строк «+ наценка» / «скидка учтена в ценах».
+  const grandWithMarkup = Number(allSumMap.grandBase) || 0; // с наценкой, без скидки
+  const markupAmt = grandWithMarkup - (Number(allSumMap.grandList) || 0);
+  const discAmt = grandWithMarkup - grand;
+  const final = grand;
   const kpData = useMemo(() => {
-    const mm = 1 + markup / 100;
     const out = [];
     const fromOut = [];
     for (const cat of cats) for (const sub of Object.keys(Gdyn[cat]||{})) for (const w of Gdyn[cat]?.[sub]||[]) {
@@ -9382,10 +9382,10 @@ ${reqBlock}`;
       const displayUnit = r.manualUnit !== undefined ? r.manualUnit : w.unit;
       const price = rowPrice(w);
       if (price) {
-        out.push({ ...w, name: displayName, unit: displayUnit, qty, price: price * mm, total: qty * price * mm });
+        out.push({ ...w, name: displayName, unit: displayUnit, qty, price, total: lineTotal(qty, price) });
       } else {
         const pf = rowPriceFrom(w);
-        if (pf) fromOut.push({ ...w, name: displayName, unit: displayUnit, qty, priceFrom: pf });
+        if (pf) fromOut.push({ ...w, name: displayName, unit: displayUnit, qty, priceFrom: clientUnitPrice(pf, _pricing) });
       }
     }
     return { items: out, fromItems: fromOut };
@@ -9769,7 +9769,7 @@ ${reqBlock}`;
     const dt = fmtDate(c.date);
     const dtM = fmtDate(c.mainDate||c.date);
     const dtA = fmtDate(c.annexDate||c.date);
-    const total = (c.works||[]).reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
+    const total = (c.works||[]).reduce((s,w)=>s+lineTotal(w.quantity,w.price),0);
     const CSS = forDocx
       ? `*{margin:0;padding:0}
   body{font-family:Verdana,Geneva,Tahoma,sans-serif;font-size:10pt;color:#000;line-height:1.5}
@@ -10327,8 +10327,8 @@ ${reqBlock}`;
   const estimateToClientHtml = (est, obj, title) => {
     try {
       const catalog = getEffectiveCatalog();
-      const mm = 1 + (Number(est.markup) || 0) / 100;
       const _estDiscPct = Math.min(100, Math.max(0, Number(est.discount) || 0));
+      const _estPricing = { markupPercent: Number(est.markup) || 0, discountPercent: _estDiscPct };
       const rows = Object.entries(est.rows || {}).filter(([, r]) => Number(r?.qty) > 0).map(([key, r]) => {
         const w = catalog.find(x => x.code === key) || catalog.find(x => x.name === key);
         if (!w) return null;
@@ -10336,8 +10336,8 @@ ${reqBlock}`;
         const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
         const raw = getEstimateRowPrice(r, w, qty, r.complexity || "std", cpxPct);
         // Скидка сметы сидит в цене каждой позиции — так же, как в редакторе и в договоре.
-        const price = discountedUnitPrice(Math.round((Number(raw) || 0) * mm), _estDiscPct);
-        return { cat: w.cat || "Прочее", name: (r.manualName !== undefined ? r.manualName : w.name), unit: (r.manualUnit !== undefined ? r.manualUnit : (w.unit || "м²")), qty, price, sum: Math.round(price * qty) };
+        const price = clientUnitPrice(raw, _estPricing);
+        return { cat: w.cat || "Прочее", name: (r.manualName !== undefined ? r.manualName : w.name), unit: (r.manualUnit !== undefined ? r.manualUnit : (w.unit || "м²")), qty, price, sum: lineTotal(qty, price) };
       }).filter(Boolean);
       if (!rows.length) return null;
       const subtotal = rows.reduce((s, r) => s + r.sum, 0);
@@ -10413,20 +10413,21 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
   _publishDocsRef.current = publishDocs;
 
   // ТЕСТ: смета сделки = настоящая смета (estId). Работы для договора/печати берём из неё.
+  // Наценка и скидка сметы — один набор параметров цены на все документы из неё.
+  const _estPricingOf = (est) => ({ markupPercent: Number(est?.markup) || 0, discountPercent: Number(est?.discount) || 0 });
   const estimateToWorks = (est) => {
     if (!est) return [];
     const catalog = getEffectiveCatalog();
-    const mm = 1 + (est.markup||0)/100;
+    const pricing = _estPricingOf(est);
     return Object.entries(est.rows||{}).filter(([,r])=>Number(r?.qty)>0).map(([key,r])=>{
       const w = catalog.find(x=>x.name===key)||catalog.find(x=>x.code===key);
       if(!w) return null;
       const qty = Number(r.qty||0);
       const cpxPct = r.cpxPct!==undefined ? Number(r.cpxPct) : undefined;
       const rawPrice = getEstimateRowPrice(r, w, qty, r.complexity||"std", cpxPct);
-      const price = rawPrice ? rawPrice*mm : 0;
       const displayName = r.manualName!==undefined ? r.manualName : w.name;
       const displayUnit = r.manualUnit!==undefined ? r.manualUnit : (w.unit||"м²");
-      return {name:displayName,quantity:qty,unit:displayUnit,price:price?Math.round(price):0};
+      return {name:displayName,quantity:qty,unit:displayUnit,price:clientUnitPrice(rawPrice, pricing)};
     }).filter(Boolean);
   };
   const dealEstimate = (deal) => estimatesRef.current.find(e=>e.id===deal.estId) || null;
@@ -10435,8 +10436,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     return {
       type:"repair_fiz", number:deal.contractNumber||"", date:deal.contractDate||new Date().toISOString().slice(0,10),
       clientId:deal.clientId, contragentId:deal.contragentId,
-      ...(()=>{ const p = applyDiscountToWorks(estimateToWorks(est), est?.discount);
-        return { works: p.works, discount: 0, ...(p.discountPercent ? { discountApplied: p.discountPercent, listPriceTotal: p.listTotal } : {}) }; })(),
+      works: estimateToWorks(est), discount: 0, // цены позиций уже клиентские
+      ...((Number(est?.discount) || 0) > 0 ? { discountApplied: Number(est.discount) } : {}),
       advancePercent:deal.advancePercent??30, note:deal.note||"",
     };
   };
@@ -10470,12 +10471,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     const client = contractClients.find(x=>x.id===deal.clientId);
     const est = dealEstimate(deal);
     const works = estimateToWorks(est).filter(w=>w.name);
-    const total = works.reduce((s,w)=>s+(Number(w.quantity)*Number(w.price)||0),0);
+    const total = works.reduce((s,w)=>s+lineTotal(w.quantity,w.price),0);
     const dPct = est?.discount||0;
     const disc = Math.round(total*dPct/100);
     const final = total - disc;
     const esc = s => String(s||"").replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));
-    const rows = works.map((w,i)=>`<tr><td style="padding:6px 8px;border-bottom:1px solid #eee">${i+1}</td><td style="padding:6px 8px;border-bottom:1px solid #eee">${esc(w.name)}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">${w.quantity||0}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">${esc(w.unit||"м²")}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${fmt(w.price||0)}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${fmt((Number(w.quantity)*Number(w.price))||0)}</td></tr>`).join("");
+    const rows = works.map((w,i)=>`<tr><td style="padding:6px 8px;border-bottom:1px solid #eee">${i+1}</td><td style="padding:6px 8px;border-bottom:1px solid #eee">${esc(w.name)}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">${w.quantity||0}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">${esc(w.unit||"м²")}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${fmt(w.price||0)}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${fmt(lineTotal(w.quantity,w.price))}</td></tr>`).join("");
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Смета ${esc(client?.name||deal.address||"")}</title>
     <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Inter',sans-serif;color:#111827;padding:28px}@page{margin:10mm;size:A4 portrait}h1{font-size:20px}table{width:100%;border-collapse:collapse;font-size:13px;margin-top:14px}th{background:#f3f4f6;padding:8px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase}.no-print{margin-top:20px;text-align:center}@media print{.no-print{display:none}}</style></head><body>
     <h1>Смета на ремонтные работы</h1>
@@ -10548,7 +10549,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     const fmtDate = s => { if(!s) return {d:"__",m:"______",y:"____"}; const [y,m,d]=s.split("-"); return {d:String(Number(d)),m:fmtMo[Number(m)-1]||"",y}; };
     const dt = fmtDate(c.date);
     const fmtN2 = n => Math.round(Number(n)||0).toLocaleString("ru-RU");
-    const total = (c.works||[]).reduce((s,w)=>s+(Number(w.quantity||0)*Number(w.price||0)),0);
+    const total = (c.works||[]).reduce((s,w)=>s+lineTotal(w.quantity,w.price),0);
     const adv = c.advancePercent ?? 30;
 
     const T = (text, opts={}) => new D.TextRun({text:String(text??""), font:TNR, size:hp(opts.sz||11), bold:!!opts.b, italics:!!opts.i, color:opts.col||"000000"});
@@ -11946,7 +11947,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             {author&&<span style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>· {author}</span>}
                             {accessAllows(currentPermissions.documentCreate, isOwnEstimate(est)) && <button onClick={()=>{
                               const catalog = getEffectiveCatalog();
-                              const mm = 1 + (est.markup||0) / 100;
+                              const pricing = _estPricingOf(est);
                               const works = Object.entries(est.rows||{}).filter(([,r])=>Number(r?.qty)>0).map(([key,r])=>{
                                 const w = catalog.find(x=>x.name===key)||catalog.find(x=>x.code===key);
                                 if(!w) return null;
@@ -11955,12 +11956,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                 const rawPrice = r.manualPrice !== undefined && r.manualPrice !== ""
                                   ? Number(r.manualPrice)
                                   : getEstimateRowPrice(r, w, qty, r.complexity||"std", cpxPct);
-                                const price = rawPrice ? rawPrice * mm : null;
+                                const price = clientUnitPrice(rawPrice, pricing);
                                 const ew = resolveEstimateRowWork(getEffectiveWork(w), r);
-                                const pf = (!price && ew.priceFrom) ? Math.round(ew.priceFrom * mm) : null;
+                                const pf = (!price && ew.priceFrom) ? clientUnitPrice(ew.priceFrom, pricing) : null;
                                 const displayName = r.manualName !== undefined ? r.manualName : w.name;
                                 const displayUnit = r.manualUnit !== undefined ? r.manualUnit : (w.unit||"м²");
-                                return {name:displayName,category:w.cat||"",subcategory:w.sub||"",quantity:qty,unit:displayUnit,price:price?Math.round(price):0,priceFrom:pf||undefined};
+                                return {name:displayName,category:w.cat||"",subcategory:w.sub||"",quantity:qty,unit:displayUnit,price:price||0,priceFrom:pf||undefined};
                               }).filter(Boolean);
                               const isDs = !!est.parentId;
                               // ДС → тип annex, номер приложения = dsNumber+1 (т.к. №1 — основное)
@@ -11971,7 +11972,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                               const mainNumber = parentContract?.number || "";
                               const mainDate = parentContract?.date || "";
                               const now = Date.now();
-                              const newContract = {id:now.toString(),createdAt:now,objectId:est.objectId||"",number:"",date:new Date(now).toISOString().split("T")[0],clientId:parentContract?.clientId||"",contragentId:parentContract?.contragentId||contragents[0]?.id||"",works,discount:est.discount||0,appendix:annexNum,estId:est.id,estClient:dProj?.name||"",estPhone:dProj?.phone||"",estAddress:dProj?.address||"",note:"",type:isDs?"annex":"repair_fiz",createdBy:currentUser.name,createdById:currentUser.id,...(isDs?{mainNumber,mainDate}:{})};
+                              const newContract = {id:now.toString(),createdAt:now,objectId:est.objectId||"",number:"",date:new Date(now).toISOString().split("T")[0],clientId:parentContract?.clientId||"",contragentId:parentContract?.contragentId||contragents[0]?.id||"",works,discount:0,...((Number(est.discount)||0)>0?{discountApplied:Number(est.discount)}:{}),appendix:annexNum,estId:est.id,estClient:dProj?.name||"",estPhone:dProj?.phone||"",estAddress:dProj?.address||"",note:"",type:isDs?"annex":"repair_fiz",createdBy:currentUser.name,createdById:currentUser.id,...(isDs?{mainNumber,mainDate}:{})};
                               setCurrentContract(newContract);
                               setContractTab("editor");
                               setScreen("contracts");
@@ -12190,7 +12191,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                   <span style={{fontSize:11,color:"#94a3b8"}}>Цена:</span>
                                   <NumInput
                                     value={price||""}
-                                    onCommit={v=>setRow(work.code || work.name,"manualPrice",v===""?undefined:priceBeforeDiscount(Number(v), _discPct))}
+                                    onCommit={v=>setRow(work.code || work.name,"manualPrice",v===""?undefined:basePriceFromClient(Number(v), _pricing))}
                                     style={{width:80,border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 5px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
                                   <span style={{fontSize:11,color:"#94a3b8"}}>Объём:</span>
                                   <NumInput
@@ -12213,7 +12214,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             <div className="wrow-desk" style={{textAlign:"right"}}>
                               <NumInput
                                 value={price||""}
-                                onCommit={v=>setRow(work.code || work.name,"manualPrice",v===""?undefined:priceBeforeDiscount(Number(v), _discPct))}
+                                onCommit={v=>setRow(work.code || work.name,"manualPrice",v===""?undefined:basePriceFromClient(Number(v), _pricing))}
                                 style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:4,padding:"3px 6px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
                             </div>
                             <div className="wrow-desk" style={{textAlign:"right"}}>
@@ -12527,7 +12528,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       )}
                       {markup>0&&currentUser.role!=="viewer"&&(
                         <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#d97706",marginTop:4}}>
-                          <span>Повышение {markup}%</span><span>+ {fmt(markupAmt)} ₸</span>
+                          <span>Повышение {markup}% <span style={{color:"#94a3b8",fontSize:11}}>· учтено в ценах</span></span><span>+ {fmt(markupAmt)} ₸</span>
                         </div>
                       )}
                       <div style={{borderTop:"1px solid #e2e8f0",marginTop:12,paddingTop:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -14771,19 +14772,19 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         // Конвертация строк сметы в позиции договора (как кнопка 📄 в разделе Сметы)
         const estToContractWorks = (est) => {
           const catalog = getEffectiveCatalog();
-          const mm = 1 + (est.markup||0)/100;
+          const pricing = _estPricingOf(est);
           return Object.entries(est.rows||{}).filter(([,r])=>Number(r?.qty)>0).map(([key,r])=>{
             const w = catalog.find(x=>x.name===key)||catalog.find(x=>x.code===key);
             if(!w) return null;
             const qty = Number(r.qty||0);
             const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
             const rawPrice = getEstimateRowPrice(r, w, qty, r.complexity||"std", cpxPct);
-            const price = rawPrice ? rawPrice * mm : null;
+            const price = clientUnitPrice(rawPrice, pricing);
             const ew = resolveEstimateRowWork(getEffectiveWork(w), r);
-            const pf = (!price && ew.priceFrom) ? Math.round(ew.priceFrom * mm) : null;
+            const pf = (!price && ew.priceFrom) ? clientUnitPrice(ew.priceFrom, pricing) : null;
             const displayName = r.manualName !== undefined ? r.manualName : w.name;
             const displayUnit = r.manualUnit !== undefined ? r.manualUnit : (w.unit||"м²");
-            return {name:displayName,category:w.cat||"",subcategory:w.sub||"",quantity:qty,unit:displayUnit,price:price?Math.round(price):0,priceFrom:pf||undefined};
+            return {name:displayName,category:w.cat||"",subcategory:w.sub||"",quantity:qty,unit:displayUnit,price:price||0,priceFrom:pf||undefined};
           }).filter(Boolean);
         };
         // ── Вспомогательные функции для workspace ──
@@ -14848,10 +14849,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           const openObjectContract = (obj, fromEst=null) => {
             if (!accessAllows(currentPermissions.documentCreate, estimatorObjectIds.has(obj.id))) return;
             const clientId = ensureObjClient(obj); // синхронно (записи в фон) — редактор открывается сразу
-          // Общая скидка сметы разносится по позициям, а не хранится отдельным полем:
-          // документ становится самодостаточным, и все экраны видят одну сумму.
-          const _priced = applyDiscountToWorks(fromEst ? estToContractWorks(fromEst) : [], fromEst?.discount);
-          const works = _priced.works;
+          // Цены позиций уже клиентские (наценка и скидка внутри), поэтому документ
+          // самодостаточен: его сумма = сумме позиций, и все экраны видят одно число.
+          const works = fromEst ? estToContractWorks(fromEst) : [];
+          const _fromDisc = Number(fromEst?.discount) || 0;
           const isDs = !!(fromEst && fromEst.parentId && fromEst.parentId!==fromEst.id);
           const siblings = fromEst ? estimatesRef.current.filter(e=>e.parentId===fromEst.parentId) : [];
           const annexNum = isDs ? (fromEst.dsNumber||1)+1 : 1;
@@ -14870,7 +14871,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             contragentId: contragents[0]?.id||"",
             works,
             discount: 0, // скидка уже внутри цен позиций — второй раз не вычитаем
-            ...(_priced.discountPercent ? { discountApplied: _priced.discountPercent, listPriceTotal: _priced.listTotal } : {}),
+            ...(_fromDisc > 0 ? { discountApplied: _fromDisc } : {}),
             appendix: annexNum,
             estId: fromEst?.id||"",
             note: "",

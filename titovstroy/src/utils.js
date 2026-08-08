@@ -584,7 +584,7 @@ export function buildEstimatorDashboard({ objects = [], estimates = [], producti
 // для денег всегда contractNetTotal.
 export function contractWorksGross(contract) {
   return (contract?.works || []).reduce(
-    (sum, work) => sum + ((Number(work?.quantity) || 0) * (Number(work?.price) || 0)),
+    (sum, work) => sum + lineTotal(work?.quantity, work?.price),
     0,
   );
 }
@@ -600,43 +600,34 @@ export function contractNetTotal(contract) {
   return gross - Math.round(gross * discount / 100);
 }
 
-// Цена одной позиции со скидкой. Единственное место, где живёт это правило:
-// им пользуются и редактор сметы (цена за единицу в таблице), и генерация
-// документов из сметы, поэтому смета и договор дают одно и то же число.
-export function discountedUnitPrice(price, discountPercent = 0) {
-  const p = Number(price) || 0;
+// ЕДИНАЯ цена позиции для клиента. Всё приложение обязано считать её только так,
+// иначе одна и та же работа стоит по-разному в смете, КП, договоре и акте: раньше
+// редактор округлял base*скидка, документы — round(base*наценка)*скидка, а клиентская
+// смета round(round(base*наценка))*скидка. Округление ОДНО и в самом конце.
+export function clientUnitPrice(basePrice, { markupPercent = 0, discountPercent = 0 } = {}) {
+  const p = Number(basePrice) || 0;
   if (!p) return p;
-  const pct = Math.min(100, Math.max(0, Number(discountPercent) || 0));
-  return pct ? Math.round(p * (1 - pct / 100)) : p;
+  const m = Math.max(0, Number(markupPercent) || 0);
+  const d = Math.min(100, Math.max(0, Number(discountPercent) || 0));
+  return Math.round(p * (1 + m / 100) * (1 - d / 100));
 }
-// Обратный ход: в поле цены менеджер видит и вводит цену СО СКИДКОЙ, а хранится
-// прайсовая — иначе изменение процента скидки было бы необратимым.
-export function priceBeforeDiscount(netPrice, discountPercent = 0) {
-  const p = Number(netPrice) || 0;
-  const pct = Math.min(100, Math.max(0, Number(discountPercent) || 0));
-  if (!p || !pct || pct >= 100) return p;
-  return Math.round(p / (1 - pct / 100));
+// Обратный ход для поля ввода: менеджер видит и вводит КЛИЕНТСКУЮ цену, а хранится
+// прайсовая — иначе изменить процент скидки/наценки было бы уже нечем.
+export function basePriceFromClient(clientPrice, { markupPercent = 0, discountPercent = 0 } = {}) {
+  const p = Number(clientPrice) || 0;
+  const m = Math.max(0, Number(markupPercent) || 0);
+  const d = Math.min(100, Math.max(0, Number(discountPercent) || 0));
+  const k = (1 + m / 100) * (1 - d / 100);
+  if (!p || !k) return p;
+  return Math.round(p / k);
 }
-
-// Разносит общую скидку по позициям: цена КАЖДОЙ строки уменьшается на процент
-// скидки. Документ после этого самодостаточен — его сумма равна сумме строк, и
-// любому экрану достаточно сложить позиции, отдельное поле скидки не нужно.
-// Применяется в момент создания документа из сметы (договор, доп. соглашение,
-// акт) и никогда задним числом: уже выписанные документы не трогаем.
-// Цена за единицу округляется до тенге, поэтому итог документа может разойтись
-// со сметой на несколько тенге — это цена того, что в документе целые числа.
-export function applyDiscountToWorks(works = [], discountPercent = 0) {
-  const list = Array.isArray(works) ? works : [];
-  // Позиции договора хранят quantity, строки акта — qty. Считаем и то и другое.
-  const lineSum = (w) => (Number(w?.quantity ?? w?.qty) || 0) * (Number(w?.price) || 0);
-  const listTotal = list.reduce((sum, w) => sum + lineSum(w), 0);
-  const pct = Math.min(100, Math.max(0, Number(discountPercent) || 0));
-  if (!pct) {
-    return { works: list, listTotal, netTotal: listTotal, discountPercent: 0, discountAmount: 0 };
-  }
-  const next = list.map(w => ({ ...w, price: discountedUnitPrice(w?.price, pct) }));
-  const netTotal = next.reduce((sum, w) => sum + lineSum(w), 0);
-  return { works: next, listTotal, netTotal, discountPercent: pct, discountAmount: listTotal - netTotal };
+// Сумма строки — тоже одно правило: целые тенге, копеек в документах не бывает.
+// Объём бывает дробным (5,5 м²), поэтому без округления сумма строки утекала в копейки.
+export function lineTotal(qty, unitPrice) {
+  const q = Number(qty) || 0;
+  const p = Number(unitPrice) || 0;
+  if (q <= 0 || !p) return 0;
+  return Math.round(q * p);
 }
 
 export function resolveFinanceProjectBudget({ project = {}, object = null, estimates = [], contractTotal = 0 } = {}) {

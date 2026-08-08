@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as utils from "./utils.js";
-import { normCN, contractNetTotal, contractWorksGross, applyDiscountToWorks, discountedUnitPrice, priceBeforeDiscount, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, hasInvalidFinanceProjectDate, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, normalizeEstimateSuggestionRules, createDefaultEstimateSuggestionRules, resolveEstimateSuggestionRules, buildEstimateSuggestions } from "./utils.js";
+import { normCN, contractNetTotal, contractWorksGross, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, hasInvalidFinanceProjectDate, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, normalizeEstimateSuggestionRules, createDefaultEstimateSuggestionRules, resolveEstimateSuggestionRules, buildEstimateSuggestions } from "./utils.js";
 import { documentTemplateBackupSpecs } from "./documents/documentTemplateBackup.js";
 
 describe("поиск финансового проекта по связанному объекту", () => {
@@ -1913,90 +1913,89 @@ describe("contractNetTotal — скидка договора", () => {
   });
 });
 
-describe("applyDiscountToWorks — скидка зашивается в позиции", () => {
-  const works = [
-    { name:"Демонтаж перегородок (монолит)", quantity: 5.5, price: 20000, unit:"м²" },
-    { name:"Перегородки из газоблока", quantity: 72, price: 11667, unit:"м²" },
-    { name:"Перегородки из кирпича", quantity: 36, price: 13333, unit:"м²" },
-  ];
-  it("пересчитывает цену каждой позиции", () => {
-    const r = applyDiscountToWorks(works, 12);
-    expect(r.works.map(w => w.price)).toEqual([17600, 10267, 11733]);
-  });
-  it("документ становится самодостаточным: сумма позиций = итог документа", () => {
-    const r = applyDiscountToWorks(works, 12);
-    const sum = r.works.reduce((s, w) => s + w.quantity * w.price, 0);
-    expect(sum).toBe(r.netTotal);
-    // и совпадает с тем, что посчитает contractNetTotal у нового договора (discount=0)
-    expect(contractNetTotal({ discount: 0, works: r.works })).toBe(r.netTotal);
-  });
-  it("отдаёт прайсовую сумму и сумму скидки для печати", () => {
-    const r = applyDiscountToWorks(works, 12);
-    expect(r.listTotal).toBe(1_430_012);
-    expect(r.discountAmount).toBe(r.listTotal - r.netTotal);
-    expect(r.discountPercent).toBe(12);
-  });
-  it("не трогает исходный массив", () => {
-    const copy = JSON.parse(JSON.stringify(works));
-    applyDiscountToWorks(works, 12);
-    expect(works).toEqual(copy);
-  });
-  it("сохраняет остальные поля позиции", () => {
-    const r = applyDiscountToWorks([{ name:"Работа", quantity:2, price:1000, unit:"шт", category:"Черновые" }], 10);
-    expect(r.works[0]).toEqual({ name:"Работа", quantity:2, price:900, unit:"шт", category:"Черновые" });
-  });
-  it("понимает и строки акта, где количество лежит в qty", () => {
-    const r = applyDiscountToWorks([{ name:"Работа", qty:3, price:1000 }], 10);
-    expect(r.works[0].price).toBe(900);
-    expect(r.listTotal).toBe(3000);
-    expect(r.netTotal).toBe(2700);
-  });
-  it("без скидки возвращает позиции как есть", () => {
-    const r = applyDiscountToWorks(works, 0);
-    expect(r.works).toBe(works);
-    expect(r.netTotal).toBe(r.listTotal);
-    expect(r.discountAmount).toBe(0);
-  });
-  it("мусор и пустой ввод не ломают расчёт", () => {
-    expect(applyDiscountToWorks([], 12).netTotal).toBe(0);
-    expect(applyDiscountToWorks(null, 12).netTotal).toBe(0);
-    expect(applyDiscountToWorks(works, -5).netTotal).toBe(1_430_012);
-    expect(applyDiscountToWorks(works, "10").works[0].price).toBe(18000);
-    expect(applyDiscountToWorks(works, 100).netTotal).toBe(0);
-  });
-});
-
 describe("скидка на уровне позиции сметы", () => {
   it("цена за единицу уменьшается на процент скидки", () => {
-    expect(discountedUnitPrice(20000, 12)).toBe(17600);
-    expect(discountedUnitPrice(13333, 12)).toBe(11733);
-    expect(discountedUnitPrice(11667, 12)).toBe(10267);
+    expect(clientUnitPrice(20000, { discountPercent: 12 })).toBe(17600);
+    expect(clientUnitPrice(13333, { discountPercent: 12 })).toBe(11733);
+    expect(clientUnitPrice(11667, { discountPercent: 12 })).toBe(10267);
   });
   it("итог сметы Аслана собирается из позиций со скидкой", () => {
     const rows = [[5.5, 20000], [72, 11667], [36, 13333]];
-    const sum = rows.reduce((s, [q, p]) => s + q * discountedUnitPrice(p, 12), 0);
+    const sum = rows.reduce((s, [q, p]) => s + q * clientUnitPrice(p, { discountPercent: 12 }), 0);
     expect(sum).toBe(1_258_412);
   });
   it("без скидки цена не меняется", () => {
-    expect(discountedUnitPrice(20000, 0)).toBe(20000);
-    expect(discountedUnitPrice(20000, null)).toBe(20000);
-    expect(discountedUnitPrice(0, 12)).toBe(0);
+    expect(clientUnitPrice(20000, { discountPercent: 0 })).toBe(20000);
+    expect(clientUnitPrice(20000, { discountPercent: null })).toBe(20000);
+    expect(clientUnitPrice(0, { discountPercent: 12 })).toBe(0);
   });
   it("введённая менеджером цена со скидкой разворачивается в прайсовую и обратно", () => {
     // в поле видно 18 000 при скидке 12% → храним прайсовую, показываем снова 18 000
-    const base = priceBeforeDiscount(18000, 12);
+    const base = basePriceFromClient(18000, { discountPercent: 12 });
     expect(base).toBe(20455);
-    expect(discountedUnitPrice(base, 12)).toBe(18000);
+    expect(clientUnitPrice(base, { discountPercent: 12 })).toBe(18000);
   });
   it("разворот без скидки — тождество", () => {
-    expect(priceBeforeDiscount(18000, 0)).toBe(18000);
-    expect(priceBeforeDiscount(0, 12)).toBe(0);
-    expect(priceBeforeDiscount(18000, 100)).toBe(18000);
+    expect(basePriceFromClient(18000, { discountPercent: 0 })).toBe(18000);
+    expect(basePriceFromClient(0, { discountPercent: 12 })).toBe(0);
+    expect(basePriceFromClient(18000, { discountPercent: 100 })).toBe(18000);
   });
   it("смена процента скидки не портит прайсовую цену — считается от неё заново", () => {
     const base = 20000;
-    expect(discountedUnitPrice(base, 12)).toBe(17600);
-    expect(discountedUnitPrice(base, 10)).toBe(18000);
-    expect(discountedUnitPrice(base, 0)).toBe(20000);
+    expect(clientUnitPrice(base, { discountPercent: 12 })).toBe(17600);
+    expect(clientUnitPrice(base, { discountPercent: 10 })).toBe(18000);
+    expect(clientUnitPrice(base, { discountPercent: 0 })).toBe(20000);
+  });
+});
+
+describe("одна цена везде — наценка, скидка, копейки", () => {
+  // Раньше порядок округления был разный: редактор round(base*скидка) БЕЗ наценки,
+  // документы round(base*наценка)*скидка, клиентская смета ещё на шаг длиннее.
+  // Теперь всё считает clientUnitPrice: одно умножение, одно округление в конце.
+  it("наценка и скидка применяются одним умножением", () => {
+    expect(clientUnitPrice(10000, { markupPercent: 12.5, discountPercent: 12 })).toBe(9900);
+    expect(clientUnitPrice(13333, { markupPercent: 0, discountPercent: 12 })).toBe(11733);
+    expect(clientUnitPrice(13333, { markupPercent: 9, discountPercent: 0 })).toBe(14533);
+  });
+  it("результат не зависит от того, кто считает — редактор, договор или акт", () => {
+    const base = 7777, pricing = { markupPercent: 6, discountPercent: 7 };
+    const editor = clientUnitPrice(base, pricing);
+    const contract = clientUnitPrice(base, pricing);
+    const act = clientUnitPrice(base, pricing);
+    expect(new Set([editor, contract, act]).size).toBe(1);
+  });
+  it("промежуточное округление наценки давало другое число — оно и накапливалось", () => {
+    // Так считали документы: сначала округляли цену с наценкой, потом скидку.
+    const oldWay = (b, m, d) => Math.round(Math.round(b * (1 + m / 100)) * (1 - d / 100));
+    const base = 1003, m = 9, d = 7;
+    expect(oldWay(base, m, d)).toBe(1016);
+    expect(clientUnitPrice(base, { markupPercent: m, discountPercent: d })).toBe(1017);
+    // расхождение не единичное: на обычном прайсе оно у каждой пятой позиции
+    let diff = 0;
+    for (let b = 1000; b <= 3000; b++) {
+      if (oldWay(b, m, d) !== clientUnitPrice(b, { markupPercent: m, discountPercent: d })) diff++;
+    }
+    expect(diff).toBeGreaterThan(300);
+  });
+  it("сумма строки — целые тенге даже при дробном объёме", () => {
+    expect(lineTotal(5.5, 17601)).toBe(96806);   // 96 805,5 → без округления утекало в копейки
+    expect(Number.isInteger(lineTotal(5.5, 17601))).toBe(true);
+    expect(lineTotal(5.5, 17600)).toBe(96800);
+    expect(lineTotal(0, 17600)).toBe(0);
+    expect(lineTotal(3, 0)).toBe(0);
+  });
+  it("сумма договора складывается из тех же целых строк", () => {
+    const works = [
+      { quantity: 5.5, price: clientUnitPrice(20000, { discountPercent: 12 }) },
+      { quantity: 72,  price: clientUnitPrice(11667, { discountPercent: 12 }) },
+      { quantity: 36,  price: clientUnitPrice(13333, { discountPercent: 12 }) },
+    ];
+    expect(contractNetTotal({ discount: 0, works })).toBe(1_258_412);
+    expect(contractWorksGross({ works })).toBe(1_258_412);
+  });
+  it("ввод клиентской цены разворачивается через наценку и скидку разом", () => {
+    const pricing = { markupPercent: 10, discountPercent: 12 };
+    const base = basePriceFromClient(18000, pricing);
+    expect(clientUnitPrice(base, pricing)).toBe(18000);
   });
 });
