@@ -21,7 +21,7 @@ import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restore
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, contractNetTotal, applyDiscountToWorks, contractsNeedingDiscountMigration, describeDiscountMigration, migrateContractDiscount, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
+import { normCN, contractNetTotal, applyDiscountToWorks, discountedUnitPrice, priceBeforeDiscount, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -2777,7 +2777,7 @@ function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note })
 
             {/* Итог */}
             <div style={{background:"#1a1a28",borderRadius:10,padding:"13px 18px",color:"#f5f2ec",marginTop:8}}>
-              {discount>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#e07070",marginBottom:6}}><span>Скидка {discount}%</span><span>− {fmt(discAmt)} ₸</span></div>}
+              {discount>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#e07070",marginBottom:6}}><span>Скидка {discount}% <span style={{opacity:.75}}>· учтена в ценах</span></span><span>− {fmt(discAmt)} ₸</span></div>}
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <span style={{fontSize:14,fontWeight:600,letterSpacing:.5}}>ИТОГО:</span>
                 <span style={{fontSize:28,fontWeight:900,color:"#b8904a",letterSpacing:-.5}}>{fmt(final)} ₸</span>
@@ -3201,11 +3201,8 @@ function RolePermissionsEditor({ rolePermissions, onSaveRolePermissions }) {
 }
 
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
-function AdminPageContent({ currentUser, presence = {}, onAuditPrice = null, permissions=DEFAULT_ROLE_PERMISSIONS.admin, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], documentTemplateEnabled=false, documentTemplateService=null, documentTemplateData={}, fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBeforePriceChange=async()=>true, onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{}, discountRows=[], onMigrateDiscounts=async()=>({ok:false}) }) {
+function AdminPageContent({ currentUser, presence = {}, onAuditPrice = null, permissions=DEFAULT_ROLE_PERMISSIONS.admin, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], documentTemplateEnabled=false, documentTemplateService=null, documentTemplateData={}, fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBeforePriceChange=async()=>true, onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
   const [tab, setTab] = useState("users");
-  const [discountPick, setDiscountPick] = useState({});   // выбранные для пересчёта договоры
-  const [discountBusy, setDiscountBusy] = useState(false);
-  const [discountMsg, setDiscountMsg] = useState("");
   const hasAdminPermission = (key) => accessAllows(permissions[key], true);
   const adminTabs = [
     ["users","👥 Сотрудники","adminUsers"],
@@ -3218,7 +3215,6 @@ function AdminPageContent({ currentUser, presence = {}, onAuditPrice = null, per
     ["backups","🗄 Бэкапы", hasAdminPermission("adminBackups") || hasAdminPermission("adminRestore") ? null : "__none"],
     ["audit","📋 Журнал","adminAudit"],
     ["check","🔍 Проверка базы","adminDbCheck"],
-    ["discounts","💸 Скидки в документах","adminRestore"],
   ];
   const allowedAdminTabs = adminTabs.filter(([, , key]) => key === null || (key !== "__none" && hasAdminPermission(key)));
   useEffect(() => {
@@ -4312,88 +4308,6 @@ function AdminPageContent({ currentUser, presence = {}, onAuditPrice = null, per
               </div>
             </div>
             <IssuePanel issues={checkIssues} onNav={onNavIssue} emptyText="✓ База чистая — связи и целостность в порядке" />
-          </div>
-        );
-      })()}
-
-      {tab === "discounts" && (()=>{
-        const TL = { repair_fiz:"Договор ремонта", annex:"Доп. соглашение", design:"Дизайн-проект", design_add:"Доп. соглашение к ДП", reservation:"Бронь", podryad:"Договор подряда", podryad_annex:"Приложение к подряду" };
-        const ST = { draft:"Черновик", sign:"На подписании", signed:"Подписан", done:"Закрыт" };
-        const all = discountRows.map(r=>r.id);
-        const allOn = all.length>0 && all.every(id=>discountPick[id]);
-        const chosen = all.filter(id=>discountPick[id]);
-        return (
-          <div style={{display:"flex",flexDirection:"column",gap:16}}>
-            <div style={{fontSize:12.5,color:"#64748b",lineHeight:1.55}}>
-              Раньше скидка хранилась отдельным полем, а цены позиций оставались прайсовыми. Новые документы
-              создаются иначе: скидка сразу сидит в цене каждой позиции, поэтому сумма договора = сумме позиций
-              и везде показывается одно число. Здесь можно перевести на новый формат старые договоры.
-              <br/><b>Сметы переводить не нужно</b> — их итог и так считается со скидкой, а поле скидки в смете
-              нужно, чтобы её можно было менять.
-            </div>
-            {discountRows.length===0 ? (
-              <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:12,padding:"18px",textAlign:"center",color:"#166534",fontSize:13,fontWeight:700}}>
-                ✓ Старых документов со скидкой в отдельном поле не осталось
-              </div>
-            ) : (<>
-              <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:12,padding:"12px 16px",fontSize:12.5,color:"#92610f",lineHeight:1.5}}>
-                ⚠ Цены за единицу в выбранных договорах изменятся (скидка уйдёт внутрь цены). Если бумажный
-                экземпляр уже подписан, распечатка из системы перестанет с ним совпадать. Бэкап договоров
-                создаётся автоматически, откатить можно через «🗄 Бэкапы».
-              </div>
-              <div style={{overflowX:"auto"}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5,minWidth:720}}>
-                  <thead><tr style={{background:"#f8fafc",textAlign:"left"}}>
-                    <th style={{padding:"8px 10px",width:34}}>
-                      <input type="checkbox" checked={allOn} onChange={e=>{
-                        const on=e.target.checked; const next={}; all.forEach(id=>{ next[id]=on; }); setDiscountPick(next);
-                      }}/>
-                    </th>
-                    {["Документ","Объект","Скидка","Сейчас","Станет","Разница"].map(h=>
-                      <th key={h} style={{padding:"8px 10px",fontWeight:700,color:"#475569",whiteSpace:"nowrap"}}>{h}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {discountRows.map(r=>(
-                      <tr key={r.id} style={{borderTop:"1px solid #f1f5f9"}}>
-                        <td style={{padding:"8px 10px"}}>
-                          <input type="checkbox" checked={!!discountPick[r.id]} onChange={e=>setDiscountPick(p=>({...p,[r.id]:e.target.checked}))}/>
-                        </td>
-                        <td style={{padding:"8px 10px"}}>
-                          <div style={{fontWeight:700,color:"#0f172a"}}>{TL[r.type]||"Документ"} №{r.number||"—"}</div>
-                          <div style={{fontSize:11,color:"#94a3b8"}}>{ST[r.contractStatus]||r.contractStatus} · {r.positions} позиций</div>
-                        </td>
-                        <td style={{padding:"8px 10px",color:"#475569"}}>
-                          <div>{r.client||"—"}</div>
-                          <div style={{fontSize:11,color:"#94a3b8"}}>{r.address||""}</div>
-                        </td>
-                        <td style={{padding:"8px 10px",fontWeight:700,color:"#dc2626",whiteSpace:"nowrap"}}>{r.discount}%</td>
-                        <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{fmt(r.before)} ₸</td>
-                        <td style={{padding:"8px 10px",fontWeight:700,whiteSpace:"nowrap"}}>{fmt(r.after)} ₸</td>
-                        <td style={{padding:"8px 10px",whiteSpace:"nowrap",color:r.delta===0?"#94a3b8":"#92610f"}}>{r.delta===0?"—":(r.delta>0?"+":"")+fmt(r.delta)+" ₸"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div style={{fontSize:11.5,color:"#94a3b8"}}>
-                «Разница» — округление: цена за единицу округляется до целых тенге, поэтому итог может сместиться на единицы тенге.
-              </div>
-              <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-                <button disabled={chosen.length===0||discountBusy} onClick={async ()=>{
-                  setDiscountBusy(true); setDiscountMsg("");
-                  try {
-                    const res = await onMigrateDiscounts(chosen);
-                    setDiscountMsg(res?.ok ? `✓ Пересчитано документов: ${res.count}` : (res?.reason||"Не выполнено"));
-                    if (res?.ok) setDiscountPick({});
-                  } catch(e) { setDiscountMsg("Ошибка: "+(e?.message||e)); }
-                  finally { setDiscountBusy(false); }
-                }}
-                  style={{background:chosen.length&&!discountBusy?"#2563eb":"#cbd5e1",color:"#fff",border:"none",borderRadius:8,padding:"9px 18px",fontSize:13,fontWeight:700,cursor:chosen.length&&!discountBusy?"pointer":"default",fontFamily:"inherit"}}>
-                  {discountBusy?"Пересчитываю…":`Пересчитать выбранные (${chosen.length})`}
-                </button>
-                {discountMsg && <span style={{fontSize:12.5,fontWeight:700,color:discountMsg.startsWith("✓")?"#059669":"#dc2626"}}>{discountMsg}</span>}
-              </div>
-            </>)}
           </div>
         );
       })()}
@@ -6969,49 +6883,6 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     _bumpLoaded();
   }, [_bumpLoaded]);
 
-  // ── Перенос скидки в позиции у СТАРЫХ договоров (Админка → «Скидки в документах») ──
-  // Только по явному действию владельца, поштучно, с подтверждением. Автоматически
-  // ничего не пересчитывается: боевые договоры трогаем лишь когда он сам нажал.
-  const discountMigrationRows = useMemo(() => {
-    const byId = {};
-    for (const o of (objects || [])) byId[o.id] = o;
-    return contractsNeedingDiscountMigration(contracts).map(c => {
-      const o = c.objectId ? byId[c.objectId] : null;
-      return {
-        ...describeDiscountMigration(c),
-        client: o?.clientName || c.estClient || "",
-        address: o?.address || c.estAddress || "",
-        positions: (c.works || []).length,
-      };
-    }).sort((a, b) => String(a.number).localeCompare(String(b.number), "ru"));
-  }, [contracts, objects]);
-
-  const runDiscountMigration = async (ids = []) => {
-    const wanted = new Set(ids);
-    const cur = contractsRef.current || [];
-    const targets = cur.filter(c => wanted.has(c.id) && (Number(c.discount) || 0) > 0);
-    if (targets.length === 0) return { ok: false, reason: "Нечего пересчитывать" };
-    const names = targets.map(c => `№${c.number || "без номера"}`).join(", ");
-    if (!await confirmTyped(
-      `Перенести скидку в цены позиций: ${targets.length} док. (${names}).\n\n` +
-      `Цены за единицу в этих договорах изменятся. Уже подписанные бумажные экземпляры\n` +
-      `перестанут совпадать с тем, что печатает система.\n\n` +
-      `Бэкап договоров создаётся автоматически.`, "ПЕРЕСЧИТАТЬ")) return { ok: false, reason: "Отменено" };
-    const now = Date.now();
-    const patched = new Map();
-    for (const c of targets) { const next = migrateContractDiscount(c, now); if (next) patched.set(c.id, next); }
-    if (patched.size === 0) return { ok: false, reason: "Нечего пересчитывать" };
-    const res = await saveContracts(cur.map(c => patched.get(c.id) || c));
-    if (res === undefined) return { ok: false, reason: "Запись не прошла — изменения не сохранены" };
-    for (const c of patched.values()) {
-      logChange(currentUser, { entity: "contract", entityId: c.id, objectId: c.objectId || "",
-        label: `Договор №${c.number || "без номера"}`,
-        action: "перенёс скидку в цены позиций",
-        detail: `скидка ${c.discountApplied}% · прайс ${fmt(c.listPriceTotal)} ₸ → ${fmt(contractNetTotal(c))} ₸` });
-    }
-    return { ok: true, count: patched.size };
-  };
-
   const saveContracts = async (list, opts = {}) => {
     const r = await saveListProtected(CONTRACTS_KEY, CONTRACTS_BACKUPS_KEY, list, (fl)=>{ contractsRef.current = fl; setContracts(fl); }, { loadedRef: _contractsLoaded, ...opts });
     return r;
@@ -9435,11 +9306,18 @@ ${reqBlock}`;
     }
   }, [setRow]);
 
-  const rowPrice = (work) => {
+  // Общая скидка сметы применяется К КАЖДОЙ ПОЗИЦИИ, а не только к итогу: цена за
+  // единицу, сумма строки, разделы, КП и все документы из сметы показывают одно и
+  // то же число. Базовая (прайсовая) цена при этом не переписывается — она остаётся
+  // в каталоге/manualPrice, поэтому процент скидки можно менять туда-обратно.
+  const _discPct = Math.min(100, Math.max(0, Number(discount) || 0));
+  const withRowDiscount = (p) => discountedUnitPrice(p, _discPct);
+  const rowBasePrice = (work) => {
     const r = rows[work.code] || rows[work.name] || {};
     const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
     return getEstimateRowPrice(r, work, Number(r.qty || 0), r.complexity || "std", cpxPct);
   };
+  const rowPrice = (work) => withRowDiscount(rowBasePrice(work));
   const rowTotal = (work) => {
     const qty = Number((rows[work.code] || rows[work.name] || {}).qty || 0);
     const price = rowPrice(work);
@@ -9457,27 +9335,30 @@ ${reqBlock}`;
   const allSumMap = useMemo(() => {
     const subMap = {};
     const catMap = {};
-    let grandTotal = 0;
+    let grandTotal = 0;      // со скидкой (то, что видит клиент)
+    let grandBaseTotal = 0;  // прайсовая сумма до скидки — нужна только чтобы показать размер скидки
     for (const cat of Object.keys(Gdyn)) {
-      let catTotal = 0;
+      let catTotal = 0; let catBase = 0;
       for (const sub of Object.keys(Gdyn[cat]||{})) {
-        let subTotal = 0;
+        let subTotal = 0; let subBase = 0;
         for (const w of (Gdyn[cat][sub]||[])) {
           const r = rows[w.code] || rows[w.name] || {};
           const qty = Number(r.qty || 0);
           if (!qty) continue;
           const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
-          const price = getEstimateRowPrice(r, w, qty, r.complexity || "std", cpxPct);
-          if (price) subTotal += qty * price;
+          const base = getEstimateRowPrice(r, w, qty, r.complexity || "std", cpxPct);
+          if (base) { subTotal += qty * withRowDiscount(base); subBase += qty * base; }
         }
         subMap[cat+"||"+sub] = subTotal;
         catTotal += subTotal;
+        catBase += subBase;
       }
       catMap[cat] = catTotal;
       grandTotal += catTotal;
+      grandBaseTotal += catBase;
     }
-    return { subMap, catMap, grand: grandTotal };
-  }, [rows, catalogVersion]);
+    return { subMap, catMap, grand: grandTotal, grandBase: grandBaseTotal };
+  }, [rows, catalogVersion, _discPct]);
   const subSum = (cat, sub) => allSumMap.subMap[cat+"||"+sub] || 0;
   const catSum = (cat) => allSumMap.catMap[cat] || 0;
   const grand = Number(allSumMap.grand) || 0;
@@ -9485,8 +9366,10 @@ ${reqBlock}`;
   const _discount = Number(discount) || 0;
   const markupAmt = grand * _markup / 100;
   const grandWithMarkup = grand + markupAmt; // база для клиента (markup скрыт)
-  const discAmt = grandWithMarkup * _discount / 100;
-  const final = Math.round(grandWithMarkup - discAmt); // округляем итог, чтобы не копилась дробная погрешность в сохранённом total
+  // Скидка уже сидит в цене каждой позиции, поэтому из итога её НЕ вычитаем —
+  // discAmt считается лишь для строки «учтена в ценах» (размер скидки в деньгах).
+  const discAmt = Math.round((Number(allSumMap.grandBase) || 0) * (1 + _markup / 100) - grandWithMarkup);
+  const final = Math.round(grandWithMarkup);
   const kpData = useMemo(() => {
     const mm = 1 + markup / 100;
     const out = [];
@@ -10445,19 +10328,21 @@ ${reqBlock}`;
     try {
       const catalog = getEffectiveCatalog();
       const mm = 1 + (Number(est.markup) || 0) / 100;
+      const _estDiscPct = Math.min(100, Math.max(0, Number(est.discount) || 0));
       const rows = Object.entries(est.rows || {}).filter(([, r]) => Number(r?.qty) > 0).map(([key, r]) => {
         const w = catalog.find(x => x.code === key) || catalog.find(x => x.name === key);
         if (!w) return null;
         const qty = Number(r.qty || 0);
         const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
         const raw = getEstimateRowPrice(r, w, qty, r.complexity || "std", cpxPct);
-        const price = Math.round((Number(raw) || 0) * mm);
+        // Скидка сметы сидит в цене каждой позиции — так же, как в редакторе и в договоре.
+        const price = discountedUnitPrice(Math.round((Number(raw) || 0) * mm), _estDiscPct);
         return { cat: w.cat || "Прочее", name: (r.manualName !== undefined ? r.manualName : w.name), unit: (r.manualUnit !== undefined ? r.manualUnit : (w.unit || "м²")), qty, price, sum: Math.round(price * qty) };
       }).filter(Boolean);
       if (!rows.length) return null;
       const subtotal = rows.reduce((s, r) => s + r.sum, 0);
-      const disc = Number(est.discount) || 0;
-      const total = Math.round(est.total || subtotal * (1 - disc / 100));
+      const disc = _estDiscPct;
+      const total = subtotal; // цены строк уже со скидкой — вычитать нечего
       const esc = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       const F = n => (Math.round(Number(n) || 0)).toLocaleString("ru-RU");
       const cats = []; const cmap = {};
@@ -10480,7 +10365,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 <h1>${esc(title || "Смета")}</h1>
 <div class="sub">${esc([obj?.clientName, obj?.address].filter(Boolean).join(" · "))} · ${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}</div>
 <table><thead><tr><th>Наименование работ</th><th class="r">Кол-во</th><th>Ед.</th><th class="r">Цена, ₸</th><th class="r">Сумма, ₸</th></tr></thead><tbody>${body}</tbody></table>
-<div class="tot">${disc > 0 ? `Сумма: ${F(subtotal)} ₸ · скидка ${disc}%<br/>` : ""}Итого: <b>${F(total)} ₸</b></div>
+<div class="tot">${disc > 0 ? `Скидка ${disc}% учтена в ценах<br/>` : ""}Итого: <b>${F(total)} ₸</b></div>
 </body></html>`;
     } catch (e) { console.warn("estimateToClientHtml err", e); return null; }
   };
@@ -12304,8 +12189,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                 <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                                   <span style={{fontSize:11,color:"#94a3b8"}}>Цена:</span>
                                   <NumInput
-                                    value={r.manualPrice !== undefined ? r.manualPrice : (price||"")}
-                                    onCommit={v=>setRow(work.code || work.name,"manualPrice",v===""?undefined:Number(v))}
+                                    value={price||""}
+                                    onCommit={v=>setRow(work.code || work.name,"manualPrice",v===""?undefined:priceBeforeDiscount(Number(v), _discPct))}
                                     style={{width:80,border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 5px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
                                   <span style={{fontSize:11,color:"#94a3b8"}}>Объём:</span>
                                   <NumInput
@@ -12327,8 +12212,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             </div>
                             <div className="wrow-desk" style={{textAlign:"right"}}>
                               <NumInput
-                                value={r.manualPrice !== undefined ? r.manualPrice : (price||"")}
-                                onCommit={v=>setRow(work.code || work.name,"manualPrice",v===""?undefined:Number(v))}
+                                value={price||""}
+                                onCommit={v=>setRow(work.code || work.name,"manualPrice",v===""?undefined:priceBeforeDiscount(Number(v), _discPct))}
                                 style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:4,padding:"3px 6px",fontSize:12,textAlign:"right",fontFamily:"inherit",background:"#fff"}}/>
                             </div>
                             <div className="wrow-desk" style={{textAlign:"right"}}>
@@ -12630,7 +12515,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       </div>
                       {discount>0&&(
                         <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#dc2626",marginTop:6}}>
-                          <span>Скидка {discount}%</span><span>− {fmt(discAmt)} ₸</span>
+                          <span>Скидка {discount}% <span style={{color:"#94a3b8",fontSize:11}}>· учтена в ценах</span></span><span>− {fmt(discAmt)} ₸</span>
                         </div>
                       )}
                       {currentUser.role!=="viewer" && (
@@ -16573,8 +16458,6 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           onExportEstimatesXls={exportEstimatesXls}
           checkIssues={_checkIssues}
           onNavIssue={openIssue}
-          discountRows={discountMigrationRows}
-          onMigrateDiscounts={runDiscountMigration}
         />
       )}
 

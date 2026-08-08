@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as utils from "./utils.js";
-import { normCN, contractNetTotal, contractWorksGross, applyDiscountToWorks, contractsNeedingDiscountMigration, describeDiscountMigration, migrateContractDiscount, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, hasInvalidFinanceProjectDate, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, normalizeEstimateSuggestionRules, createDefaultEstimateSuggestionRules, resolveEstimateSuggestionRules, buildEstimateSuggestions } from "./utils.js";
+import { normCN, contractNetTotal, contractWorksGross, applyDiscountToWorks, discountedUnitPrice, priceBeforeDiscount, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, hasInvalidFinanceProjectDate, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, normalizeEstimateSuggestionRules, createDefaultEstimateSuggestionRules, resolveEstimateSuggestionRules, buildEstimateSuggestions } from "./utils.js";
 import { documentTemplateBackupSpecs } from "./documents/documentTemplateBackup.js";
 
 describe("поиск финансового проекта по связанному объекту", () => {
@@ -1966,60 +1966,37 @@ describe("applyDiscountToWorks — скидка зашивается в пози
   });
 });
 
-describe("перенос скидки в позиции у старых договоров", () => {
-  const con = () => ({ id:"c1", number:"1034", type:"repair_fiz", contractStatus:"sign", discount:12, works:[
-    { name:"Демонтаж перегородок (монолит)", quantity: 5.5, price: 20000, unit:"м²" },
-    { name:"Перегородки из газоблока", quantity: 72, price: 11667, unit:"м²" },
-    { name:"Перегородки из кирпича", quantity: 36, price: 13333, unit:"м²" },
-  ] });
-  it("в список на пересчёт попадают только старые договоры со скидкой и позициями", () => {
-    const list = [
-      con(),
-      { id:"c2", discount:0, works:[{quantity:1,price:100}] },        // без скидки
-      { id:"c3", discount:10, works:[] },                              // без позиций
-      { id:"c4", discount:10, works:[{quantity:1,price:100}], deletedAt: 1 }, // в корзине
-      { id:"c5", discountApplied:10, discount:0, works:[{quantity:1,price:90}] }, // уже переведён
-    ];
-    expect(contractsNeedingDiscountMigration(list).map(c => c.id)).toEqual(["c1"]);
+describe("скидка на уровне позиции сметы", () => {
+  it("цена за единицу уменьшается на процент скидки", () => {
+    expect(discountedUnitPrice(20000, 12)).toBe(17600);
+    expect(discountedUnitPrice(13333, 12)).toBe(11733);
+    expect(discountedUnitPrice(11667, 12)).toBe(10267);
   });
-  it("показывает, что было и что станет", () => {
-    const d = describeDiscountMigration(con());
-    expect(d.listTotal).toBe(1_430_012);
-    expect(d.before).toBe(1_258_411);   // сейчас: сумма позиций минус скидка полем
-    expect(d.after).toBe(1_258_412);    // станет: сумма позиций со скидкой в ценах
-    expect(d.delta).toBe(1);
+  it("итог сметы Аслана собирается из позиций со скидкой", () => {
+    const rows = [[5.5, 20000], [72, 11667], [36, 13333]];
+    const sum = rows.reduce((s, [q, p]) => s + q * discountedUnitPrice(p, 12), 0);
+    expect(sum).toBe(1_258_412);
   });
-  it("переносит скидку в цены и обнуляет поле скидки", () => {
-    const out = migrateContractDiscount(con(), 777);
-    expect(out.works.map(w => w.price)).toEqual([17600, 10267, 11733]);
-    expect(out.discount).toBe(0);
-    expect(out.discountApplied).toBe(12);
-    expect(out.listPriceTotal).toBe(1_430_012);
-    expect(out.discountMigratedAt).toBe(777);
-    expect(contractNetTotal(out)).toBe(1_258_412);
+  it("без скидки цена не меняется", () => {
+    expect(discountedUnitPrice(20000, 0)).toBe(20000);
+    expect(discountedUnitPrice(20000, null)).toBe(20000);
+    expect(discountedUnitPrice(0, 12)).toBe(0);
   });
-  it("сохраняет все остальные поля договора", () => {
-    const out = migrateContractDiscount(con(), 1);
-    expect(out.id).toBe("c1");
-    expect(out.number).toBe("1034");
-    expect(out.contractStatus).toBe("sign");
-    expect(out.works[0].unit).toBe("м²");
-    expect(out.works[0].name).toBe("Демонтаж перегородок (монолит)");
+  it("введённая менеджером цена со скидкой разворачивается в прайсовую и обратно", () => {
+    // в поле видно 18 000 при скидке 12% → храним прайсовую, показываем снова 18 000
+    const base = priceBeforeDiscount(18000, 12);
+    expect(base).toBe(20455);
+    expect(discountedUnitPrice(base, 12)).toBe(18000);
   });
-  it("не мутирует исходный договор", () => {
-    const src = con();
-    const copy = JSON.parse(JSON.stringify(src));
-    migrateContractDiscount(src, 1);
-    expect(src).toEqual(copy);
+  it("разворот без скидки — тождество", () => {
+    expect(priceBeforeDiscount(18000, 0)).toBe(18000);
+    expect(priceBeforeDiscount(0, 12)).toBe(0);
+    expect(priceBeforeDiscount(18000, 100)).toBe(18000);
   });
-  it("повторный прогон уже переведённого договора ничего не делает", () => {
-    const once = migrateContractDiscount(con(), 1);
-    expect(migrateContractDiscount(once, 2)).toBeNull();
-    expect(contractsNeedingDiscountMigration([once])).toEqual([]);
-  });
-  it("договор без скидки или без позиций не переводится", () => {
-    expect(migrateContractDiscount({ discount:0, works:[{quantity:1,price:100}] })).toBeNull();
-    expect(migrateContractDiscount({ discount:10, works:[] })).toBeNull();
-    expect(migrateContractDiscount(null)).toBeNull();
+  it("смена процента скидки не портит прайсовую цену — считается от неё заново", () => {
+    const base = 20000;
+    expect(discountedUnitPrice(base, 12)).toBe(17600);
+    expect(discountedUnitPrice(base, 10)).toBe(18000);
+    expect(discountedUnitPrice(base, 0)).toBe(20000);
   });
 });
