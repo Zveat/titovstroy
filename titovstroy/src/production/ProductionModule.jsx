@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, Fragment } from "react";
 import { STAGE_STATUSES, emptyProduction } from "./constants.js";
-import { normCN, estimatesForObject, findFinanceProjectForObject, sortProductionStages, moveProductionStage, buildGanttLayout, sortGanttRows, GANTT_SCALES, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "../utils.js";
+import { normCN, contractNetTotal, estimatesForObject, findFinanceProjectForObject, sortProductionStages, moveProductionStage, buildGanttLayout, sortGanttRows, GANTT_SCALES, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "../utils.js";
 import { buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, _stageKey } from "./commands.js";
 import { listProductionDrafts, removeProductionDraft, saveProductionDraft } from "./drafts.js";
 
@@ -487,9 +487,8 @@ export default function ProductionModule({
     const annexes = mainNo
       ? objectContracts.filter(c => (c.type === "annex" || c.type === "design_add") && normCN(c.mainNumber) === mainNo)
       : [];
-    const worksTotal = c => (c?.works || []).reduce((sum, work) => sum
-      + (Number(work.quantity) || 0) * (Number(work.price) || 0), 0);
-    const contractBudget = main ? worksTotal(main) + annexes.reduce((sum, c) => sum + worksTotal(c), 0) : 0;
+    // Каждый документ — со своей скидкой (contract.discount), как в печатной форме.
+    const contractBudget = main ? contractNetTotal(main) + annexes.reduce((sum, c) => sum + contractNetTotal(c), 0) : 0;
     const estimatePlan = estimatesForObject(estimates, openObj.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0);
 
     if (!finProj && !main && estimatePlan <= 0) return null;
@@ -559,7 +558,7 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatc
   // Только клиентские договоры: подряд (с рабочим) — это себестоимость, в метрику «Договоры» не входит
   const objContracts = contracts.filter(c => c.objectId === obj.id && !c.deletedAt && c.type !== "podryad" && c.type !== "podryad_annex");
   const totalEst = objEstimates.reduce((s, e) => s + (Number(e.total) || 0), 0);
-  const totalCon = objContracts.reduce((s, c) => s + (c.works || []).reduce((ss, w) => ss + (Number(w.quantity) || 0) * (Number(w.price) || 0), 0), 0);
+  const totalCon = objContracts.reduce((s, c) => s + contractNetTotal(c), 0); // со скидкой договора
   const stages = prod.stages || [];
   const doneStages = stages.filter(s => s.status === "done").length;
   const stageProg = stages.length ? Math.round(doneStages / stages.length * 100) : 0;
