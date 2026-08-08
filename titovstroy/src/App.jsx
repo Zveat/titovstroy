@@ -21,7 +21,7 @@ import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restore
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
+import { normCN, contractNetTotal, applyDiscountToWorks, contractsNeedingDiscountMigration, describeDiscountMigration, migrateContractDiscount, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -1684,9 +1684,9 @@ const logObjChange = (user, obj, patch, source = "manual") => {
     }
   } catch (e) { console.warn("logObjChange failed", e); }
 };
-// Сумма договора (для журнала): сумма позиций, иначе м²-расчёт, иначе totalCost.
+// Сумма договора (для журнала): сумма позиций со скидкой, иначе м²-расчёт, иначе totalCost.
 const contractAmount = (c) => {
-  const ws = (c?.works || []).reduce((s, w) => s + ((Number(w.quantity) || 0) * (Number(w.price) || 0)), 0);
+  const ws = contractNetTotal(c);
   if (ws) return ws;
   if (c?.priceType === "sqm") return Math.round((Number(c?.pricePerSqm) || 0) * (Number(c?.area) || 0)) || 0;
   return Number(c?.totalCost) || 0;
@@ -3201,8 +3201,11 @@ function RolePermissionsEditor({ rolePermissions, onSaveRolePermissions }) {
 }
 
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
-function AdminPageContent({ currentUser, presence = {}, onAuditPrice = null, permissions=DEFAULT_ROLE_PERMISSIONS.admin, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], documentTemplateEnabled=false, documentTemplateService=null, documentTemplateData={}, fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBeforePriceChange=async()=>true, onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
+function AdminPageContent({ currentUser, presence = {}, onAuditPrice = null, permissions=DEFAULT_ROLE_PERMISSIONS.admin, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], documentTemplateEnabled=false, documentTemplateService=null, documentTemplateData={}, fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBeforePriceChange=async()=>true, onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{}, discountRows=[], onMigrateDiscounts=async()=>({ok:false}) }) {
   const [tab, setTab] = useState("users");
+  const [discountPick, setDiscountPick] = useState({});   // выбранные для пересчёта договоры
+  const [discountBusy, setDiscountBusy] = useState(false);
+  const [discountMsg, setDiscountMsg] = useState("");
   const hasAdminPermission = (key) => accessAllows(permissions[key], true);
   const adminTabs = [
     ["users","👥 Сотрудники","adminUsers"],
@@ -3215,6 +3218,7 @@ function AdminPageContent({ currentUser, presence = {}, onAuditPrice = null, per
     ["backups","🗄 Бэкапы", hasAdminPermission("adminBackups") || hasAdminPermission("adminRestore") ? null : "__none"],
     ["audit","📋 Журнал","adminAudit"],
     ["check","🔍 Проверка базы","adminDbCheck"],
+    ["discounts","💸 Скидки в документах","adminRestore"],
   ];
   const allowedAdminTabs = adminTabs.filter(([, , key]) => key === null || (key !== "__none" && hasAdminPermission(key)));
   useEffect(() => {
@@ -3798,7 +3802,7 @@ function AdminPageContent({ currentUser, presence = {}, onAuditPrice = null, per
           // статистика по подрядчику: сколько договоров подряда и на какую сумму
           const workerStats = (wid) => {
             const cs = (contracts||[]).filter(c=>!c.deletedAt && (c.type==="podryad"||c.type==="podryad_annex") && c.workerId===wid);
-            const sum = cs.reduce((s,c)=>s+(c.works||[]).reduce((a,w)=>a+((Number(w.quantity)||0)*(Number(w.price)||0)),0),0);
+            const sum = cs.reduce((s,c)=>s+contractNetTotal(c),0);
             return { count: cs.length, sum };
           };
           const emptyWorker = () => ({ id:Date.now().toString(), name:"", iin:"", doc:"", phone:"", email:"", address:"", spec:"" });
@@ -4308,6 +4312,88 @@ function AdminPageContent({ currentUser, presence = {}, onAuditPrice = null, per
               </div>
             </div>
             <IssuePanel issues={checkIssues} onNav={onNavIssue} emptyText="✓ База чистая — связи и целостность в порядке" />
+          </div>
+        );
+      })()}
+
+      {tab === "discounts" && (()=>{
+        const TL = { repair_fiz:"Договор ремонта", annex:"Доп. соглашение", design:"Дизайн-проект", design_add:"Доп. соглашение к ДП", reservation:"Бронь", podryad:"Договор подряда", podryad_annex:"Приложение к подряду" };
+        const ST = { draft:"Черновик", sign:"На подписании", signed:"Подписан", done:"Закрыт" };
+        const all = discountRows.map(r=>r.id);
+        const allOn = all.length>0 && all.every(id=>discountPick[id]);
+        const chosen = all.filter(id=>discountPick[id]);
+        return (
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            <div style={{fontSize:12.5,color:"#64748b",lineHeight:1.55}}>
+              Раньше скидка хранилась отдельным полем, а цены позиций оставались прайсовыми. Новые документы
+              создаются иначе: скидка сразу сидит в цене каждой позиции, поэтому сумма договора = сумме позиций
+              и везде показывается одно число. Здесь можно перевести на новый формат старые договоры.
+              <br/><b>Сметы переводить не нужно</b> — их итог и так считается со скидкой, а поле скидки в смете
+              нужно, чтобы её можно было менять.
+            </div>
+            {discountRows.length===0 ? (
+              <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:12,padding:"18px",textAlign:"center",color:"#166534",fontSize:13,fontWeight:700}}>
+                ✓ Старых документов со скидкой в отдельном поле не осталось
+              </div>
+            ) : (<>
+              <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:12,padding:"12px 16px",fontSize:12.5,color:"#92610f",lineHeight:1.5}}>
+                ⚠ Цены за единицу в выбранных договорах изменятся (скидка уйдёт внутрь цены). Если бумажный
+                экземпляр уже подписан, распечатка из системы перестанет с ним совпадать. Бэкап договоров
+                создаётся автоматически, откатить можно через «🗄 Бэкапы».
+              </div>
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5,minWidth:720}}>
+                  <thead><tr style={{background:"#f8fafc",textAlign:"left"}}>
+                    <th style={{padding:"8px 10px",width:34}}>
+                      <input type="checkbox" checked={allOn} onChange={e=>{
+                        const on=e.target.checked; const next={}; all.forEach(id=>{ next[id]=on; }); setDiscountPick(next);
+                      }}/>
+                    </th>
+                    {["Документ","Объект","Скидка","Сейчас","Станет","Разница"].map(h=>
+                      <th key={h} style={{padding:"8px 10px",fontWeight:700,color:"#475569",whiteSpace:"nowrap"}}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {discountRows.map(r=>(
+                      <tr key={r.id} style={{borderTop:"1px solid #f1f5f9"}}>
+                        <td style={{padding:"8px 10px"}}>
+                          <input type="checkbox" checked={!!discountPick[r.id]} onChange={e=>setDiscountPick(p=>({...p,[r.id]:e.target.checked}))}/>
+                        </td>
+                        <td style={{padding:"8px 10px"}}>
+                          <div style={{fontWeight:700,color:"#0f172a"}}>{TL[r.type]||"Документ"} №{r.number||"—"}</div>
+                          <div style={{fontSize:11,color:"#94a3b8"}}>{ST[r.contractStatus]||r.contractStatus} · {r.positions} позиций</div>
+                        </td>
+                        <td style={{padding:"8px 10px",color:"#475569"}}>
+                          <div>{r.client||"—"}</div>
+                          <div style={{fontSize:11,color:"#94a3b8"}}>{r.address||""}</div>
+                        </td>
+                        <td style={{padding:"8px 10px",fontWeight:700,color:"#dc2626",whiteSpace:"nowrap"}}>{r.discount}%</td>
+                        <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{fmt(r.before)} ₸</td>
+                        <td style={{padding:"8px 10px",fontWeight:700,whiteSpace:"nowrap"}}>{fmt(r.after)} ₸</td>
+                        <td style={{padding:"8px 10px",whiteSpace:"nowrap",color:r.delta===0?"#94a3b8":"#92610f"}}>{r.delta===0?"—":(r.delta>0?"+":"")+fmt(r.delta)+" ₸"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{fontSize:11.5,color:"#94a3b8"}}>
+                «Разница» — округление: цена за единицу округляется до целых тенге, поэтому итог может сместиться на единицы тенге.
+              </div>
+              <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                <button disabled={chosen.length===0||discountBusy} onClick={async ()=>{
+                  setDiscountBusy(true); setDiscountMsg("");
+                  try {
+                    const res = await onMigrateDiscounts(chosen);
+                    setDiscountMsg(res?.ok ? `✓ Пересчитано документов: ${res.count}` : (res?.reason||"Не выполнено"));
+                    if (res?.ok) setDiscountPick({});
+                  } catch(e) { setDiscountMsg("Ошибка: "+(e?.message||e)); }
+                  finally { setDiscountBusy(false); }
+                }}
+                  style={{background:chosen.length&&!discountBusy?"#2563eb":"#cbd5e1",color:"#fff",border:"none",borderRadius:8,padding:"9px 18px",fontSize:13,fontWeight:700,cursor:chosen.length&&!discountBusy?"pointer":"default",fontFamily:"inherit"}}>
+                  {discountBusy?"Пересчитываю…":`Пересчитать выбранные (${chosen.length})`}
+                </button>
+                {discountMsg && <span style={{fontSize:12.5,fontWeight:700,color:discountMsg.startsWith("✓")?"#059669":"#dc2626"}}>{discountMsg}</span>}
+              </div>
+            </>)}
           </div>
         );
       })()}
@@ -6252,7 +6338,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       const num = normCN(c.number);
       if (!num) continue;
       const obj = c.objectId ? objects.find(o=>o.id===c.objectId) : null;
-      const conTotal = (c.works||[]).reduce((s,w)=>s+((Number(w.quantity)||0)*(Number(w.price)||0)),0);
+      const conTotal = contractNetTotal(c); // со скидкой договора — это цена клиента
       const agg = obj ? estAgg[obj.id] : null;
       // ПЛАН = ВСЕ сметы объекта (основная + доп.) — доп. сметы сразу в плане; если смет нет — сумма работ договора
       const planTotal = (agg && agg.total>0) ? agg.total : conTotal;
@@ -6278,13 +6364,13 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     return c;
   };
   // Бюджет проекта = сумма основного договора + всех его доп. соглашений (доп. работы увеличивают бюджет).
-  const _worksSum = (works) => (works || []).reduce((s, w) => s + ((Number(w.quantity) || 0) * (Number(w.price) || 0)), 0);
+  // Каждый документ считается СО СВОЕЙ скидкой (contractNetTotal) — как в печатной форме.
   const finBudgetOfContract = (main) => {
     if (!main) return 0;
-    const own = _worksSum(main.works);
+    const own = contractNetTotal(main);
     const annex = main.number ? contractsRef.current
       .filter(x => !x.deletedAt && x.type === "annex" && x.mainNumber && normCN(x.mainNumber) === normCN(main.number))
-      .reduce((s, x) => s + _worksSum(x.works), 0) : 0;
+      .reduce((s, x) => s + contractNetTotal(x), 0) : 0;
     return own + annex;
   };
   const finProjDraftFromObject = (obj, contract) => {
@@ -6883,6 +6969,49 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     _bumpLoaded();
   }, [_bumpLoaded]);
 
+  // ── Перенос скидки в позиции у СТАРЫХ договоров (Админка → «Скидки в документах») ──
+  // Только по явному действию владельца, поштучно, с подтверждением. Автоматически
+  // ничего не пересчитывается: боевые договоры трогаем лишь когда он сам нажал.
+  const discountMigrationRows = useMemo(() => {
+    const byId = {};
+    for (const o of (objects || [])) byId[o.id] = o;
+    return contractsNeedingDiscountMigration(contracts).map(c => {
+      const o = c.objectId ? byId[c.objectId] : null;
+      return {
+        ...describeDiscountMigration(c),
+        client: o?.clientName || c.estClient || "",
+        address: o?.address || c.estAddress || "",
+        positions: (c.works || []).length,
+      };
+    }).sort((a, b) => String(a.number).localeCompare(String(b.number), "ru"));
+  }, [contracts, objects]);
+
+  const runDiscountMigration = async (ids = []) => {
+    const wanted = new Set(ids);
+    const cur = contractsRef.current || [];
+    const targets = cur.filter(c => wanted.has(c.id) && (Number(c.discount) || 0) > 0);
+    if (targets.length === 0) return { ok: false, reason: "Нечего пересчитывать" };
+    const names = targets.map(c => `№${c.number || "без номера"}`).join(", ");
+    if (!await confirmTyped(
+      `Перенести скидку в цены позиций: ${targets.length} док. (${names}).\n\n` +
+      `Цены за единицу в этих договорах изменятся. Уже подписанные бумажные экземпляры\n` +
+      `перестанут совпадать с тем, что печатает система.\n\n` +
+      `Бэкап договоров создаётся автоматически.`, "ПЕРЕСЧИТАТЬ")) return { ok: false, reason: "Отменено" };
+    const now = Date.now();
+    const patched = new Map();
+    for (const c of targets) { const next = migrateContractDiscount(c, now); if (next) patched.set(c.id, next); }
+    if (patched.size === 0) return { ok: false, reason: "Нечего пересчитывать" };
+    const res = await saveContracts(cur.map(c => patched.get(c.id) || c));
+    if (res === undefined) return { ok: false, reason: "Запись не прошла — изменения не сохранены" };
+    for (const c of patched.values()) {
+      logChange(currentUser, { entity: "contract", entityId: c.id, objectId: c.objectId || "",
+        label: `Договор №${c.number || "без номера"}`,
+        action: "перенёс скидку в цены позиций",
+        detail: `скидка ${c.discountApplied}% · прайс ${fmt(c.listPriceTotal)} ₸ → ${fmt(contractNetTotal(c))} ₸` });
+    }
+    return { ok: true, count: patched.size };
+  };
+
   const saveContracts = async (list, opts = {}) => {
     const r = await saveListProtected(CONTRACTS_KEY, CONTRACTS_BACKUPS_KEY, list, (fl)=>{ contractsRef.current = fl; setContracts(fl); }, { loadedRef: _contractsLoaded, ...opts });
     return r;
@@ -7303,7 +7432,9 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       const unit = r.manualUnit !== undefined ? r.manualUnit : w.unit;
       lines.push({ cat: w.cat || "", name, unit: unit || "", qty, price: Math.round(price * mm), included: true, doneQty: qty });
     }
-    return lines;
+    // Акт выставляется по ценам договора, а в них уже сидит скидка сметы.
+    // Раньше наценка применялась, а скидка нет — акт выходил дороже договора.
+    return applyDiscountToWorks(lines, est.discount).works;
   };
   // Открыть построитель акта по объекту и его смете
   const openAvrBuilder = (obj, est) => {
@@ -9892,6 +10023,11 @@ ${reqBlock}`;
           html += "<tr style=\"background:#e5e7eb\"><td style=\"font-weight:bold\">\u0418\u0422\u041e\u0413\u041e \u0441\u043e \u0441\u043a\u0438\u0434\u043a\u043e\u0439:</td>"
             + "<td class=\"tr\" style=\"font-weight:bold;font-size:11pt\">" + fmtN(total-discAmt) + " \u20b8</td></tr>";
         } else {
+          // Новые договоры: скидка уже разнесена по позициям, вычитать нечего —
+          // но клиент должен видеть, что скидка дана.
+          if(c.discountApplied>0){
+            html += "<tr><td style=\"font-size:9pt;color:#c00\">\u0412 \u0446\u0435\u043d\u0430\u0445 \u0443\u0447\u0442\u0435\u043d\u0430 \u0441\u043a\u0438\u0434\u043a\u0430 "+c.discountApplied+"%</td><td class=\"tr\" style=\"font-size:9pt;color:#c00\"></td></tr>";
+          }
           html += "<tr style=\"background:#e5e7eb\"><td style=\"font-weight:bold\">\u0418\u0422\u041e\u0413\u041e:</td>"
             + "<td class=\"tr\" style=\"font-weight:bold;font-size:11pt\">" + fmtN(total) + " \u20b8</td></tr>";
         }
@@ -9902,6 +10038,9 @@ ${reqBlock}`;
           html += "<p class=\"tr\" style=\"font-size:9pt;color:#c00;padding-top:4pt\">\u0421\u043a\u0438\u0434\u043a\u0430 "+c.discount+"%: \u2212 "+fmtN(discAmt)+" \u20b8</p>";
           html += "<p class=\"tr\" style=\"font-weight:bold;font-size:11pt\">\u0418\u0422\u041e\u0413\u041e \u0441\u043e \u0441\u043a\u0438\u0434\u043a\u043e\u0439: " + fmtN(total-discAmt) + " \u20b8</p>";
         } else {
+          if(c.discountApplied>0){
+            html += "<p class=\"tr\" style=\"font-size:9pt;color:#c00;padding-top:4pt\">\u0412 \u0446\u0435\u043d\u0430\u0445 \u0443\u0447\u0442\u0435\u043d\u0430 \u0441\u043a\u0438\u0434\u043a\u0430 "+c.discountApplied+"%</p>";
+          }
           html += "<p class=\"tr\" style=\"font-weight:bold;font-size:11pt;padding-top:4pt\">\u0418\u0422\u041e\u0413\u041e: " + fmtN(total) + " \u20b8</p>";
         }
       }
@@ -10410,7 +10549,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     const est = dealEstimate(deal);
     return {
       type:"repair_fiz", number:deal.contractNumber||"", date:deal.contractDate||new Date().toISOString().slice(0,10),
-      clientId:deal.clientId, contragentId:deal.contragentId, works:estimateToWorks(est), discount:(est?.discount)||0,
+      clientId:deal.clientId, contragentId:deal.contragentId,
+      ...(()=>{ const p = applyDiscountToWorks(estimateToWorks(est), est?.discount);
+        return { works: p.works, discount: 0, ...(p.discountPercent ? { discountApplied: p.discountPercent, listPriceTotal: p.listTotal } : {}) }; })(),
       advancePercent:deal.advancePercent??30, note:deal.note||"",
     };
   };
@@ -10578,6 +10719,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         rows.push(new D.TableRow({children:[TC("Скидка "+c.discount+"%:",83,{span:5,i:true,bg:"fce8e8",al:D.AlignmentType.RIGHT}),TC("\u2212 "+fmtN2(discAmt)+" \u20b8",17,{bg:"fce8e8",i:true,al:D.AlignmentType.RIGHT})]}));
         rows.push(new D.TableRow({children:[TC("\u0418\u0422\u041e\u0413\u041e \u0441\u043e \u0441\u043a\u0438\u0434\u043a\u043e\u0439:",83,{span:5,b:true,bg:"e8e0c8",al:D.AlignmentType.RIGHT}),TC(fmtN2(total-discAmt)+" \u20b8",17,{bg:"e8e0c8",b:true,sz:11,al:D.AlignmentType.RIGHT})]}));
       } else {
+        if(c.discountApplied>0){
+          rows.push(new D.TableRow({children:[TC("\u0412 \u0446\u0435\u043d\u0430\u0445 \u0443\u0447\u0442\u0435\u043d\u0430 \u0441\u043a\u0438\u0434\u043a\u0430 "+c.discountApplied+"%",83,{span:5,i:true,bg:"fce8e8",al:D.AlignmentType.RIGHT}),TC("",17,{bg:"fce8e8",i:true,al:D.AlignmentType.RIGHT})]}));
+        }
         rows.push(new D.TableRow({children:[TC("\u0418\u0422\u041e\u0413\u041e:",83,{span:5,b:true,bg:"e8e0c8",al:D.AlignmentType.RIGHT}),TC(fmtN2(total)+" \u20b8",17,{bg:"e8e0c8",b:true,sz:11,al:D.AlignmentType.RIGHT})]}));
       }
       return new D.Table({rows:rows,width:{size:CONTENT_W,type:D.WidthType.DXA}});
@@ -14819,7 +14963,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           const openObjectContract = (obj, fromEst=null) => {
             if (!accessAllows(currentPermissions.documentCreate, estimatorObjectIds.has(obj.id))) return;
             const clientId = ensureObjClient(obj); // синхронно (записи в фон) — редактор открывается сразу
-          const works = fromEst ? estToContractWorks(fromEst) : [];
+          // Общая скидка сметы разносится по позициям, а не хранится отдельным полем:
+          // документ становится самодостаточным, и все экраны видят одну сумму.
+          const _priced = applyDiscountToWorks(fromEst ? estToContractWorks(fromEst) : [], fromEst?.discount);
+          const works = _priced.works;
           const isDs = !!(fromEst && fromEst.parentId && fromEst.parentId!==fromEst.id);
           const siblings = fromEst ? estimatesRef.current.filter(e=>e.parentId===fromEst.parentId) : [];
           const annexNum = isDs ? (fromEst.dsNumber||1)+1 : 1;
@@ -14837,7 +14984,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             estAddress: obj.address||"",
             contragentId: contragents[0]?.id||"",
             works,
-            discount: fromEst?.discount||0,
+            discount: 0, // скидка уже внутри цен позиций — второй раз не вычитаем
+            ...(_priced.discountPercent ? { discountApplied: _priced.discountPercent, listPriceTotal: _priced.listTotal } : {}),
             appendix: annexNum,
             estId: fromEst?.id||"",
             note: "",
@@ -15813,7 +15961,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       return _ordered.map(c=>{
                       const cl2 = contractClients.find(x=>x.id===c.clientId);
                       const ca2 = contragents.find(x=>x.id===c.contragentId);
-                      const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
+                      const total = contractNetTotal(c); // со скидкой договора — как в печатной форме
                       const stC = CONTRACT_STATUSES.find(x=>x.key===(c.contractStatus||"draft"))||CONTRACT_STATUSES[0];
                       const TLABEL = {repair_fiz:"Договор ремонта",annex:"Доп. соглашение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронь",podryad:"👷 Договор подряда"};
                       const isAnnex = c.type==="annex" || c.type==="podryad_annex";
@@ -16131,7 +16279,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   const renderContractCard = (c, isChild=false, kidsCount=0, collapsed=false) => {
                     const client = contractClients.find(x=>x.id===c.clientId);
                     const ca = contragents.find(x=>x.id===c.contragentId);
-                    const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
+                    const total = contractNetTotal(c); // со скидкой договора
                     const isPod = c.type==="podryad" || c.type==="podryad_annex";
                     const workerName = isPod ? workerNameOf(c) : "";
                     // Замерщику подряд виден, но открывать нельзя (себестоимость)
@@ -16237,7 +16385,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   </div>
                 ) : trashed.sort((a,b)=>b.deletedAt-a.deletedAt).map(c=>{
                   const client = contractClients.find(x=>x.id===c.clientId);
-                  const total = (c.works||[]).reduce((s,w)=>s+(w.quantity*w.price||0),0);
+                  const total = contractNetTotal(c); // со скидкой договора
                   const TLABEL2 = {repair_fiz:"Договор",annex:"Приложение",design:"Дизайн-проект",design_add:"Доп. соглашение",reservation:"Бронь"};
                   const title = c.number ? `${TLABEL2[c.type||"repair_fiz"]||"Договор"} №${c.number}` : (TLABEL2[c.type||"repair_fiz"]||"Договор")+" (без номера)";
                   return (
@@ -16425,6 +16573,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           onExportEstimatesXls={exportEstimatesXls}
           checkIssues={_checkIssues}
           onNavIssue={openIssue}
+          discountRows={discountMigrationRows}
+          onMigrateDiscounts={runDiscountMigration}
         />
       )}
 

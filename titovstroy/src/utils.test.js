@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as utils from "./utils.js";
-import { normCN, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, hasInvalidFinanceProjectDate, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, normalizeEstimateSuggestionRules, createDefaultEstimateSuggestionRules, resolveEstimateSuggestionRules, buildEstimateSuggestions } from "./utils.js";
+import { normCN, contractNetTotal, contractWorksGross, applyDiscountToWorks, contractsNeedingDiscountMigration, describeDiscountMigration, migrateContractDiscount, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, hasInvalidFinanceProjectDate, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, normalizeEstimateSuggestionRules, createDefaultEstimateSuggestionRules, resolveEstimateSuggestionRules, buildEstimateSuggestions } from "./utils.js";
 import { documentTemplateBackupSpecs } from "./documents/documentTemplateBackup.js";
 
 describe("поиск финансового проекта по связанному объекту", () => {
@@ -1876,5 +1876,150 @@ describe("право на раздел ФОТ", () => {
 
   it("админа нельзя лишить доступа к ФОТ", () => {
     expect(normalizeRolePermissions({ admin: { payroll: "none" } }).admin.payroll).toBe("edit");
+  });
+});
+
+describe("contractNetTotal — скидка договора", () => {
+  // Боевой случай: договор №1034, объект «Аслан». Позиции дают 1 430 012 ₸,
+  // скидка 12% — клиент платит 1 258 411 ₸. Финансы показывали сумму без скидки.
+  const c1034 = { discount: 12, works: [
+    { name:"Демонтаж перегородок (монолит)", quantity: 5.5, price: 20000 },
+    { name:"Перегородки из газоблока", quantity: 72, price: 11667 },
+    { name:"Перегородки из кирпича", quantity: 36, price: 13333 },
+  ] };
+  it("сумма позиций без скидки остаётся доступной отдельно", () => {
+    expect(contractWorksGross(c1034)).toBe(1_430_012);
+  });
+  it("совпадает с «Итого» в смете и печатной форме договора", () => {
+    expect(contractNetTotal(c1034)).toBe(1_258_411);
+  });
+  it("без скидки возвращает сумму позиций", () => {
+    expect(contractNetTotal({ works: c1034.works })).toBe(1_430_012);
+    expect(contractNetTotal({ discount: 0, works: c1034.works })).toBe(1_430_012);
+  });
+  it("мусор в поле скидки не ломает сумму", () => {
+    expect(contractNetTotal({ discount: "12", works: c1034.works })).toBe(1_258_411);
+    expect(contractNetTotal({ discount: -5, works: c1034.works })).toBe(1_430_012);
+    expect(contractNetTotal({ discount: 999, works: c1034.works })).toBe(0);
+    expect(contractNetTotal({ discount: null, works: c1034.works })).toBe(1_430_012);
+  });
+  it("пустой договор — ноль, без падения", () => {
+    expect(contractNetTotal(null)).toBe(0);
+    expect(contractNetTotal({})).toBe(0);
+    expect(contractNetTotal({ discount: 20, works: [] })).toBe(0);
+  });
+  it("строковые количество и цена приводятся к числу", () => {
+    expect(contractNetTotal({ discount: 10, works:[{ quantity:"2", price:"1000" }] })).toBe(1800);
+  });
+});
+
+describe("applyDiscountToWorks — скидка зашивается в позиции", () => {
+  const works = [
+    { name:"Демонтаж перегородок (монолит)", quantity: 5.5, price: 20000, unit:"м²" },
+    { name:"Перегородки из газоблока", quantity: 72, price: 11667, unit:"м²" },
+    { name:"Перегородки из кирпича", quantity: 36, price: 13333, unit:"м²" },
+  ];
+  it("пересчитывает цену каждой позиции", () => {
+    const r = applyDiscountToWorks(works, 12);
+    expect(r.works.map(w => w.price)).toEqual([17600, 10267, 11733]);
+  });
+  it("документ становится самодостаточным: сумма позиций = итог документа", () => {
+    const r = applyDiscountToWorks(works, 12);
+    const sum = r.works.reduce((s, w) => s + w.quantity * w.price, 0);
+    expect(sum).toBe(r.netTotal);
+    // и совпадает с тем, что посчитает contractNetTotal у нового договора (discount=0)
+    expect(contractNetTotal({ discount: 0, works: r.works })).toBe(r.netTotal);
+  });
+  it("отдаёт прайсовую сумму и сумму скидки для печати", () => {
+    const r = applyDiscountToWorks(works, 12);
+    expect(r.listTotal).toBe(1_430_012);
+    expect(r.discountAmount).toBe(r.listTotal - r.netTotal);
+    expect(r.discountPercent).toBe(12);
+  });
+  it("не трогает исходный массив", () => {
+    const copy = JSON.parse(JSON.stringify(works));
+    applyDiscountToWorks(works, 12);
+    expect(works).toEqual(copy);
+  });
+  it("сохраняет остальные поля позиции", () => {
+    const r = applyDiscountToWorks([{ name:"Работа", quantity:2, price:1000, unit:"шт", category:"Черновые" }], 10);
+    expect(r.works[0]).toEqual({ name:"Работа", quantity:2, price:900, unit:"шт", category:"Черновые" });
+  });
+  it("понимает и строки акта, где количество лежит в qty", () => {
+    const r = applyDiscountToWorks([{ name:"Работа", qty:3, price:1000 }], 10);
+    expect(r.works[0].price).toBe(900);
+    expect(r.listTotal).toBe(3000);
+    expect(r.netTotal).toBe(2700);
+  });
+  it("без скидки возвращает позиции как есть", () => {
+    const r = applyDiscountToWorks(works, 0);
+    expect(r.works).toBe(works);
+    expect(r.netTotal).toBe(r.listTotal);
+    expect(r.discountAmount).toBe(0);
+  });
+  it("мусор и пустой ввод не ломают расчёт", () => {
+    expect(applyDiscountToWorks([], 12).netTotal).toBe(0);
+    expect(applyDiscountToWorks(null, 12).netTotal).toBe(0);
+    expect(applyDiscountToWorks(works, -5).netTotal).toBe(1_430_012);
+    expect(applyDiscountToWorks(works, "10").works[0].price).toBe(18000);
+    expect(applyDiscountToWorks(works, 100).netTotal).toBe(0);
+  });
+});
+
+describe("перенос скидки в позиции у старых договоров", () => {
+  const con = () => ({ id:"c1", number:"1034", type:"repair_fiz", contractStatus:"sign", discount:12, works:[
+    { name:"Демонтаж перегородок (монолит)", quantity: 5.5, price: 20000, unit:"м²" },
+    { name:"Перегородки из газоблока", quantity: 72, price: 11667, unit:"м²" },
+    { name:"Перегородки из кирпича", quantity: 36, price: 13333, unit:"м²" },
+  ] });
+  it("в список на пересчёт попадают только старые договоры со скидкой и позициями", () => {
+    const list = [
+      con(),
+      { id:"c2", discount:0, works:[{quantity:1,price:100}] },        // без скидки
+      { id:"c3", discount:10, works:[] },                              // без позиций
+      { id:"c4", discount:10, works:[{quantity:1,price:100}], deletedAt: 1 }, // в корзине
+      { id:"c5", discountApplied:10, discount:0, works:[{quantity:1,price:90}] }, // уже переведён
+    ];
+    expect(contractsNeedingDiscountMigration(list).map(c => c.id)).toEqual(["c1"]);
+  });
+  it("показывает, что было и что станет", () => {
+    const d = describeDiscountMigration(con());
+    expect(d.listTotal).toBe(1_430_012);
+    expect(d.before).toBe(1_258_411);   // сейчас: сумма позиций минус скидка полем
+    expect(d.after).toBe(1_258_412);    // станет: сумма позиций со скидкой в ценах
+    expect(d.delta).toBe(1);
+  });
+  it("переносит скидку в цены и обнуляет поле скидки", () => {
+    const out = migrateContractDiscount(con(), 777);
+    expect(out.works.map(w => w.price)).toEqual([17600, 10267, 11733]);
+    expect(out.discount).toBe(0);
+    expect(out.discountApplied).toBe(12);
+    expect(out.listPriceTotal).toBe(1_430_012);
+    expect(out.discountMigratedAt).toBe(777);
+    expect(contractNetTotal(out)).toBe(1_258_412);
+  });
+  it("сохраняет все остальные поля договора", () => {
+    const out = migrateContractDiscount(con(), 1);
+    expect(out.id).toBe("c1");
+    expect(out.number).toBe("1034");
+    expect(out.contractStatus).toBe("sign");
+    expect(out.works[0].unit).toBe("м²");
+    expect(out.works[0].name).toBe("Демонтаж перегородок (монолит)");
+  });
+  it("не мутирует исходный договор", () => {
+    const src = con();
+    const copy = JSON.parse(JSON.stringify(src));
+    migrateContractDiscount(src, 1);
+    expect(src).toEqual(copy);
+  });
+  it("повторный прогон уже переведённого договора ничего не делает", () => {
+    const once = migrateContractDiscount(con(), 1);
+    expect(migrateContractDiscount(once, 2)).toBeNull();
+    expect(contractsNeedingDiscountMigration([once])).toEqual([]);
+  });
+  it("договор без скидки или без позиций не переводится", () => {
+    expect(migrateContractDiscount({ discount:0, works:[{quantity:1,price:100}] })).toBeNull();
+    expect(migrateContractDiscount({ discount:10, works:[] })).toBeNull();
+    expect(migrateContractDiscount(null)).toBeNull();
   });
 });

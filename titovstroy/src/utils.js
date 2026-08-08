@@ -580,6 +580,91 @@ export function buildEstimatorDashboard({ objects = [], estimates = [], producti
 // Финансовый проект хранит деньги и ссылку objectId. Описательные поля всегда
 // вычисляются из объекта, производства, договора и актов, чтобы их нельзя было
 // независимо изменить в двух разделах.
+// Сумма позиций договора БЕЗ скидки. Это не та сумма, которую платит клиент, —
+// для денег всегда contractNetTotal.
+export function contractWorksGross(contract) {
+  return (contract?.works || []).reduce(
+    (sum, work) => sum + ((Number(work?.quantity) || 0) * (Number(work?.price) || 0)),
+    0,
+  );
+}
+// Скидка живёт отдельным полем договора (contract.discount, %) и применяется в
+// редакторе договора и в печатной форме. Финансы её раньше не применяли, поэтому
+// бюджет проекта, долг и прогресс оплаты были завышены на сумму скидки
+// (ловили на договоре №1034: 1 430 012 вместо 1 258 411 при скидке 12%).
+// Формула повторяет печатную форму: total − round(total * discount / 100).
+export function contractNetTotal(contract) {
+  const gross = contractWorksGross(contract);
+  const discount = Math.min(100, Math.max(0, Number(contract?.discount) || 0));
+  if (!discount) return gross;
+  return gross - Math.round(gross * discount / 100);
+}
+
+// Разносит общую скидку по позициям: цена КАЖДОЙ строки уменьшается на процент
+// скидки. Документ после этого самодостаточен — его сумма равна сумме строк, и
+// любому экрану достаточно сложить позиции, отдельное поле скидки не нужно.
+// Применяется в момент создания документа из сметы (договор, доп. соглашение,
+// акт) и никогда задним числом: уже выписанные документы не трогаем.
+// Цена за единицу округляется до тенге, поэтому итог документа может разойтись
+// со сметой на несколько тенге — это цена того, что в документе целые числа.
+export function applyDiscountToWorks(works = [], discountPercent = 0) {
+  const list = Array.isArray(works) ? works : [];
+  // Позиции договора хранят quantity, строки акта — qty. Считаем и то и другое.
+  const lineSum = (w) => (Number(w?.quantity ?? w?.qty) || 0) * (Number(w?.price) || 0);
+  const listTotal = list.reduce((sum, w) => sum + lineSum(w), 0);
+  const pct = Math.min(100, Math.max(0, Number(discountPercent) || 0));
+  if (!pct) {
+    return { works: list, listTotal, netTotal: listTotal, discountPercent: 0, discountAmount: 0 };
+  }
+  const k = 1 - pct / 100;
+  const next = list.map(w => ({ ...w, price: Math.round((Number(w?.price) || 0) * k) }));
+  const netTotal = next.reduce((sum, w) => sum + lineSum(w), 0);
+  return { works: next, listTotal, netTotal, discountPercent: pct, discountAmount: listTotal - netTotal };
+}
+
+// Старые документы хранят прайсовые цены + отдельное поле discount. Новые —
+// цены со скидкой и discount = 0. Обе модели считаются правильно, но держать
+// две — лишний риск, поэтому старые можно перевести на новую вручную из Админки.
+// Автоматически НИЧЕГО не переводится: только по явному действию владельца.
+export function contractsNeedingDiscountMigration(contracts = []) {
+  return (contracts || []).filter(c => c
+    && !c.deletedAt
+    && (Number(c.discount) || 0) > 0
+    && Array.isArray(c.works) && c.works.length > 0);
+}
+// Описание одной строки плана пересчёта — что было и что станет.
+export function describeDiscountMigration(contract) {
+  const pct = Math.min(100, Math.max(0, Number(contract?.discount) || 0));
+  const before = contractNetTotal(contract);
+  const applied = applyDiscountToWorks(contract?.works, pct);
+  return {
+    id: contract?.id || "",
+    number: contract?.number || "",
+    type: contract?.type || "repair_fiz",
+    contractStatus: contract?.contractStatus || "draft",
+    discount: pct,
+    listTotal: applied.listTotal,
+    before,                       // как считается сейчас
+    after: applied.netTotal,      // как будет считаться после переноса скидки в позиции
+    delta: applied.netTotal - before,
+  };
+}
+// Возвращает НОВЫЙ объект договора; исходный не мутируется.
+export function migrateContractDiscount(contract, now = Date.now()) {
+  const pct = Math.min(100, Math.max(0, Number(contract?.discount) || 0));
+  if (!pct || !Array.isArray(contract?.works) || contract.works.length === 0) return null;
+  const applied = applyDiscountToWorks(contract.works, pct);
+  return {
+    ...contract,
+    works: applied.works,
+    discount: 0,                       // скидка теперь внутри цен — второй раз не вычитаем
+    discountApplied: pct,              // для строки «В ценах учтена скидка X%» в печати
+    listPriceTotal: applied.listTotal, // прайсовая сумма до скидки, для истории
+    discountMigratedAt: now,
+    updatedAt: now,
+  };
+}
+
 export function resolveFinanceProjectBudget({ project = {}, object = null, estimates = [], contractTotal = 0 } = {}) {
   const linkedEstimates = object?.id
     ? estimatesForObject((estimates || []).filter(e => e && !e.deletedAt), object.id)
