@@ -6,6 +6,8 @@
     <meta name="theme-color" content="#0f172a" />
     <!-- Отключаем авто-распознавание чисел как телефонов в Safari/iOS (убирает зелёное подчёркивание сумм) -->
     <meta name="format-detection" content="telephone=no" />
+    <!-- ERP не должна попадать в поиск: внутренняя система + клиентские кабинеты -->
+    <meta name="robots" content="noindex, nofollow" />
     <title>TitovStroy — Цифровая система управления ремонтами</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23b8904a'/><text y='.9em' font-size='70' x='15' font-weight='900' fill='%230c0e1a'>T</text></svg>" />
     <link rel="apple-touch-icon" href="/appletouchicon.png" />
@@ -28,6 +30,14 @@
       #boot-splash .name{color:#f1f5f9;font-size:18px;font-weight:700;letter-spacing:.02em}
       #boot-splash .spin{width:26px;height:26px;border:3px solid rgba(255,255,255,.2);border-top-color:#b8904a;border-radius:50%;animation:bsp .7s linear infinite}
       @keyframes bsp{to{transform:rotate(360deg)}}
+
+      /* Критичная раскладка навигации — здесь, а не в React.
+         Правило «боковое меню только для десктопа» живёт в стилях приложения,
+         а они появляются вместе с разметкой. На телефоне из-за этого на долю
+         секунды показывались сразу два меню: десктопное и мобильное. Здесь
+         оно применяется с первой отрисовки, до того как React что-то нарисует. */
+      .mob-nav{display:none}
+      @media(max-width:700px){ .sidebar{display:none} }
     </style>
   </head>
   <body>
