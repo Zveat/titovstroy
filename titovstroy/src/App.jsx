@@ -4221,13 +4221,13 @@ function AdminPageContent({ currentUser, presence = {}, onAuditPrice = null, per
 
           {/* ↑ Наверх */}
           <button onClick={()=>document.getElementById("price-cat-"+getEffectiveCatalog().map(w=>w.cat)[0]?.replace(/\s/g,"_"))?.scrollIntoView({behavior:"smooth",block:"start"})}
-            style={{position:"fixed",bottom:80,right:32,background:"#2563eb",color:"#f3f4f6",border:"none",borderRadius:999,width:40,height:40,fontSize:18,cursor:"pointer",boxShadow:"0 2px 10px rgba(0,0,0,.2)",zIndex:30,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            className="float-fab" style={{position:"fixed",bottom:80,right:32,background:"#2563eb",color:"#f3f4f6",border:"none",borderRadius:999,width:40,height:40,fontSize:18,cursor:"pointer",boxShadow:"0 2px 10px rgba(0,0,0,.2)",zIndex:30,display:"flex",alignItems:"center",justifyContent:"center"}}>
             ↑
           </button>
 
           {/* Индикатор автосохранения */}
           {(priceMsg || priceSaving) && (
-            <div style={{position:"fixed",bottom:0,left:"220px",right:0,background:"#f8fafc",borderTop:"1px solid #e2e8f0",padding:"10px 24px",zIndex:20,textAlign:"center"}}>
+            <div className="save-strip" style={{position:"fixed",bottom:0,left:"220px",right:0,background:"#f8fafc",borderTop:"1px solid #e2e8f0",padding:"10px 24px",zIndex:20,textAlign:"center"}}>
               {priceMsg && <span style={{fontSize:13,color:"#059669",fontWeight:700}}>{priceMsg}</span>}
               {priceSaving && !priceMsg && <span style={{fontSize:12,color:"#94a3b8"}}>💾 Сохранение...</span>}
             </div>
@@ -11323,14 +11323,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#f8fafc",minHeight:"100vh",color:"#0f172a",display:"flex",flexDirection:"column"}}>
       {/* Баннер: данные не загрузились — редактирование опасно */}
       {loadError && (
-        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:500,background:"#dc2626",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:500,background:"#dc2626",color:"#fff",padding:"10px 16px",paddingTop:"calc(10px + env(safe-area-inset-top,0px))",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
           ⚠️ Не удалось загрузить данные из базы. НЕ редактируйте сметы — сохранение отключено для защиты данных.
           <button onClick={()=>window.location.reload()} style={{background:"#fff",color:"#dc2626",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Обновить</button>
         </div>
       )}
       {/* Плашка read-only вкладки: lease редактирования у другой вкладки */}
       {!editorTab && (
-        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:501,background:"#475569",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)",flexWrap:"wrap"}}>
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:501,background:"#475569",color:"#fff",padding:"10px 16px",paddingTop:"calc(10px + env(safe-area-inset-top,0px))",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)",flexWrap:"wrap"}}>
           {_isViewer
             ? "Режим просмотра — изменения недоступны для этой учётной записи."
             : "Сервис открыт для редактирования в другой вкладке — здесь только просмотр (изменения не сохраняются)."}
@@ -11340,7 +11340,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       {/* НЕ СОХРАНЕНО. Оранжевый баннер ниже — про «ушло локально, дожмём»; этот про «не ушло
           вообще». Красный, не прячется сам и держит payload: «Повторить» шлёт те же данные. */}
       {saveFails.length > 0 && (
-        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:502,background:"#b91c1c",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.25)",flexWrap:"wrap"}}>
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:502,background:"#b91c1c",color:"#fff",padding:"10px 16px",paddingTop:"calc(10px + env(safe-area-inset-top,0px))",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.25)",flexWrap:"wrap"}}>
           <span>⛔ НЕ СОХРАНЕНО:{" "}
             {saveFails.map((f,i)=>(
               <span key={f.id}>{i>0?" · ":" "}<b>{f.label}</b> — {saveFailReasonText(f.reason)}{f.count>1?` (×${f.count})`:""}</span>
@@ -11355,7 +11355,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         </div>
       )}
       {!loadError && !syncBannerHidden && (cloudError || prodUnsyncedN > 0 || dirtyCount > 0 || legacyDirtyN > 0) && (
-        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:500,background:"#d97706",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)",flexWrap:"wrap"}}>
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:500,background:"#d97706",color:"#fff",padding:"10px 16px",paddingTop:"calc(10px + env(safe-area-inset-top,0px))",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)",flexWrap:"wrap"}}>
           ⚠️ {prodUnsyncedN > 0 ? `Изменения производства ожидают синхронизации (${prodUnsyncedN}) — ` : ""}Данные могут быть сохранены ТОЛЬКО на этом устройстве — облако недоступно{dirtyCount>0?` (несинхронизировано: ${dirtyCount})`:""}. Приложение само дожмёт синхронизацию, когда облако ответит. Если баннер не гаснет — проверьте интернет и отключите блокировщик рекламы для этого сайта.{legacyDirtyN>0?` Есть старые несинхронизированные правки без владельца (${legacyDirtyN}) — они НЕ отправляются автоматически, обратитесь к администратору.`:""}
           <button onClick={resyncNow} disabled={resyncing} style={{background:"#fff",color:"#d97706",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:resyncing?"default":"pointer",fontFamily:"inherit"}}>{resyncing?"Синхронизирую…":"🔄 Повторить сейчас"}</button>
           {legacyDirtyN>0 && <button onClick={downloadLegacyDirty} style={{background:"#fff",color:"#92400e",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Скачать старые правки</button>}
@@ -11441,6 +11441,43 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         .sidebar.collapsed .nav-label{opacity:0;width:0;pointer-events:none}
         .sidebar-content{margin-left:248px;transition:margin-left .22s cubic-bezier(.4,0,.2,1);min-height:100vh;background:#f8fafc}
         .sidebar-content.collapsed{margin-left:64px}
+        /* Плавающие элементы на телефоне перекрывались нижним меню (68px плюс
+           безопасная зона), а полоска автосохранения ещё и была сдвинута на
+           ширину бокового меню, которого на телефоне нет. */
+        @media(max-width:700px){
+          .float-fab{bottom:calc(80px + env(safe-area-inset-bottom,0px))!important;right:16px!important}
+          .save-strip{left:0!important;bottom:calc(68px + env(safe-area-inset-bottom,0px))!important}
+        }
+        /* Панель редактора сметы на телефоне. Кнопки были разной высоты,
+           «Финансы вкл» переносилось на две строки, а значок сохранения стоял
+           дважды — в начале ряда и в конце. Дубль убран, кнопки приведены
+           к одной высоте, надписи не переносятся. */
+        @media(max-width:700px){
+          .editor-header-right{flex-wrap:wrap!important;gap:6px!important;
+            justify-content:flex-end!important;flex:1 1 100%!important}
+          .editor-header-right button{min-height:34px!important;padding:6px 11px!important;
+            font-size:11.5px!important;white-space:nowrap!important;line-height:1.1!important}
+        }
+        /* Вкладки карточки объекта: на телефоне их девять и они разваливались
+           на три ряда, съедая пол-экрана. Одна строка с прокруткой вбок —
+           полоса прокрутки скрыта, листается пальцем. */
+        @media(max-width:700px){
+          .obj-tabs{flex-wrap:nowrap!important;overflow-x:auto;-webkit-overflow-scrolling:touch;
+            scrollbar-width:none;padding-bottom:2px}
+          .obj-tabs::-webkit-scrollbar{display:none}
+          .obj-tabs button{flex:0 0 auto!important;white-space:nowrap!important}
+        }
+        /* Карточка сметы на телефоне: ряд из шести кнопок не сжимался
+           (flexShrink:0) и не переносился, поэтому выдавливал название и дату
+           в узкую колонку, а сам вылезал за карточку. На узком экране
+           разворачиваем карточку в столбец, кнопкам разрешаем перенос. */
+        @media(max-width:700px){
+          .est-card-row{flex-direction:column!important;align-items:stretch!important;gap:10px!important}
+          .est-card-acts{flex-direction:row!important;align-items:center!important;
+            justify-content:space-between!important;flex-wrap:wrap!important;gap:8px!important}
+          .est-card-btns{flex-wrap:wrap!important;gap:6px!important;flex:1!important;justify-content:flex-end!important}
+          .est-card-btns button{padding:5px 10px!important;font-size:11px!important}
+        }
         @media(max-width:700px){
           .sidebar{display:none!important}
           .sidebar-content{margin-left:0!important;padding-top:env(safe-area-inset-top,0px)!important;padding-bottom:calc(68px + env(safe-area-inset-bottom,0px))!important}
@@ -11793,7 +11830,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             </div>
             <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
               {navHistory.length > 0 && <button onClick={goBack} style={{background:"none",border:"1px solid rgba(255,255,255,.4)",borderRadius:6,padding:"4px 12px",cursor:"pointer",fontSize:14,color:"#fff"}}>← Назад</button>}
-              {saving && <span style={{fontSize:11,color:"#94a3b8"}}>💾</span>}
+              {/* Место под значок держим всегда: раньше он появлялся и исчезал при
+                  каждом автосохранении, менял ширину строки и дёргал панель. */}
+              <span aria-hidden={!saving} style={{fontSize:11,color:"#94a3b8",width:14,textAlign:"center",
+                flexShrink:0,opacity:saving?1:0,transition:"opacity .18s ease"}}>💾</span>
               {currentPermissions.analytics !== "none" && (
                 <button className="btn btn-o" style={{padding:"6px 9px",fontSize:14}} onClick={()=>setScreen("analytics")} title="Статистика">📊</button>
               )}
@@ -12058,7 +12098,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               </div>
             </div>
             <div className="editor-header-right" style={{display:"flex",alignItems:"center",gap:8}}>
-              {saving && <span style={{fontSize:11,color:"#94a3b8"}}>💾</span>}
+              {/* Место под значок держим всегда: раньше он появлялся и исчезал при
+                  каждом автосохранении, менял ширину строки и дёргал панель. */}
+              <span aria-hidden={!saving} style={{fontSize:11,color:"#94a3b8",width:14,textAlign:"center",
+                flexShrink:0,opacity:saving?1:0,transition:"opacity .18s ease"}}>💾</span>
               {filledCount > 0 && (
                 <button onClick={()=>setShowSelectedOnly(s=>!s)}
                   style={{fontSize:11,padding:"6px 12px",background:showSelectedOnly?"#f0fdf4":"",border:`1px solid ${showSelectedOnly?"#059669":"#e2e8f0"}`,borderRadius:8,color:showSelectedOnly?"#059669":"#94a3b8",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
@@ -12077,7 +12120,6 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 {currentUser.role==="admin"?"👑":currentUser.role==="viewer"?"👁":"👤"} {currentUser.name}
               </span>
               <button className="btn btn-o" style={{padding:"8px 16px",fontSize:13}} onClick={saveAndBack}>← Назад</button>
-              {saving && <span style={{fontSize:11,color:"#94a3b8"}}>💾</span>}
             </div>
           </div>
 
@@ -12652,7 +12694,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 
           {/* Плавающая кнопка итога */}
           {screen === "editor" && canEditCurrentEstimate && grand > 0 && (
-            <div style={{position:"fixed",bottom:22,right:18,zIndex:50}}>
+            <div className="float-fab" style={{position:"fixed",bottom:22,right:18,zIndex:50}}>
               <button
                 onClick={()=>{
                   const el = document.getElementById("summary-panel");
@@ -15703,7 +15745,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             return (
               <div>
                 {/* Вкладки карточки объекта: Информация · Сметы · Документы · производство */}
-                <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap",borderBottom:"1px solid #e2e8f0"}}>
+                <div className="obj-tabs" style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap",borderBottom:"1px solid #e2e8f0"}}>
                   {[
                     ["info","ℹ️ Информация"],
                     ["documents",`📄 Документы (${objEsts.length+objCons.length+reports.filter(r=>r.objectId===obj.id && canSeeReport(r)).length})`],
@@ -15758,7 +15800,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       return (
                         <div key={est.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 16px",cursor:canEditEstimate?"pointer":"default",marginLeft:isChild?16:0,borderLeft:isChild?"3px solid #d1fae5":"1px solid #e5e7eb"}}
                           onClick={canEditEstimate?()=>openObjectEstimateEdit(est, obj):undefined}>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                          <div className="est-card-row" style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                                 <span style={{fontSize:10,fontWeight:700,color:isChild?"#059669":"#2563eb",background:isChild?"rgba(5,150,105,.08)":"#eff6ff",borderRadius:3,padding:"1px 6px"}}>Смета {estNum}</span>
@@ -15770,9 +15812,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                 {est.createdBy&&` · ${est.createdBy}`}
                               </div>
                             </div>
-                            <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
+                            <div className="est-card-acts" style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
                               <div style={{fontWeight:800,fontSize:15,color:"#0f172a"}}>{fmt(est.total||0)} ₸</div>
-                              <div style={{display:"flex",gap:4}} onClick={e=>e.stopPropagation()}>
+                              <div className="est-card-btns" style={{display:"flex",gap:4}} onClick={e=>e.stopPropagation()}>
                                 {canCreateDocument && <button title={isChild?"Создать доп. соглашение из этой доп. сметы":"Создать договор из сметы"} onClick={()=>openObjectContract(obj,est)}
                                   style={{background:"rgba(184,144,74,.08)",color:"#2563eb",border:"1px solid #eff6ff",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄 {isChild?"Доп. соглашение":"Договор"}</button>
                                 }
