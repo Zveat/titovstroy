@@ -11414,7 +11414,6 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           .wrow{grid-template-columns:1fr auto!important;gap:4px 10px!important;padding:10px 12px!important;align-items:center!important}
           .wrow-desk{display:none!important}
           .wrow-mob-extra{display:flex!important}
-          .wrow-th{grid-template-columns:1fr auto!important}
           .cpx-sel{font-size:10px!important;padding:3px 4px!important;max-width:110px!important}
         }
         @media print{
@@ -11441,18 +11440,19 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         .sidebar.collapsed .nav-label{opacity:0;width:0;pointer-events:none}
         .sidebar-content{margin-left:248px;transition:margin-left .22s cubic-bezier(.4,0,.2,1);min-height:100vh;background:#f8fafc}
         .sidebar-content.collapsed{margin-left:64px}
-        /* Строка работы на телефоне. Справа стояли столбиком три элемента —
-           «₸/ед», поле ввода и итог, — и даже пустая строка была высотой в
-           четыре текстовые. Теперь цена и итог идут строкой под названием,
-           справа только поле: строка стала вдвое ниже и читается слева направо. */
+        /* Строка работы на телефоне: название сверху во всю ширину, под ним
+           одна строка «цена за единицу — поле объёма — итог». Пятиколоночная
+           шапка десктопа на телефоне скрыта: она описывала колонки, которых
+           здесь нет, и подписи стояли не над своими данными. */
         @media(max-width:700px){
-          .wrow{grid-template-areas:"name input" "meta input"!important;
-            grid-template-columns:minmax(0,1fr) auto!important;align-items:center!important;
-            row-gap:2px!important}
-          .wrow>*:first-child{grid-area:name;min-width:0}
-          .wrow-mob-extra{display:flex!important}
-          .wrow-mob-meta{grid-area:meta;display:flex!important}
-          .wrow-mob-extra{grid-area:input}
+          .wrow{grid-template-columns:minmax(0,1fr)!important;row-gap:7px!important;
+            align-items:stretch!important;padding:11px 12px!important}
+          .wrow-th{display:none!important}
+          .wrow-mob-line{display:flex!important;align-items:center;gap:10px}
+          .wml-price{flex:1;min-width:0;font-size:11.5px;color:#94a3b8;white-space:nowrap;
+            overflow:hidden;text-overflow:ellipsis}
+          .wml-total{flex-shrink:0;min-width:76px;text-align:right;font-size:12.5px;
+            font-weight:800;color:#0f172a;white-space:nowrap}
         }
         /* Ряд категорий сметы (Черновые · Чистовые · Санузел · Прочие) стоял
            одной строкой без переноса и без прокрутки — всё, что не влезало
@@ -12487,18 +12487,17 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                    : <span style={{color:"#94a3b8",fontSize:12}}>—</span>}
                         </div>
                         {/* Mobile right column: цена/ед · поле · итог */}
-                        {/* Телефон: цена за единицу и итог — строкой под названием.
-                            Раньше они стояли столбиком справа вместе с полем ввода,
-                            и пустая строка занимала четыре строки высоты. */}
-                        <div className="wrow-mob-meta" style={{display:"none",fontSize:11,gap:8,alignItems:"baseline"}}>
-                          <span style={{color:"#94a3b8",whiteSpace:"nowrap"}}>
-                            {displayPrice!=null ? fmt(displayPrice)+" ₸/ед" : <span style={{fontStyle:"italic",fontSize:10}}>нет цены</span>}
+                        {/* Телефон: одна строка под названием — цена за единицу слева,
+                            поле объёма посередине, итог справа. Колонки десктопа сюда не
+                            переносятся: их шапка «Цена · Объём · Итого» на телефоне скрыта,
+                            потому что описывала пять колонок, которых здесь нет. */}
+                        <div className="wrow-mob-line" style={{display:"none"}}>
+                          <span className="wml-price">
+                            {displayPrice!=null ? fmt(displayPrice)+" ₸/ед" : <i style={{fontStyle:"italic"}}>нет цены</i>}
                           </span>
-                          {total>0 && <span style={{fontWeight:800,color:"#0f172a",whiteSpace:"nowrap"}}>= {fmt(total)} ₸</span>}
-                        </div>
-                        <div className="wrow-mob-extra" style={{alignItems:"center",display:"none"}}>
-                          <NumInput className="num" style={{width:78,textAlign:"center",fontSize:16,padding:"7px 8px",fontWeight:700}} placeholder="0"
+                          <NumInput className="num" style={{width:78,textAlign:"center",fontSize:16,padding:"7px 8px",fontWeight:700,flexShrink:0}} placeholder="0"
                             value={r.qty||""} onCommit={v=>setRow(work.code || work.name,"qty",v)}/>
+                          <span className="wml-total">{total>0 ? fmt(total)+" ₸" : ""}</span>
                         </div>
                       </div>
                     );
