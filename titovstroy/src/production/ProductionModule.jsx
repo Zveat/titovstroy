@@ -599,7 +599,13 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatc
         onFocus={e => { _fldFocus.current = e.target.value; }}
         onChange={e => patch({ [key]: e.target.value })}
         onBlur={e => { if (auditLabel && audit && e.target.value !== _fldFocus.current) audit({ entity: "object", field: auditLabel, action: "изменил", old: _fmtFld(type, _fldFocus.current), new: _fmtFld(type, e.target.value) }); }}
-        style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+        style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 13,
+          fontFamily: "inherit", outline: "none", boxSizing: "border-box",
+          // iOS рисует поле даты своим системным стилем и перебивает рамку —
+          // получалась серая плашка, не похожая на остальные поля. Сбрасываем
+          // системное оформление и задаём фон с высотой явно.
+          WebkitAppearance: "none", appearance: "none", background: "#fff",
+          color: "#0f172a", minHeight: 38 }} />
     </div>
   );
   // Выбор ответственного — только из сотрудников системы. Свободный ввод убран намеренно:
@@ -695,7 +701,13 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatc
         <div style={{ marginTop: 10 }}>
           <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Ссылка на рабочую группу WhatsApp</div>
           <input value={prod.waGroup || ""} onChange={e => patch({ waGroup: e.target.value })} placeholder="https://chat.whatsapp.com/…"
-            style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+            style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 13,
+          fontFamily: "inherit", outline: "none", boxSizing: "border-box",
+          // iOS рисует поле даты своим системным стилем и перебивает рамку —
+          // получалась серая плашка, не похожая на остальные поля. Сбрасываем
+          // системное оформление и задаём фон с высотой явно.
+          WebkitAppearance: "none", appearance: "none", background: "#fff",
+          color: "#0f172a", minHeight: 38 }} />
         </div>
       </div>
       </fieldset>
