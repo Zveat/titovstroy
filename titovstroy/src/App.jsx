@@ -11441,6 +11441,26 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         .sidebar.collapsed .nav-label{opacity:0;width:0;pointer-events:none}
         .sidebar-content{margin-left:248px;transition:margin-left .22s cubic-bezier(.4,0,.2,1);min-height:100vh;background:#f8fafc}
         .sidebar-content.collapsed{margin-left:64px}
+        /* Строка работы на телефоне. Справа стояли столбиком три элемента —
+           «₸/ед», поле ввода и итог, — и даже пустая строка была высотой в
+           четыре текстовые. Теперь цена и итог идут строкой под названием,
+           справа только поле: строка стала вдвое ниже и читается слева направо. */
+        @media(max-width:700px){
+          .wrow{grid-template-areas:"name input" "meta input"!important;
+            grid-template-columns:minmax(0,1fr) auto!important;align-items:center!important;
+            row-gap:2px!important}
+          .wrow>*:first-child{grid-area:name;min-width:0}
+          .wrow-mob-extra{display:flex!important}
+          .wrow-mob-meta{grid-area:meta;display:flex!important}
+          .wrow-mob-extra{grid-area:input}
+        }
+        /* Ряд категорий сметы (Черновые · Чистовые · Санузел · Прочие) стоял
+           одной строкой без переноса и без прокрутки — всё, что не влезало
+           в экран, просто обрезалось и было недоступно. Теперь листается
+           пальцем; полосу прокрутки прячем, чтобы не съедала высоту. */
+        .est-cats{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+        .est-cats::-webkit-scrollbar{display:none}
+        .est-cats>button{flex:0 0 auto;white-space:nowrap}
         /* Плавающие элементы на телефоне перекрывались нижним меню (68px плюс
            безопасная зона), а полоска автосохранения ещё и была сдвинута на
            ширину бокового меню, которого на телефоне нет. */
@@ -12295,7 +12315,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 </div>
 
                 {/* Категории */}
-                {!isSearching && <div style={{display:"flex",gap:3,padding:"10px 10px 0",borderBottom:"1px solid #e2e8f0"}}>
+                {!isSearching && <div className="est-cats" style={{display:"flex",gap:3,padding:"10px 10px 0",borderBottom:"1px solid #e2e8f0"}}>
                   {cats.map(cat=>(
                     <button key={cat} className={`tab-btn ${activeCat===cat?"active":""}`}
                       onClick={()=>{ const s=Object.keys(Gdyn[cat]||{}); setActiveCat(cat); setActiveSub(s[0]||""); }}>
@@ -12438,7 +12458,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     return (
                       <div key={work.name} className={`wrow ${filled?"on":""}`}>
                         {/* Desktop: 5 cols via CSS class; Mobile: overridden to 2 cols */}
-                        <style>{`@media(min-width:701px){.wrow{grid-template-columns:1fr 50px 120px 76px 90px}}.wrow-mob-extra{display:none}@media(max-width:700px){.wrow{grid-template-columns:1fr auto!important}.wrow-mob-extra{display:flex!important}}`}</style>
+                        {/* Раскладка строки: десктоп — пять колонок. Мобильная вынесена в общий
+                            блок стилей, чтобы правила не дублировались в каждой строке
+                            и не спорили друг с другом важностью. */}
+                        <style>{`@media(min-width:701px){.wrow{grid-template-columns:1fr 50px 120px 76px 90px}}`}</style>
                         {nameBlock}
                         <div className="wrow-desk" style={{textAlign:"center",fontSize:12,paddingTop:3,display:"flex",alignItems:"center",justifyContent:"center",gap:3}}>
                           {r.editingUnit ? (
@@ -12464,15 +12487,18 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                    : <span style={{color:"#94a3b8",fontSize:12}}>—</span>}
                         </div>
                         {/* Mobile right column: цена/ед · поле · итог */}
-                        <div className="wrow-mob-extra" style={{flexDirection:"column",alignItems:"flex-end",gap:3,display:"none",paddingTop:2,minWidth:90}}>
-                          <span style={{fontSize:11,color:"#94a3b8",whiteSpace:"nowrap"}}>
+                        {/* Телефон: цена за единицу и итог — строкой под названием.
+                            Раньше они стояли столбиком справа вместе с полем ввода,
+                            и пустая строка занимала четыре строки высоты. */}
+                        <div className="wrow-mob-meta" style={{display:"none",fontSize:11,gap:8,alignItems:"baseline"}}>
+                          <span style={{color:"#94a3b8",whiteSpace:"nowrap"}}>
                             {displayPrice!=null ? fmt(displayPrice)+" ₸/ед" : <span style={{fontStyle:"italic",fontSize:10}}>нет цены</span>}
                           </span>
-                          <NumInput className="num" style={{width:82,textAlign:"center",fontSize:16,padding:"7px 10px",fontWeight:700}} placeholder="0"
+                          {total>0 && <span style={{fontWeight:800,color:"#0f172a",whiteSpace:"nowrap"}}>= {fmt(total)} ₸</span>}
+                        </div>
+                        <div className="wrow-mob-extra" style={{alignItems:"center",display:"none"}}>
+                          <NumInput className="num" style={{width:78,textAlign:"center",fontSize:16,padding:"7px 8px",fontWeight:700}} placeholder="0"
                             value={r.qty||""} onCommit={v=>setRow(work.code || work.name,"qty",v)}/>
-                          {total>0
-                            ? <span style={{fontSize:12,fontWeight:800,color:"#0f172a",whiteSpace:"nowrap"}}>{fmt(total)} ₸</span>
-                            : <span style={{fontSize:10,color:"#334155"}}>—</span>}
                         </div>
                       </div>
                     );
