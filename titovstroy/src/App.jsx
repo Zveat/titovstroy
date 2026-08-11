@@ -11384,6 +11384,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         .sub-btn:hover{color:#0f172a;background:#f1f5f9}
         .sub-btn.active{background:#e2e8f0;color:#0f172a;font-weight:600}
         .wrow{display:grid;align-items:start;padding:9px 14px;border-radius:8px;gap:8px;transition:background .12s;min-width:0}
+        .wrow-th-mob{display:none}
         .wrow:hover{background:#f8fafc}
         .wrow.on{background:#eff6ff}
         .num{background:#ffffff;border:1px solid #e2e8f0;color:#0f172a;border-radius:8px;padding:6px 8px;text-align:right;font-family:inherit;font-size:13px;transition:border-color .15s,box-shadow .15s;outline:none}
@@ -11447,8 +11448,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         @media(max-width:700px){
           .wrow{grid-template-columns:minmax(0,1fr)!important;row-gap:7px!important;
             align-items:stretch!important;padding:11px 12px!important}
-          .wrow-th{display:none!important}
+          /* Шапка на телефоне: «Наименование» строкой, под ней подписи ровно
+             над своими значениями — те же пропорции, что в строке работы.
+             Пятиколоночная сетка десктопа здесь не годится: колонок три. */
+          .wrow-th{display:block!important;padding:8px 12px!important}
+          .wrow-th-mob{display:flex!important;gap:10px;margin-top:4px;align-items:baseline}
+          .wth-qty{width:78px;flex-shrink:0;text-align:center}
           .wrow-mob-line{display:flex!important;align-items:center;gap:10px}
+          .wrow-mob-line{padding:0}
           .wml-price{flex:1;min-width:0;font-size:11.5px;color:#94a3b8;white-space:nowrap;
             overflow:hidden;text-overflow:ellipsis}
           .wml-total{flex-shrink:0;min-width:76px;text-align:right;font-size:12.5px;
@@ -12199,6 +12206,13 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       <span className="wrow-desk" style={{textAlign:"right"}}>Цена за ед., ₸</span>
                       <span className="wrow-desk" style={{textAlign:"right"}}>Объём</span>
                       <span className="wrow-desk" style={{textAlign:"right"}}>Итого, ₸</span>
+                      {/* Телефон: подписи стоят ровно над своими значениями —
+                          те же пропорции, что у строки работы ниже. */}
+                      <div className="wrow-th-mob">
+                        <span className="wml-price">Цена за ед.</span>
+                        <span className="wth-qty">Объём</span>
+                        <span className="wml-total">Итого</span>
+                      </div>
                     </div>
                     <div style={{padding:"4px 0"}}>
                       {selectedWorks.map(work => {
@@ -12340,7 +12354,13 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   <span className="wrow-desk" style={{textAlign:"right"}}>Цена за ед., ₸</span>
                   <span className="wrow-desk" style={{textAlign:"right"}}>Объём</span>
                   <span className="wrow-desk" style={{textAlign:"right"}}>Итого, ₸</span>
-                  <span className="wrow-mob-extra" style={{textAlign:"right",display:"none"}}>Цена · Объём · Итого</span>
+                  {/* Телефон: подписи стоят ровно над своими значениями —
+                      те же пропорции, что у строки работы ниже. */}
+                  <div className="wrow-th-mob">
+                    <span className="wml-price">Цена за ед.</span>
+                    <span className="wth-qty">Объём</span>
+                    <span className="wml-total">Итого</span>
+                  </div>
                 </div>
 
                 {/* Строки работ */}
