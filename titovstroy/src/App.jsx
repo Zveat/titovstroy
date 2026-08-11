@@ -11457,7 +11457,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           .wrow-mob-line{display:flex!important;align-items:center;gap:10px}
           .wrow-mob-line{padding:0}
           .wml-price{flex:1;min-width:0;font-size:11.5px;color:#94a3b8;white-space:nowrap;
-            overflow:hidden;text-overflow:ellipsis}
+            display:flex;align-items:center;gap:5px}
+          /* priceCell собран для правой колонки десктопа — на телефоне он слева */
+          .wml-price>div{justify-content:flex-start!important;min-width:0}
+          .wml-unit{flex-shrink:0}
           .wml-total{flex-shrink:0;min-width:76px;text-align:right;font-size:12.5px;
             font-weight:800;color:#0f172a;white-space:nowrap}
         }
@@ -12512,8 +12515,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             переносятся: их шапка «Цена · Объём · Итого» на телефоне скрыта,
                             потому что описывала пять колонок, которых здесь нет. */}
                         <div className="wrow-mob-line" style={{display:"none"}}>
+                          {/* Цена за единицу редактируется так же, как на компьютере:
+                              переиспользуем тот же priceCell — карандаш, поле, сброс
+                              ручной цены. Своя копия разошлась бы с десктопной. */}
                           <span className="wml-price">
-                            {displayPrice!=null ? fmt(displayPrice)+" ₸/ед" : <i style={{fontStyle:"italic"}}>нет цены</i>}
+                            {priceCell}
+                            {displayPrice!=null && <span className="wml-unit">₸/ед</span>}
                           </span>
                           <NumInput className="num" style={{width:78,textAlign:"center",fontSize:16,padding:"7px 8px",fontWeight:700,flexShrink:0}} placeholder="0"
                             value={r.qty||""} onCommit={v=>setRow(work.code || work.name,"qty",v)}/>
