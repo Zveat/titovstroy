@@ -592,9 +592,16 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatc
   const _fldFocus = useRef("");
   const _fmtFld = (type, v) => type === "date" ? (v ? new Date(v).toLocaleDateString("ru-RU") : "—") : (v || "—");
   // auditLabel задаётся только для значимых полей (прораб/сроки) — тогда на blur пишем «было→стало»
+  // Ячейка тянется на всю высоту строки сетки, а поле прижимается к её низу:
+  // подписи разной длины («Дата продажи (подписание договора)» переносится, а
+  // «Дата начала работ» нет), и без этого соседние поля в одной строке стояли
+  // на разной высоте — сетка выглядела съехавшей.
+  const _cell = { display: "flex", flexDirection: "column", height: "100%" };
+  const _cellInputWrap = { marginTop: "auto" };
   const fld = (label, key, type = "text", auditLabel = null) => (
-    <div>
+    <div style={_cell}>
       <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>{label}</div>
+      <div style={_cellInputWrap}>
       <input type={type} value={prod[key] || ""}
         onFocus={e => { _fldFocus.current = e.target.value; }}
         onChange={e => patch({ [key]: e.target.value })}
@@ -606,6 +613,7 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatc
           // системное оформление и задаём фон с высотой явно.
           WebkitAppearance: "none", appearance: "none", background: "#fff",
           color: "#0f172a", minHeight: 38 }} />
+      </div>
     </div>
   );
   // Выбор ответственного — только из сотрудников системы. Свободный ввод убран намеренно:
@@ -617,8 +625,9 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatc
     const current = prod[key] || "";
     const known = (staffOptions || []).map(u => (typeof u === "string" ? u : u?.name)).filter(Boolean);
     return (
-      <div>
+      <div style={_cell}>
         <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>{label}</div>
+        <div style={_cellInputWrap}>
         <select value={current} disabled={readOnly}
           onChange={e => {
             const next = e.target.value;
@@ -632,6 +641,7 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatc
           {known.map(name => <option key={name} value={name}>{name}</option>)}
           {current && !known.includes(current) && <option value={current}>{current} (нет в сотрудниках)</option>}
         </select>
+        </div>
       </div>
     );
   };
@@ -644,6 +654,10 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatc
   );
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* На телефоне две колонки полей дают ~150px на каждую: подписи вроде
+          «Дата продажи (подписание договора)» ломаются на три строки, а сами
+          поля становятся уже календарной даты. Одна колонка на узком экране. */}
+      <style>{`@media(max-width:700px){.prod-grid{grid-template-columns:1fr!important}}`}</style>
       {/* Напоминания / просрочки */}
       {alerts.length > 0 && (
         <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 12, padding: "12px 15px" }}>
@@ -673,7 +687,7 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatc
       {/* Производственные поля */}
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px" }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 14 }}>Производственная информация</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div className="prod-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           {fldStaff("Ответственный прораб / менеджер", "responsible", "прораб")}
           {fld("Доступ (ключ, код, пропуск)", "access")}
           {fld("Дата продажи (подписание договора)", "saleDate", "date")}
@@ -1151,8 +1165,12 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
                             onBlur={e => auditStage(s, "прораб этапа", _stFocus.current, e.target.value)}
                             style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 8px", fontSize: 12, fontFamily: "inherit", outline: "none", width: 100 }} />
                           {/* Тот же выбор позиции, что и в колонке слева, но для телефона —
-                              там колонка скрыта, а переставлять работы нужно. */}
-                          <label className="st-ord-mob" style={{ alignItems: "center", gap: 4, fontSize: 11, color: "#94a3b8", whiteSpace: "nowrap" }}>№
+                              там колонка скрыта, а переставлять работы нужно.
+                              Подпись именно «№ в разделе»: нумерация идёт внутри раздела и
+                              в каждом начинается с единицы. С коротким «№» это читалось как
+                              сквозной номер работы, и список выглядел сбитым (…1, 2, потом
+                              снова 1) — хотя порядок верный. */}
+                          <label className="st-ord-mob" title="Позиция в разделе" style={{ alignItems: "center", gap: 4, fontSize: 11, color: "#94a3b8", whiteSpace: "nowrap" }}>№ в разделе
                             <select title="Позиция в разделе" value={li} onChange={e => patch({ stages: moveProductionStage(stages, s.id, Number(e.target.value)) })}
                               style={{ width: 46, height: 26, border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 11.5, color: "#475569", background: "#fff", textAlign: "center", fontFamily: "inherit" }}>
                               {list.map((_, index) => <option key={index} value={index}>{index + 1}</option>)}
@@ -1324,7 +1342,11 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
                       </div>
                     ))}
                     <div style={{ position: "absolute", left: layout.todayX, top: 0, bottom: 0, width: 2, background: "#ef4444", zIndex: 3 }} />
-                    <div style={{ position: "absolute", left: layout.todayX + 4, top: 2, fontSize: 9.5, fontWeight: 800, color: "#ef4444", whiteSpace: "nowrap", zIndex: 3 }}>сегодня</div>
+                    {/* Подпись у линии «сегодня» ложится поверх подписи шкалы — на телефоне,
+                        где шаг между делениями мелкий, получалась каша из «авг» и «сегодня».
+                        Линия и так расшифрована в легенде над графиком, поэтому там подпись
+                        не рисуем. */}
+                    {!narrow && <div style={{ position: "absolute", left: layout.todayX + 4, top: 2, fontSize: 9.5, fontWeight: 800, color: "#ef4444", whiteSpace: "nowrap", zIndex: 3 }}>сегодня</div>}
                   </div>
                 </div>
 
@@ -1410,6 +1432,17 @@ function DateF({ label, v, on }) {
   );
 }
 
+// Ввод в журнале и замечаниях на телефоне. Поле и кнопка стояли в одной строке,
+// кнопке хватало ширины, а полю оставалась треть — писать в него было неудобно.
+// Плюс отступы карточки 18px съедали ещё 36px от узкого экрана.
+const PROD_INPUT_CSS = `@media(max-width:700px){
+  .prod-card{padding:13px!important}
+  .prod-ta{min-height:96px!important}
+  .prod-add-row>input{flex:1 1 100%!important;min-width:0!important}
+  .prod-add-row>button{flex:1 1 100%!important}
+  .prod-add-btn>button{width:100%!important}
+}`;
+
 // Дата+время для журнала/замечаний
 const _fmtTs = (ts) => ts ? new Date(ts).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
 
@@ -1420,12 +1453,16 @@ function JournalTab({ prod, patch, genId, currentUser }) {
   const add = () => { if (!text.trim()) return; patch({ journal: [{ id: genId(), ts: Date.now(), author: currentUser?.name || "—", text: text.trim() }, ...entries] }); setText(""); };
   const del = (id) => { if (window.confirm("Удалить запись?")) patch({ journal: entries.filter(e => e.id !== id) }); };
   return (
-    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
+    <div className="prod-card" style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
+      {/* Поля ввода на телефоне: у карточки отступы 18px с двух сторон — это 36px
+          от и без того узкого экрана. Плюс двух строк мало, чтобы разглядеть
+          написанное, а кнопка рядом с полем отъедала у него треть ширины. */}
+      <style>{PROD_INPUT_CSS}</style>
       <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 14 }}>📖 Журнал объекта ({entries.length})</div>
       <div style={{ marginBottom: 16 }}>
-        <textarea value={text} onChange={e => setText(e.target.value)} rows={2} placeholder="Что произошло на объекте? («залили стяжку», «клиент перенёс розетку», «привезли плитку»…)"
+        <textarea className="prod-ta" value={text} onChange={e => setText(e.target.value)} rows={2} placeholder="Что произошло на объекте? («залили стяжку», «клиент перенёс розетку»…)"
           style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "9px 12px", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box", resize: "vertical" }} />
-        <div style={{ textAlign: "right", marginTop: 8 }}>
+        <div className="prod-add-btn" style={{ textAlign: "right", marginTop: 8 }}>
           <button onClick={add} disabled={!text.trim()} style={{ background: text.trim() ? "#2563eb" : "#cbd5e1", color: "#fff", border: "none", borderRadius: 8, padding: "8px 20px", fontSize: 13, fontWeight: 700, cursor: text.trim() ? "pointer" : "default", fontFamily: "inherit" }}>+ Запись в журнал</button>
         </div>
       </div>
@@ -1458,12 +1495,13 @@ function DefectsTab({ prod, patch, genId, currentUser }) {
   const del = (id) => patch({ defects: items.filter(i => i.id !== id) });
   const open = items.filter(i => !i.done).length;
   return (
-    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
+    <div className="prod-card" style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
+      <style>{PROD_INPUT_CSS}</style>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>⚠️ Замечания и дефекты</div>
         <div style={{ fontSize: 13, fontWeight: 700, color: open ? "#dc2626" : "#059669" }}>{open ? `${open} открыто` : (items.length ? "всё устранено ✓" : "—")}</div>
       </div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+      <div className="prod-add-row" style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
         <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && add()} placeholder="Новое замечание (что исправить)…"
           style={{ flex: "1 1 200px", border: "1px solid #e2e8f0", borderRadius: 8, padding: "9px 12px", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
         <button onClick={add} disabled={!text.trim()} style={{ background: text.trim() ? "#dc2626" : "#cbd5e1", color: "#fff", border: "none", borderRadius: 8, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: text.trim() ? "pointer" : "default", fontFamily: "inherit" }}>+ Добавить</button>
