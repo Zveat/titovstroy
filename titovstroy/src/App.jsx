@@ -8368,16 +8368,45 @@ ${reqBlock}`;
     setResyncing(false);
   }, [resyncing, loadEstimates, loadContracts, loadFinance, currentUser?.role, flushAllProductionPending]);
   const _resyncRef = useRef(resyncNow); _resyncRef.current = resyncNow;
-  // Авто-флеш зависших правок: при старте, периодически и при возврате сети
+  const cloudErrorRef = useRef(cloudError); cloudErrorRef.current = cloudError;
+  // Авто-флеш зависших правок: при старте, периодически, при возврате сети и
+  // при возвращении в приложение.
+  //
+  // Про телефон. Когда вкладка уходит в фон, браузер замораживает таймеры:
+  // человек переключился на другое приложение, вернулся — а баннер «облако
+  // недоступно» ещё висит, потому что следующая проверка будет только через
+  // полторы минуты. Отсюда ощущение, что он не гаснет вообще. Поэтому:
+  //   · проверяем сразу при возврате на вкладку (visibilitychange/pageshow);
+  //   · пока баннер горит, проверяем чаще — раз в 20 секунд вместо 90.
+  // Условие гашения берём из общего помощника: раньше здесь считались ВИДИМЫЕ
+  // dirty-ключи, включая legacy-карантин, который автоматически не отправляется
+  // никогда, — с ним баннер не погас бы уже ни при каких условиях.
   useEffect(() => {
-    let stop = false;
-    const flush = () => { if (!stop) storage.flushDirty().then(()=>{ if(!stop) { const left = storage.dirtyKeysVisible().length; setDirtyCount(left); if (left === 0 && _prodUnsyncedIds.current.size === 0) setCloudError(false); } }).catch(()=>{}); };
+    let stop = false, iv = 0;
+    const flush = () => {
+      if (stop) return;
+      storage.flushDirty()
+        .then(() => { if (!stop) { setDirtyCount(storage.dirtyKeysVisible().length); _clearCloudErrorIfAllClean(); } })
+        .catch(() => { if (!stop) setDirtyCount(storage.dirtyKeysVisible().length); })
+        .finally(() => { if (!stop) schedule(); });
+    };
+    const schedule = () => {
+      clearTimeout(iv);
+      iv = setTimeout(flush, cloudErrorRef.current ? 20000 : 90000);
+    };
+    const onWake = () => { if (document.visibilityState === "visible") flush(); };
     flush();
-    const iv = setInterval(flush, 90000);
     const onOnline = () => _resyncRef.current && _resyncRef.current();
     window.addEventListener("online", onOnline);
-    return () => { stop = true; clearInterval(iv); window.removeEventListener("online", onOnline); };
-  }, []);
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("pageshow", onWake);
+    return () => {
+      stop = true; clearTimeout(iv);
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("pageshow", onWake);
+    };
+  }, [_clearCloudErrorIfAllClean]);
   // Индикатор «есть несинхронизированные изменения» (свои — dirtyCount; legacy-карантин — отдельно)
   useEffect(() => {
     const upd = () => { setDirtyCount(storage.dirtyKeysVisible().length); setLegacyDirtyN(storage.legacyDirtyKeys().length); };
@@ -11508,10 +11537,34 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           .est-card-btns{flex-wrap:wrap!important;gap:6px!important;flex:1!important;justify-content:flex-end!important}
           .est-card-btns button{padding:5px 10px!important;font-size:11px!important}
         }
+        /* Карточка договора в «Документах» — та же болезнь, что была у сметы.
+           Правая колонка (сумма + «+ Приложение», PDF, GDoc, корзина) стоит с
+           flexShrink:0 и без переноса: на телефоне она забирала почти всю
+           ширину, название «Договор подряда №1017 — Мукашев Чингиз Мейрамович»
+           сжималось в колонку в пару слов и уходило под кнопки. */
+        @media(max-width:700px){
+          .doc-card-row{flex-direction:column!important;align-items:stretch!important;gap:10px!important}
+          /* Сумма — своей строкой. Если оставить её в одной строке с кнопками,
+             четыре кнопки перестают помещаться и рвутся на два неровных ряда. */
+          .doc-card-side{text-align:left!important;display:flex!important;flex-direction:column!important;
+            align-items:stretch!important;gap:8px!important}
+          .doc-card-btns{flex-wrap:wrap!important;gap:6px!important;margin-top:0!important;
+            justify-content:flex-start!important}
+          .doc-card-btns button{padding:5px 8px!important;font-size:11px!important}
+        }
         @media(max-width:700px){
           .sidebar{display:none!important}
           .sidebar-content{margin-left:0!important;padding-top:env(safe-area-inset-top,0px)!important;padding-bottom:calc(68px + env(safe-area-inset-bottom,0px))!important}
           .mob-nav{display:flex!important}
+          /* Полоска под часами и вырезом. Приложение открыто как отдельное
+             (apple-mobile-web-app-capable), строка состояния прозрачная, поэтому
+             прокручиваемый список проезжал прямо под часами и уровнем сети —
+             фильтры «Все · Подряд · Ремонт» читались вперемешку с 23:57 и 5G.
+             Отступа сверху тут мало: он держит только начало страницы, а
+             прокрутка идёт под ним. Нужна непрозрачная накладка.
+             z-index 45: выше содержимого, ниже нижнего меню (50) и окон (200+). */
+          body::before{content:"";position:fixed;top:0;left:0;right:0;
+            height:env(safe-area-inset-top,0px);background:#f8fafc;z-index:45;pointer-events:none}
           .page{padding:18px 14px 84px!important}
           .list-header,.contracts-header{padding:10px 14px!important;top:env(safe-area-inset-top,0px)!important}
           .list-pad{padding:16px 14px 0!important}
@@ -16272,7 +16325,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         </div>}
                         <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:8,padding:"14px 18px",cursor:_podLocked?"default":"pointer",transition:"all .15s",marginLeft:isChild?26:0,borderLeft:isChild?"3px solid #ede9fe":(isPod?"3px solid #10b981":"1px solid #e5e7eb"),opacity:_podLocked?.75:1}}
                           onClick={_podLocked?undefined:()=>{ setCurrentContract({...c}); setContractTab("editor"); }}>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                          <div className="doc-card-row" style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                                 {!isChild && kidsCount>0 && (
@@ -16298,9 +16351,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                 {new Date(c.date||Date.now()).toLocaleDateString("ru-RU")} · {(c.works||[]).length} позиций
                               </div>
                             </div>
-                            <div style={{textAlign:"right",flexShrink:0}}>
+                            <div className="doc-card-side" style={{textAlign:"right",flexShrink:0}}>
                               <div style={{fontWeight:800,fontSize:16,color:"#0f172a"}}>{fmt(total)} ₸</div>
-                              <div style={{display:"flex",gap:5,marginTop:6}}>
+                              <div className="doc-card-btns" style={{display:"flex",gap:5,marginTop:6}}>
                                 {c.type==="podryad" && !isChild && accessAllows(currentPermissions.documentCreate, _isOwnDoc(c)) && !_isUser && (
                                   <button title="Создать доп. приложение к этому договору подряда" onClick={e=>{e.stopPropagation(); createPodryadAnnex(c);}}
                                     style={{background:"#ecfdf5",color:"#059669",border:"1px solid rgba(5,150,105,.25)",borderRadius:5,padding:"3px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ Приложение</button>
