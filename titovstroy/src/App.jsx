@@ -21,7 +21,7 @@ import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restore
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, contractNetTotal, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
+import { normCN, contractNetTotal, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, resolveEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -556,7 +556,7 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
             <div style={{ fontSize: 12.5, color: "#94a3b8" }}>Найдено: {filtered.length}</div>
             <button onClick={() => exportFilteredMasters("naimi", filtered, crmData)} style={{ border: "1px solid #bfdbfe", background: "#eff6ff", color: "#2563eb", borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 750, cursor: "pointer", fontFamily: "inherit" }}>⬇ Excel по фильтру</button>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(310px,1fr))", gap: 12, alignItems: "stretch" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(min(310px,100%),1fr))", gap: 12, alignItems: "stretch" }}>
             {shown.map(m => {
               const phoneD = m.phone ? _kzPhone(m.phone) : "";
               return (
@@ -784,7 +784,7 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
             <div style={{ fontSize: 12.5, color: "#94a3b8" }}>Найдено: {filtered.length}</div>
             <button onClick={() => exportFilteredMasters("olx", filtered, crmData)} style={{ border: "1px solid #bfdbfe", background: "#eff6ff", color: "#2563eb", borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 750, cursor: "pointer", fontFamily: "inherit" }}>⬇ Excel по фильтру</button>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(310px,1fr))", gap: 12, alignItems: "stretch" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(min(310px,100%),1fr))", gap: 12, alignItems: "stretch" }}>
             {shown.map(m => {
               const phoneD = m.phone ? _kzPhone(m.phone) : "";
               const fd = freshDays(m);
@@ -3553,8 +3553,11 @@ function AdminPageContent({ currentUser, presence = {}, onAuditPrice = null, per
         </Suspense>
       ) : tab === "users" ? (
         <div>
-          {/* Список сотрудников — карточки богатые (роль, онлайн, кнопки), поэтому шире: 2 колонки */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(480px,1fr))",gap:10,marginBottom:20,alignItems:"start"}}>
+          {/* Список сотрудников — карточки богатые (роль, онлайн, кнопки), поэтому шире: 2 колонки.
+              min(480px,100%) вместо голых 480px: у minmax жёсткий минимум, и на телефоне
+              колонка оставалась 480px при экране 360 — карточка вылезала за край, кнопка
+              «Изменить» обрезалась. Так же исправлены остальные широкие сетки в файле. */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(min(480px,100%),1fr))",gap:10,marginBottom:20,alignItems:"start"}}>
             {users.map(u => (
               <div key={u.id} style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"16px 18px"}}>
                 <div className="user-row" style={{display:"flex",alignItems:"flex-start",gap:12}}>
@@ -3667,7 +3670,7 @@ function AdminPageContent({ currentUser, presence = {}, onAuditPrice = null, per
               )}
             </div>
             {clients.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#334155",fontSize:13}}>Клиентов пока нет</div>}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:10}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(min(320px,100%),1fr))",gap:10}}>
             {clients.map(c=>(
               <div key={c.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"14px 16px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -3742,7 +3745,7 @@ function AdminPageContent({ currentUser, presence = {}, onAuditPrice = null, per
                   className="btn btn-g" style={{fontSize:12,padding:"6px 12px"}}>+ Добавить</button>
               )}
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:10}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(min(320px,100%),1fr))",gap:10}}>
             {contragents.map(c=>(
               <div key={c.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:"14px 16px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -3825,7 +3828,7 @@ function AdminPageContent({ currentUser, presence = {}, onAuditPrice = null, per
                 <span style={{fontSize:11,color:"#cbd5e1"}}>Нажмите <b>+ Добавить</b> — или создайте нового прямо в редакторе договора подряда</span>
               </div>
             )}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(340px,1fr))",gap:10}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(min(340px,100%),1fr))",gap:10}}>
             {shown.map(w=>{
               const st = workerStats(w.id);
               return (
@@ -7288,13 +7291,11 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   // Собрать строки акта из позиций сметы (цена с учётом наценки, без НДС)
   const buildAvrLinesFromEst = (est) => {
     const cat = getEffectiveCatalog();
-    const lk = new Map();
-    for (const w of cat) { if (w?.name) lk.set(w.name, w); if (w?.code) lk.set(w.code, w); }
     const pricing = { markupPercent: Number(est.markup) || 0, discountPercent: Number(est.discount) || 0 };
     const lines = [];
-    for (const [key, r] of Object.entries(est.rows || {})) {
-      const qty = Number(r?.qty || 0); if (qty <= 0) continue;
-      const w = lk.get(key); if (!w) continue;
+    // Строки берём тем же правилом, что и смета: иначе в акт попадали работы,
+    // удалённые из сметы (их прежняя запись под названием остаётся в данных).
+    for (const { row: r, work: w, qty } of resolveEstimateRows(est.rows, cat, { extraCat: EXTRA_CAT })) {
       let price;
       if (r.manualPrice !== undefined && r.manualPrice !== "") { const n = Number(r.manualPrice); price = isNaN(n) ? 0 : n; }
       else { const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined; price = getEstimateRowPrice(r, w, qty, r.complexity || "std", cpxPct) || 0; }
@@ -7894,11 +7895,10 @@ ${reqBlock}`;
     for (const est of objEsts) {
       const mk = 1 + (Number(est.markup) || 0) / 100;
       const disc = 1 - (Number(est.discount) || 0) / 100;
-      for (const [key, r] of Object.entries(est.rows || {})) {
-        const qty = Number(r?.qty || 0);
-        if (qty <= 0) continue;
-        const w = catalog.find(x => x.code === key) || catalog.find(x => x.name === key)
-          || catalog.find(x => r?.manualName && x.name === r.manualName);
+      // Тем же правилом, что и сама смета: иначе в этапы производства
+      // попадали работы, удалённые из сметы (их прежняя запись под названием
+      // остаётся в данных и раньше подхватывалась отсюда напрямую).
+      for (const { key, row: r, work: w, qty } of resolveEstimateRows(est.rows, catalog, { extraCat: EXTRA_CAT })) {
         const name = String(r?.manualName ?? r?.name ?? w?.name ?? key).trim();
         if (!name) continue;
         const unit = String(r?.manualUnit ?? r?.unit ?? w?.unit ?? "").trim();
@@ -10448,16 +10448,17 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     if (!est) return [];
     const catalog = getEffectiveCatalog();
     const pricing = _estPricingOf(est);
-    return Object.entries(est.rows||{}).filter(([,r])=>Number(r?.qty)>0).map(([key,r])=>{
-      const w = catalog.find(x=>x.name===key)||catalog.find(x=>x.code===key);
-      if(!w) return null;
-      const qty = Number(r.qty||0);
+    // resolveEstimateRows — то же правило выбора строки, что у самой сметы.
+    // Раньше здесь перебирались rows напрямую, и договор воскрешал работы,
+    // удалённые из сметы (их старая запись под названием остаётся в данных),
+    // а свободные позиции без работы в каталоге, наоборот, выбрасывались.
+    return resolveEstimateRows(est.rows, catalog, { extraCat: EXTRA_CAT }).map(({ row: r, work: w, qty }) => {
       const cpxPct = r.cpxPct!==undefined ? Number(r.cpxPct) : undefined;
       const rawPrice = getEstimateRowPrice(r, w, qty, r.complexity||"std", cpxPct);
       const displayName = r.manualName!==undefined ? r.manualName : w.name;
       const displayUnit = r.manualUnit!==undefined ? r.manualUnit : (w.unit||"м²");
       return {name:displayName,quantity:qty,unit:displayUnit,price:clientUnitPrice(rawPrice, pricing)};
-    }).filter(Boolean);
+    });
   };
   const dealEstimate = (deal) => estimatesRef.current.find(e=>e.id===deal.estId) || null;
   const dealToContract = (deal) => {
@@ -11532,10 +11533,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
            разворачиваем карточку в столбец, кнопкам разрешаем перенос. */
         @media(max-width:700px){
           .est-card-row{flex-direction:column!important;align-items:stretch!important;gap:10px!important}
-          .est-card-acts{flex-direction:row!important;align-items:center!important;
-            justify-content:space-between!important;flex-wrap:wrap!important;gap:8px!important}
-          .est-card-btns{flex-wrap:wrap!important;gap:6px!important;flex:1!important;justify-content:flex-end!important}
-          .est-card-btns button{padding:5px 10px!important;font-size:11px!important}
+          /* Сумма — своей строкой, кнопки — от левого края. Пока сумма стояла
+             в одной строке с кнопками, а кнопки прижимались вправо, шесть штук
+             разваливались на три рваных ряда с дырами по краям. */
+          .est-card-acts{flex-direction:column!important;align-items:stretch!important;gap:8px!important}
+          .est-card-btns{flex-wrap:wrap!important;gap:6px!important;justify-content:flex-start!important}
+          .est-card-btns button{padding:6px 10px!important;font-size:11px!important}
         }
         /* Карточка договора в «Документах» — та же болезнь, что была у сметы.
            Правая колонка (сумма + «+ Приложение», PDF, GDoc, корзина) стоит с

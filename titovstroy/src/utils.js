@@ -65,6 +65,60 @@ export function resolveEstimateRowWork(work = {}, row = {}) {
     : applyWorkPricingOverride(work, null);
 }
 
+// ЕДИНОЕ правило «какая строка сметы относится к работе каталога».
+//
+// Одна и та же работа может лежать в rows ДВАЖДЫ: под кодом (WALL-007) и под
+// названием («Ошкуривание стен») — раньше строки писались по названию, сейчас
+// по коду. Редактор и итог сметы берут пару как rows[код] || rows[название],
+// поэтому очистка объёма создаёт ПУСТУЮ запись под кодом, а старая запись под
+// названием остаётся в данных со старым объёмом — её просто больше никто не
+// показывает.
+//
+// Всё, что вместо этого перебирало rows напрямую (договор из сметы, акт
+// выполненных работ, этапы производства), брало забытую запись и возвращало
+// удалённые работы. На смете «Таисия» договор выходил на 4 980 744 ₸ вместо
+// 3 101 192 ₸: девять удалённых работ воскресали, а одна свободная позиция,
+// наоборот, терялась — её нет в каталоге, и её молча выбрасывали.
+//
+// Возвращает строки В ПОРЯДКЕ КАТАЛОГА: {key, row, work, qty}. Позиции без
+// работы в каталоге (свободные, восстановленные из актов) идут в конце с
+// синтезированной работой — ровно так же, как их показывает сама смета.
+export const ESTIMATE_EXTRA_CAT = "Восстановлено из актов";
+export function resolveEstimateRows(rows = {}, catalog = [], { extraCat = ESTIMATE_EXTRA_CAT } = {}) {
+  const src = rows && typeof rows === "object" ? rows : {};
+  const out = [];
+  const used = new Set();
+  for (const work of Array.isArray(catalog) ? catalog : []) {
+    if (!work) continue;
+    // Именно || , а не проверка на undefined: так выбирает строку сам редактор
+    // сметы и её итог. Любое расхождение здесь снова разведёт суммы.
+    const codeRow = work.code != null ? src[work.code] : undefined;
+    const nameRow = work.name != null ? src[work.name] : undefined;
+    const row = codeRow || nameRow;
+    if (!row) continue;
+    const key = codeRow ? work.code : work.name;
+    if (used.has(key)) continue;
+    // Забытый близнец той же работы помечается использованным, иначе ниже он
+    // уехал бы в «позиции без каталога» и работа задвоилась.
+    if (work.code != null) used.add(work.code);
+    if (work.name != null) used.add(work.name);
+    const qty = Number(row.qty || 0);
+    if (!(qty > 0)) continue;
+    out.push({ key, row, work, qty });
+  }
+  for (const [key, row] of Object.entries(src)) {
+    if (used.has(key)) continue;
+    const qty = Number(row?.qty || 0);
+    if (!(qty > 0)) continue;
+    out.push({
+      key, row, qty,
+      work: { code: key, name: row.manualName || key, unit: row.manualUnit || "",
+        cat: extraCat, sub: "Позиции", tiers: [], cost: 0, fixedPrice: Number(row.manualPrice) || 0 },
+    });
+  }
+  return out;
+}
+
 export function sealLegacyEstimateRows(sourceRows = {}, catalog = []) {
   const byKey = new Map();
   for (const work of catalog || []) {

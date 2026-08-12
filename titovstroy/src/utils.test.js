@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as utils from "./utils.js";
-import { normCN, contractNetTotal, contractWorksGross, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, hasInvalidFinanceProjectDate, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, normalizeEstimateSuggestionRules, createDefaultEstimateSuggestionRules, resolveEstimateSuggestionRules, buildEstimateSuggestions } from "./utils.js";
+import { normCN, contractNetTotal, contractWorksGross, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, resolveEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, hasInvalidFinanceProjectDate, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, normalizeEstimateSuggestionRules, createDefaultEstimateSuggestionRules, resolveEstimateSuggestionRules, buildEstimateSuggestions } from "./utils.js";
 import { documentTemplateBackupSpecs } from "./documents/documentTemplateBackup.js";
 
 describe("поиск финансового проекта по связанному объекту", () => {
@@ -1997,5 +1997,54 @@ describe("одна цена везде — наценка, скидка, коп�
     const pricing = { markupPercent: 10, discountPercent: 12 };
     const base = basePriceFromClient(18000, pricing);
     expect(clientUnitPrice(base, pricing)).toBe(18000);
+  });
+});
+
+describe("выбор строк сметы (договор/акт/этапы должны видеть то же, что смета)", () => {
+  // Боевой случай: смета «Таисия». Одна работа лежала в rows дважды — под кодом
+  // с очищенным объёмом и под названием со старым. Смета показывала 3 101 192 ₸,
+  // а договор из неё выходил на 4 980 744 ₸: девять удалённых работ воскресали.
+  const catalog = [
+    { code: "DEM-001", name: "Снятие обоев", cat: "Черновые", sub: "Демонтаж", unit: "м²", fixedPrice: 333, tiers: [] },
+    { code: "WALL-007", name: "Ошкуривание стен", cat: "Черновые", sub: "Стены", unit: "м²", fixedPrice: 667, tiers: [] },
+  ];
+
+  it("очищенная запись под кодом перебивает забытую запись под названием", () => {
+    const rows = { "DEM-001": { qty: "" }, "Снятие обоев": { qty: "189" } };
+    expect(resolveEstimateRows(rows, catalog)).toEqual([]);
+  });
+
+  it("работа не задваивается, когда обе записи заполнены", () => {
+    const rows = { "DEM-001": { qty: "10" }, "Снятие обоев": { qty: "189" } };
+    const out = resolveEstimateRows(rows, catalog);
+    expect(out).toHaveLength(1);
+    expect(out[0].key).toBe("DEM-001");
+    expect(out[0].qty).toBe(10);
+  });
+
+  it("запись под названием берётся, когда записи под кодом нет", () => {
+    const out = resolveEstimateRows({ "Ошкуривание стен": { qty: "189" } }, catalog);
+    expect(out).toHaveLength(1);
+    expect(out[0].key).toBe("Ошкуривание стен");
+    expect(out[0].work.code).toBe("WALL-007");
+  });
+
+  it("позиция без работы в каталоге не теряется, а получает свою работу", () => {
+    const rows = { "Монтаж натяжного потолка (сумма от)": { qty: "1", manualPrice: 65000, manualUnit: "усл." } };
+    const out = resolveEstimateRows(rows, catalog);
+    expect(out).toHaveLength(1);
+    expect(out[0].work.fixedPrice).toBe(65000);
+    expect(out[0].work.unit).toBe("усл.");
+    expect(out[0].work.cat).toBe(utils.ESTIMATE_EXTRA_CAT);
+  });
+
+  it("нулевые и пустые объёмы отбрасываются", () => {
+    const rows = { "DEM-001": { qty: 0 }, "WALL-007": { qty: "" }, "Своя позиция": { qty: "-3" } };
+    expect(resolveEstimateRows(rows, catalog)).toEqual([]);
+  });
+
+  it("порядок — каталожный, свободные позиции в конце", () => {
+    const rows = { "Своя позиция": { qty: 1 }, "WALL-007": { qty: 5 }, "DEM-001": { qty: 2 } };
+    expect(resolveEstimateRows(rows, catalog).map(x => x.key)).toEqual(["DEM-001", "WALL-007", "Своя позиция"]);
   });
 });
