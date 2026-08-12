@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, Fragment } from "react";
+import { useState, useMemo, useEffect, useLayoutEffect, useRef, Fragment } from "react";
 import { STAGE_STATUSES, emptyProduction } from "./constants.js";
 import { normCN, contractNetTotal, estimatesForObject, findFinanceProjectForObject, sortProductionStages, moveProductionStage, buildGanttLayout, sortGanttRows, GANTT_SCALES, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "../utils.js";
 import { buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, _stageKey } from "./commands.js";
@@ -994,6 +994,30 @@ function ClientMessageCard({ prod, patch, embedded = false }) {
 }
 
 // ─── ВКЛАДКА: ЭТАПЫ И СРОКИ ───
+// Название работы в списке этапов. Раньше тут был <input>: одна строка без
+// переноса, поэтому на телефоне от «Демонтаж существующих перегородок из ГКЛ
+// с утилизацией мусора» было видно первые пару слов, а на боевых объектах
+// названия доходят до 300–450 символов. Textarea переносит текст и сама
+// подгоняет высоту под содержимое; Enter гасим, чтобы название осталось
+// однострочным по смыслу (перевод строки ломал бы выгрузки и печать).
+function StageName({ value, onChange, readOnly }) {
+  const ref = useRef(null);
+  const fit = () => { const el = ref.current; if (!el) return; el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; };
+  useLayoutEffect(fit, [value]);
+  // Ширина строки меняется при повороте телефона и при сворачивании боковой
+  // колонки — высоту нужно пересчитать, иначе текст обрежется по старой.
+  useEffect(() => { window.addEventListener("resize", fit); return () => window.removeEventListener("resize", fit); }, []);
+  return (
+    <textarea ref={ref} rows={1} value={value || ""} readOnly={readOnly}
+      onChange={e => { onChange(e.target.value.replace(/\s*\n\s*/g, " ")); }}
+      onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } }}
+      placeholder="Наименование работы"
+      style={{ width: "100%", border: "none", fontSize: 13, fontWeight: 600, color: "#0f172a",
+        fontFamily: "inherit", outline: "none", background: "transparent", padding: 0,
+        resize: "none", overflow: "hidden", lineHeight: 1.35, display: "block" }} />
+  );
+}
+
 function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, audit }) {
   const stages = prod.stages || [];
   const [newName, setNewName] = useState("");
@@ -1001,6 +1025,15 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
   // Масштаб графика: "auto" подбирает шаг под длину проекта, остальные — выбор владельца.
   const [ganttScale, setGanttScale] = useState("auto");
   const [ganttShowUndated, setGanttShowUndated] = useState(false);
+  // Ширина колонки названий в графике считается в пикселях (её нельзя задать
+  // медиа-запросом — по ней же считается общая ширина полотна), поэтому ширину
+  // экрана приходится знать в JS.
+  const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth <= 700);
+  useEffect(() => {
+    const onResize = () => setNarrow(window.innerWidth <= 700);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
   const upd = (id, p) => patch({ stages: stages.map(s => s.id === id ? { ...s, ...p } : s) });
   // Журнал изменений этапа (прораб/срок) — пишем на blur, только если значение реально изменилось
   const _stFocus = useRef("");
@@ -1049,6 +1082,25 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Раскладка строки этапа на телефоне. Инлайновые стили тут не подходят:
+          нужна медиа-условная вёрстка, а не фиксированная.
+          На узком экране левая колонка перестановки (стрелки + номер) съедала
+          40px из ~250px строки — название работы обрезалось, а строка из
+          ЧЕТЫРЁХ полей даты не помещалась и уезжала за край карточки. Поэтому
+          на телефоне: колонка перестановки убирается, вместо неё компактный
+          выбор номера встаёт в строку со статусом, а даты идут 2×2. */}
+      <style>{`
+        .st-ord-mob{display:none}
+        @media(max-width:700px){
+          .st-row{gap:8px!important;padding:11px 0!important}
+          .st-ord{display:none!important}
+          .st-dates{grid-template-columns:1fr 1fr!important;gap:8px!important}
+          .st-ord-mob{display:inline-flex!important}
+          .st-resp{flex:1 1 90px!important;width:auto!important;min-width:0}
+          .st-add>*{flex:1 1 100%!important}
+          .st-add>button{flex:0 0 auto!important}
+        }
+      `}</style>
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Этапы и сроки ({stages.length})</div>
@@ -1069,9 +1121,9 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
                   const downId = li < list.length - 1 ? list[li + 1].id : null;
                   const arrBtn = (on) => ({ background: "none", border: "none", color: on ? "#94a3b8" : "#e2e8f0", cursor: on ? "pointer" : "default", fontSize: 12, lineHeight: 1, padding: 0, height: 15 });
                   return (
-                    <div key={s.id} style={{ display: "flex", gap: 10, padding: "10px 0", borderBottom: "1px solid #f1f5f9" }}>
+                    <div key={s.id} className="st-row" style={{ display: "flex", gap: 10, padding: "10px 0", borderBottom: "1px solid #f1f5f9" }}>
                       {/* Быстрая перестановка в пределах категории: край, шаг или точная позиция. */}
-                      <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", flexShrink: 0, gap: 2, width: 40 }}>
+                      <div className="st-ord" style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", flexShrink: 0, gap: 2, width: 40 }}>
                         <div style={{ display:"flex", gap:3 }}>
                           <button title="В начало раздела" disabled={!upId} onClick={() => patch({ stages: moveProductionStage(stages, s.id, 0) })} style={arrBtn(!!upId)}>⇤</button>
                           <button title="Выше" disabled={!upId} onClick={() => moveStage(s.id, upId)} style={arrBtn(!!upId)}>▲</button>
@@ -1087,21 +1139,28 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
                       </div>
                       <div style={{ width: 3, borderRadius: 3, background: st.color, flexShrink: 0, minHeight: 36 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <input value={s.name} onChange={e => upd(s.id, { name: e.target.value })} placeholder="Наименование работы"
-                          style={{ width: "100%", border: "none", fontSize: 13, fontWeight: 600, color: "#0f172a", fontFamily: "inherit", outline: "none", background: "transparent", padding: 0 }} />
+                        <StageName value={s.name} onChange={v => upd(s.id, { name: v })} />
                         {(s.qty > 0 || s.unit) && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 1 }}>{s.qty > 0 ? fmt(s.qty) : ""} {s.unit || ""}</div>}
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8, alignItems: "center" }}>
                           <select value={s.status} onChange={e => upd(s.id, { status: e.target.value })}
                             style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 6px", fontSize: 11.5, fontFamily: "inherit", color: st.color, background: st.bg, fontWeight: 700, cursor: "pointer" }}>
                             {STAGE_STATUSES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
                           </select>
-                          <input value={s.responsible || ""} onChange={e => upd(s.id, { responsible: e.target.value })} placeholder="Ответств."
+                          <input className="st-resp" value={s.responsible || ""} onChange={e => upd(s.id, { responsible: e.target.value })} placeholder="Ответств."
                             onFocus={e => { _stFocus.current = e.target.value; }}
                             onBlur={e => auditStage(s, "прораб этапа", _stFocus.current, e.target.value)}
                             style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 8px", fontSize: 12, fontFamily: "inherit", outline: "none", width: 100 }} />
+                          {/* Тот же выбор позиции, что и в колонке слева, но для телефона —
+                              там колонка скрыта, а переставлять работы нужно. */}
+                          <label className="st-ord-mob" style={{ alignItems: "center", gap: 4, fontSize: 11, color: "#94a3b8", whiteSpace: "nowrap" }}>№
+                            <select title="Позиция в разделе" value={li} onChange={e => patch({ stages: moveProductionStage(stages, s.id, Number(e.target.value)) })}
+                              style={{ width: 46, height: 26, border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 11.5, color: "#475569", background: "#fff", textAlign: "center", fontFamily: "inherit" }}>
+                              {list.map((_, index) => <option key={index} value={index}>{index + 1}</option>)}
+                            </select>
+                          </label>
                           {iw != null && <span style={{ fontSize: 11, color: "#2563eb", fontWeight: 700 }}>🔨 {iw} дн</span>}
                         </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, marginTop: 8 }}>
+                        <div className="st-dates" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, marginTop: 8 }}>
                           <div>
                             <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 2 }}>Старт план</div>
                             <input type="date" value={s.planStart || ""} onChange={e => upd(s.id, { planStart: e.target.value })} style={dInp} />
@@ -1134,7 +1193,7 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
           </div>
         )}
         {/* Ручное добавление работы */}
-        <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", borderTop: "1px solid #f1f5f9", paddingTop: 12 }}>
+        <div className="st-add" style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", borderTop: "1px solid #f1f5f9", paddingTop: 12 }}>
           <input value={newCat} onChange={e => setNewCat(e.target.value)} placeholder="Заголовок (Черновые…)"
             style={{ flex: "1 1 140px", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", outline: "none" }} />
           <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === "Enter" && addManual()} placeholder="Наименование работы"
@@ -1154,9 +1213,16 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
       {stages.length > 0 && (() => {
         const scaleWanted = ganttScale;
         const layout = buildGanttLayout(stages, { now: Date.now(), scale: scaleWanted, viewWidth: 980 });
-        const NAME_W = 260;   // было 164 — в него не помещалось даже короткое название
+        // 260px на десктопе (было 164 — в него не помещалось даже короткое название).
+        // На телефоне это две трети экрана: от самого графика оставалась полоска
+        // в пару сантиметров, поэтому там колонка уже.
+        const NAME_W = narrow ? 132 : 260;
         const ROW_H = 34;     // было 46: план и факт стояли двумя полосками друг под другом
         const CAT_H = 26;
+        // Колонка названий прилипает к левому краю: полотно шире экрана, и без
+        // этого при прокрутке вправо названия уезжали — было видно полосы, но не
+        // понятно, чьи они.
+        const nameSticky = { position: "sticky", left: 0, zIndex: 6, background: "#fff" };
 
         const Legend = () => (
           <div style={{ display: "flex", gap: 14, fontSize: 11, color: "#64748b", flexWrap: "wrap", alignItems: "center" }}>
@@ -1244,7 +1310,7 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
                 {/* Шкала: число + месяц. Раньше был только месяц — на коротком проекте
                     это одна подпись на весь график, и понять сроки было нельзя. */}
                 <div style={{ display: "flex", position: "sticky", top: 0, zIndex: 4, background: "#fff", borderBottom: "1px solid #e2e8f0" }}>
-                  <div style={{ width: NAME_W, flexShrink: 0, borderRight: "1px solid #eef2f7",
+                  <div style={{ ...nameSticky, zIndex: 7, width: NAME_W, flexShrink: 0, borderRight: "1px solid #eef2f7",
                     fontSize: 10.5, color: "#94a3b8", fontWeight: 700, display: "flex", alignItems: "flex-end", padding: "0 12px 5px" }}>
                     Работа
                   </div>
@@ -1265,7 +1331,7 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
                 {grouped.map(([cat, list]) => (
                   <Fragment key={cat}>
                     <div style={{ display: "flex", background: "#fafbfd" }}>
-                      <div style={{ width: NAME_W, flexShrink: 0, borderRight: "1px solid #eef2f7", padding: "6px 12px",
+                      <div style={{ ...nameSticky, background: "#fafbfd", width: NAME_W, flexShrink: 0, borderRight: "1px solid #eef2f7", padding: "6px 12px",
                         fontSize: 10, fontWeight: 800, color: "#94a3b8", textTransform: "uppercase", letterSpacing: ".05em",
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={cat}>{cat}</div>
                       <div style={{ position: "relative", width: W, height: CAT_H, flexShrink: 0 }}>{gridLines}{todayLine}</div>
@@ -1284,10 +1350,11 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
                         <div key={s.id} style={{ display: "flex", borderBottom: "1px solid #f6f8fb", minHeight: ROW_H }}>
                           {/* Колонка имени: 260px и перенос в две строки. Раньше 164px в одну —
                               от «Электромонтажные работы (сумма…)» оставалось «Электромонтажные …». */}
-                          <div style={{ width: NAME_W, flexShrink: 0, borderRight: "1px solid #eef2f7", padding: "5px 12px", minWidth: 0 }} title={title}>
-                            <div style={{ fontSize: 11.5, fontWeight: 600, lineHeight: 1.25, color: s.overdue ? "#dc2626" : "#0f172a",
-                              display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{s.name || "Без названия"}</div>
-                            <div style={{ fontSize: 9.5, color: s.overdue ? "#dc2626" : st.color, fontWeight: 700, marginTop: 1 }}>
+                          <div style={{ ...nameSticky, width: NAME_W, flexShrink: 0, borderRight: "1px solid #eef2f7", padding: narrow ? "5px 8px" : "5px 12px", minWidth: 0 }} title={title}>
+                            <div style={{ fontSize: narrow ? 10.5 : 11.5, fontWeight: 600, lineHeight: 1.25, color: s.overdue ? "#dc2626" : "#0f172a",
+                              display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "anywhere" }}>{s.name || "Без названия"}</div>
+                            <div style={{ fontSize: 9.5, color: s.overdue ? "#dc2626" : st.color, fontWeight: 700, marginTop: 1,
+                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                               {s.overdue ? `просрочка ${s.lateDays} дн` : st.label}
                               {s.responsible ? <span style={{ color: "#94a3b8", fontWeight: 600 }}> · {s.responsible}</span> : null}
                             </div>
