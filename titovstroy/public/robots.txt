@@ -1,0 +1,4 @@
+# ERP TitovStroy (erp.titovstroy.kz) — внутренняя система, в поиске ей делать нечего.
+# Продающий сайт живёт на titovstroy.kz, у него свой robots.txt и sitemap.
+User-agent: *
+Disallow: /
