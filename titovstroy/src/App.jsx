@@ -21,7 +21,7 @@ import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restore
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { normCN, contractNetTotal, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, resolveEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
+import { normCN, contractNetTotal, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, resolveEstimateRows, existingEstimateRowKey, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -4887,7 +4887,9 @@ function DealEditor({ deal, clients, contragents, estimate, onUpdate, onBack, on
   const [withStamp, setWithStamp] = useState(true);
   const [showClientForm, setShowClientForm] = useState(false);
   const upd = (patch) => onUpdate(prev=>({...prev,...patch}));
-  const posCount = estimate ? Object.values(estimate.rows||{}).filter(r=>Number(r?.qty)>0).length : 0;
+  // Через resolveEstimateRows, а не подсчётом строк: одна работа может лежать в
+  // rows дважды (под кодом и под названием), и прямой подсчёт завышал число позиций.
+  const posCount = estimate ? resolveEstimateRows(estimate.rows, getEffectiveCatalog()).length : 0;
   const fin = Math.round(estimate?.total || 0);
   const readonly = role==="viewer";
   const client = clients.find(c=>c.id===deal.clientId);
@@ -5720,13 +5722,26 @@ function EditorSessionGate({ currentUser, setCurrentUser }) {
 
 // Мигрирует ключи rows со старого формата (name) на новый (code).
 // Нужно при открытии смет, созданных до перехода на code-ключи.
+// Перевод ключей строк на коды работ. Строка под НАЗВАНИЕМ (так писали раньше)
+// переезжает на код работы. Если под этим кодом запись уже есть — она главнее:
+// именно её показывает редактор и считает итог сметы (rows[код] || rows[название]).
+// Без этой проверки исход зависел от порядка ключей в объекте: у сметы, где код
+// стоит раньше названия, миграция затирала актуальную запись забытой и возвращала
+// в смету работы, которые из неё удалили.
 function migrateRowsToCodeKeys(rows, catalog) {
+  const src = rows || {};
   const result = {};
-  for (const [key, val] of Object.entries(rows || {})) {
+  const fromName = [];
+  for (const [key, val] of Object.entries(src)) {
     const byCode = catalog.find(w => w.code === key);
     if (byCode) { result[key] = val; continue; }
     const byName = catalog.find(w => w.name === key);
-    result[byName ? byName.code : key] = val;
+    if (byName) fromName.push([byName.code, val]);
+    else result[key] = val;
+  }
+  for (const [code, val] of fromName) {
+    if (Object.prototype.hasOwnProperty.call(result, code)) continue; // запись под кодом главнее
+    result[code] = val;
   }
   return result;
 }
@@ -6232,11 +6247,10 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const contractLinkMap = useMemo(() => {
     const m = {};
     // справочник для расчёта себестоимости сметы
-    const wl = new Map();
-    for (const w of getEffectiveCatalog()) { if(w?.name) wl.set(w.name,w); if(w?.code) wl.set(w.code,w); }
+    const _catForCost = getEffectiveCatalog();
     const estCostOf = (e) => {
       let cost = 0;
-      for (const [key,r] of Object.entries(e.rows||{})) { const qty=Number(r?.qty||0); if(!qty) continue; const w=wl.get(key); if(w) cost+=rowCostPerUnit(r,w)*qty; }
+      for (const { row:r, work:w, qty } of resolveEstimateRows(e.rows, _catForCost)) cost += rowCostPerUnit(r,w)*qty;
       return cost;
     };
     // Агрегаты смет по объекту: основная + дополнительные, включая старые ДС,
@@ -9176,7 +9190,7 @@ ${reqBlock}`;
     const stLbl = (k) => (STATUSES.find(s => s.key === (k || "new")) || {}).label || k || "";
     const rows = ests.map(e => {
       const obj = e.objectId ? objById[e.objectId] : null;
-      const nPos = Object.values(e.rows || {}).filter(r => Number(r?.qty) > 0).length;
+      const nPos = resolveEstimateRows(e.rows, getEffectiveCatalog()).length;
       return [
         e.proj?.name || "Без названия",
         e.proj?.phone || "",
@@ -9296,6 +9310,13 @@ ${reqBlock}`;
 
   // ── Вычисления текущей сметы ──
   const setRow = useCallback((name, field, val) => setRows(prev => {
+    // ОТКУДА БРАЛИСЬ ДВОЙНИКИ. Читал редактор строку как rows[код] || rows[название]
+    // (старые сметы хранили строки по названию), а писал ВСЕГДА по коду. Первая же
+    // правка старой строки заводила вторую запись под кодом, а запись под названием
+    // оставалась в данных со СТАРЫМ объёмом и больше нигде не показывалась. Дальше
+    // очистка объёма чистила только запись под кодом — и удалённая работа продолжала
+    // жить в данных. Пишем туда, где строка уже лежит; новая по-прежнему идёт по коду.
+    name = existingEstimateRowKey(prev, name, getEffectiveCatalog());
     const before = prev[name] || {};
     let next = { ...before, [field]: val };
     // Новая заполненная позиция фиксирует актуальные цену/себестоимость именно сейчас.
@@ -9459,11 +9480,7 @@ ${reqBlock}`;
     // Себестоимость одной сметы по заполненным позициям
     const estCost = (e) => {
       let cost = 0;
-      for(const [key,r] of Object.entries(e.rows||{})){
-        const qty = Number(r?.qty||0); if(!qty) continue;
-        const w = workLookup.get(key);
-        if(w) cost += rowCostPerUnit(r,w)*qty;
-      }
+      for(const { row:r, work:w, qty } of resolveEstimateRows(e.rows, catalogForStats)) cost += rowCostPerUnit(r,w)*qty;
       return cost;
     };
 
@@ -9505,9 +9522,7 @@ ${reqBlock}`;
     const estForCats = scopedEstimates.filter(e=>e.objectId && objIdSet.has(e.objectId));
     const catFin = {};
     for(const e of estForCats){
-      for(const [key,r] of Object.entries(e.rows||{})){
-        const qty=Number(r?.qty||0); if(!qty) continue;
-        const w=workLookup.get(key); if(!w) continue;
+      for(const { row:r, work:w, qty } of resolveEstimateRows(e.rows, catalogForStats)){
         const mp = Number(r.manualPrice);
         const price = (r.manualPrice!==undefined&&r.manualPrice!==""&&!isNaN(mp)) ? mp : getEstimateRowPrice(r, w, qty, r.complexity||"std", r.cpxPct!==undefined?Number(r.cpxPct):undefined);
         const c = w.cat||"—";
@@ -10358,10 +10373,7 @@ ${reqBlock}`;
       const catalog = getEffectiveCatalog();
       const _estDiscPct = Math.min(100, Math.max(0, Number(est.discount) || 0));
       const _estPricing = { markupPercent: Number(est.markup) || 0, discountPercent: _estDiscPct };
-      const rows = Object.entries(est.rows || {}).filter(([, r]) => Number(r?.qty) > 0).map(([key, r]) => {
-        const w = catalog.find(x => x.code === key) || catalog.find(x => x.name === key);
-        if (!w) return null;
-        const qty = Number(r.qty || 0);
+      const rows = resolveEstimateRows(est.rows, catalog, { extraCat: EXTRA_CAT }).map(({ row: r, work: w, qty }) => {
         const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
         const raw = getEstimateRowPrice(r, w, qty, r.complexity || "std", cpxPct);
         // Скидка сметы сидит в цене каждой позиции — так же, как в редакторе и в договоре.
@@ -11111,12 +11123,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
   const exportJSON = (est) => {
     const catalog = getEffectiveCatalog();
     const works = [];
-    const rows = est.rows || {};
-    for (const [key, r] of Object.entries(rows)) {
-      const qty = Number(r.qty || 0);
-      if (qty <= 0) continue;
-      const w = catalog.find(x => x.name === key) || catalog.find(x => x.code === key);
-      if (!w) continue;
+    for (const { row: r, work: w, qty } of resolveEstimateRows(est.rows, catalog, { extraCat: EXTRA_CAT })) {
       const price = getEstimateRowPrice(r, w, qty, r.complexity || "std", r.cpxPct !== undefined ? Number(r.cpxPct) : undefined);
       works.push({
         code: w.code || null,
@@ -12074,10 +12081,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             {accessAllows(currentPermissions.documentCreate, isOwnEstimate(est)) && <button onClick={()=>{
                               const catalog = getEffectiveCatalog();
                               const pricing = _estPricingOf(est);
-                              const works = Object.entries(est.rows||{}).filter(([,r])=>Number(r?.qty)>0).map(([key,r])=>{
-                                const w = catalog.find(x=>x.name===key)||catalog.find(x=>x.code===key);
-                                if(!w) return null;
-                                const qty = Number(r.qty||0);
+                              const works = resolveEstimateRows(est.rows, catalog, { extraCat: EXTRA_CAT }).map(({ row: r, work: w, qty })=>{
                                 const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
                                 const rawPrice = r.manualPrice !== undefined && r.manualPrice !== ""
                                   ? Number(r.manualPrice)
@@ -12088,7 +12092,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                 const displayName = r.manualName !== undefined ? r.manualName : w.name;
                                 const displayUnit = r.manualUnit !== undefined ? r.manualUnit : (w.unit||"м²");
                                 return {name:displayName,category:w.cat||"",subcategory:w.sub||"",quantity:qty,unit:displayUnit,price:price||0,priceFrom:pf||undefined};
-                              }).filter(Boolean);
+                              });
                               const isDs = !!est.parentId;
                               // ДС → тип annex, номер приложения = dsNumber+1 (т.к. №1 — основное)
                               const sibCount = isDs ? (dsMap[est.parentId]||[]).filter(e=>e.dsNumber<=(est.dsNumber||1)).length : 0;
@@ -14923,10 +14927,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         const estToContractWorks = (est) => {
           const catalog = getEffectiveCatalog();
           const pricing = _estPricingOf(est);
-          return Object.entries(est.rows||{}).filter(([,r])=>Number(r?.qty)>0).map(([key,r])=>{
-            const w = catalog.find(x=>x.name===key)||catalog.find(x=>x.code===key);
-            if(!w) return null;
-            const qty = Number(r.qty||0);
+          return resolveEstimateRows(est.rows, catalog, { extraCat: EXTRA_CAT }).map(({ row: r, work: w, qty }) => {
             const cpxPct = r.cpxPct !== undefined ? Number(r.cpxPct) : undefined;
             const rawPrice = getEstimateRowPrice(r, w, qty, r.complexity||"std", cpxPct);
             const price = clientUnitPrice(rawPrice, pricing);
@@ -14935,7 +14936,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             const displayName = r.manualName !== undefined ? r.manualName : w.name;
             const displayUnit = r.manualUnit !== undefined ? r.manualUnit : (w.unit||"м²");
             return {name:displayName,category:w.cat||"",subcategory:w.sub||"",quantity:qty,unit:displayUnit,price:price||0,priceFrom:pf||undefined};
-          }).filter(Boolean);
+          });
         };
         // ── Вспомогательные функции для workspace ──
         const openObjectEstimate = (obj) => {
@@ -15331,22 +15332,13 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 // показываем коммерческий план непосредственно из смет выбранных объектов.
                 if (objectFilterStatus === "approval") {
                   const catalog = getEffectiveCatalog();
-                  const worksByKey = new Map();
-                  for (const w of catalog) {
-                    if (w?.code) worksByKey.set(w.code,w);
-                    if (w?.name) worksByKey.set(w.name,w);
-                  }
                   let budget = 0;
                   let planCost = 0;
                   for (const object of usRows) {
                     for (const estimate of estimatesForObject(estimates, object.id)) {
                       let calculatedTotal = 0;
                       let estimateCost = 0;
-                      for (const [key,row] of Object.entries(estimate.rows||{})) {
-                        const qty = Number(row?.qty||0);
-                        if (qty<=0) continue;
-                        const work = worksByKey.get(key)
-                          || (row?.manualName ? worksByKey.get(row.manualName) : null);
+                      for (const { row, work, qty } of resolveEstimateRows(estimate.rows, catalog)) {
                         const cpxPct = row?.cpxPct!==undefined ? Number(row.cpxPct) : undefined;
                         const unitPrice = work
                           ? getEstimateRowPrice(row,work,qty,row?.complexity||"std",cpxPct)
@@ -15903,7 +15895,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       const canDeleteEstimateHere = accessAllows(currentPermissions.estimateDelete, estimatorObjectIds.has(obj.id));
                       const canCreateDocument = accessAllows(currentPermissions.documentCreate, estimatorObjectIds.has(obj.id));
                       const estNum = isChild ? (est.dsNumber||1)+1 : 1;
-                      const posCount = Object.values(est.rows||{}).filter(r=>Number(r?.qty)>0).length;
+                      const posCount = resolveEstimateRows(est.rows, getEffectiveCatalog()).length;
                       const stEst = STATUSES.find(s=>s.key===(est.status||"new"))||STATUSES[0];
                       return (
                         <div key={est.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 16px",cursor:canEditEstimate?"pointer":"default",marginLeft:isChild?16:0,borderLeft:isChild?"3px solid #d1fae5":"1px solid #e5e7eb"}}

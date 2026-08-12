@@ -119,6 +119,21 @@ export function resolveEstimateRows(rows = {}, catalog = [], { extraCat = ESTIMA
   return out;
 }
 
+// Куда писать правку строки сметы. Редактор адресует работу её кодом, но строка
+// может уже лежать под названием (так писали раньше). Пишем туда, где она есть,
+// иначе у работы заводится вторая запись, а первая остаётся в данных со старым
+// объёмом. Новая строка (нигде нет) получает тот ключ, которым её позвали.
+export function existingEstimateRowKey(rows = {}, key, catalog = []) {
+  const src = rows && typeof rows === "object" ? rows : {};
+  const has = k => k != null && Object.prototype.hasOwnProperty.call(src, k);
+  if (has(key)) return key;
+  const list = Array.isArray(catalog) ? catalog : [];
+  const work = list.find(w => w?.code === key) || list.find(w => w?.name === key);
+  if (!work) return key;
+  const alias = work.code === key ? work.name : work.code;
+  return has(alias) ? alias : key;
+}
+
 export function sealLegacyEstimateRows(sourceRows = {}, catalog = []) {
   const byKey = new Map();
   for (const work of catalog || []) {

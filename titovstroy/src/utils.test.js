@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as utils from "./utils.js";
-import { normCN, contractNetTotal, contractWorksGross, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, resolveEstimateRows, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, hasInvalidFinanceProjectDate, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, normalizeEstimateSuggestionRules, createDefaultEstimateSuggestionRules, resolveEstimateSuggestionRules, buildEstimateSuggestions } from "./utils.js";
+import { normCN, contractNetTotal, contractWorksGross, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, findFinanceProjectForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, resolveEstimateRows, existingEstimateRowKey, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, visibleDirtyKeys, resolveVerifiedCloudRead, isStaleApprovalObject, buildFinanceProjectView, resolveFinanceProjectBudget, hasInvalidFinanceProjectDate, sortProductionStages, moveProductionStage, financeStatusMeta, isActiveFinanceStatus, buildEstimatorDashboard, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, documentPermissionKey, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, normalizeEstimateSuggestionRules, createDefaultEstimateSuggestionRules, resolveEstimateSuggestionRules, buildEstimateSuggestions } from "./utils.js";
 import { documentTemplateBackupSpecs } from "./documents/documentTemplateBackup.js";
 
 describe("поиск финансового проекта по связанному объекту", () => {
@@ -2046,5 +2046,27 @@ describe("выбор строк сметы (договор/акт/этапы д�
   it("порядок — каталожный, свободные позиции в конце", () => {
     const rows = { "Своя позиция": { qty: 1 }, "WALL-007": { qty: 5 }, "DEM-001": { qty: 2 } };
     expect(resolveEstimateRows(rows, catalog).map(x => x.key)).toEqual(["DEM-001", "WALL-007", "Своя позиция"]);
+  });
+});
+
+describe("правка строки сметы не должна заводить вторую запись той же работы", () => {
+  const catalog = [{ code: "DEM-001", name: "Снятие обоев", cat: "Черновые", sub: "Демонтаж", fixedPrice: 333, tiers: [] }];
+
+  it("правка по коду уходит в существующую запись под названием", () => {
+    const rows = { "Снятие обоев": { qty: "189" } };
+    expect(existingEstimateRowKey(rows, "DEM-001", catalog)).toBe("Снятие обоев");
+  });
+
+  it("если запись под кодом уже есть — пишем в неё", () => {
+    const rows = { "DEM-001": { qty: "10" }, "Снятие обоев": { qty: "189" } };
+    expect(existingEstimateRowKey(rows, "DEM-001", catalog)).toBe("DEM-001");
+  });
+
+  it("новая строка получает тот ключ, которым её позвали", () => {
+    expect(existingEstimateRowKey({}, "DEM-001", catalog)).toBe("DEM-001");
+  });
+
+  it("работа не из каталога адресуется как есть", () => {
+    expect(existingEstimateRowKey({}, "Своя позиция", catalog)).toBe("Своя позиция");
   });
 });
