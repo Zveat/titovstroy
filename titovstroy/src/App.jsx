@@ -6364,18 +6364,6 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const resolveManagerName = useMemo(() => makeManagerResolver(allUsers), [allUsers]);
   const [objectAttentionFilter, setObjectAttentionFilter] = useState("");
   const [objectDateSort, setObjectDateSort] = useState("new"); // new = сначала новые, old = сначала старые
-  // Шапка «Объектов» разрослась: поиск с датами, три ряда фильтров и две сводки
-  // по шесть-десять плиток — до первой карточки объекта уходило две трети экрана.
-  // Всё это свёрнуто и раскрывается по клику; выбор запоминается на устройстве,
-  // чтобы не открывать одно и то же каждый раз.
-  const _objPanel = (key, def) => { try { const v = localStorage.getItem("titovstroy-objpanel-" + key); return v == null ? def : v === "1"; } catch { return def; } };
-  const [objFiltersOpen, setObjFiltersOpen] = useState(() => _objPanel("filters", false));
-  const [objSummaryOpen, setObjSummaryOpen] = useState(() => _objPanel("summary", false));
-  const [objDispatchOpen, setObjDispatchOpen] = useState(() => _objPanel("dispatch", false));
-  const _setObjPanel = (key, setter) => (value) => {
-    setter(value);
-    try { localStorage.setItem("titovstroy-objpanel-" + key, value ? "1" : "0"); } catch {}
-  };
   const [objectDateFrom, setObjectDateFrom] = useState("");
   const [objectDateTo, setObjectDateTo] = useState("");
   const [objectSearch, setObjectSearch] = useState("");
@@ -15242,6 +15230,13 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                 <input value={objectSearch} onChange={e=>setObjectSearch(e.target.value)} placeholder="🔍 Поиск по клиенту, телефону, адресу..."
                   style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:13,flex:1,minWidth:200,boxSizing:"border-box",outline:"none",fontFamily:"inherit"}}/>
+                <label style={{display:"flex",alignItems:"center",gap:4,border:"1px solid #e2e8f0",borderRadius:8,padding:"0 6px 0 9px",fontSize:11,fontWeight:600,color:"#94a3b8",background:"#fff",whiteSpace:"nowrap",flexShrink:0,fontFamily:"inherit"}} title="Дата от">с
+                  <input type="date" value={objectDateFrom} onChange={e=>setObjectDateFrom(e.target.value)}
+                    style={{border:"none",padding:"8px 0",fontSize:12,outline:"none",fontFamily:"inherit",background:"transparent",color:objectDateFrom?"#0f172a":"#94a3b8"}}/></label>
+                <label style={{display:"flex",alignItems:"center",gap:4,border:"1px solid #e2e8f0",borderRadius:8,padding:"0 6px 0 9px",fontSize:11,fontWeight:600,color:"#94a3b8",background:"#fff",whiteSpace:"nowrap",flexShrink:0,fontFamily:"inherit"}} title="Дата до">по
+                  <input type="date" value={objectDateTo} onChange={e=>setObjectDateTo(e.target.value)}
+                    style={{border:"none",padding:"8px 0",fontSize:12,outline:"none",fontFamily:"inherit",background:"transparent",color:objectDateTo?"#0f172a":"#94a3b8"}}/></label>
+                {(objectDateFrom||objectDateTo) && <button onClick={()=>{setObjectDateFrom("");setObjectDateTo("");}} style={{background:"none",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 10px",fontSize:12,cursor:"pointer",color:"#94a3b8",fontFamily:"inherit"}}>✕ дата</button>}
                 {currentPermissions.objectExport !== "none" && <button onClick={()=>downloadCSV(
                   "objects_"+new Date().toISOString().slice(0,10)+".csv",
                   ["Статус","Клиент","Телефон","Адрес","Тип","Площадь","Менеджер","Дата создания","Смет (шт)","Сумма смет","Договоров"],
@@ -15258,19 +15253,6 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   <span style={{fontSize:10,color:"#94a3b8"}}>дата</span>
                   <span style={{fontSize:13,color:"#2563eb"}}>{objectDateSort==="new"?"↓":"↑"}</span>
                 </button>
-                {(()=>{
-                  // Тип, сотрудник и период — под кнопкой: ими пользуются редко, а два
-                  // ряда чипов занимали место постоянно. Сколько фильтров включено —
-                  // видно на кнопке, иначе забытый фильтр молча «прячет» объекты.
-                  const on = (objectFilterType?1:0) + (objectFilterManager?1:0) + ((objectDateFrom||objectDateTo)?1:0);
-                  return (
-                    <button onClick={()=>_setObjPanel("filters", setObjFiltersOpen)(!objFiltersOpen)}
-                      style={{display:"flex",alignItems:"center",gap:6,border:`1px solid ${on?"#2563eb":"#e2e8f0"}`,background:on?"#eff6ff":"#fff",color:on?"#2563eb":"#64748b",borderRadius:8,padding:"8px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                      ⚙ Фильтры{on?` · ${on}`:""} <span style={{fontSize:10}}>{objFiltersOpen?"▲":"▼"}</span>
-                    </button>
-                  );
-                })()}
-                <span style={{fontSize:12,color:"#94a3b8",whiteSpace:"nowrap"}}>Объектов: {usRows.length}</span>
               </div>
               {objectAttentionFilter === "stale-approval" && (
                 <div style={{display:"flex",alignItems:"center",gap:8,background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:9,padding:"8px 11px",color:"#92400e",fontSize:12,fontWeight:700}}>
@@ -15309,17 +15291,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   );
                 })()}
               </div>
-              {/* Тип, сотрудник и период — раскрываются кнопкой «Фильтры» */}
-              {objFiltersOpen && (<>
-              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                <label style={{display:"flex",alignItems:"center",gap:4,border:"1px solid #e2e8f0",borderRadius:8,padding:"0 6px 0 9px",fontSize:11,fontWeight:600,color:"#94a3b8",background:"#fff",whiteSpace:"nowrap",flexShrink:0,fontFamily:"inherit"}} title="Дата от">с
-                  <input type="date" value={objectDateFrom} onChange={e=>setObjectDateFrom(e.target.value)}
-                    style={{border:"none",padding:"8px 0",fontSize:12,outline:"none",fontFamily:"inherit",background:"transparent",color:objectDateFrom?"#0f172a":"#94a3b8"}}/></label>
-                <label style={{display:"flex",alignItems:"center",gap:4,border:"1px solid #e2e8f0",borderRadius:8,padding:"0 6px 0 9px",fontSize:11,fontWeight:600,color:"#94a3b8",background:"#fff",whiteSpace:"nowrap",flexShrink:0,fontFamily:"inherit"}} title="Дата до">по
-                  <input type="date" value={objectDateTo} onChange={e=>setObjectDateTo(e.target.value)}
-                    style={{border:"none",padding:"8px 0",fontSize:12,outline:"none",fontFamily:"inherit",background:"transparent",color:objectDateTo?"#0f172a":"#94a3b8"}}/></label>
-                {(objectDateFrom||objectDateTo) && <button onClick={()=>{setObjectDateFrom("");setObjectDateTo("");}} style={{background:"none",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 10px",fontSize:12,cursor:"pointer",color:"#94a3b8",fontFamily:"inherit"}}>✕ дата</button>}
-              </div>
+              {/* Фильтр по типу объекта */}
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 {["","Вторичка","Новостройка","Коммерция"].map(t=>(
                   <button key={t||"all"} onClick={()=>setObjectFilterType(t)}
@@ -15341,7 +15313,6 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   ))}
                 </div>
               )}
-              </>)}
 
               {liveObjects.length===0 && (
                 <div style={{textAlign:"center",padding:"60px 0",color:"#94a3b8"}}>
@@ -15428,7 +15399,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 return true;
               });
               return (<>
-              {!objectAttentionFilter && orphanFps.length>0 && <div style={{fontSize:12,color:"#94a3b8"}}>Проектов из Финансов без объекта: {orphanFps.length}</div>}
+              <div style={{fontSize:12,color:"#94a3b8"}}>Объектов: {usRows.length}{!objectAttentionFilter&&orphanFps.length>0?` · проектов из Финансов без объекта: ${orphanFps.length}`:""}</div>
               {objectFinanceSummary && objectFinanceSummary.objects>0 && (()=>{
                 const money=n=>new Intl.NumberFormat("ru-RU").format(Math.round(Number(n)||0))+" ₸";
                 const s=objectFinanceSummary;
@@ -15445,28 +15416,17 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   ["Валовая прибыль",money(s.gross),s.gross>=0?"#059669":"#dc2626","#f0fdf4"],
                   ["Маржа",s.margin+"%",s.margin>=30?"#059669":s.margin>=0?"#f59e0b":"#dc2626","#fffbeb"],
                 ];
-                // Свёрнуто по умолчанию: шесть плиток стояли над списком всегда, а
-                // нужны эпизодически. В свёрнутом виде — две главные цифры строкой.
-                const head = s.kind==="plan"
-                  ? `объём смет ${money(s.budget)} · маржа ${s.margin}%`
-                  : `продажи ${money(s.budget)}${s.debt>0?` · долг ${money(s.debt)}`:""}`;
                 return <div style={{margin:"2px 0 4px"}}>
-                  <button onClick={()=>_setObjPanel("summary", setObjSummaryOpen)(!objSummaryOpen)}
-                    style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,
-                      background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"9px 12px",cursor:"pointer",
-                      fontFamily:"inherit",textAlign:"left",marginBottom:objSummaryOpen?8:0}}>
-                    <span style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",minWidth:0}}>
-                      <span style={{fontSize:12,fontWeight:800,color:"#475569"}}>💰 {s.kind==="plan"?"План по сметам":"Финансы"}</span>
-                      <span style={{fontSize:12,color:"#64748b"}}>{head}</span>
-                    </span>
-                    <span style={{fontSize:10.5,color:"#94a3b8",whiteSpace:"nowrap"}}>{s.objects} об. {objSummaryOpen?"▲":"▼"}</span>
-                  </button>
-                  {objSummaryOpen && <div className="fin-tiles" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:8}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:8}}>
+                    <div style={{fontSize:12,fontWeight:800,color:"#475569"}}>{s.kind==="plan"?"План по сметам выбранных объектов":"Финансы по выбранным объектам"}</div>
+                    <div style={{fontSize:10.5,color:"#94a3b8"}}>{s.objects} объектов</div>
+                  </div>
+                  <div className="fin-tiles" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:8}}>
                     {tiles.map(([label,value,color,bg])=><div key={label} style={{background:bg,border:"1px solid "+color+"22",borderRadius:10,padding:"10px 12px",minWidth:0}}>
                       <div style={{fontSize:10.5,color:"#64748b",fontWeight:650,marginBottom:3}}>{label}</div>
                       <div style={{fontSize:16,fontWeight:850,color,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{value}</div>
                     </div>)}
-                  </div>}
+                  </div>
                 </div>;
               })()}
               {/* Диспетчерская: кто из объектов текущего списка требует внимания и почему.
@@ -15477,8 +15437,6 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   objects={usRows}
                   productions={productions}
                   onOpenObject={(object) => openIssue({ object: object.id, tab: "control" })}
-                  open={objDispatchOpen}
-                  onToggle={_setObjPanel("dispatch", setObjDispatchOpen)}
                 />
               )}
               {objectAttentionFilter && usRows.length === 0 && (
