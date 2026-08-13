@@ -11,6 +11,7 @@ import { parserRunMessage, triggerParserRun } from "./masters/parserTrigger.js";
 import { MasterCrmButton, MasterCrmDatabase, MasterCrmEditor } from "./masters/MasterCRM.jsx";
 import { interactionsForContact, masterSourceKey, normalizeMasterCrm } from "./masters/masterCrm.js";
 import { EstimateSuggestions, EstimateSuggestionRulesEditor } from "./estimate/EstimateSuggestions.jsx";
+import ObjectDispatcher from "./object-control/ObjectDispatcher.jsx";
 import { AnalyticsBlocks } from "./analytics/AnalyticsBlocks.jsx";
 import { PayrollModule } from "./payroll/PayrollModule.jsx";
 import { STAFF_KEY, STAFF_BACKUPS_KEY, PAYROLL_MAP_KEY } from "./payroll/payrollModel.js";
@@ -2876,6 +2877,8 @@ const ROLE_PERMISSION_GROUPS = [
       { key:"production", label:"Просмотр карточки", hint:"Ход работ и производственные данные", type:"scope" },
       { key:"productionEdit", label:"Основные данные", hint:"Даты, доступ, ответственный и примечания", type:"scope" },
       { key:"productionStages", label:"Этапы работ", hint:"Создание, сроки и выполнение", type:"scope" },
+      { key:"productionToday", label:"Вкладка «Сегодня»", hint:"План дня, статус работ в один тап, закрытие дня", type:"scope" },
+      { key:"productionControl", label:"Вкладка «Управление»", hint:"Оперативная картина объекта, задачи и замечания", type:"scope" },
       { key:"productionQuality", label:"Контроль качества", hint:"Журнал, чек-листы и замечания", type:"scope" },
       { key:"productionClientAccess", label:"Доступ клиента", hint:"Настройки клиентского кабинета", type:"scope" },
     ],
@@ -15426,6 +15429,16 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   </div>
                 </div>;
               })()}
+              {/* Диспетчерская: кто из объектов текущего списка требует внимания и почему.
+                  Только для руководителей и только когда не включён фильтр «без движения» —
+                  иначе два разных списка проблем стояли бы друг под другом. */}
+              {currentPermissions.productionControl !== "none" && !objectAttentionFilter && usRows.length > 0 && (
+                <ObjectDispatcher
+                  objects={usRows}
+                  productions={productions}
+                  onOpenObject={(object) => openIssue({ object: object.id, tab: "control" })}
+                />
+              )}
               {objectAttentionFilter && usRows.length === 0 && (
                 <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:"18px",textAlign:"center",color:"#166534",fontSize:13,fontWeight:700}}>
                   ✓ Сейчас нет объектов без движения 14+ дней
@@ -15848,6 +15861,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 <div className="obj-tabs" style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap",borderBottom:"1px solid #e2e8f0"}}>
                   {[
                     ["info","ℹ️ Информация"],
+                    // Оперативные вкладки: «Сегодня» — экран прораба, «Управление» — руководителя.
+                    // Видимость настраивается в «Админка → Права ролей», а не зашита по ролям.
+                    ...(currentPermissions.productionToday !== "none" || currentPermissions.showLocked ? [["today","☀️ Сегодня"]] : []),
+                    ...(currentPermissions.productionControl !== "none" || currentPermissions.showLocked ? [["control","🎛 Управление"]] : []),
                     ["documents",`📄 Документы (${objEsts.length+objCons.length+reports.filter(r=>r.objectId===obj.id && canSeeReport(r)).length})`],
                     ["launch","🚀 Запуск"],
                     ["stages","🔨 Этапы"],
@@ -15862,6 +15879,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                         || currentPermissions.estimates !== "none"
                         || currentPermissions.documents !== "none";
                     }
+                    if (k === "today") return currentPermissions.showLocked || currentPermissions.productionToday !== "none";
+                    if (k === "control") return currentPermissions.showLocked || currentPermissions.productionControl !== "none";
                     if (["launch","stages","journal","defects","handover"].includes(k)) {
                       return currentPermissions.showLocked || currentPermissions.production !== "none";
                     }
@@ -16139,7 +16158,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   </div>
                 )}
                 {/* Производственные вкладки (и производственная часть «Информации») — встроенный модуль Производства */}
-                {["info","launch","stages","finance","journal","defects","handover"].includes(objWsTab)
+                {["info","today","control","launch","stages","finance","journal","defects","handover"].includes(objWsTab)
                   && currentPermissions.production !== "none"
                   && !(objWsTab==="finance" && !hasFinancialDetails) && (
                   <div style={{marginTop: objWsTab==="info" ? 14 : 0}}>
@@ -16172,12 +16191,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       stages: accessAllows(currentPermissions.productionStages, estimatorObjectIds.has(obj.id)),
                       quality: accessAllows(currentPermissions.productionQuality, estimatorObjectIds.has(obj.id)),
                       clientAccess: accessAllows(currentPermissions.productionClientAccess, estimatorObjectIds.has(obj.id)),
+                      today: accessAllows(currentPermissions.productionToday, estimatorObjectIds.has(obj.id)),
+                      control: accessAllows(currentPermissions.productionControl, estimatorObjectIds.has(obj.id)),
                     }}
                     onAudit={(ev)=>logChange(currentUser, ev)}
                   />
                   </div>
                 )}
-                {["launch","stages","journal","defects","handover"].includes(objWsTab)
+                {["today","control","launch","stages","journal","defects","handover"].includes(objWsTab)
                   && currentPermissions.production === "none"
                   && (
                     <div style={{maxWidth:480,margin:"32px auto",textAlign:"center",background:"#f9fafb",border:"1px dashed #e5e7eb",borderRadius:12,padding:"32px 24px"}}>

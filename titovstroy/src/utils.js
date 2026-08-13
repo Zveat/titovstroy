@@ -310,6 +310,7 @@ const FULL_ADMIN_ACCESS = Object.freeze({
   estimateCreate:"all", estimateEdit:"all", estimateDelete:"all", estimateStatus:"all",
   estimatePublish:"all", estimateExport:"all",
   productionEdit:"all", productionStages:"all", productionQuality:"all",
+  productionToday:"all", productionControl:"all",
   productionClientAccess:"all",
   documentCreate:"all", documentEdit:"all", documentDelete:"all", documentExport:"all",
   docRepair:"all", docDesign:"all", docPodryad:"all", docAvr:"all",
@@ -351,6 +352,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     estimateCreate:"all", estimateEdit:"all", estimateDelete:"all", estimateStatus:"all",
     estimatePublish:"all", estimateExport:"all",
     productionEdit:"all", productionStages:"all", productionQuality:"all", productionClientAccess:"all",
+    productionToday:"all", productionControl:"all",
     documentCreate:"all", documentEdit:"all", documentDelete:"all", documentExport:"all",
     analyticsExport:"all",
     financeCreate:"none", financeEdit:"none", financeDelete:"none", financeExport:"all",
@@ -371,6 +373,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     estimateCreate:"none", estimateEdit:"none", estimateDelete:"none", estimateStatus:"none",
     estimatePublish:"none", estimateExport:"all",
     productionEdit:"none", productionStages:"none", productionQuality:"none", productionClientAccess:"none",
+    productionToday:"none", productionControl:"all",
     documentCreate:"none", documentEdit:"none", documentDelete:"none", documentExport:"all",
     analyticsExport:"all",
     financeCreate:"none", financeEdit:"none", financeDelete:"none", financeExport:"none",
@@ -391,6 +394,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     estimateCreate:"none", estimateEdit:"none", estimateDelete:"none", estimateStatus:"none",
     estimatePublish:"none", estimateExport:"none",
     productionEdit:"all", productionStages:"all", productionQuality:"all", productionClientAccess:"all",
+    productionToday:"all", productionControl:"all",
     documentCreate:"none", documentEdit:"none", documentDelete:"none", documentExport:"none",
     analyticsExport:"none",
     financeCreate:"none", financeEdit:"none", financeDelete:"none", financeExport:"none",
@@ -411,6 +415,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     estimateCreate:"all", estimateEdit:"own", estimateDelete:"own", estimateStatus:"own",
     estimatePublish:"own", estimateExport:"own",
     productionEdit:"own", productionStages:"own", productionQuality:"own", productionClientAccess:"none",
+    productionToday:"none", productionControl:"none",
     documentCreate:"all", documentEdit:"own", documentDelete:"own", documentExport:"own",
     analyticsExport:"own",
     financeCreate:"none", financeEdit:"none", financeDelete:"none", financeExport:"none",
@@ -431,6 +436,7 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     estimateCreate:"none", estimateEdit:"none", estimateDelete:"none", estimateStatus:"none",
     estimatePublish:"none", estimateExport:"none",
     productionEdit:"none", productionStages:"none", productionQuality:"none", productionClientAccess:"none",
+    productionToday:"none", productionControl:"none",
     documentCreate:"none", documentEdit:"none", documentDelete:"none", documentExport:"none",
     analyticsExport:"none",
     financeCreate:"none", financeEdit:"none", financeDelete:"none", financeExport:"none",
@@ -450,6 +456,7 @@ const SCOPE_KEYS = [
   "calendarEdit",
   "estimateCreate","estimateEdit","estimateDelete","estimateStatus","estimatePublish","estimateExport",
   "productionEdit","productionStages","productionQuality","productionClientAccess",
+  "productionToday","productionControl",
   "documentCreate","documentEdit","documentDelete","documentExport","analyticsExport",
   "templateView","templateEdit","templatePublish","templateRollback","templateArchive","documentInstanceEdit",
   "financeCreate","financeEdit","financeDelete","financeExport","financeDirectories",
@@ -472,6 +479,10 @@ const LEGACY_DERIVED_KEYS = Object.freeze({
   estimatePublish:"estimateEdit",
   estimateExport:"estimates",
   productionStages:"productionEdit",
+  // Старые сохранённые матрицы новых ключей не знают: выводим из «Этапов», иначе
+  // после обновления вкладки пропали бы у всех уже настроенных ролей.
+  productionToday:"productionStages",
+  productionControl:"productionStages",
   productionQuality:"productionEdit",
   productionClientAccess:"productionEdit",
   documentCreate:"documentEdit",
@@ -1160,6 +1171,24 @@ export function computeIssues(data = {}, opts = {}) {
         title:`Просрочен этап: ${s.name||"без названия"}`,
         detail:`${_objLabel(o)} · ${s.responsible?("ответств. "+s.responsible+" · "):""}просрочка ${days} дн`,
         nav:{ object:o.id, tab:"stages" } });
+    }
+  }
+  // 1б. Просроченные и срочные поручения по объекту. Раньше задача была видна
+  // только внутри карточки: просроченное поручение не всплывало нигде, и о нём
+  // вспоминали, когда открывали объект по другому поводу.
+  for (const o of objects) {
+    if (!objIsActive(o)) continue;
+    const p = prodByObj[o.id]; if (!p) continue;
+    for (const t of (p.tasks || [])) {
+      if (!t || ["done", "cancelled"].includes(t.status)) continue;
+      const due = t.dueDate ? _dayStartTs(t.dueDate) : null;
+      const late = due != null && due < today;
+      if (!late && t.priority !== "high") continue;
+      const days = late ? Math.round((today - due) / 864e5) : 0;
+      out.push({ id:`task:${o.id}:${t.id}`, group:"Производство", sev: late ? "red" : "yellow", scope:"today", dismissable:true,
+        title: late ? `Просрочена задача: ${t.title || "без названия"}` : `Срочная задача: ${t.title || "без названия"}`,
+        detail:`${_objLabel(o)}${t.assignee ? " · " + t.assignee : ""}${late ? ` · просрочка ${days} дн` : (t.dueDate ? " · срок " + t.dueDate : "")}`,
+        nav:{ object:o.id, tab:"control" } });
     }
   }
   // 2. Объект в работе/подписан без назначенного прораба

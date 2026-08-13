@@ -2070,3 +2070,32 @@ describe("правка строки сметы не должна заводит�
     expect(existingEstimateRowKey({}, "Своя позиция", catalog)).toBe("Своя позиция");
   });
 });
+
+describe("поручения по объекту попадают в проблемы главной", () => {
+  const NOW = new Date("2026-08-13T10:00:00Z").getTime();
+  const objects = [{ id: "o1", clientName: "Алла", status: "work" }];
+  const run = (tasks) => computeIssues({ objects, productions: [{ objectId: "o1", tasks }] }, { now: NOW })
+    .filter((issue) => String(issue.id).startsWith("task:"));
+
+  it("просроченная задача становится красной проблемой со ссылкой на объект", () => {
+    const [issue] = run([{ id: "t1", title: "Согласовать затирку", assignee: "Сергей Ш.", dueDate: "2026-08-10", status: "open" }]);
+    expect(issue.sev).toBe("red");
+    expect(issue.title).toContain("Просрочена задача");
+    expect(issue.detail).toContain("просрочка 3 дн");
+    expect(issue.nav).toEqual({ object: "o1", tab: "control" });
+  });
+
+  it("срочная задача без просрочки — жёлтая", () => {
+    const [issue] = run([{ id: "t2", title: "Вызвать электрика", priority: "high", status: "open" }]);
+    expect(issue.sev).toBe("yellow");
+  });
+
+  it("обычная задача в срок не шумит", () => {
+    expect(run([{ id: "t3", title: "Забрать ключи", dueDate: "2026-08-20", status: "open" }])).toHaveLength(0);
+  });
+
+  it("закрытая задача не всплывает, даже если срок прошёл", () => {
+    expect(run([{ id: "t4", title: "Старое", dueDate: "2026-01-01", status: "done" }])).toHaveLength(0);
+    expect(run([{ id: "t5", title: "Отменено", dueDate: "2026-01-01", status: "cancelled" }])).toHaveLength(0);
+  });
+});
