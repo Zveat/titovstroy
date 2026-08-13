@@ -13,7 +13,12 @@
 
 // Массивы-поэлементные: их меняют granular-командами add/patch/remove-item по id (а НЕ целиком
 // через patch-card), чтобы правка одного элемента не затирала изменения другого устройства.
-export const ARRAY_FIELDS = ["stages", "journal", "defects", "checklistLaunch", "checklistHandover"];
+export const ARRAY_FIELDS = [
+  "stages", "journal", "defects", "checklistLaunch", "checklistHandover",
+  // Оперативная часть — тоже поэлементно: прораб на объекте и руководитель в
+  // офисе правят один и тот же список одновременно.
+  "dailyReports", "tasks",
+];
 
 // Стабильный ключ сметной позиции (для сопоставления этапов со сметой). Тримим каждую часть.
 export const _stageKey = (s) => (((s && s.cat) || "").trim() + "|" + ((s && s.name) || "").trim()).toLowerCase();

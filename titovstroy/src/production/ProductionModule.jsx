@@ -3,6 +3,8 @@ import { STAGE_STATUSES, emptyProduction } from "./constants.js";
 import { normCN, contractNetTotal, estimatesForObject, findFinanceProjectForObject, sortProductionStages, moveProductionStage, buildGanttLayout, sortGanttRows, GANTT_SCALES, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "../utils.js";
 import { buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, _stageKey } from "./commands.js";
 import { listProductionDrafts, removeProductionDraft, saveProductionDraft } from "./drafts.js";
+import ObjectControlModule from "../object-control/ObjectControlModule.jsx";
+import { planStageSchedule, updateStageStatus, upsertDailyReport } from "../object-control/objectControl.js";
 
 // ─────────────────────────────────────────────────────────────────────────
 // ПРОИЗВОДСТВО — управление и контроль объектов в работе.
@@ -20,6 +22,13 @@ import { listProductionDrafts, removeProductionDraft, saveProductionDraft } from
 // ─────────────────────────────────────────────────────────────────────────
 
 const stByKey = (k) => STAGE_STATUSES.find(s => s.key === k) || STAGE_STATUSES[0];
+// Дата «сегодня» по местному времени. new Date().toISOString() отдаёт UTC и в
+// Караганде (UTC+5) после 19:00 показывал бы уже завтрашний день.
+const localDateKey = () => {
+  const date = new Date();
+  const pad = value => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
 
 // Превратить строки сметы в строки-работы (наименования). cat = блок-заголовок. estimateKey
 // (стабильный ключ сметной позиции) ОБЯЗАТЕЛЕН — по нему автосинк сопоставляет этапы; без него
@@ -438,8 +447,14 @@ export default function ProductionModule({
   const stagesReadOnly = baseReadOnly || actionPermissions.stages === false;
   const qualityReadOnly = baseReadOnly || actionPermissions.quality === false;
   const clientAccessReadOnly = baseReadOnly || actionPermissions.clientAccess === false;
-  const tabReadOnly = embedTab === "stages"
-    ? stagesReadOnly
+  // У «Сегодня» и «Управления» свои права (Админка → Права ролей), поэтому
+  // право «смотреть вкладку» и «менять на ней» разведены: роль может видеть
+  // план дня и не иметь права двигать этапы.
+  const todayReadOnly = baseReadOnly || actionPermissions.today === false || stagesReadOnly;
+  const controlReadOnly = baseReadOnly || actionPermissions.control === false || stagesReadOnly;
+  const tabReadOnly = embedTab === "stages" ? stagesReadOnly
+    : embedTab === "today" ? todayReadOnly
+    : embedTab === "control" ? controlReadOnly
     : ["launch", "handover", "journal", "defects"].includes(embedTab)
       ? qualityReadOnly
       : mainReadOnly;
@@ -467,6 +482,58 @@ export default function ProductionModule({
   const stagesPatch = (patch) => patchProd(patch, !stagesReadOnly);
   const qualityPatch = (patch) => patchProd(patch, !qualityReadOnly);
   const clientAccessPatch = (patch) => patchProd(patch, !clientAccessReadOnly);
+  // Статус этапа с вкладки «Сегодня»: сразу проставляем факт-старт и факт-конец,
+  // иначе «в работе» и «готово» не попадают ни в график, ни в прогресс.
+  const handleTodayStageStatus = (stageId, status) => {
+    const stages = (localProdRef.current?.stages || []).map(stage => (
+      stage?.id === stageId ? updateStageStatus(stage, status, localDateKey()) : stage
+    ));
+    stagesPatch({ stages });
+  };
+  // Замечание с «Управления» пишем в тот же список, что и вкладка «Замечания»,
+  // и правом «качество» — иначе через новую вкладку обошли бы её ограничение.
+  const handleAddDefect = (text) => {
+    const value = String(text || "").trim();
+    if (!value) return;
+    const current = localProdRef.current || {};
+    qualityPatch({ defects: [{ id: genId(), text: value, done: false, ts: Date.now(), author: currentUser?.name || "—" }, ...(current.defects || [])] });
+  };
+  // Закрытие дня пишет отчёт И строку в журнал объекта: держать две ленты про
+  // одно и то же незачем — история объекта живёт в журнале. Строка одна на день
+  // и автора: повторное сохранение обновляет её, а не плодит дубли.
+  const handleCloseDay = (report) => {
+    const current = localProdRef.current || {};
+    const reports = upsertDailyReport(current.dailyReports || [], report, Date.now());
+    const journalId = `daily:${report.date}:${report.createdById}`;
+    const parts = [
+      report.workers !== "" && report.workers != null ? `людей на объекте: ${report.workers}` : "",
+      report.blockers ? `мешало: ${report.blockers}` : "",
+      report.tomorrowNeeds ? `нужно на завтра: ${report.tomorrowNeeds}` : "",
+      report.note,
+    ].filter(Boolean);
+    const entry = {
+      id: journalId, ts: Date.now(), author: report.createdByName || "—",
+      text: `Отчёт за день${parts.length ? " · " + parts.join(" · ") : ""}`,
+    };
+    const journal = current.journal || [];
+    const next = journal.some(item => item?.id === journalId)
+      ? journal.map(item => item?.id === journalId ? { ...item, ...entry } : item)
+      : [entry, ...journal];
+    stagesPatch({ dailyReports: reports, journal: next });
+  };
+  // Расстановка сроков — только по явному действию и только после подтверждения:
+  // это правка боевых данных производства.
+  const handlePlanDates = () => {
+    const current = localProdRef.current || {};
+    const stages = current.stages || [];
+    const from = current.startDate || localDateKey();
+    const to = current.planEndDate;
+    if (!to) { window.alert("Сначала заполните «Плановую дату окончания» во вкладке «Информация» — от неё раскладываются сроки этапов."); return; }
+    const empty = stages.filter(s => s && s.status !== "done" && !s.planStart && !s.planEnd).length;
+    if (!empty) { window.alert("У всех работ уже проставлены сроки."); return; }
+    if (!window.confirm(`Разложить ${empty} ${_plural(empty, "работу", "работы", "работ")} без сроков между ${new Date(from).toLocaleDateString("ru-RU")} и ${new Date(to).toLocaleDateString("ru-RU")}?\n\nДлительность — пропорционально стоимости работы. Уже проставленные сроки не трогаем, всё можно поправить руками.`)) return;
+    stagesPatch({ stages: planStageSchedule(stages, { from, to, overwrite: false }) });
+  };
 
   // Данные из Финансов для текущего объекта — ДОЛЖНЫ быть до if(!openObj), иначе нарушение Rules of Hooks
   const finProj = useMemo(() => {
@@ -530,6 +597,11 @@ export default function ProductionModule({
         <ChecklistTab kind="checklistHandover" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист сдачи объекта" />
         <WarrantyTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} fmt={fmt} audit={audit} />
       </>}
+      {embedTab === "control" && <ObjectControlModule mode="control" object={openObj} production={localProd} currentUser={currentUser}
+        readOnly={controlReadOnly} onPatchProduction={stagesPatch}
+        defectsReadOnly={qualityReadOnly} onAddDefect={handleAddDefect} />}
+      {embedTab === "today" && <ObjectControlModule mode="today" object={openObj} production={localProd} currentUser={currentUser} readOnly={todayReadOnly}
+        onStageStatus={handleTodayStageStatus} onCloseDay={handleCloseDay} onPatchProduction={stagesPatch} onPlanDates={handlePlanDates} />}
       {embedTab === "stages" && <StagesTab prod={localProd} patch={stagesPatch} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} audit={audit} />}
       {embedTab === "finance" && <FinanceTab prod={localProd} patch={mainPatch} fmt={fmt} finSummary={finSummary} />}
       {embedTab === "journal" && <JournalTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} />}

@@ -74,6 +74,9 @@ export const emptyProduction = (objectId, genId) => ({
   checklistLaunch: buildChecklistItems(DEFAULT_CHECKLIST_LAUNCH, genId),
   checklistHandover: buildChecklistItems(DEFAULT_CHECKLIST_HANDOVER, genId),
   stages: [],
+  // Оперативная часть: отчёты прораба по дням и поручения по объекту.
+  dailyReports: [],
+  tasks: [],
   contractors: [],
   updatedAt: Date.now(),
 });
