@@ -33,6 +33,8 @@ const localDateKey = (value = new Date()) => {
 // Даты в интерфейсе — по-человечески. «2026-08-14» на карточке читается как
 // служебный мусор, особенно когда таких строк десяток подряд.
 const MONTHS = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+// capitalize поднимал и «Августа» — заглавная нужна только первой букве.
+const capFirst = (value) => { const text = String(value || ""); return text ? text[0].toUpperCase() + text.slice(1) : text; };
 const shortDate = (value) => {
   if (!value) return "";
   const date = new Date(value);
@@ -60,6 +62,11 @@ const statusMeta = {
 
 const panel = { background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 16 };
 const chip = (color, background) => ({ color, background, border: `1px solid ${color}26`, borderRadius: 7, padding: "5px 9px", fontSize: 11.5, fontWeight: 800, whiteSpace: "nowrap" });
+const bigAction = (color, background) => ({
+  border: `1px solid ${color}33`, background, color, borderRadius: 9, padding: "11px 14px",
+  fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+  minHeight: 42, lineHeight: 1,
+});
 const action = (color, background) => ({
   border: `1px solid ${color}33`, background, color, borderRadius: 7, padding: "7px 11px",
   fontSize: 11.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
@@ -73,7 +80,6 @@ const emptyNote = { color: "#94a3b8", fontSize: 12.5, padding: "16px 0" };
 // на них: без этого блока формы уезжают за край телефона, а ряды кнопок
 // разваливаются на неровные ступеньки.
 const CSS = `
-.oc-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,132px),1fr));gap:8px}
 .oc-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:12px}
 .oc-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;
   padding:11px 0;border-bottom:1px solid #eef2f7}
@@ -81,49 +87,70 @@ const CSS = `
 .oc-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:11px;
   background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px}
 .oc-form-wide{grid-column:1/-1}
+/* Карточка работы: слева текст, справа действия. На телефоне действия уходят
+   вниз и растягиваются — по кнопке во всю ширину пальцем не промахнёшься. */
+.oc-stage{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;
+  padding:12px 13px;background:#fff;border:1px solid #e2e8f0;border-radius:11px;margin-top:8px}
+.oc-stage-acts{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+/* Полоса готовности вместо плитки с процентом */
+.oc-bar{height:9px;border-radius:5px;background:#e2e8f0;overflow:hidden}
+.oc-bar>i{display:block;height:100%;border-radius:5px;background:#2563eb}
 @media(max-width:700px){.oc-grow{flex:1 1 100%!important}}
 @media(max-width:700px){
   .oc-row{grid-template-columns:minmax(0,1fr)!important;gap:8px!important}
   .oc-acts{justify-content:flex-start!important}
   .oc-acts>button{flex:1 1 auto!important;min-width:88px!important}
   .oc-form{grid-template-columns:minmax(0,1fr)!important}
+  .oc-stage{grid-template-columns:minmax(0,1fr)!important;gap:10px!important}
+  .oc-stage-acts{justify-content:stretch!important}
+  .oc-stage-acts>button{flex:1 1 40%!important}
+  .oc-stage-acts>button:first-child{flex:1 1 100%!important}
   .oc-head{flex-direction:column!important;align-items:stretch!important}
 }`;
 
-function Metric({ label, value, note, tone = "default" }) {
-  const [color, background] = {
-    default: ["#0f172a", "#f8fafc"], ok: ["#047857", "#ecfdf5"],
-    warning: ["#b45309", "#fffbeb"], danger: ["#b91c1c", "#fef2f2"], info: ["#1d4ed8", "#eff6ff"],
-  }[tone] || ["#0f172a", "#f8fafc"];
-  return (
-    <div style={{ background, border: "1px solid #e2e8f0", borderRadius: 10, padding: "11px 12px" }}>
-      <div style={{ color: "#64748b", fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".03em" }}>{label}</div>
-      <div style={{ color, fontSize: 21, fontWeight: 900, marginTop: 3, lineHeight: 1.1 }}>{value}</div>
-      {note && <div style={{ color: "#64748b", fontSize: 11, marginTop: 2 }}>{note}</div>}
-    </div>
-  );
-}
-
+// Работа — карточка с ОДНИМ главным действием. Раньше это была строка с тремя
+// одинаково мелкими кнопками: на телефоне в них надо целиться, и было непонятно,
+// что нажимать. Теперь главное действие зависит от статуса и занимает всю
+// ширину, остальные — второстепенные и мельче.
 function StageLine({ stage, readOnly, onStatus, compact }) {
   const meta = statusMeta[stage.status] || statusMeta.todo;
   const today = localDateKey();
   const late = stage.status !== "done" && stage.planEnd && stage.planEnd < today;
+  const primary = stage.status === "progress"
+    ? { key: "done", label: "✓ Готово", color: "#047857", bg: "#ecfdf5" }
+    : stage.status === "delayed"
+      ? { key: "progress", label: "▶ Продолжить", color: "#2563eb", bg: "#eff6ff" }
+      : { key: "progress", label: "▶ Начать", color: "#2563eb", bg: "#eff6ff" };
+  const extras = [
+    stage.status !== "done" && primary.key !== "done" ? { key: "done", label: "Готово", color: "#047857", bg: "#ecfdf5" } : null,
+    stage.status !== "delayed" && stage.status !== "done" ? { key: "delayed", label: "Проблема", color: "#b91c1c", bg: "#fef2f2" } : null,
+  ].filter(Boolean);
+  const done = stage.status === "done";
+
   return (
-    <div className="oc-row">
+    <div className="oc-stage" style={{ borderLeft: `3px solid ${late ? "#dc2626" : meta.color}` }}>
       <div style={{ minWidth: 0 }}>
-        <div style={{ color: late ? "#b91c1c" : "#0f172a", fontSize: 13, fontWeight: 700, overflowWrap: "anywhere", lineHeight: 1.3 }}>{stage.name || "Работа без названия"}</div>
-        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center", marginTop: 4, color: "#64748b", fontSize: 11 }}>
+        <div style={{ color: done ? "#94a3b8" : late ? "#b91c1c" : "#0f172a", fontSize: 14, fontWeight: 700,
+          overflowWrap: "anywhere", lineHeight: 1.3, textDecoration: done ? "line-through" : "none" }}>{stage.name || "Работа без названия"}</div>
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center", marginTop: 5, color: "#64748b", fontSize: 11.5 }}>
           <span style={{ ...chip(meta.color, meta.bg), padding: "2px 7px", fontSize: 10.5 }}>{meta.label}</span>
-          {!compact && <span>{stage.cat || "Без раздела"}</span>}
+          {!compact && stage.cat && <span>{stage.cat}</span>}
           {stage.responsible && <span>{stage.responsible}</span>}
-          {stage.planEnd && <span style={late ? { color: "#b91c1c", fontWeight: 700 } : undefined}>до {shortDate(stage.planEnd)}</span>}
+          {stage.planEnd && <span style={late ? { color: "#b91c1c", fontWeight: 800 } : undefined}>до {shortDate(stage.planEnd)}</span>}
+          {stage.qty > 0 && <span>{stage.qty} {stage.unit || ""}</span>}
         </div>
       </div>
-      {!readOnly && onStatus && (
-        <div className="oc-acts">
-          {stage.status !== "progress" && stage.status !== "done" && <button type="button" onClick={() => onStatus(stage.id, "progress")} style={action("#2563eb", "#eff6ff")}>Начать</button>}
-          {stage.status !== "done" && <button type="button" onClick={() => onStatus(stage.id, "done")} style={action("#047857", "#ecfdf5")}>Готово</button>}
-          {stage.status !== "delayed" && stage.status !== "done" && <button type="button" onClick={() => onStatus(stage.id, "delayed")} style={action("#b91c1c", "#fef2f2")}>Проблема</button>}
+      {!readOnly && onStatus && !done && (
+        <div className="oc-stage-acts">
+          <button type="button" onClick={() => onStatus(stage.id, primary.key)} style={bigAction(primary.color, primary.bg)}>{primary.label}</button>
+          {extras.map((item) => (
+            <button key={item.key} type="button" onClick={() => onStatus(stage.id, item.key)} style={action(item.color, item.bg)}>{item.label}</button>
+          ))}
+        </div>
+      )}
+      {!readOnly && onStatus && done && (
+        <div className="oc-stage-acts">
+          <button type="button" onClick={() => onStatus(stage.id, "progress")} style={action("#64748b", "#f1f5f9")}>Вернуть в работу</button>
         </div>
       )}
     </div>
@@ -154,23 +181,33 @@ function ControlView({ production, currentUser, readOnly, onPatchProduction, onA
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <style>{CSS}</style>
-      <div className="oc-head" style={{ ...panel, background: "#111c31", borderColor: "#111c31", color: "#fff", display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap", padding: "13px 16px" }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 800 }}>Оперативная картина объекта</div>
-          <div style={{ color: "#aebbd0", fontSize: 11.5, marginTop: 2 }}>
-            {reasons.length ? reasons.join(" · ") : "Просрочек, задержек и открытых замечаний нет"}
+      {/* Одна панель состояния вместо тёмной шапки и пяти плиток. Три плитки из
+          пяти почти всегда показывали ноль — это был шум, из-за которого главное
+          (готовность и причины) терялось. Теперь: полоса готовности, а рядом
+          только те показатели, которые не нули. */}
+      <section style={{ ...panel, borderColor: tone === "danger" ? "#fecaca" : tone === "warning" ? "#fde68a" : "#e2e8f0" }}>
+        <div className="oc-head" style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 22, fontWeight: 900, color: "#0f172a", lineHeight: 1 }}>{health.progressPct}%</div>
+            <div style={{ fontSize: 12, color: "#64748b", marginTop: 3 }}>готовность · {health.doneStages} из {health.totalStages} работ</div>
           </div>
+          <span style={{ ...chip(
+            tone === "danger" ? "#b91c1c" : tone === "warning" ? "#b45309" : "#047857",
+            tone === "danger" ? "#fef2f2" : tone === "warning" ? "#fffbeb" : "#ecfdf5"), flexShrink: 0 }}>{toneLabel}</span>
         </div>
-        <div style={{ border: "1px solid #ffffff26", borderRadius: 8, padding: "7px 11px", color: toneColor, fontWeight: 800, fontSize: 12, flexShrink: 0 }}>{toneLabel}</div>
-      </div>
-
-      <div className="oc-metrics">
-        <Metric label="Готовность" value={`${health.progressPct}%`} note={`${health.doneStages} из ${health.totalStages} работ`} tone="info" />
-        <Metric label="Сейчас в работе" value={health.activeStages} note="активных этапов" tone={health.activeStages ? "ok" : "warning"} />
-        <Metric label="Просрочено" value={health.overdueStages} note="этапов по плану" tone={health.overdueStages ? "danger" : "ok"} />
-        <Metric label="Проблемы" value={health.delayedStages + health.openDefects} note="задержки и замечания" tone={health.delayedStages + health.openDefects ? "danger" : "ok"} />
-        <Metric label="Запуск" value={`${health.launchPct}%`} note="чек-лист готовности" tone={health.launchPct === 100 ? "ok" : "warning"} />
-      </div>
+        <div className="oc-bar" style={{ marginTop: 10 }}>
+          <i style={{ width: `${health.progressPct}%`, background: tone === "danger" ? "#dc2626" : tone === "warning" ? "#d97706" : "#059669" }} />
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 11 }}>
+          {health.activeStages > 0 && <span style={chip("#2563eb", "#eff6ff")}>В работе: {health.activeStages}</span>}
+          {health.overdueStages > 0 && <span style={chip("#b91c1c", "#fef2f2")}>Просрочено: {health.overdueStages}</span>}
+          {health.delayedStages > 0 && <span style={chip("#b91c1c", "#fef2f2")}>Проблемы: {health.delayedStages}</span>}
+          {health.openDefects > 0 && <span style={chip("#b45309", "#fffbeb")}>Замечания: {health.openDefects}</span>}
+          {health.launchPct < 100 && <span style={chip("#b45309", "#fffbeb")}>Запуск: {health.launchPct}%</span>}
+          {reasons.length === 0 && <span style={chip("#047857", "#ecfdf5")}>Просрочек и замечаний нет</span>}
+        </div>
+        {/* Причины строкой убраны: чипы выше говорят ровно то же самое цифрами. */}
+      </section>
 
       <div className="oc-two">
         <section style={panel}>
@@ -252,6 +289,7 @@ function TodayView({ object, production, currentUser, readOnly, onStageStatus, o
   const existing = (production.dailyReports || []).find((report) => report?.date === today && String(report?.createdById || "") === String(currentUser?.id || ""));
   const [form, setForm] = useState({ workers: "", blockers: "", tomorrowNeeds: "", note: "" });
   const [saved, setSaved] = useState(false);
+  const [dayOpen, setDayOpen] = useState(false);
 
   useEffect(() => {
     setForm({
@@ -282,15 +320,15 @@ function TodayView({ object, production, currentUser, readOnly, onStageStatus, o
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <style>{CSS}</style>
-      <div className="oc-head" style={{ ...panel, display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center", padding: "13px 16px" }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 16, fontWeight: 800, color: "#0f172a" }}>План на сегодня</div>
-          <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{longDate()}</div>
-        </div>
+      {/* Шапка одной строкой. Заголовок «План на сегодня» убран: вкладка и так
+          называется «Сегодня», а он занимал строку. Нулевые счётчики не рисуем —
+          у большинства объектов сроков нет, и три нуля были просто шумом. */}
+      <div className="oc-head" style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ fontSize: 13.5, fontWeight: 800, color: "#0f172a" }}>{capFirst(longDate())}</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          <span style={chip("#2563eb", "#eff6ff")}>В работе: {groups.active.length}</span>
-          <span style={chip(groups.overdue.length ? "#b91c1c" : "#64748b", groups.overdue.length ? "#fef2f2" : "#f1f5f9")}>Просрочено: {groups.overdue.length}</span>
-          <span style={chip("#b45309", "#fffbeb")}>На сегодня: {groups.dueToday.length}</span>
+          {groups.overdue.length > 0 && <span style={chip("#b91c1c", "#fef2f2")}>Просрочено: {groups.overdue.length}</span>}
+          {groups.dueToday.length > 0 && <span style={chip("#b45309", "#fffbeb")}>На сегодня: {groups.dueToday.length}</span>}
+          <span style={chip(groups.active.length ? "#2563eb" : "#64748b", groups.active.length ? "#eff6ff" : "#f1f5f9")}>В работе: {groups.active.length}</span>
         </div>
       </div>
 
@@ -306,17 +344,38 @@ function TodayView({ object, production, currentUser, readOnly, onStageStatus, o
         </div>
       )}
 
-      <section style={panel}>
-        <div style={sectionTitle}>{groups.isFallback ? "Следующие работы" : "Фокус дня"}</div>
-        <div style={sectionNote}>{groups.isFallback ? "Сроки не заданы, поэтому показаны первые незавершённые работы." : "Статус меняется одним нажатием и сразу уходит в общую очередь производства."}</div>
+      {/* Работы идут карточками прямо в потоке, без общей панели: лишняя рамка
+          вокруг рамок только съедала ширину на телефоне. */}
+      <div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>{groups.isFallback ? "Следующие работы" : "Фокус дня"}</div>
+          {groups.isFallback && <span style={{ fontSize: 11.5, color: "#94a3b8" }}>сроки не заданы — показаны первые незавершённые</span>}
+        </div>
         {groups.focus.length
           ? groups.focus.map((stage) => <StageLine key={stage.id} stage={stage} readOnly={readOnly} onStatus={onStageStatus} compact />)
-          : <div style={{ color: "#047857", background: "#ecfdf5", borderRadius: 9, padding: 14, marginTop: 11, fontWeight: 800, fontSize: 13 }}>Все работы завершены.</div>}
-      </section>
+          : <div style={{ color: "#047857", background: "#ecfdf5", border: "1px solid #bbf7d0", borderRadius: 11, padding: 16, marginTop: 8, fontWeight: 800, fontSize: 13.5 }}>✓ Все работы завершены</div>}
+      </div>
 
+      {/* Закрытие дня свёрнуто в одну кнопку. Форма из четырёх полей занимала
+          пол-экрана и стояла открытой весь день, хотя нужна один раз вечером.
+          Если день уже закрыт — видно это и краткую выжимку, без раскрытия. */}
       <section style={panel}>
-        <div style={sectionTitle}>Закрытие дня</div>
-        <div style={sectionNote}>Отчёт сохранится после нажатия кнопки. Повторное сохранение обновит сегодняшний отчёт.</div>
+        <button type="button" onClick={() => setDayOpen(value => !value)}
+          style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+            background: "transparent", border: 0, padding: 0, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+          <span style={{ minWidth: 0 }}>
+            <span style={{ display: "block", fontSize: 14, fontWeight: 800, color: "#0f172a" }}>
+              {saved ? "✓ День закрыт" : "🌙 Закрыть день"}
+            </span>
+            <span style={{ display: "block", fontSize: 11.5, color: "#94a3b8", marginTop: 2, overflowWrap: "anywhere" }}>
+              {saved
+                ? [existing?.workers !== "" && existing?.workers != null ? `людей: ${existing.workers}` : "", existing?.blockers || "", existing?.tomorrowNeeds ? `на завтра: ${existing.tomorrowNeeds}` : ""].filter(Boolean).join(" · ") || "отчёт сохранён"
+                : "людей на объекте, что мешало, что нужно завтра"}
+            </span>
+          </span>
+          <span style={{ fontSize: 11, color: "#94a3b8", flexShrink: 0 }}>{dayOpen ? "▲" : "▼"}</span>
+        </button>
+        {dayOpen && (<>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,190px),1fr))", gap: 9, marginTop: 12 }}>
           <Field label="Людей на объекте"><input type="number" min="0" inputMode="numeric" value={form.workers} disabled={readOnly} onChange={(event) => { setSaved(false); setForm((prev) => ({ ...prev, workers: event.target.value })); }} style={inputStyle} /></Field>
           <Field label="Что мешало работе"><input value={form.blockers} disabled={readOnly} onChange={(event) => { setSaved(false); setForm((prev) => ({ ...prev, blockers: event.target.value })); }} placeholder="Нет материалов, нет доступа…" style={inputStyle} /></Field>
@@ -325,10 +384,14 @@ function TodayView({ object, production, currentUser, readOnly, onStageStatus, o
         <div style={{ marginTop: 9 }}>
           <Field label="Комментарий"><textarea rows={2} value={form.note} disabled={readOnly} onChange={(event) => { setSaved(false); setForm((prev) => ({ ...prev, note: event.target.value })); }} placeholder="Короткий итог дня" style={{ ...inputStyle, resize: "vertical", minHeight: 62 }} /></Field>
         </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 11, flexWrap: "wrap" }}>
-          {saved && <span style={{ color: "#059669", fontSize: 12, fontWeight: 800 }}>Отчёт сохранён</span>}
-          {!readOnly && <button type="button" onClick={closeDay} style={{ border: 0, borderRadius: 8, padding: "10px 18px", background: "#0f172a", color: "#fff", fontFamily: "inherit", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Закрыть день</button>}
-        </div>
+        {!readOnly && (
+          <button type="button" onClick={() => { closeDay(); setDayOpen(false); }}
+            style={{ width: "100%", border: 0, borderRadius: 9, padding: "13px 18px", background: "#0f172a", color: "#fff",
+              fontFamily: "inherit", fontSize: 14, fontWeight: 800, cursor: "pointer", marginTop: 12, minHeight: 46 }}>
+            {saved ? "Обновить отчёт за день" : "Закрыть день"}
+          </button>
+        )}
+        </>)}
       </section>
 
       <WorkCoordination production={production} currentUser={currentUser} readOnly={readOnly} onPatchProduction={onPatchProduction} compact />
