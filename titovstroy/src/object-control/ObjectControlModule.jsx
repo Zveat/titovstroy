@@ -4,6 +4,7 @@ import {
   buildTaskSummary,
   buildTodayStageGroups,
   countStagesWithPlan,
+  isDefectClosed,
   updateTaskStatus,
 } from "./objectControl.js";
 
@@ -242,7 +243,7 @@ function ControlView({ production, currentUser, readOnly, onPatchProduction, onA
 function OpenDefects({ production, readOnly, onAdd }) {
   const [text, setText] = useState("");
   const defects = Array.isArray(production?.defects) ? production.defects : [];
-  const open = defects.filter(item => !item?.done);
+  const open = defects.filter((item) => !isDefectClosed(item));
   const submit = () => { const value = text.trim(); if (!value || readOnly) return; onAdd?.(value); setText(""); };
   return (
     <section style={panel}>
