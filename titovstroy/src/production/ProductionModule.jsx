@@ -6,7 +6,8 @@ import { listProductionDrafts, removeProductionDraft, saveProductionDraft } from
 import ObjectControlModule from "../object-control/ObjectControlModule.jsx";
 import { planStageSchedule, updateStageStatus, upsertDailyReport } from "../object-control/objectControl.js";
 import { useStageReports } from "../stage-reports/useStageReports.js";
-import StageReports, { StageReportsSummary, STAGE_REPORTS_CSS } from "../stage-reports/StageReports.jsx";
+import { listPayments, isOverpaid } from "../stage-reports/model.js";
+import StageReports, { PaymentPanel, StageReportsSummary, STAGE_REPORTS_CSS } from "../stage-reports/StageReports.jsx";
 
 // ─────────────────────────────────────────────────────────────────────────
 // ПРОИЗВОДСТВО — управление и контроль объектов в работе.
@@ -619,7 +620,7 @@ export default function ProductionModule({
       {embedTab === "today" && <ObjectControlModule mode="today" object={openObj} production={localProd} currentUser={currentUser} readOnly={todayReadOnly}
         onStageStatus={handleTodayStageStatus} onCloseDay={handleCloseDay} onPatchProduction={stagesPatch} onPlanDates={handlePlanDates} renderStageReports={(stage) => <StageReports stage={stage} api={stageReports} currentUser={currentUser} />} />}
       {embedTab === "stages" && <StagesTab prod={localProd} patch={stagesPatch} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} audit={audit} stageReports={stageReports} currentUser={currentUser} />}
-      {embedTab === "finance" && <FinanceTab prod={localProd} patch={mainPatch} fmt={fmt} finSummary={finSummary} />}
+      {embedTab === "finance" && <FinanceTab prod={localProd} patch={mainPatch} fmt={fmt} finSummary={finSummary} stageReports={stageReports} currentUser={currentUser} />}
       {embedTab === "journal" && <JournalTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} />}
       {embedTab === "defects" && <DefectsTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} />}
       </fieldset>}
@@ -1150,7 +1151,7 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
   // позиции из смет сами добавляются/обновляются/удаляются (флаг fromEst), ручные этапы не трогаются.
   // Поэтому ручной кнопки «Обновить из смет» больше нет.
   const inWorkDays = (s) => s.factStart ? Math.max(0, Math.round((_dayStart(s.factEnd || new Date()) - _dayStart(s.factStart)) / 864e5)) + 1 : null;
-  const dInp = { border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 7px", fontSize: 12, fontFamily: "inherit", outline: "none", color: "#0f172a", width: "100%", boxSizing: "border-box" };
+  const dInp = { border: "1px solid #e2e8f0", borderRadius: 7, padding: "5px 6px", fontSize: 12, fontFamily: "inherit", outline: "none", color: "#0f172a", width: "100%", boxSizing: "border-box", background: "#fff" };
 
   // График (Гантт)
   const dates = stages.flatMap(s => [s.planStart, s.planEnd, s.factStart, s.factEnd]).filter(Boolean).map(d => new Date(d).getTime());
@@ -1192,13 +1193,44 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
           на телефоне: колонка перестановки убирается, вместо неё компактный
           выбор номера встаёт в строку со статусом, а даты идут 2×2. */}
       <style>{`
-        .st-ord-mob{display:none}
+        /* Работа — карточка в две зоны: слева суть (что, кто, статус), справа
+           сроки отдельным блоком. Раньше всё шло одной колонкой, и четыре поля
+           даты растягивались на всю ширину экрана: под дату в 10 символов
+           уходило по 440 пикселей, а список из 18 работ не помещался ни на один
+           экран. */
+        .st-card{display:flex;gap:14px;align-items:flex-start;padding:11px 13px;background:#fff;
+          border:1px solid #e8edf3;border-left-width:3px;border-radius:10px;margin-top:8px}
+        .st-main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:7px}
+        .st-side{flex:0 0 250px}
+        .st-head{display:flex;align-items:flex-start;gap:8px}
+        .st-num{width:44px;height:26px;border:1px solid #e2e8f0;border-radius:7px;font-size:11.5px;
+          color:#475569;background:#fff;text-align:center;font-family:inherit;flex-shrink:0}
+        /* Перестановка одной группой в шапке. Отдельная колонка слева съедала
+           40px ширины у названия, а на телефоне пряталась совсем — и там же
+           приходилось держать её дубль. Теперь набор один на все экраны. */
+        .st-move{display:flex;gap:1px;flex-shrink:0}
+        .st-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        /* Поля не тянем во всю ширину: на широком экране под имя в два слова
+           уходило больше тысячи пикселей, а пунктир примечания шёл через весь
+           экран и читался как сломанная вёрстка. */
+        .st-resp{flex:0 1 240px;min-width:0}
+        /* Сроки: «План / Факт» × «Старт / Конец». Подпись живёт в заголовке
+           столбца и в начале строки — вместо четырёх длинных подписей четыре
+           коротких слова при том же смысле. */
+        .st-dates{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,1fr);
+          gap:5px 7px;align-items:center;background:#f8fafc;border:1px solid #eef2f7;
+          border-radius:9px;padding:8px 10px}
+        .st-dh{font-size:10px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em;text-align:center}
+        .st-dr{font-size:10.5px;color:#94a3b8;white-space:nowrap}
+        .st-note{width:100%;max-width:520px;border:none;border-bottom:1px dashed #e2e8f0;font-size:11.5px;color:#64748b;
+          font-family:inherit;outline:none;padding:2px 0;background:transparent}
+        @media(max-width:860px){
+          .st-card{flex-direction:column;gap:9px}
+          .st-side{flex:1 1 auto;width:100%}
+          .st-resp{flex:1 1 130px}
+          .st-note{max-width:none}
+        }
         @media(max-width:700px){
-          .st-row{gap:8px!important;padding:11px 0!important}
-          .st-ord{display:none!important}
-          .st-dates{grid-template-columns:1fr 1fr!important;gap:8px!important}
-          .st-ord-mob{display:inline-flex!important}
-          .st-resp{flex:1 1 90px!important;width:auto!important;min-width:0}
           .st-add>*{flex:1 1 100%!important}
           .st-add>button{flex:0 0 auto!important}
         }
@@ -1222,77 +1254,57 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
                   const iw = inWorkDays(s);
                   const upId = li > 0 ? list[li - 1].id : null;
                   const downId = li < list.length - 1 ? list[li + 1].id : null;
-                  const arrBtn = (on) => ({ background: "none", border: "none", color: on ? "#94a3b8" : "#e2e8f0", cursor: on ? "pointer" : "default", fontSize: 12, lineHeight: 1, padding: 0, height: 15 });
+                  const arrBtn = (on) => ({ background: "none", border: "none", color: on ? "#94a3b8" : "#e2e8f0", cursor: on ? "pointer" : "default", fontSize: 12, lineHeight: 1, padding: "5px 4px", fontFamily: "inherit" });
                   return (
-                    <div key={s.id} className="st-row" style={{ display: "flex", gap: 10, padding: "10px 0", borderBottom: "1px solid #f1f5f9" }}>
-                      {/* Быстрая перестановка в пределах категории: край, шаг или точная позиция. */}
-                      <div className="st-ord" style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", flexShrink: 0, gap: 2, width: 40 }}>
-                        <div style={{ display:"flex", gap:3 }}>
-                          <button title="В начало раздела" disabled={!upId} onClick={() => patch({ stages: moveProductionStage(stages, s.id, 0) })} style={arrBtn(!!upId)}>⇤</button>
-                          <button title="Выше" disabled={!upId} onClick={() => moveStage(s.id, upId)} style={arrBtn(!!upId)}>▲</button>
+                    <div key={s.id} className="st-card" style={{ borderLeftColor: st.color }}>
+                      <div className="st-main">
+                        <div className="st-head">
+                          <select title="Позиция в разделе" className="st-num" value={li}
+                            onChange={e => patch({ stages: moveProductionStage(stages, s.id, Number(e.target.value)) })}>
+                            {list.map((_, index) => <option key={index} value={index}>{index + 1}</option>)}
+                          </select>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <StageName value={s.name} onChange={v => upd(s.id, { name: v })} />
+                            {(s.qty > 0 || s.unit) && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 1 }}>{s.qty > 0 ? fmt(s.qty) : ""} {s.unit || ""}</div>}
+                          </div>
+                          <div className="st-move">
+                            <button title="В начало раздела" disabled={!upId} onClick={() => patch({ stages: moveProductionStage(stages, s.id, 0) })} style={arrBtn(!!upId)}>⇤</button>
+                            <button title="Выше" disabled={!upId} onClick={() => moveStage(s.id, upId)} style={arrBtn(!!upId)}>▲</button>
+                            <button title="Ниже" disabled={!downId} onClick={() => moveStage(s.id, downId)} style={arrBtn(!!downId)}>▼</button>
+                            <button title="В конец раздела" disabled={!downId} onClick={() => patch({ stages: moveProductionStage(stages, s.id, list.length - 1) })} style={arrBtn(!!downId)}>⇥</button>
+                          </div>
+                          <button onClick={() => { if (window.confirm(`Удалить этап «${s.name || "без названия"}»?\n\nВажно: если эта работа ещё есть в смете объекта — этап вернётся при следующей синхронизации. Чтобы убрать навсегда, удалите работу из сметы.`)) patch({ stages: stages.filter(x => x.id !== s.id) }); }}
+                            title="Удалить этап" style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: "2px 0 0", flexShrink: 0 }}>×</button>
                         </div>
-                        <select title="Позиция в разделе" value={li} onChange={e => patch({ stages: moveProductionStage(stages, s.id, Number(e.target.value)) })}
-                          style={{width:38,height:24,border:"1px solid #e2e8f0",borderRadius:6,fontSize:11,color:"#475569",background:"#fff",textAlign:"center",fontFamily:"inherit"}}>
-                          {list.map((_, index) => <option key={index} value={index}>{index + 1}</option>)}
-                        </select>
-                        <div style={{ display:"flex", gap:3 }}>
-                          <button title="Ниже" disabled={!downId} onClick={() => moveStage(s.id, downId)} style={arrBtn(!!downId)}>▼</button>
-                          <button title="В конец раздела" disabled={!downId} onClick={() => patch({ stages: moveProductionStage(stages, s.id, list.length - 1) })} style={arrBtn(!!downId)}>⇥</button>
-                        </div>
-                      </div>
-                      <div style={{ width: 3, borderRadius: 3, background: st.color, flexShrink: 0, minHeight: 36 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <StageName value={s.name} onChange={v => upd(s.id, { name: v })} />
-                        {(s.qty > 0 || s.unit) && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 1 }}>{s.qty > 0 ? fmt(s.qty) : ""} {s.unit || ""}</div>}
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8, alignItems: "center" }}>
+                        <div className="st-meta">
                           <select value={s.status} onChange={e => upd(s.id, { status: e.target.value })}
-                            style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 6px", fontSize: 11.5, fontFamily: "inherit", color: st.color, background: st.bg, fontWeight: 700, cursor: "pointer" }}>
+                            style={{ border: "1px solid #e2e8f0", borderRadius: 7, padding: "6px 7px", fontSize: 11.5, fontFamily: "inherit", color: st.color, background: st.bg, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>
                             {STAGE_STATUSES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
                           </select>
-                          <input className="st-resp" value={s.responsible || ""} onChange={e => upd(s.id, { responsible: e.target.value })} placeholder="Ответств."
+                          <input className="st-resp" value={s.responsible || ""} onChange={e => upd(s.id, { responsible: e.target.value })} placeholder="Ответственный"
                             onFocus={e => { _stFocus.current = e.target.value; }}
                             onBlur={e => auditStage(s, "прораб этапа", _stFocus.current, e.target.value)}
-                            style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 8px", fontSize: 12, fontFamily: "inherit", outline: "none", width: 100 }} />
-                          {/* Тот же выбор позиции, что и в колонке слева, но для телефона —
-                              там колонка скрыта, а переставлять работы нужно.
-                              Подпись именно «№ в разделе»: нумерация идёт внутри раздела и
-                              в каждом начинается с единицы. С коротким «№» это читалось как
-                              сквозной номер работы, и список выглядел сбитым (…1, 2, потом
-                              снова 1) — хотя порядок верный. */}
-                          <label className="st-ord-mob" title="Позиция в разделе" style={{ alignItems: "center", gap: 4, fontSize: 11, color: "#94a3b8", whiteSpace: "nowrap" }}>№ в разделе
-                            <select title="Позиция в разделе" value={li} onChange={e => patch({ stages: moveProductionStage(stages, s.id, Number(e.target.value)) })}
-                              style={{ width: 46, height: 26, border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 11.5, color: "#475569", background: "#fff", textAlign: "center", fontFamily: "inherit" }}>
-                              {list.map((_, index) => <option key={index} value={index}>{index + 1}</option>)}
-                            </select>
-                          </label>
-                          {iw != null && <span style={{ fontSize: 11, color: "#2563eb", fontWeight: 700 }}>🔨 {iw} дн</span>}
+                            style={{ border: "1px solid #e2e8f0", borderRadius: 7, padding: "6px 9px", fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                          {iw != null && <span style={{ fontSize: 11, color: "#2563eb", fontWeight: 700, whiteSpace: "nowrap" }}>🔨 {iw} дн</span>}
                         </div>
-                        <div className="st-dates" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 5, marginTop: 8 }}>
-                          <div>
-                            <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 2 }}>Старт план</div>
-                            <input type="date" value={s.planStart || ""} onChange={e => upd(s.id, { planStart: e.target.value })} style={dInp} />
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 2 }}>Конец план</div>
-                            <input type="date" value={s.planEnd || ""} onChange={e => upd(s.id, { planEnd: e.target.value })}
-                              onFocus={e => { _stFocus.current = e.target.value; }}
-                              onBlur={e => auditStage(s, "срок этапа (план)", _fmtDate(_stFocus.current), _fmtDate(e.target.value))} style={dInp} />
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 2 }}>Старт факт</div>
-                            <input type="date" value={s.factStart || ""} onChange={e => upd(s.id, { factStart: e.target.value })} style={dInp} />
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 2 }}>Конец факт</div>
-                            <input type="date" value={s.factEnd || ""} onChange={e => upd(s.id, { factEnd: e.target.value })} style={dInp} />
-                          </div>
-                        </div>
-                        <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="+ примечание"
-                          style={{ marginTop: 6, width: "100%", border: "none", borderBottom: "1px dashed #e2e8f0", fontSize: 11, color: "#64748b", fontFamily: "inherit", outline: "none", padding: "1px 0", background: "transparent" }} />
+                        <input className="st-note" value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="+ примечание" />
                         {stageReports && <StageReports stage={s} api={stageReports} currentUser={currentUser} />}
                       </div>
-                      <button onClick={() => { if (window.confirm(`Удалить этап «${s.name || "без названия"}»?\n\nВажно: если эта работа ещё есть в смете объекта — этап вернётся при следующей синхронизации. Чтобы убрать навсегда, удалите работу из сметы.`)) patch({ stages: stages.filter(x => x.id !== s.id) }); }}
-                        title="Удалить этап" style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "0 2px", flexShrink: 0, alignSelf: "flex-start" }}>×</button>
+                      <div className="st-side">
+                        <div className="st-dates">
+                          <span />
+                          <span className="st-dh">План</span>
+                          <span className="st-dh">Факт</span>
+                          <span className="st-dr">Старт</span>
+                          <input type="date" value={s.planStart || ""} onChange={e => upd(s.id, { planStart: e.target.value })} style={dInp} />
+                          <input type="date" value={s.factStart || ""} onChange={e => upd(s.id, { factStart: e.target.value })} style={dInp} />
+                          <span className="st-dr">Конец</span>
+                          <input type="date" value={s.planEnd || ""} onChange={e => upd(s.id, { planEnd: e.target.value })}
+                            onFocus={e => { _stFocus.current = e.target.value; }}
+                            onBlur={e => auditStage(s, "срок этапа (план)", _fmtDate(_stFocus.current), _fmtDate(e.target.value))} style={dInp} />
+                          <input type="date" value={s.factEnd || ""} onChange={e => upd(s.id, { factEnd: e.target.value })} style={dInp} />
+                        </div>
+                      </div>
                     </div>
                   );
                 })}
@@ -1669,7 +1681,11 @@ function PerUnitCell({ total, qty, onChange, ph = "—" }) {
   );
 }
 
-function FinanceTab({ prod, patch, fmt, finSummary }) {
+function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser }) {
+  // Отчёт прораба о расчёте с бригадой живёт здесь, а не в «Этапах»: это про
+  // деньги, строки те же этапы, и рядом стоит «Себ. факт», которую отчёт как
+  // раз и обосновывает. В «Этапах» остаются только фото — они для клиента.
+  const [openPay, setOpenPay] = useState("");
   const stages = prod.stages || [];
   const upd = (id, p) => patch({ stages: stages.map(s => s.id === id ? { ...s, ...p } : s) });
   const num = (v) => Number(v) || 0;
@@ -1733,13 +1749,15 @@ function FinanceTab({ prod, patch, fmt, finSummary }) {
           </div>
         </div>
       )}
+      {stageReports && <StageReportsSummary api={stageReports} kind="pay" />}
       {/* Компактная таблица финансов по этапам */}
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, overflowX: "auto" }}>
+        <style>{STAGE_REPORTS_CSS}</style>
         <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>Финансы по этапам</div>
         {stages.length === 0 ? (
           <div style={{ textAlign: "center", color: "#94a3b8", padding: "26px 0", fontSize: 13 }}>Этапы появятся автоматически при открытии объекта со сметой.</div>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760, fontSize: 12.5 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: stageReports ? 860 : 760, fontSize: 12.5 }}>
             <thead>
               <tr>
                 <th style={{ ...th, textAlign: "left", minWidth: 200 }}>Наименование работы</th>
@@ -1749,17 +1767,18 @@ function FinanceTab({ prod, patch, fmt, finSummary }) {
                 <th style={{ ...th, textAlign: "right" }}>Маржа план</th>
                 <th style={{ ...th, textAlign: "right" }}>Маржа факт</th>
                 <th style={{ ...th, textAlign: "center" }}>Опл.</th>
+                {stageReports && <th style={{ ...th, textAlign: "center" }}>Расчёт</th>}
               </tr>
             </thead>
             <tbody>
               {grouped.map(([cat, list]) => (
                 <Fragment key={cat}>
-                  <tr><td colSpan={7} style={{ padding: "10px 8px 4px", fontSize: 11.5, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em", background: "#fffdf7" }}>{cat}</td></tr>
+                  <tr><td colSpan={stageReports ? 8 : 7} style={{ padding: "10px 8px 4px", fontSize: 11.5, fontWeight: 800, color: "#b8904a", textTransform: "uppercase", letterSpacing: ".04em", background: "#fffdf7" }}>{cat}</td></tr>
                   {list.map(s => {
                     const pc = num(s.priceClient), cf = num(s.costFact);
                     const mPlanSum = pc - num(s.costPlan), mpl = pc ? Math.round(mPlanSum / pc * 100) : 0;
                     const mFactSum = cf ? pc - cf : null, mft = (pc && cf) ? Math.round((pc - cf) / pc * 100) : null;
-                    return (
+                    const row = (
                       <tr key={s.id} style={{ borderTop: "1px solid #f1f5f9", background: s.paid ? "#f0fdf4" : "transparent" }}>
                         <td style={{ ...tdc, minWidth: 200 }}>
                           <div style={{ fontWeight: 600, color: "#0f172a", fontSize: 12.5 }}>{s.name || "—"}</div>
@@ -1772,8 +1791,39 @@ function FinanceTab({ prod, patch, fmt, finSummary }) {
                         <td style={{ padding: "6px 8px", textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}>{margCell(mPlanSum, mpl)}</td>
                         <td style={{ padding: "6px 8px", textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}>{margCell(mFactSum, mft)}</td>
                         <td style={{ padding: "6px 8px", textAlign: "center", verticalAlign: "top" }}><input type="checkbox" checked={!!s.paid} onChange={e => upd(s.id, { paid: e.target.checked })} title="Оплачено клиентом" style={{ width: 17, height: 17, cursor: "pointer" }} /></td>
+                        {stageReports && (() => {
+                          const reports = listPayments(stageReports.list, s.id);
+                          const mine = stageReports.canReview ? reports : reports.filter(r => String(r.authorId || "") === String(currentUser?.id || ""));
+                          const pending = mine.filter(r => r.status === "pending").length;
+                          const over = mine.filter(isOverpaid).length;
+                          return (
+                            <td style={{ padding: "6px 8px", textAlign: "center", verticalAlign: "top" }}>
+                              <button type="button" className="sr-btn" data-on={openPay === s.id ? "1" : "0"}
+                                onClick={() => setOpenPay(prev => prev === s.id ? "" : s.id)}>
+                                💵{mine.length > 0 ? ` ${mine.length}` : ""}
+                                {pending > 0 && <span style={{ color: "#b45309" }}>•</span>}
+                                {over > 0 && <span style={{ color: "#b91c1c" }}>⚠</span>}
+                              </button>
+                            </td>
+                          );
+                        })()}
                       </tr>
                     );
+                    // Панель раскрывается сразу под своей строкой. Отдельным блоком
+                    // в конце раздела она вводила в заблуждение: жмёшь на первой
+                    // работе, а отчёты появляются под третьей.
+                    return openPay === s.id && stageReports
+                      ? (
+                        <Fragment key={s.id}>
+                          {row}
+                          <tr>
+                            <td colSpan={8} style={{ padding: "0 8px 10px" }}>
+                              <PaymentPanel stage={s} api={stageReports} currentUser={currentUser} />
+                            </td>
+                          </tr>
+                        </Fragment>
+                      )
+                      : row;
                   })}
                 </Fragment>
               ))}
@@ -1787,6 +1837,7 @@ function FinanceTab({ prod, patch, fmt, finSummary }) {
                 <td style={{ padding: "9px 8px", textAlign: "right", whiteSpace: "nowrap" }}>{margCell(mPlanSumTot, mPlanTot)}</td>
                 <td style={{ padding: "9px 8px", textAlign: "right", whiteSpace: "nowrap" }}>{margCell(mFactSumTot, mFactTot)}</td>
                 <td></td>
+                {stageReports && <td></td>}
               </tr>
             </tfoot>
           </table>
