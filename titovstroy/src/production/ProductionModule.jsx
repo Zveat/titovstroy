@@ -6,7 +6,7 @@ const _stageStatusLabel = (key) => STAGE_STATUSES.find(item => item.key === key)
 import { normCN, contractNetTotal, estimatesForObject, findFinanceProjectForObject, sortProductionStages, moveProductionStage, buildGanttLayout, sortGanttRows, GANTT_SCALES, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "../utils.js";
 import { buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, _stageKey } from "./commands.js";
 import { listProductionDrafts, removeProductionDraft, saveProductionDraft } from "./drafts.js";
-import ObjectControlModule from "../object-control/ObjectControlModule.jsx";
+import ObjectControlModule, { SubTabs } from "../object-control/ObjectControlModule.jsx";
 import { planStageSchedule, updateStageStatus, upsertDailyReport } from "../object-control/objectControl.js";
 import { useStageReports } from "../stage-reports/useStageReports.js";
 import { stagePaymentTotals } from "../stage-reports/model.js";
@@ -1753,26 +1753,18 @@ function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser, a
   const grouped = groupByCat(sortProductionStages(stages));
 
   const mCol = (p) => p >= 30 ? "#059669" : p >= 0 ? "#d97706" : "#dc2626";
-  const finTabs = [["works", "Работы и маржа", "📊"], ["settle", "Взаиморасчёты", "💵"]];
-  const finTab = (key, label, icon) => {
-    const on = finPage === key;
-    const pending = key === "settle" && stageReports ? stageReports.summary.payments.pending : 0;
-    return (
-      <button key={key} type="button" onClick={() => setFinPage(key)}
-        style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", fontFamily: "inherit",
-          fontSize: 13, fontWeight: on ? 800 : 600, borderRadius: 10, padding: "9px 14px", whiteSpace: "nowrap",
-          border: "1px solid " + (on ? "transparent" : "#e2e8f0"), background: on ? "#0f172a" : "#fff",
-          color: on ? "#fff" : "#64748b" }}>
-        <span>{icon}</span>{label}
-        {pending > 0 && <span style={{ fontSize: 11, fontWeight: 800, color: on ? "#fde68a" : "#b45309" }}>{pending}</span>}
-      </button>
-    );
-  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Тот же переключатель, что на «Сегодня» и «Управлении». Раньше здесь были
+          свои тёмные пилюли: подраздел выглядел крупнее и заметнее, чем сами
+          вкладки объекта, и читался как главная навигация. */}
       {stageReports && (
-        <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>{finTabs.map(([k, l, i]) => finTab(k, l, i))}</div>
+        <SubTabs value={finPage} onChange={setFinPage} tabs={[
+          { key: "works", label: "Работы и маржа", icon: "📊" },
+          { key: "settle", label: "Взаиморасчёты", icon: "💵",
+            count: stageReports.summary.payments.pending, tone: "warn" },
+        ]} />
       )}
       {/* Сводка объекта — на странице работ: на взаиморасчётах она только
           отвлекает, там свой итог «выплачено». */}
