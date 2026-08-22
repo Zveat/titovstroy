@@ -9,8 +9,8 @@ import { listProductionDrafts, removeProductionDraft, saveProductionDraft } from
 import ObjectControlModule from "../object-control/ObjectControlModule.jsx";
 import { planStageSchedule, updateStageStatus, upsertDailyReport } from "../object-control/objectControl.js";
 import { useStageReports } from "../stage-reports/useStageReports.js";
-import { listPayments, isOverpaid } from "../stage-reports/model.js";
-import StageReports, { PaymentPanel, StageReportsSummary, STAGE_REPORTS_CSS } from "../stage-reports/StageReports.jsx";
+import { stagePaymentTotals } from "../stage-reports/model.js";
+import StageReports, { PaymentsSection, StageReportsSummary, STAGE_REPORTS_CSS } from "../stage-reports/StageReports.jsx";
 
 // ─────────────────────────────────────────────────────────────────────────
 // ПРОИЗВОДСТВО — управление и контроль объектов в работе.
@@ -1727,9 +1727,6 @@ function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser, a
   // раз и обосновывает. В «Этапах» остаются только фото — они для клиента.
   const [openPay, setOpenPay] = useState("");
   const stages = prod.stages || [];
-  // Объявлено ПОСЛЕ stages: раньше стояло выше и падало с «Cannot access
-  // 'stages' before initialization» — вкладка «Финансы» уходила в белый экран.
-  const openStage = stages.find((item) => item.id === openPay) || null;
   const upd = (id, p) => patch({ stages: stages.map(s => s.id === id ? { ...s, ...p } : s) });
   const num = (v) => Number(v) || 0;
   const tot = stages.reduce((a, s) => { a.priceClient += num(s.priceClient); a.costPlan += num(s.costPlan); a.costFact += num(s.costFact); return a; }, { priceClient: 0, costPlan: 0, costFact: 0 });
@@ -1810,7 +1807,7 @@ function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser, a
                 <th style={{ ...th, textAlign: "right" }}>Маржа план</th>
                 <th style={{ ...th, textAlign: "right" }}>Маржа факт</th>
                 <th style={{ ...th, textAlign: "center" }}>Опл.</th>
-                {stageReports && <th style={{ ...th, textAlign: "center" }}>Расчёт</th>}
+                {stageReports && <th style={{ ...th, textAlign: "right" }}>Выплачено</th>}
               </tr>
             </thead>
             <tbody>
@@ -1835,18 +1832,23 @@ function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser, a
                         <td style={{ padding: "6px 8px", textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}>{margCell(mFactSum, mft)}</td>
                         <td style={{ padding: "6px 8px", textAlign: "center", verticalAlign: "top" }}><input type="checkbox" checked={!!s.paid} onChange={e => { audit && audit({ entity: "stage", field: "оплата работы клиентом", action: "изменил", old: s.paid ? "оплачено" : "не оплачено", new: e.target.checked ? "оплачено" : "не оплачено", detail: `работа: ${s.name || "без названия"}` }); upd(s.id, { paid: e.target.checked }); }} title="Оплачено клиентом" style={{ width: 17, height: 17, cursor: "pointer" }} /></td>
                         {stageReports && (() => {
-                          const reports = listPayments(stageReports.list, s.id);
-                          const mine = stageReports.canReview ? reports : reports.filter(r => String(r.authorId || "") === String(currentUser?.id || ""));
-                          const pending = mine.filter(r => r.status === "pending").length;
-                          const over = mine.filter(isOverpaid).length;
+                          // Только показываем: сколько по этой работе ушло из ВСЕХ выплат.
+                          // Заводить выплату отсюда нельзя — один чек часто закрывает
+                          // несколько работ, и вход из строки навязывал бы «одна работа =
+                          // один чек», то есть заведомо неверную запись.
+                          const totals = stagePaymentTotals(stageReports.list, s.id);
                           return (
-                            <td style={{ padding: "6px 8px", textAlign: "center", verticalAlign: "top" }}>
-                              <button type="button" className="sr-btn" data-on={openPay === s.id ? "1" : "0"}
-                                onClick={() => setOpenPay(prev => prev === s.id ? "" : s.id)}>
-                                💵{mine.length > 0 ? ` ${mine.length}` : ""}
-                                {pending > 0 && <span style={{ color: "#b45309" }}>•</span>}
-                                {over > 0 && <span style={{ color: "#b91c1c" }}>⚠</span>}
-                              </button>
+                            <td style={{ padding: "6px 8px", textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}>
+                              {totals.count === 0 ? <span style={{ color: "#cbd5e1" }}>—</span> : (
+                                <button type="button" onClick={() => setOpenPay(prev => prev === s.id ? "" : s.id)}
+                                  title="Показать выплаты по этой работе"
+                                  style={{ background: "none", border: 0, padding: 0, cursor: "pointer", fontFamily: "inherit", textAlign: "right" }}>
+                                  <b style={{ fontSize: 12.5, color: totals.over > 0 ? "#b91c1c" : "#0f172a" }}>{fmt(totals.fact)} ₸</b>
+                                  <div style={{ fontSize: 10.5, fontWeight: 700, color: totals.over > 0 ? "#b91c1c" : "#94a3b8" }}>
+                                    {totals.over > 0 ? `⚠ +${fmt(totals.over)} к смете` : `${totals.count} ${_plural(totals.count, "выплата", "выплаты", "выплат")}`}
+                                  </div>
+                                </button>
+                              )}
                             </td>
                           );
                         })()}
@@ -1872,20 +1874,12 @@ function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser, a
           </table>
         )}
       </div>
-      {/* Панель отчёта живёт ВНЕ таблицы. Внутри она наследовала её ширину
-          (860px с боковой прокруткой), и на телефоне форма рендерилась шириной
-          860 в экране 390: подписи обрезались, поля уезжали за край. Здесь она
-          занимает ширину экрана и на телефоне выглядит как обычная форма. */}
-      {stageReports && openStage && (
-        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
-          <style>{STAGE_REPORTS_CSS}</style>
-          <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", marginBottom: 2 }}>
-            <span style={{ fontSize: 13.5, fontWeight: 800, color: "#0f172a", minWidth: 0, overflowWrap: "anywhere" }}>{openStage.name || "Работа"}</span>
-            <button type="button" onClick={() => setOpenPay("")}
-              style={{ marginLeft: "auto", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 7, padding: "5px 10px", fontSize: 11.5, fontWeight: 800, color: "#64748b", cursor: "pointer", fontFamily: "inherit" }}>Закрыть</button>
-          </div>
-          <PaymentPanel stage={openStage} api={stageReports} currentUser={currentUser} />
-        </div>
+      {/* Раздел живёт ВНЕ таблицы. Внутри он наследовал её ширину (860px с
+          боковой прокруткой), и на телефоне форма рендерилась шириной 860 в
+          экране 390: подписи обрезались, поля уезжали за край. */}
+      {stageReports && (
+        <PaymentsSection stages={sortProductionStages(stages)} api={stageReports} currentUser={currentUser}
+          filterStageId={openPay} onClearFilter={() => setOpenPay("")} />
       )}
     </div>
   );
