@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   stageReportsKey, normalizeStageReports, emptyStageReports, PHOTO_KINDS, findRecord,
-  reportStatusMeta, paymentDeviation,
+  reportStatusMeta, paymentDeviation, paymentAmount, paymentLines, unallocated,
   makePhotoRecord, addPhoto, patchPhoto, reviewPhoto as reviewPhotoIn, removeRecord,
   makePaymentReport, addPaymentReport, patchPaymentReport, reviewPaymentReport,
   countAwaitingReview, summarizePayments,
@@ -202,12 +202,14 @@ export function useStageReports({ objectId, storage, currentUser, canReview = fa
     const report = makePaymentReport({ ...input, objectId, ...author });
     await commit((current) => addPaymentReport(current, report));
     const delta = paymentDeviation(report);
-    audit({ entity: "stage", field: "расчёт с рабочими", action: "создал отчёт",
-      old: `согласовано ${report.agreed.toLocaleString("ru-RU")} ₸`,
-      new: `факт ${report.fact.toLocaleString("ru-RU")} ₸${delta > 0 ? ` (выше на ${delta.toLocaleString("ru-RU")})` : ""}`,
-      detail: [workOf(report.stageId), report.payee].filter(Boolean).join(" · ") });
+    const rest = unallocated(report);
+    const works = paymentLines(report).map((line) => stageName?.(line.stageId)).filter(Boolean);
+    audit({ entity: "object", field: "взаиморасчёт с мастером", action: "завёл выплату",
+      old: report.payee,
+      new: `${paymentAmount(report).toLocaleString("ru-RU")} ₸${delta > 0 ? ` (выше сметы на ${delta.toLocaleString("ru-RU")})` : ""}${rest > 0 ? `, не распределено ${rest.toLocaleString("ru-RU")}` : ""}`,
+      detail: works.length ? `работы: ${works.join(", ")}` : "" });
     return report;
-  }, [readOnly, objectId, author, commit, audit, workOf]);
+  }, [readOnly, objectId, author, commit, audit, stageName]);
 
   const updatePayment = useCallback((reportId, patch) =>
     commit((current) => patchPaymentReport(current, reportId, patch)), [commit]);
@@ -215,9 +217,9 @@ export function useStageReports({ objectId, storage, currentUser, canReview = fa
   const decidePayment = useCallback((reportId, verdict, comment) => {
     if (!canReview) return null;
     const report = findRecord(listRef.current, reportId);
-    audit({ entity: "stage", field: "расчёт с рабочими", action: "проверил отчёт",
+    audit({ entity: "object", field: "взаиморасчёт с мастером", action: "проверил выплату",
       old: reportStatusMeta(report?.status).label, new: reportStatusMeta(verdict).label,
-      detail: [workOf(report?.stageId), report?.payee, comment].filter(Boolean).join(" · ") });
+      detail: [report?.payee, comment].filter(Boolean).join(" · ") });
     return commit((current) => reviewPaymentReport(current, reportId, verdict, currentUser || {}, comment));
   }, [commit, canReview, currentUser, audit, workOf]);
 

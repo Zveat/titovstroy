@@ -25,10 +25,16 @@ export const REC_PAYMENT = "payment";
 // ── ФОТО ────────────────────────────────────────────────────────────────────
 // Порядок жёсткий: клиент читает историю работы сверху вниз. «В процессе» —
 // самая ценная: когда стена зашита, каркас и утеплитель уже ничем не доказать.
+// Подписи разные для прораба и для клиента. Прорабу нужно коротко и в его
+// словах — он выбирает стадию съёмки. Клиенту «В процессе» не говорит ничего:
+// он не знает, что там снимали и зачем. Ему важно, ЧТО это доказывает.
 export const PHOTO_KINDS = [
-  { key: "before", label: "До", hint: "как было до работы" },
-  { key: "during", label: "В процессе", hint: "скрытые работы: каркас, утеплитель, разводка" },
-  { key: "after", label: "После", hint: "результат" },
+  { key: "before", label: "До", hint: "как было до работы",
+    clientLabel: "Как было", clientHint: "до начала работ" },
+  { key: "during", label: "В процессе", hint: "скрытые работы: каркас, утеплитель, разводка",
+    clientLabel: "Скрытые работы", clientHint: "каркас, утеплитель, разводка — после отделки этого уже не увидеть" },
+  { key: "after", label: "После", hint: "результат",
+    clientLabel: "Результат", clientHint: "как получилось" },
 ];
 export const PHOTO_KIND_KEYS = PHOTO_KINDS.map((item) => item.key);
 export const MAX_PHOTOS_PER_KIND = 30;
@@ -106,11 +112,42 @@ export const emptyStageReports = () => [];
 // без этапа такую запись всё равно некуда показать).
 export function normalizeStageReports(raw) {
   if (!Array.isArray(raw)) return [];
-  return raw.filter((item) =>
-    item && typeof item === "object" &&
-    text(item.id) && text(item.stageId) &&
-    (item.rec === REC_PHOTO || item.rec === REC_PAYMENT));
+  return raw.filter((item) => {
+    if (!item || typeof item !== "object" || !text(item.id)) return false;
+    // У фото этап обязателен: снимок без работы показать негде.
+    if (item.rec === REC_PHOTO) return !!text(item.stageId);
+    // У выплаты работа задаётся распределением. Старые записи знали один этап —
+    // их читаем по stageId, ничего не переписывая в базе.
+    if (item.rec === REC_PAYMENT) return paymentLines(item).length > 0;
+    return false;
+  });
 }
+
+// Распределение выплаты по работам. Одним чеком закрывают несколько работ:
+// заплатили мастеру 300 000, из них 100 000 за демонтаж и 200 000 за остальное.
+// Модель «одна выплата = одна работа» такое записать не может — чек повисал бы
+// целиком на одной работе и врал.
+export function paymentLines(report) {
+  const raw = Array.isArray(report?.lines) ? report.lines : [];
+  const out = raw
+    .filter((line) => line && text(line.stageId))
+    .map((line) => ({ stageId: text(line.stageId), agreed: Math.round(num(line.agreed)), fact: Math.round(num(line.fact)) }));
+  if (out.length) return out;
+  // Записи до появления распределения: одна работа, суммы лежали в самой записи.
+  if (text(report?.stageId)) {
+    return [{ stageId: text(report.stageId), agreed: Math.round(num(report.agreed)), fact: Math.round(num(report.fact)) }];
+  }
+  return [];
+}
+
+// Сумма чека. У старых записей отдельного поля не было — там это факт.
+export const paymentAmount = (report) =>
+  Math.round(num(report?.amount !== undefined && report?.amount !== null && report?.amount !== "" ? report.amount : report?.fact));
+export const allocatedTotal = (report) => paymentLines(report).reduce((sum, line) => sum + line.fact, 0);
+export const agreedTotal = (report) => paymentLines(report).reduce((sum, line) => sum + line.agreed, 0);
+// Сколько из чека не разложено по работам. Отрицательное — разложили больше,
+// чем в чеке: это ошибка ввода, и её надо показывать так же заметно.
+export const unallocated = (report) => paymentAmount(report) - allocatedTotal(report);
 
 const replaceById = (list, record) => {
   const base = normalizeStageReports(list);
@@ -128,9 +165,27 @@ export const listPhotos = (list, stageId) => normalizeStageReports(list)
   .filter((item) => item.rec === REC_PHOTO && item.stageId === String(stageId || ""))
   .sort((a, b) => PHOTO_KIND_KEYS.indexOf(a.kind) - PHOTO_KIND_KEYS.indexOf(b.kind) || (a.createdAt || 0) - (b.createdAt || 0));
 
-export const listPayments = (list, stageId) => normalizeStageReports(list)
-  .filter((item) => item.rec === REC_PAYMENT && item.stageId === String(stageId || ""))
+// Все выплаты объекта, свежие сверху.
+export const listAllPayments = (list) => normalizeStageReports(list)
+  .filter((item) => item.rec === REC_PAYMENT)
   .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+// Выплаты, которые задели конкретную работу.
+export const listPayments = (list, stageId) => listAllPayments(list)
+  .filter((item) => paymentLines(item).some((line) => line.stageId === String(stageId || "")));
+
+// Сколько всего ушло по работе из всех выплат и сколько по ней согласовано.
+export function stagePaymentTotals(list, stageId) {
+  const key = String(stageId || "");
+  let fact = 0, agreed = 0, count = 0;
+  for (const report of listAllPayments(list)) {
+    for (const line of paymentLines(report)) {
+      if (line.stageId !== key) continue;
+      fact += line.fact; agreed += line.agreed; count++;
+    }
+  }
+  return { fact, agreed, count, over: fact - agreed };
+}
 
 export const countPhotosOfKind = (list, stageId, kind) =>
   listPhotos(list, stageId).filter((item) => item.kind === kind).length;
@@ -239,12 +294,16 @@ export const countAwaitingReview = (list) => normalizeStageReports(list)
 // ── РАСЧЁТ С РАБОЧИМИ ───────────────────────────────────────────────────────
 export function validatePaymentReport(input = {}) {
   const errors = [];
+  const lines = paymentLines({ lines: input.lines, stageId: input.stageId, agreed: input.agreed, fact: input.fact });
   if (!text(input.objectId)) errors.push("Не указан объект");
-  if (!text(input.stageId)) errors.push("Отчёт нужно привязать к этапу");
+  if (!lines.length) errors.push("Выберите хотя бы одну работу");
   if (!PAY_MODE_KEYS.includes(input.mode)) errors.push("Не выбран вид оплаты: полная, частичная или аванс");
   if (!text(input.payee)) errors.push("Не указано, кому платим");
-  if (!(num(input.agreed) > 0)) errors.push("Согласованная сумма должна быть больше нуля");
-  if (num(input.fact) < 0) errors.push("Фактическая сумма не может быть отрицательной");
+  if (!(num(input.amount ?? input.fact) > 0)) errors.push("Сумма выплаты должна быть больше нуля");
+  // Разложить больше, чем в чеке, нельзя: это уже не «не дозаполнил», а ошибка,
+  // из-за которой по работам пройдёт денег больше, чем реально выдано.
+  const over = lines.reduce((sum, line) => sum + line.fact, 0) - Math.round(num(input.amount ?? input.fact));
+  if (over > 0) errors.push(`По работам разложено на ${over.toLocaleString("ru-RU")} ₸ больше, чем в выплате`);
   return errors;
 }
 
@@ -252,15 +311,18 @@ export function makePaymentReport(input = {}) {
   const errors = validatePaymentReport(input);
   if (errors.length) throw new Error(errors.join("; "));
   const now = Number(input.createdAt) || Date.now();
+  const lines = paymentLines({ lines: input.lines, stageId: input.stageId, agreed: input.agreed, fact: input.fact });
   return {
     rec: REC_PAYMENT,
     id: text(input.id) || makeId("pr"),
     objectId: text(input.objectId),
-    stageId: text(input.stageId),
+    // Первая работа дублируется в stageId ради старых мест, которые читают
+    // запись как одностадийную. Истина — в lines.
+    stageId: lines[0].stageId,
     mode: input.mode,
     payee: text(input.payee),
-    agreed: Math.round(num(input.agreed)),
-    fact: Math.round(num(input.fact)),
+    amount: Math.round(num(input.amount ?? input.fact)),
+    lines,
     note: text(input.note),
     receipts: Array.isArray(input.receipts) ? input.receipts.filter(Boolean) : [],
     date: text(input.date) || new Date(now).toISOString().slice(0, 10),
@@ -274,17 +336,39 @@ export function makePaymentReport(input = {}) {
   };
 }
 
-// Отклонение = факт − согласовано. Ради этой строки всё и делается: если прораб
-// нашёл бригаду за 150, а отчитался за 250, разница видна сразу.
-export const paymentDeviation = (report) => Math.round(num(report?.fact) - num(report?.agreed));
+// Отклонение = разложено по работам − согласовано по этим же работам. Ради этой
+// строки всё и делается: нашли бригаду за 150, отчитались за 250 — разница видна.
+export const paymentDeviation = (report) => allocatedTotal(report) - agreedTotal(report);
 // Переплата — всегда повод для разговора, при любом виде оплаты.
 export const isOverpaid = (report) => paymentDeviation(report) > 0;
-// Сколько ещё осталось отдать. Считаем только для аванса и частичной: при
-// полной оплате недоплата — это экономия, а не долг перед бригадой.
+// Сколько ещё осталось отдать. Считаем только для аванса и частичной: при полной
+// оплате недобор — это экономия, а не долг перед бригадой.
 export const paymentRemainder = (report) => {
   if (!isPartialPayment(report)) return 0;
-  return Math.max(0, Math.round(num(report?.agreed) - num(report?.fact)));
+  return Math.max(0, agreedTotal(report) - allocatedTotal(report));
 };
+
+// Разложить сумму по работам пропорционально их себестоимости из сметы. Остаток
+// от округления добрасываем в самую крупную строку, иначе итог не сойдётся с
+// чеком на копейки и человек будет искать ошибку там, где её нет.
+export function allocateByPlan(stages = [], amount = 0) {
+  const rows = (Array.isArray(stages) ? stages : [])
+    .map((stage) => ({ stageId: text(stage?.id ?? stage?.stageId), plan: Math.max(0, Math.round(num(stage?.costPlan ?? stage?.agreed))) }))
+    .filter((row) => row.stageId);
+  const total = Math.round(num(amount));
+  if (!rows.length || total <= 0) return rows.map((row) => ({ stageId: row.stageId, agreed: row.plan, fact: 0 }));
+  const planSum = rows.reduce((sum, row) => sum + row.plan, 0);
+  const out = planSum > 0
+    ? rows.map((row) => ({ stageId: row.stageId, agreed: row.plan, fact: Math.floor(total * row.plan / planSum) }))
+    : rows.map((row, index) => ({ stageId: row.stageId, agreed: row.plan, fact: Math.floor(total / rows.length) + (index === 0 ? total % rows.length : 0) }));
+  const rest = total - out.reduce((sum, row) => sum + row.fact, 0);
+  if (rest !== 0 && out.length) {
+    let biggest = 0;
+    for (let i = 1; i < out.length; i++) if (out[i].fact > out[biggest].fact) biggest = i;
+    out[biggest].fact += rest;
+  }
+  return out;
+}
 
 export const addPaymentReport = (list, report) => [...normalizeStageReports(list), report];
 
@@ -318,13 +402,15 @@ export function reviewPaymentReport(list, reportId, verdict, reviewer = {}, comm
 // Сводка по объекту для руководителя: сколько ждёт проверки и на какую сумму
 // расхождение. Отдельно переплаты — именно они повод для разговора.
 export function summarizePayments(list) {
-  let pending = 0, overpaid = 0, deviation = 0, total = 0;
-  for (const report of normalizeStageReports(list)) {
-    if (report.rec !== REC_PAYMENT) continue;
+  let pending = 0, overpaid = 0, deviation = 0, total = 0, loose = 0, paid = 0;
+  for (const report of listAllPayments(list)) {
     total++;
+    paid += paymentAmount(report);
     if (report.status === "pending") pending++;
     const delta = paymentDeviation(report);
     if (delta > 0) { overpaid++; deviation += delta; }
+    const rest = unallocated(report);
+    if (rest !== 0) loose += Math.abs(rest);
   }
-  return { total, pending, overpaid, deviation };
+  return { total, pending, overpaid, deviation, loose, paid };
 }

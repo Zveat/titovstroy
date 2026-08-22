@@ -8,8 +8,9 @@ import {
   countAwaitingReview, isClientVisible,
   makePaymentReport, validatePaymentReport, addPaymentReport, patchPaymentReport,
   reviewPaymentReport, canReviewPayment, paymentDeviation, isOverpaid,
-  paymentRemainder, payModeMeta, isPartialPayment,
-  listPayments, summarizePayments,
+  paymentRemainder, payModeMeta, isPartialPayment, paymentLines, paymentAmount,
+  allocatedTotal, agreedTotal, unallocated, allocateByPlan, stagePaymentTotals,
+  listPayments, listAllPayments, summarizePayments,
 } from "./model.js";
 
 const photoInput = (over = {}) => ({
@@ -17,8 +18,8 @@ const photoInput = (over = {}) => ({
   author: "Прораб", authorId: "u1", ...over,
 });
 const payInput = (over = {}) => ({
-  objectId: "o1", stageId: "s1", mode: "full", payee: "Бригада Ержана",
-  agreed: 150000, fact: 250000, author: "Прораб", authorId: "u1", ...over,
+  objectId: "o1", mode: "full", payee: "Бригада Ержана", amount: 250000,
+  lines: [{ stageId: "s1", agreed: 150000, fact: 250000 }], author: "Прораб", authorId: "u1", ...over,
 });
 const approvedPhoto = (list, record) => reviewPhoto(addPhoto(list, record), record.id, REVIEW_APPROVED, { id: "u2", name: "Рук" });
 
@@ -192,117 +193,131 @@ describe("фото: что видит клиент", () => {
   });
 });
 
-describe("расчёт с рабочими: обязательные поля", () => {
-  it("перечисляет всё, чего не хватает", () => {
-    expect(validatePaymentReport({})).toEqual([
-      "Не указан объект",
-      "Отчёт нужно привязать к этапу",
-      "Не выбран вид оплаты: полная, частичная или аванс",
-      "Не указано, кому платим",
-      "Согласованная сумма должна быть больше нуля",
-    ]);
+describe("выплата: распределение по работам", () => {
+  const pay = (over = {}) => ({
+    objectId: "o1", mode: "full", payee: "Бригада Ержана", amount: 300000,
+    lines: [{ stageId: "s1", agreed: 96800, fact: 100000 }, { stageId: "s2", agreed: 140000, fact: 150000 }],
+    author: "Прораб", authorId: "u1", ...over,
   });
 
-  it("без исполнителя отчёт не создаётся", () => {
-    expect(() => makePaymentReport(payInput({ payee: "  " }))).toThrow(/кому платим/);
+  it("один чек закрывает несколько работ", () => {
+    const report = makePaymentReport(pay({ lines: [
+      { stageId: "s1", agreed: 96800, fact: 100000 },
+      { stageId: "s2", agreed: 140000, fact: 150000 },
+      { stageId: "s3", agreed: 60000, fact: 50000 },
+    ] }));
+    expect(paymentLines(report)).toHaveLength(3);
+    expect(allocatedTotal(report)).toBe(300000);
+    expect(agreedTotal(report)).toBe(296800);
+    expect(paymentDeviation(report)).toBe(3200);
+    expect(unallocated(report)).toBe(0);
   });
 
-  it("нулевая согласованная сумма не проходит", () => {
-    expect(validatePaymentReport(payInput({ agreed: 0 }))).toContain("Согласованная сумма должна быть больше нуля");
+  it("нераспределённый остаток виден, но сохранять не мешает", () => {
+    const report = makePaymentReport(pay({ amount: 300000, lines: [{ stageId: "s1", agreed: 96800, fact: 100000 }] }));
+    expect(unallocated(report)).toBe(200000);
+    expect(validatePaymentReport(pay({ amount: 300000, lines: [{ stageId: "s1", agreed: 1, fact: 100000 }] }))).toEqual([]);
   });
 
-  it("отрицательный факт не проходит", () => {
-    expect(validatePaymentReport(payInput({ fact: -1 }))).toContain("Фактическая сумма не может быть отрицательной");
+  it("разложить БОЛЬШЕ, чем в чеке, нельзя", () => {
+    // Разделитель тысяч в русской локали — неразрывный пробел, поэтому
+    // сверяем по смыслу, а не по точной строке.
+    expect(validatePaymentReport(pay({ amount: 100000 })))
+      .toEqual([expect.stringMatching(/^По работам разложено на 150\s?000 ₸ больше, чем в выплате$/)]);
   });
 
-  it("суммы с пробелами и запятой читаются", () => {
-    const report = makePaymentReport(payInput({ agreed: "150 000", fact: "250000,49" }));
-    expect(report.agreed).toBe(150000);
-    expect(report.fact).toBe(250000);
+  it("без работ и без суммы отчёт не создаётся", () => {
+    expect(validatePaymentReport({ objectId: "o1", mode: "full", payee: "х", amount: 100 }))
+      .toContain("Выберите хотя бы одну работу");
+    expect(validatePaymentReport(pay({ amount: 0 }))).toContain("Сумма выплаты должна быть больше нуля");
   });
 
-  it("дата подставляется, статус всегда «на проверке»", () => {
-    const report = makePaymentReport(payInput({ date: "" }));
-    expect(report.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(report.status).toBe("pending");
-  });
-});
-
-describe("расчёт с рабочими: отклонение", () => {
-  it("считает факт минус согласовано", () => {
-    expect(paymentDeviation({ agreed: 150000, fact: 250000 })).toBe(100000);
-    expect(isOverpaid({ agreed: 150000, fact: 250000 })).toBe(true);
+  it("суммы по работе собираются из всех выплат", () => {
+    let list = addPaymentReport(emptyStageReports(), makePaymentReport(pay()));
+    list = addPaymentReport(list, makePaymentReport(pay({ amount: 40000, lines: [{ stageId: "s1", agreed: 0, fact: 40000 }] })));
+    expect(stagePaymentTotals(list, "s1")).toEqual({ fact: 140000, agreed: 96800, count: 2, over: 43200 });
+    expect(listPayments(list, "s2")).toHaveLength(1);
+    expect(listAllPayments(list)).toHaveLength(2);
   });
 
-  it("экономия — отрицательное отклонение и не переплата", () => {
-    expect(paymentDeviation({ agreed: 150000, fact: 120000 })).toBe(-30000);
-    expect(isOverpaid({ agreed: 150000, fact: 120000 })).toBe(false);
+  it("раскладка по смете делит пропорционально и сходится до копейки", () => {
+    const rows = allocateByPlan([{ id: "a", costPlan: 100 }, { id: "b", costPlan: 200 }], 301);
+    expect(rows.reduce((sum, r) => sum + r.fact, 0)).toBe(301);
+    expect(rows).toEqual([{ stageId: "a", agreed: 100, fact: 100 }, { stageId: "b", agreed: 200, fact: 201 }]);
   });
 
-  it("совпадение сумм — ноль", () => {
-    expect(paymentDeviation({ agreed: 150000, fact: 150000 })).toBe(0);
-    expect(isOverpaid({ agreed: 150000, fact: 150000 })).toBe(false);
+  it("если смета пустая — делим поровну, и итог всё равно сходится", () => {
+    const rows = allocateByPlan([{ id: "a" }, { id: "b" }, { id: "c" }], 100);
+    expect(rows.reduce((sum, r) => sum + r.fact, 0)).toBe(100);
   });
 
-  it("при авансе и частичной недоплата — остаток, а не экономия", () => {
-    expect(paymentRemainder({ mode: "advance", agreed: 150000, fact: 50000 })).toBe(100000);
-    expect(paymentRemainder({ mode: "partial", agreed: 150000, fact: 90000 })).toBe(60000);
-    expect(paymentRemainder({ mode: "full", agreed: 150000, fact: 90000 })).toBe(0);
+  it("остаток к доплате считается по авансу, но не по полной оплате", () => {
+    const advance = makePaymentReport(pay({ mode: "advance", amount: 50000, lines: [{ stageId: "s1", agreed: 150000, fact: 50000 }] }));
+    expect(paymentRemainder(advance)).toBe(100000);
+    const full = makePaymentReport(pay({ mode: "full", amount: 50000, lines: [{ stageId: "s1", agreed: 150000, fact: 50000 }] }));
+    expect(paymentRemainder(full)).toBe(0);
+    expect(paymentDeviation(full)).toBe(-100000);
   });
 
   it("переплата остаётся переплатой при любом виде оплаты", () => {
-    expect(isOverpaid({ mode: "advance", agreed: 150000, fact: 200000 })).toBe(true);
-    expect(paymentRemainder({ mode: "advance", agreed: 150000, fact: 200000 })).toBe(0);
+    const report = makePaymentReport(pay({ mode: "advance", amount: 200000, lines: [{ stageId: "s1", agreed: 150000, fact: 200000 }] }));
+    expect(isOverpaid(report)).toBe(true);
+    expect(paymentRemainder(report)).toBe(0);
   });
 
-  it("старые записи не теряют подпись вида оплаты", () => {
+  it("записи в старом формате (одна работа) читаются и не пропадают", () => {
+    const legacy = [{ rec: "payment", id: "old", objectId: "o1", stageId: "s9", agreed: 80000, fact: 95000, mode: "paid", status: "pending" }];
+    expect(normalizeStageReports(legacy)).toHaveLength(1);
+    expect(paymentLines(legacy[0])).toEqual([{ stageId: "s9", agreed: 80000, fact: 95000 }]);
+    expect(paymentAmount(legacy[0])).toBe(95000);
     expect(payModeMeta("paid").label).toBe("Полная оплата");
-    expect(payModeMeta("due").label).toBe("Частичная");
     expect(isPartialPayment({ mode: "due" })).toBe(true);
-    expect(isPartialPayment({ mode: "paid" })).toBe(false);
+    expect(stagePaymentTotals(legacy, "s9").fact).toBe(95000);
   });
 
-  it("сводка по объекту: сколько на проверке и на сколько переплата", () => {
-    let list = addPaymentReport(emptyStageReports(), makePaymentReport(payInput()));
-    list = addPaymentReport(list, makePaymentReport(payInput({ stageId: "s2", agreed: 100000, fact: 90000 })));
-    list = addPaymentReport(list, makePaymentReport(payInput({ stageId: "s2", agreed: 50000, fact: 70000 })));
-    list = addPhoto(list, makePhotoRecord(photoInput()));
-    expect(summarizePayments(list)).toEqual({ total: 3, pending: 3, overpaid: 2, deviation: 120000 });
+  it("сводка по объекту: сколько выплачено, сколько на проверке и переплат", () => {
+    let list = addPaymentReport(emptyStageReports(), makePaymentReport(pay()));
+    list = addPaymentReport(list, makePaymentReport(pay({ amount: 100000, lines: [{ stageId: "s3", agreed: 120000, fact: 90000 }] })));
+    // 300 000 − 250 000 разложенных и 100 000 − 90 000: суммарно 60 000 висит нераспределённым.
+    expect(summarizePayments(list)).toEqual({ total: 2, pending: 2, overpaid: 1, deviation: 13200, paid: 400000, loose: 60000 });
   });
 });
 
 describe("расчёт с рабочими: проверка руководителем", () => {
+  const pay = (over = {}) => ({
+    objectId: "o1", mode: "full", payee: "Бригада Ержана", amount: 250000,
+    lines: [{ stageId: "s1", agreed: 150000, fact: 250000 }], author: "Прораб", authorId: "u1", ...over,
+  });
+
   it("свой отчёт подтвердить нельзя даже с правами", () => {
-    const report = makePaymentReport(payInput());
+    const report = makePaymentReport(pay());
     expect(canReviewPayment(report, { id: "u1" }, { canReview: true })).toBe(false);
     expect(canReviewPayment(report, { id: "u2" }, { canReview: true })).toBe(true);
   });
 
   it("без права проверки нельзя никому", () => {
-    const report = makePaymentReport(payInput());
+    const report = makePaymentReport(pay());
     expect(canReviewPayment(report, { id: "u2" }, { canReview: false })).toBe(false);
     expect(canReviewPayment(report, { id: "u2" }, {})).toBe(false);
   });
 
   it("вердикт пишется вместе с автором и комментарием", () => {
-    const report = makePaymentReport(payInput());
-    let list = addPaymentReport(emptyStageReports(), report);
-    list = reviewPaymentReport(list, report.id, "clarify", { id: "u2", name: "Титов" }, "откуда 250?");
-    const saved = listPayments(list, "s1")[0];
+    const report = makePaymentReport(pay());
+    let list = reviewPaymentReport(addPaymentReport(emptyStageReports(), report), report.id, "clarify", { id: "u2", name: "Титов" }, "откуда 250?");
+    const saved = listAllPayments(list)[0];
     expect(saved).toMatchObject({ status: "clarify", reviewNote: "откуда 250?", reviewedBy: "Титов", reviewedById: "u2" });
     expect(saved.reviewedAt).toBeGreaterThan(0);
   });
 
   it("несуществующий вердикт отвергается", () => {
-    const list = addPaymentReport(emptyStageReports(), makePaymentReport(payInput()));
+    const list = addPaymentReport(emptyStageReports(), makePaymentReport(pay()));
     expect(() => reviewPaymentReport(list, "нет", "одобрямс", {})).toThrow(/Неизвестное решение/);
   });
 
   it("правка отчёта не теряет id и не подменяет тип записи", () => {
-    const report = makePaymentReport(payInput());
-    let list = addPaymentReport(emptyStageReports(), report);
-    list = patchPaymentReport(list, report.id, { id: "подмена", rec: REC_PHOTO, note: "доплата" });
-    const saved = listPayments(list, "s1")[0];
+    const report = makePaymentReport(pay());
+    let list = patchPaymentReport(addPaymentReport(emptyStageReports(), report), report.id, { id: "подмена", rec: REC_PHOTO, note: "доплата" });
+    const saved = listAllPayments(list)[0];
     expect(saved.id).toBe(report.id);
     expect(saved.rec).toBe(REC_PAYMENT);
     expect(saved.note).toBe("доплата");

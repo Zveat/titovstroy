@@ -78,7 +78,13 @@ export function ClientPhotoReport({ groups = [], ui, expanded, onExpand, onOpen 
               if (!items.length) return null;
               return (
                 <div key={phase.key} style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: 10.5, fontWeight: 800, color: BRASS, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>{phase.label}</div>
+                  {/* Подпись клиентская: «В процессе» ему ничего не объясняет —
+                      он не знает, что снимали и зачем. «Скрытые работы» с
+                      расшифровкой говорит ровно то, ради чего снимок и делали. */}
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 800, color: BRASS, textTransform: "uppercase", letterSpacing: ".05em" }}>{phase.clientLabel || phase.label}</div>
+                    {phase.clientHint && <div style={{ fontSize: 11, color: FAINT, marginTop: 1, lineHeight: 1.35 }}>{phase.clientHint}</div>}
+                  </div>
                   {/* Сетка, а не боковая лента: снимки за краем клиент просто не
                       найдёт. Колонки подбираются под ширину, поэтому на телефоне
                       это три штуки в ряд, а на компьютере ряд заполняется целиком
@@ -150,7 +156,7 @@ export function PhotoLightbox({ value, onChange, onClose }) {
       <div style={{ display: "flex", alignItems: "flex-start", gap: 10, color: "#fff", flexShrink: 0 }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 800, lineHeight: 1.3, overflowWrap: "anywhere" }}>{value.title}</div>
-          <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 3 }}>{phase ? phase.label : ""} · {index + 1} из {list.length}</div>
+          <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 3 }}>{phase ? (phase.clientLabel || phase.label) : ""} · {index + 1} из {list.length}</div>
         </div>
         <button onClick={(event) => { event.stopPropagation(); onClose?.(); }} aria-label="Закрыть"
           style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(255,255,255,.12)", border: "1px solid rgba(255,255,255,.18)", color: "#fff", fontSize: 17, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, lineHeight: 1 }}>✕</button>

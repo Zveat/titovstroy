@@ -1,12 +1,14 @@
 // Две кнопки в карточке этапа и панели под ними: «Фото» и «Расчёт с рабочими».
 // Обе панели рассчитаны на телефон в первую очередь — прораб заполняет их
 // стоя на объекте, а не за столом.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   PHOTO_KINDS, PAY_MODES, MAX_PHOTOS_PER_KIND,
   REVIEW_APPROVED, REVIEW_REJECTED, REVIEW_PENDING,
   listPhotos, listPayments, countPhotosOfKind, countStagePhotos,
   paymentDeviation, isOverpaid, paymentRemainder, payModeMeta, isPartialPayment,
+  paymentLines, paymentAmount, allocatedTotal, unallocated, allocateByPlan,
+  listAllPayments, summarizePayments,
   reportStatusMeta, canReviewPayment, validatePaymentReport,
 } from "./model.js";
 import { entryStatus, QUEUE_STATUS_LABELS, QUEUE_FAILED, QUEUE_UPLOADING } from "./queue.js";
@@ -229,21 +231,50 @@ function PhotoPanel({ stage, api, onOpen }) {
   );
 }
 
-function PaymentForm({ stage, api, onDone }) {
-  // Согласованную сумму подставляем из «Себ. план» работы: прораб не должен
-  // переписывать руками то, что уже посчитано в смете. Поправить можно.
-  const plannedCost = Math.round(Number(stage?.costPlan) || 0);
-  const [form, setForm] = useState({
-    mode: "full", payee: "", agreed: plannedCost > 0 ? String(plannedCost) : "",
-    fact: "", note: "", date: new Date().toISOString().slice(0, 10),
-  });
+// Форма выплаты. Одна выплата — один чек, но закрывать она может несколько
+// работ: заплатили мастеру 300 000, из них 100 000 за демонтаж и 200 000 за
+// остальное. Поэтому суммы вводятся построчно, а не одним полем.
+function PaymentForm({ stages, api, onDone, preselect = "" }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [form, setForm] = useState({ mode: "full", payee: "", amount: "", note: "", date: today });
+  const [picked, setPicked] = useState(() => (preselect ? { [preselect]: "" } : {}));
   const [receipts, setReceipts] = useState([]);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState("");
   const set = (patch) => setForm((prev) => ({ ...prev, ...patch }));
-  const draft = { ...form, objectId: api.objectId || "x", stageId: stage.id };
-  const delta = paymentDeviation({ agreed: form.agreed, fact: form.fact });
-  const errors = validatePaymentReport({ ...draft, objectId: draft.objectId || "x" });
+
+  const chosen = stages.filter((stage) => stage.id in picked);
+  const planOf = (stage) => Math.round(Number(stage?.costPlan) || 0);
+  const lines = chosen.map((stage) => ({ stageId: stage.id, agreed: planOf(stage), fact: Math.round(Number(String(picked[stage.id]).replace(/\s/g, "").replace(",", ".")) || 0) }));
+  const draft = { objectId: api.objectId || "x", mode: form.mode, payee: form.payee, amount: form.amount, lines };
+  const amount = paymentAmount(draft);
+  const spread = allocatedTotal(draft);
+  const rest = amount - spread;
+  const errors = validatePaymentReport(draft);
+
+  const toggle = (stage) => setPicked((prev) => {
+    const next = { ...prev };
+    if (stage.id in next) delete next[stage.id];
+    else next[stage.id] = "";
+    return next;
+  });
+  // Раскладка по смете: суммы делятся пропорционально себестоимости плана.
+  // Вручную по десяти работам никто считать не станет — а без раскладки не
+  // станет и заполнять.
+  const spreadByPlan = () => {
+    const rows = allocateByPlan(chosen, amount);
+    setPicked((prev) => {
+      const next = { ...prev };
+      for (const row of rows) next[row.stageId] = String(row.fact);
+      return next;
+    });
+  };
+  // Одна работа — вся сумма чека уходит в неё, лишний ввод ни к чему.
+  const oneStage = chosen.length === 1 ? chosen[0].id : "";
+  useEffect(() => {
+    if (!oneStage || !amount) return;
+    setPicked((prev) => (String(prev[oneStage] || "") === "" ? { ...prev, [oneStage]: String(amount) } : prev));
+  }, [oneStage, amount]);
 
   const attach = async (event) => {
     const files = [...(event.target.files || [])];
@@ -251,7 +282,7 @@ function PaymentForm({ stage, api, onDone }) {
     if (!files.length) return;
     setSaving(true); setProblem("");
     try {
-      const uploaded = await api.uploadReceipts(stage.id, files);
+      const uploaded = await api.uploadReceipts(chosen[0]?.id || preselect || "obj", files);
       setReceipts((prev) => [...prev, ...uploaded]);
     } catch (failure) { setProblem(failure?.message || "Чек не загрузился — проверьте связь"); }
     finally { setSaving(false); }
@@ -261,17 +292,14 @@ function PaymentForm({ stage, api, onDone }) {
     if (errors.length) { setProblem(errors[0]); return; }
     setSaving(true); setProblem("");
     try {
-      await api.savePayment({ ...form, stageId: stage.id, receipts });
+      await api.savePayment({ ...form, amount, lines, receipts });
       onDone?.();
-    } catch (failure) { setProblem(failure?.message || "Не удалось сохранить отчёт"); }
+    } catch (failure) { setProblem(failure?.message || "Не удалось сохранить выплату"); }
     finally { setSaving(false); }
   };
 
   return (
     <div style={{ borderTop: "1px solid #e2e8f0", marginTop: 10, paddingTop: 10 }}>
-      {/* Подписи над полями, а не подсказки внутри: как только сумму ввели,
-          подсказка исчезает, и в форме про деньги остаются два одинаковых числа,
-          про которые уже не скажешь, где согласовано, а где факт. */}
       <div className="sr-form">
         <label className="sr-lab">Вид оплаты
           <select className="sr-field" value={form.mode} onChange={(event) => set({ mode: event.target.value })}>
@@ -285,35 +313,66 @@ function PaymentForm({ stage, api, onDone }) {
           <input className="sr-field" value={form.payee} onChange={(event) => set({ payee: event.target.value })}
             placeholder="рабочий, бригада или подрядчик" />
         </label>
-        <label className="sr-lab">Согласовано, ₸
-          <input className="sr-field" inputMode="numeric" value={form.agreed} onChange={(event) => set({ agreed: event.target.value })}
-            placeholder="150 000" />
-          {plannedCost > 0 && <span style={{ fontWeight: 600, color: "#94a3b8" }}>из сметы: {money(plannedCost)} ₸</span>}
-        </label>
-        <label className="sr-lab">Фактически, ₸
-          <input className="sr-field" inputMode="numeric" value={form.fact} onChange={(event) => set({ fact: event.target.value })}
-            placeholder="150 000" />
-        </label>
-        <label className="sr-lab sr-wide">Комментарий
-          <textarea className="sr-field" rows={2} value={form.note} onChange={(event) => set({ note: event.target.value })}
-            placeholder="за что и почему столько" />
+        <label className="sr-lab sr-wide">Сумма выплаты, ₸ — как в чеке
+          <input className="sr-field" inputMode="numeric" value={form.amount} onChange={(event) => set({ amount: event.target.value })}
+            placeholder="300 000" />
         </label>
       </div>
 
-      {/* Расхождение показываем сразу при вводе, а не после сохранения: прораб
-          видит, что его заметят, ещё до отправки. При авансе и частичной оплате
-          недоплата — это остаток, а не экономия, и называть её выгодой нельзя. */}
-      {String(form.fact).trim() !== "" && (() => {
-        const partial = isPartialPayment(form);
-        const rest = partial ? paymentRemainder({ mode: form.mode, agreed: form.agreed, fact: form.fact }) : 0;
-        const tone = delta > 0 ? ["#b91c1c", "#fef2f2"] : (!partial && delta < 0) ? ["#047857", "#ecfdf5"] : ["#64748b", "#f1f5f9"];
-        const label = delta > 0 ? `⚠ Выше согласованной на ${money(delta)} ₸`
-          : partial ? (rest > 0 ? `Останется отдать ${money(rest)} ₸` : "Согласованная сумма закрыта полностью")
-            : delta < 0 ? `Ниже согласованной на ${money(-delta)} ₸` : "Совпадает с согласованной";
-        return (
-          <div style={{ marginTop: 9, ...chip(tone[0], tone[1]), padding: "6px 10px", fontSize: 12 }}>{label}</div>
-        );
-      })()}
+      <div style={{ marginTop: 12 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 7 }}>
+          <span style={{ fontSize: 12, fontWeight: 800, color: "#0f172a" }}>За какие работы</span>
+          {chosen.length > 1 && amount > 0 && (
+            <button type="button" onClick={spreadByPlan} style={small("#2563eb", "#eff6ff")}>Разложить по смете</button>
+          )}
+        </div>
+        <div style={{ display: "grid", gap: 6, maxHeight: 260, overflowY: "auto" }}>
+          {stages.map((stage) => {
+            const on = stage.id in picked;
+            return (
+              <div key={stage.id} style={{ border: "1px solid " + (on ? "#bfdbfe" : "#e2e8f0"), background: on ? "#f8fbff" : "#fff",
+                borderRadius: 9, padding: "8px 10px", display: "grid", gap: 6 }}>
+                <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", minWidth: 0 }}>
+                  <input type="checkbox" checked={on} onChange={() => toggle(stage)} style={{ marginTop: 2, flexShrink: 0 }} />
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: on ? 800 : 600, color: "#0f172a", overflowWrap: "anywhere" }}>{stage.name || "Работа"}</span>
+                    {planOf(stage) > 0 && <span style={{ display: "block", fontSize: 11, color: "#94a3b8" }}>по смете {money(planOf(stage))} ₸</span>}
+                  </span>
+                </label>
+                {on && (() => {
+                  const line = lines.find((item) => item.stageId === stage.id) || { agreed: 0, fact: 0 };
+                  const delta = line.fact - line.agreed;
+                  return (
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <input className="sr-field" inputMode="numeric" style={{ flex: "1 1 120px", minWidth: 0 }}
+                        value={picked[stage.id]} placeholder="сумма по этой работе"
+                        onChange={(event) => setPicked((prev) => ({ ...prev, [stage.id]: event.target.value }))} />
+                      {line.fact > 0 && line.agreed > 0 && (
+                        <span style={chip(delta > 0 ? "#b91c1c" : delta < 0 ? "#64748b" : "#047857",
+                          delta > 0 ? "#fef2f2" : delta < 0 ? "#f1f5f9" : "#ecfdf5")}>
+                          {delta > 0 ? `⚠ выше сметы на ${money(delta)} ₸` : delta < 0 ? `ниже сметы на ${money(-delta)} ₸` : "как в смете"}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Сходится ли разложенное с чеком. Остаток сохранять не мешает — прораб
+          на объекте не всегда помнит разбивку, и запрет означал бы, что запись
+          не появится вовсе. Но висящую сумму видно и ему, и руководителю. */}
+      {amount > 0 && (
+        <div style={{ marginTop: 10, ...chip(rest === 0 ? "#047857" : rest < 0 ? "#b91c1c" : "#b45309",
+          rest === 0 ? "#ecfdf5" : rest < 0 ? "#fef2f2" : "#fffbeb"), padding: "7px 11px", fontSize: 12 }}>
+          {rest === 0 ? `✓ Разложено ${money(spread)} из ${money(amount)} ₸`
+            : rest > 0 ? `Не распределено ${money(rest)} ₸ из ${money(amount)}`
+              : `⚠ Разложено на ${money(-rest)} ₸ больше, чем в выплате`}
+        </div>
+      )}
 
       <div className="sr-tiles">
         {receipts.map((receipt) => (
@@ -324,8 +383,8 @@ function PaymentForm({ stage, api, onDone }) {
                 border: "1px solid #fecaca", background: "#fff", color: "#dc2626", cursor: "pointer", fontSize: 11, lineHeight: 1 }}>×</button>
           </div>
         ))}
-        {/* Чек чаще всего уже лежит в галерее — это скриншот перевода, а не то,
-            что фотографируют на месте. Поэтому здесь галерея первой. */}
+        {/* Чек чаще всего уже в галерее — это скриншот перевода, а не то, что
+            фотографируют на месте. Поэтому галерея первой. */}
         <label className="sr-tile sr-add" title="Выбрать из галереи">
           🖼<span>Чек из галереи</span>
           <input type="file" accept="image/*" multiple style={{ display: "none" }} onChange={attach} />
@@ -335,6 +394,11 @@ function PaymentForm({ stage, api, onDone }) {
           <input type="file" accept="image/*" capture="environment" multiple style={{ display: "none" }} onChange={attach} />
         </label>
       </div>
+
+      <label className="sr-lab" style={{ marginTop: 10 }}>Комментарий
+        <textarea className="sr-field" rows={2} value={form.note} onChange={(event) => set({ note: event.target.value })}
+          placeholder="за что и почему столько" />
+      </label>
 
       {problem && <div style={{ marginTop: 8, fontSize: 12, color: "#b91c1c", fontWeight: 700 }}>{problem}</div>}
       <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
@@ -347,10 +411,16 @@ function PaymentForm({ stage, api, onDone }) {
   );
 }
 
-function PaymentCard({ report, api, currentUser }) {
+// Карточка выплаты. Видно и общую сумму чека, и на какие работы она разошлась —
+// иначе «300 000 Ержану» не проверить: неясно, за что именно платили.
+function PaymentCard({ report, api, currentUser, stageName }) {
   const [comment, setComment] = useState("");
   const [open, setOpen] = useState(false);
   const meta = reportStatusMeta(report.status);
+  const lines = paymentLines(report);
+  const amount = paymentAmount(report);
+  const spread = allocatedTotal(report);
+  const rest = amount - spread;
   const delta = paymentDeviation(report);
   const mine = String(report.authorId || "") === String(currentUser?.id || "");
   const mayReview = canReviewPayment(report, currentUser, { canReview: api.canReview });
@@ -358,20 +428,43 @@ function PaymentCard({ report, api, currentUser }) {
   return (
     <div className="sr-rep" style={{ borderLeft: `3px solid ${meta.color}` }}>
       <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-        <span style={{ fontSize: 13, fontWeight: 800, color: "#0f172a", minWidth: 0, overflowWrap: "anywhere" }}>{report.payee}</span>
+        <span style={{ fontSize: 13.5, fontWeight: 800, color: "#0f172a", minWidth: 0, overflowWrap: "anywhere" }}>{report.payee}</span>
+        <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>{money(amount)} ₸</span>
         <span style={chip(meta.color, meta.bg)}>{meta.label}</span>
         <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: "auto" }}>
           {payModeMeta(report.mode).label} · {shortDate(report.date)}
         </span>
       </div>
-      <div className="sr-sums">
-        <span style={{ fontSize: 12, color: "#64748b" }}>согласовано <b style={{ color: "#0f172a" }}>{money(report.agreed)} ₸</b></span>
-        <span style={{ fontSize: 12, color: "#64748b" }}>факт <b style={{ color: "#0f172a" }}>{money(report.fact)} ₸</b></span>
-        {delta > 0 && <span style={chip("#b91c1c", "#fef2f2")}>⚠ выше на {money(delta)} ₸</span>}
-        {delta < 0 && (isPartialPayment(report)
-          ? <span style={chip("#64748b", "#f1f5f9")}>остаток {money(paymentRemainder(report))} ₸</span>
-          : <span style={chip("#047857", "#ecfdf5")}>ниже на {money(-delta)} ₸</span>)}
+
+      <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+        {lines.map((line) => {
+          const over = line.fact - line.agreed;
+          return (
+            <div key={line.stageId} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", fontSize: 12 }}>
+              <span style={{ color: "#475569", flex: "1 1 140px", minWidth: 0, overflowWrap: "anywhere" }}>{stageName?.(line.stageId) || "Работа"}</span>
+              <span style={{ fontWeight: 800, color: "#0f172a", whiteSpace: "nowrap" }}>{money(line.fact)} ₸</span>
+              {line.agreed > 0 && over !== 0 && (
+                <span style={chip(over > 0 ? "#b91c1c" : "#64748b", over > 0 ? "#fef2f2" : "#f1f5f9")}>
+                  {over > 0 ? `⚠ +${money(over)}` : `−${money(-over)}`} к смете
+                </span>
+              )}
+            </div>
+          );
+        })}
       </div>
+
+      <div className="sr-sums">
+        {rest !== 0 && (
+          <span style={chip(rest < 0 ? "#b91c1c" : "#b45309", rest < 0 ? "#fef2f2" : "#fffbeb")}>
+            {rest > 0 ? `не распределено ${money(rest)} ₸` : `⚠ разложено на ${money(-rest)} ₸ больше чека`}
+          </span>
+        )}
+        {delta > 0 && <span style={chip("#b91c1c", "#fef2f2")}>⚠ выше сметы на {money(delta)} ₸</span>}
+        {delta < 0 && (isPartialPayment(report)
+          ? <span style={chip("#64748b", "#f1f5f9")}>остаток по смете {money(paymentRemainder(report))} ₸</span>
+          : <span style={chip("#047857", "#ecfdf5")}>ниже сметы на {money(-delta)} ₸</span>)}
+      </div>
+
       {report.note && <div style={{ fontSize: 12, color: "#475569", marginTop: 6, lineHeight: 1.4 }}>{report.note}</div>}
       {report.receipts?.length > 0 && (
         <div className="sr-tiles">
@@ -406,41 +499,60 @@ function PaymentCard({ report, api, currentUser }) {
             </div>
           ) : (
             <button type="button" onClick={() => setOpen(true)} style={small("#0f172a", "#f1f5f9")}>
-              {report.status === "pending" ? "Проверить отчёт" : "Изменить решение"}
+              {report.status === "pending" ? "Проверить выплату" : "Изменить решение"}
             </button>
           )}
         </div>
       )}
-      {/* Своё подтвердить нельзя — это и есть смысл проверки. Объясняем прямо,
+      {/* Своё подтвердить нельзя — в этом и смысл проверки. Объясняем прямо,
           иначе автор ищет пропавшую кнопку. */}
       {mine && api.canReview && (
-        <div style={{ marginTop: 8, fontSize: 11, color: "#94a3b8" }}>Свой отчёт подтверждает другой человек.</div>
+        <div style={{ marginTop: 8, fontSize: 11, color: "#94a3b8" }}>Свою выплату подтверждает другой человек.</div>
       )}
     </div>
   );
 }
 
-export function PaymentPanel({ stage, api, currentUser }) {
+// Раздел «Взаиморасчёты» под таблицей финансов: список выплат по объекту.
+// Прораб не видит чужие выплаты — только свои и их статус.
+export function PaymentsSection({ stages = [], api, currentUser, filterStageId = "", onClearFilter }) {
   const [adding, setAdding] = useState(false);
-  const reports = listPayments(api.list, stage.id);
-  const visible = api.canReview ? reports : reports.filter((item) => String(item.authorId || "") === String(currentUser?.id || ""));
+  const all = filterStageId ? listPayments(api.list, filterStageId) : listAllPayments(api.list);
+  const visible = api.canReview ? all : all.filter((item) => String(item.authorId || "") === String(currentUser?.id || ""));
+  const nameOf = (stageId) => stages.find((item) => item.id === stageId)?.name || "";
+  const totals = summarizePayments(api.list);
 
   return (
-    <div className="sr-panel">
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12.5, fontWeight: 800, color: "#0f172a" }}>Расчёт с рабочими</span>
-        <span className="sr-note" style={{ fontSize: 11, color: "#94a3b8", flex: 1, minWidth: 0 }}>
-          внутренний документ — финансовые операции не создаёт
-        </span>
+    <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
+      <style>{STAGE_REPORTS_CSS}</style>
+      <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Взаиморасчёты с мастерами</span>
+        {!filterStageId && totals.paid > 0 && <span style={chip("#64748b", "#f1f5f9")}>выплачено {money(totals.paid)} ₸</span>}
+        {filterStageId && (
+          <span style={chip("#2563eb", "#eff6ff")}>только по работе: {nameOf(filterStageId) || "выбранной"}</span>
+        )}
+        {filterStageId && onClearFilter && (
+          <button type="button" onClick={onClearFilter} style={small("#64748b", "#f1f5f9")}>Показать все</button>
+        )}
         {!api.readOnly && !adding && (
-          <button type="button" onClick={() => setAdding(true)} style={small("#0f172a", "#fff")}>+ Отчёт</button>
+          <button type="button" onClick={() => setAdding(true)} style={{ ...primary, marginLeft: "auto" }}>+ Выплата</button>
         )}
       </div>
-      {adding && <PaymentForm stage={stage} api={api} onDone={() => setAdding(false)} />}
+      <div style={{ fontSize: 11.5, color: "#94a3b8", marginTop: 3, lineHeight: 1.45 }}>
+        Один чек может закрывать несколько работ — суммы разносятся по ним внутри выплаты.
+        Внутренний документ: финансовых операций не создаёт.
+      </div>
+
+      {adding && <PaymentForm stages={stages} api={api} preselect={filterStageId} onDone={() => setAdding(false)} />}
+
       {visible.length === 0 && !adding && (
-        <div style={{ fontSize: 12, color: "#94a3b8", padding: "10px 0 2px" }}>Отчётов по этой работе пока нет.</div>
+        <div style={{ fontSize: 12.5, color: "#94a3b8", padding: "14px 0 2px" }}>
+          {filterStageId ? "По этой работе выплат пока нет." : "Выплат пока нет."}
+        </div>
       )}
-      {visible.map((report) => <PaymentCard key={report.id} report={report} api={api} currentUser={currentUser} />)}
+      {visible.map((report) => (
+        <PaymentCard key={report.id} report={report} api={api} currentUser={currentUser} stageName={nameOf} />
+      ))}
     </div>
   );
 }
