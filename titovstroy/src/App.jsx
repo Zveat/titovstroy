@@ -23,7 +23,7 @@ import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplat
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 import { clientPhotosByStage, stageReportsKey, normalizeStageReports } from "./stage-reports/model.js";
-import { ClientPhotoReport, PhotoLightbox, stagesWithPhotos } from "./stage-reports/ClientPhotos.jsx";
+import { ClientPhotoReport, ClientTabs, PhotoLightbox, stagesWithPhotos } from "./stage-reports/ClientPhotos.jsx";
 import { normCN, contractNetTotal, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, resolveEstimateRows, existingEstimateRowKey, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
@@ -5227,7 +5227,11 @@ function PublicProgress({ token }) {
   // Просмотр фото на весь экран: {list, i}. Держим индекс, а не само фото —
   // из полноэкранного режима клиент листает соседние снимки той же работы.
   const [lb, setLb] = useState(null);
-  const [photosAll, setPhotosAll] = useState(false);
+  const [photosAll, setPhotosAll] = useState(true);
+  // Кабинет разбит на вкладки, как карточка объекта внутри системы. Одной
+  // лентой фотоотчёт тонул между готовностью и оплатой, а ради него клиент
+  // страницу и открывает.
+  const [tab, setTab] = useState("work");
   // Загрузка снимка прогресса + документов. isRefresh: не сбрасываем страницу в
   // "недоступно" и не накручиваем счётчик просмотров при ручном обновлении.
   const load = useCallback(async (opts = {}) => {
@@ -5331,6 +5335,19 @@ function PublicProgress({ token }) {
   // здесь только раскладываем по работам и стадиям: до → скрытые работы → после.
   const photoStages = (showStages && showPhotos) ? stagesWithPhotos(_stg) : [];
   const photoOf = (st) => (photoStages.find(g => g.stage === st) || {}).list || [];
+  // Вкладки кабинета. Показываем только то, что реально есть: пустая вкладка
+  // «Документы» у объекта без документов — обещание, которого никто не давал.
+  const _docsCount = docs ? ((docs.contracts || []).length + (docs.acts || []).length + (docs.estimates || []).length) : 0;
+  const tabItems = [
+    ["work", "Ход работ", "🔨", showStages || history.length > 0],
+    ["photos", "Фотоотчёт", "📷", photoStages.length > 0],
+    ["pay", "Оплата", "💳", showPay && !!s.payment],
+    ["docs", "Документы", "📄", vis.docs !== false && _docsCount > 0],
+    ["notes", "Замечания", "💬", showRemarks],
+  ].filter(item => item[3]);
+  // Выбранная вкладка могла пропасть между обновлениями снимка — тогда страница
+  // осталась бы пустой без единого объяснения.
+  const activeTab = tabItems.some(([key]) => key === tab) ? tab : (tabItems[0]?.[0] || "work");
   // Работы идут ПАРАЛЛЕЛЬНО и НЕ по порядку списка. Поэтому «сейчас в работе» — это ВСЕ этапы
   // со статусом progress, а «задержки» — delayed. Никакой ложной последовательности «текущий→следующий».
   const inWork = _stg.filter(st => (st.status || "todo") === "progress");
@@ -5424,8 +5441,11 @@ function PublicProgress({ token }) {
       </div>
     </div>
 
+    <ClientTabs items={tabItems} active={activeTab} onPick={setTab} ui={{ INK, MUT }}
+      badges={{ photos: photoStages.reduce((n, g) => n + g.list.length, 0) }} />
+
     {/* Сейчас в работе — ВСЕ параллельные этапы (progress) + задержки. Без ложного «далее». */}
-    {showStages && !s.factEndDate && (inWork.length > 0 || delayedStages.length > 0) && (
+    {activeTab === "work" && showStages && !s.factEndDate && (inWork.length > 0 || delayedStages.length > 0) && (
       <div style={card}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
           <span style={{ fontSize: 15 }}>🔨</span>
@@ -5457,11 +5477,11 @@ function PublicProgress({ token }) {
 
     {/* Фотоотчёт — доказательство работ. Клиент видит, что было до, что спрятано
         внутри конструкции (каркас, утеплитель, разводка) и что получилось. */}
-    <ClientPhotoReport groups={photoStages} ui={{ card, INK, BRASS, FAINT, BLUE }}
-      expanded={photosAll} onExpand={setPhotosAll} onOpen={setLb} />
+    {activeTab === "photos" && <ClientPhotoReport groups={photoStages} ui={{ card, INK, BRASS, FAINT, BLUE }}
+      expanded={photosAll} onExpand={setPhotosAll} onOpen={setLb} />}
 
     {/* Ход работ — таймлайн */}
-    {showStages && (
+    {activeTab === "work" && showStages && (
     <div style={card}>
       <div style={h}>Ход работ</div>
       {groups.length === 0 && <div style={{ color: FAINT, fontSize: 13, padding: "8px 0" }}>Этапы появятся по мере старта работ.</div>}
@@ -5505,7 +5525,7 @@ function PublicProgress({ token }) {
     )}
 
     {/* Оплата */}
-    {showPay && s.payment && (() => {
+    {activeTab === "pay" && showPay && s.payment && (() => {
       const fill = pay.budget > 0 ? Math.min(100, Math.round((pay.paid || 0) / pay.budget * 100)) : 0;
       return (
       <div style={card}>
@@ -5529,7 +5549,7 @@ function PublicProgress({ token }) {
     })()}
 
     {/* Документы (сметы + договоры + акты) */}
-    {vis.docs !== false && docs && ((docs.contracts || []).length > 0 || (docs.acts || []).length > 0 || (docs.estimates || []).length > 0) && (
+    {activeTab === "docs" && vis.docs !== false && docs && ((docs.contracts || []).length > 0 || (docs.acts || []).length > 0 || (docs.estimates || []).length > 0) && (
       <div style={card}>
         <div style={h}>Документы</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -5554,7 +5574,7 @@ function PublicProgress({ token }) {
     )}
 
     {/* Замечания от клиента */}
-    {showRemarks && (
+    {activeTab === "notes" && showRemarks && (
     <div style={card}>
       <div style={h}>Замечания и пожелания</div>
       <div style={{ fontSize: 12.5, color: FAINT, marginBottom: 12, lineHeight: 1.45 }}>Напишите, если что-то нужно поправить или уточнить — замечание попадёт прорабу.</div>
@@ -5582,7 +5602,7 @@ function PublicProgress({ token }) {
     )}
 
     {/* История — безопасная лента событий по объекту */}
-    {history.length > 0 && (
+    {activeTab === "work" && history.length > 0 && (
       <div style={card}>
         <div style={h}>История</div>
         <div style={{ position: "relative" }}>
