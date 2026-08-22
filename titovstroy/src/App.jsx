@@ -22,6 +22,8 @@ import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restore
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
+import { clientPhotosByStage, stageReportsKey, normalizeStageReports } from "./stage-reports/model.js";
+import { ClientPhotoReport, PhotoLightbox, stagesWithPhotos } from "./stage-reports/ClientPhotos.jsx";
 import { normCN, contractNetTotal, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, resolveEstimateRows, existingEstimateRowKey, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
@@ -5222,6 +5224,10 @@ function PublicProgress({ token }) {
   const [rmSent, setRmSent] = useState(false);
   const [docs, setDocs] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Просмотр фото на весь экран: {list, i}. Держим индекс, а не само фото —
+  // из полноэкранного режима клиент листает соседние снимки той же работы.
+  const [lb, setLb] = useState(null);
+  const [photosAll, setPhotosAll] = useState(false);
   // Загрузка снимка прогресса + документов. isRefresh: не сбрасываем страницу в
   // "недоступно" и не накручиваем счётчик просмотров при ручном обновлении.
   const load = useCallback(async (opts = {}) => {
@@ -5320,6 +5326,11 @@ function PublicProgress({ token }) {
   // Настройки видимости (старые снимки без vis → показываем всё, как раньше)
   const vis = s.vis || {};
   const showStages = vis.stages !== false, showPay = vis.payments !== false, showRemarks = vis.remarks !== false;
+  const showPhotos = vis.photos !== false;
+  // Фотоотчёт по работам. Снимок уже вычищен (скрытые и недогруженные не приходят),
+  // здесь только раскладываем по работам и стадиям: до → скрытые работы → после.
+  const photoStages = (showStages && showPhotos) ? stagesWithPhotos(_stg) : [];
+  const photoOf = (st) => (photoStages.find(g => g.stage === st) || {}).list || [];
   // Работы идут ПАРАЛЛЕЛЬНО и НЕ по порядку списка. Поэтому «сейчас в работе» — это ВСЕ этапы
   // со статусом progress, а «задержки» — delayed. Никакой ложной последовательности «текущий→следующий».
   const inWork = _stg.filter(st => (st.status || "todo") === "progress");
@@ -5444,6 +5455,11 @@ function PublicProgress({ token }) {
       </div>
     )}
 
+    {/* Фотоотчёт — доказательство работ. Клиент видит, что было до, что спрятано
+        внутри конструкции (каркас, утеплитель, разводка) и что получилось. */}
+    <ClientPhotoReport groups={photoStages} ui={{ card, INK, BRASS, FAINT, BLUE }}
+      expanded={photosAll} onExpand={setPhotosAll} onOpen={setLb} />
+
     {/* Ход работ — таймлайн */}
     {showStages && (
     <div style={card}>
@@ -5471,6 +5487,12 @@ function PublicProgress({ token }) {
                       <div style={{ fontSize: 13.5, fontWeight: isCur ? 800 : 600, color: status === "done" ? "#475569" : INK }}>{st.name}</div>
                       <div style={{ fontSize: 11, color: cfg.c, fontWeight: 700, marginTop: 1 }}>{cfg.l}{st.planEnd ? ` · до ${dt(st.planEnd)}` : ""}</div>
                     </div>
+                    {photoOf(st).length > 0 && (
+                      <button onClick={() => setLb({ list: photoOf(st), i: 0, title: st.name })}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#f8fafc", border: "1px solid #eef1f5", borderRadius: 20, padding: "4px 9px", fontSize: 11.5, fontWeight: 800, color: BLUE, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+                        📷 {photoOf(st).length}
+                      </button>
+                    )}
                     {Number(st.priceClient) > 0 && <div style={{ fontSize: 12.5, fontWeight: 800, color: MUT, flexShrink: 0 }}>{fmt(st.priceClient)} ₸</div>}
                   </div>
                 );
@@ -5581,6 +5603,8 @@ function PublicProgress({ token }) {
     )}
 
     <div style={{ textAlign: "center", fontSize: 11.5, color: FAINT, marginTop: 20, paddingBottom: 4 }}>TitovStroy · ремонт и отделка{s.publishedAt ? ` · обновлено ${new Date(s.publishedAt).toLocaleDateString("ru-RU")}` : ""}</div>
+
+    <PhotoLightbox value={lb} onChange={setLb} onClose={() => setLb(null)} />
   </>);
 }
 
@@ -7705,8 +7729,18 @@ ${reqBlock}`;
   // ── ДОСТУП КЛИЕНТА К ПРОГРЕССУ (публичная ссылка #/progress/<токен>) ──
   const prodEntriesRef = useRef([]);
   useEffect(() => { prodEntriesRef.current = prodEntries; }, [prodEntries]);
+  // Отчёты по этапам лежат отдельным узлом на объект (см. stage-reports/model.js)
+  // и в состоянии приложения не держатся: их читает только публикация снимка и
+  // сама карточка объекта, когда её открыли.
+  const _readStageReports = useCallback(async (objectId) => {
+    try {
+      const result = await storage.getResult(stageReportsKey(objectId));
+      if (result?.status !== "found" || !result.value) return [];
+      return normalizeStageReports(JSON.parse(result.value));
+    } catch { return []; }
+  }, []);
   // Собрать ОЧИЩЕННЫЙ снимок для клиента (без себестоимости/маржи/подрядчиков/внутренних заметок)
-  const buildProgressSnapshot = useCallback((objectId, prev = {}) => {
+  const buildProgressSnapshot = useCallback((objectId, prev = {}, stageReports = []) => {
     const obj = objectsRef.current.find(o => o.id === objectId);
     if (!obj) return null;
     const prod = productionsRef.current.find(p => p.objectId === objectId) || {};
@@ -7735,8 +7769,14 @@ ${reqBlock}`;
     // Настройки видимости для клиента (по умолчанию всё включено). Скрытые разделы НЕ
     // просто прячутся в интерфейсе — их данные вообще не кладём в снимок, чтобы не утекли
     // даже при прямом чтении ноды.
+    // Фото по работам. Ради них клиент и заходит: видно, что было до, что
+    // спрятано внутри конструкции и что получилось. Скрытые вручную и
+    // недогруженные не отдаём — clientPhotosByStage их отсекает, заодно
+    // выбрасывая внутренние поля (кто снял) из публичного снимка.
+    const _clientPhotos = clientPhotosByStage(stageReports);
     const cv = obj.clientVis || {};
     const showPay = cv.payments !== false, showStages = cv.stages !== false, showRemarks = cv.remarks !== false, showDocs = cv.docs !== false;
+    const showPhotos = cv.photos !== false;
     // Индивидуальные ОПЛАТЫ клиента (только доходные операции по договорам объекта) — для «Истории».
     // Только когда оплаты разрешены к показу. Себестоимость/расходы/подрядчики сюда НЕ попадают —
     // берём исключительно income-транзакции, привязанные к номерам договоров этого объекта.
@@ -7755,8 +7795,8 @@ ${reqBlock}`;
       startDate: prod.startDate || "", planEndDate: prod.planEndDate || "", factEndDate: prod.factEndDate || "",
       progressPct, doneStages: doneCnt, totalStages: stages.length,
       // vis — что показывать клиенту (публичная страница читает эти флаги)
-      vis: { payments: showPay, docs: showDocs, stages: showStages, remarks: showRemarks },
-      stages: showStages ? stages.map(st => ({ name: st.manualName || st.name || "Этап", cat: st.cat || "Работы", status: st.status || "todo", planEnd: st.planEnd || "", factEnd: st.factEnd || "", priceClient: Number(st.priceClient) || 0 })) : [],
+      vis: { payments: showPay, docs: showDocs, stages: showStages, remarks: showRemarks, photos: showPhotos },
+      stages: showStages ? stages.map(st => ({ photos: showPhotos ? (_clientPhotos[st.id] || []) : [], name: st.manualName || st.name || "Этап", cat: st.cat || "Работы", status: st.status || "todo", planEnd: st.planEnd || "", factEnd: st.factEnd || "", priceClient: Number(st.priceClient) || 0 })) : [],
       payment: showPay ? { budget, paid, remaining: Math.max(0, budget - paid) } : null,
       payments: showPay ? payments : [],
       handover, clientRemarks: showRemarks ? clientRemarks : [], clientMessage,
@@ -7775,7 +7815,7 @@ ${reqBlock}`;
     if (!showRemarks) { try { await syncRemarksRef.current?.(objectId); } catch {} }
     let prev = {};
     try { const r = await storage.getResult(PROGRESS_NODE(obj.progressToken)); if (r.status === "found" && r.value) prev = JSON.parse(r.value); } catch {}
-    const snap = buildProgressSnapshot(objectId, prev);
+    const snap = buildProgressSnapshot(objectId, prev, await _readStageReports(objectId));
     if (!snap) return;
     if (showRemarks) {
       // Клиент мог отправить замечание прямо в эту ноду, пока мы считали снимок (submitRemark
@@ -7870,7 +7910,7 @@ ${reqBlock}`;
     // автоматической фоновой republish'ю). Повторное включение задаёт свежий срок.
     const progressExpiresAt = Date.now() + 60 * 24 * 60 * 60 * 1000;
     await saveObjects([...objectsRef.current.filter(o => o.id !== objectId), { ...obj, progressShared: true, progressToken: token, progressExpiresAt, updatedAt: Date.now() }]);
-    const snap = buildProgressSnapshot(objectId, {});
+    const snap = buildProgressSnapshot(objectId, {}, await _readStageReports(objectId));
     if (snap) { try { await storage.set(PROGRESS_NODE(token), JSON.stringify(snap)); } catch {} }
     try { await _publishDocsRef.current?.(objectId); } catch {}
     logChange(currentUser, { entity: "publish", entityId: objectId, objectId, label: _objLabel(obj), action: "открыл доступ клиенту" });
@@ -7888,7 +7928,7 @@ ${reqBlock}`;
     try { await publishProgressRef.current?.(objectId); } catch {}
     try { await _publishDocsRef.current?.(objectId); } catch {}
     // журнал: каждый переключённый раздел видимости
-    const VIS_LBL = { payments: "оплата", docs: "документы", stages: "этапы работ", remarks: "замечания" };
+    const VIS_LBL = { payments: "оплата", docs: "документы", stages: "этапы работ", remarks: "замечания", photos: "фотоотчёт" };
     for (const f of Object.keys(patch || {})) {
       const before = (obj.clientVis || {})[f] !== false, after = patch[f] !== false;
       if (before === after) continue;
@@ -16211,6 +16251,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   && !(objWsTab === "control" && currentPermissions.productionControl === "none")
                   && !(objWsTab==="finance" && !hasFinancialDetails) && (
                   <div style={{marginTop: objWsTab==="info" ? 14 : 0}}>
+                  {/* Отчёты по этапам пишут в свой узел сами (через storage), а после
+                      записи просят перепубликовать снимок клиента: в состоянии
+                      приложения этот узел не живёт, и авто-republish по productions
+                      его бы не заметил. */}
                   <ProductionModule
                     embedObjectId={obj.id}
                     embedTab={objWsTab}
@@ -16227,6 +16271,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     onDeleteProduction={onDeleteProduction}
                     onToggleClientShare={toggleClientShare}
                     onSetClientVis={setClientVis}
+                    stageReportsStorage={storage}
+                    onStageReportsChanged={(objectId) => { try { publishProgressRef.current?.(objectId); } catch {} }}
                     buildStagesFromEstimate={buildStagesFromEstimate}
                     finProjects={finProjects}
                     financeTx={financeTx}
