@@ -5,6 +5,8 @@ import { buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, _stageK
 import { listProductionDrafts, removeProductionDraft, saveProductionDraft } from "./drafts.js";
 import ObjectControlModule from "../object-control/ObjectControlModule.jsx";
 import { planStageSchedule, updateStageStatus, upsertDailyReport } from "../object-control/objectControl.js";
+import { useStageReports } from "../stage-reports/useStageReports.js";
+import StageReports, { StageReportsSummary, STAGE_REPORTS_CSS } from "../stage-reports/StageReports.jsx";
 
 // ─────────────────────────────────────────────────────────────────────────
 // ПРОИЗВОДСТВО — управление и контроль объектов в работе.
@@ -312,6 +314,7 @@ export default function ProductionModule({
   staffOptions = [], // сотрудники системы для выбора ответственного (свободный ввод убран)
   actionPermissions = {},
   embedObjectId, embedTab, clientInfoCard, // встроенный режим: карточка одного объекта внутри раздела «Объекты»
+  stageReportsStorage, onStageReportsChanged, // фото и расчёты по этапу — свой узел, см. stage-reports/
 }) {
   // карта запись производства по ключу записи (objectId реального объекта или "fp:<id>")
   const entryByKey = useMemo(() => { const m = {}; for (const e of entries) m[e.key] = e; return m; }, [entries]);
@@ -452,6 +455,18 @@ export default function ProductionModule({
   // план дня и не иметь права двигать этапы.
   const todayReadOnly = baseReadOnly || actionPermissions.today === false || stagesReadOnly;
   const controlReadOnly = baseReadOnly || actionPermissions.control === false || stagesReadOnly;
+  // Фото и расчёты по этапу. Право «проверять» берём из уже существующего права
+  // на клиентский доступ: именно оно и означает «решает, что видит клиент», и
+  // по умолчанию есть у руководителя с администратором, но не у прораба. Новый
+  // ключ прав заводить не стали — этот настраивается в «Права ролей» как есть.
+  const stageReports = useStageReports({
+    objectId: openObj?.id,
+    storage: stageReportsStorage,
+    currentUser,
+    canReview: !baseReadOnly && actionPermissions.clientAccess !== false,
+    readOnly: stagesReadOnly,
+    onChanged: onStageReportsChanged,
+  });
   const tabReadOnly = embedTab === "stages" ? stagesReadOnly
     : embedTab === "today" ? todayReadOnly
     : embedTab === "control" ? controlReadOnly
@@ -597,12 +612,13 @@ export default function ProductionModule({
         <ChecklistTab kind="checklistHandover" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист сдачи объекта" />
         <WarrantyTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} fmt={fmt} audit={audit} />
       </>}
+      {embedTab === "control" && <StageReportsSummary api={stageReports} />}
       {embedTab === "control" && <ObjectControlModule mode="control" object={openObj} production={localProd} currentUser={currentUser}
         readOnly={controlReadOnly} onPatchProduction={stagesPatch}
-        defectsReadOnly={qualityReadOnly} onAddDefect={handleAddDefect} />}
+        defectsReadOnly={qualityReadOnly} onAddDefect={handleAddDefect} renderStageReports={(stage) => <StageReports stage={stage} api={stageReports} currentUser={currentUser} />} />}
       {embedTab === "today" && <ObjectControlModule mode="today" object={openObj} production={localProd} currentUser={currentUser} readOnly={todayReadOnly}
-        onStageStatus={handleTodayStageStatus} onCloseDay={handleCloseDay} onPatchProduction={stagesPatch} onPlanDates={handlePlanDates} />}
-      {embedTab === "stages" && <StagesTab prod={localProd} patch={stagesPatch} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} audit={audit} />}
+        onStageStatus={handleTodayStageStatus} onCloseDay={handleCloseDay} onPatchProduction={stagesPatch} onPlanDates={handlePlanDates} renderStageReports={(stage) => <StageReports stage={stage} api={stageReports} currentUser={currentUser} />} />}
+      {embedTab === "stages" && <StagesTab prod={localProd} patch={stagesPatch} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} audit={audit} stageReports={stageReports} currentUser={currentUser} />}
       {embedTab === "finance" && <FinanceTab prod={localProd} patch={mainPatch} fmt={fmt} finSummary={finSummary} />}
       {embedTab === "journal" && <JournalTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} />}
       {embedTab === "defects" && <DefectsTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} />}
@@ -813,7 +829,7 @@ function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, onSetClientV
   const realUrl = shared ? (window.location.origin + window.location.pathname + "#/progress/" + obj.progressToken) : null;
   const url = realUrl || shareLink;
   const cv = obj.clientVis || {};
-  const visRows = [["stages","Этапы работ"],["payments","Оплата по договору"],["docs","Документы"],["remarks","Замечания клиента"]];
+  const visRows = [["stages","Этапы работ"],["photos","Фотоотчёт"],["payments","Оплата по договору"],["docs","Документы"],["remarks","Замечания клиента"]];
   return (
     <fieldset disabled={readOnly} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 11, margin:0, minWidth:0 }}>
       {onToggleClientShare && (
@@ -1104,7 +1120,7 @@ function StageName({ value, onChange, readOnly }) {
   );
 }
 
-function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, audit }) {
+function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, audit, stageReports, currentUser }) {
   const stages = prod.stages || [];
   const [newName, setNewName] = useState("");
   const [newCat, setNewCat] = useState("");
@@ -1186,6 +1202,7 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
           .st-add>*{flex:1 1 100%!important}
           .st-add>button{flex:0 0 auto!important}
         }
+        ${STAGE_REPORTS_CSS}
       `}</style>
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
@@ -1272,6 +1289,7 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
                         </div>
                         <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="+ примечание"
                           style={{ marginTop: 6, width: "100%", border: "none", borderBottom: "1px dashed #e2e8f0", fontSize: 11, color: "#64748b", fontFamily: "inherit", outline: "none", padding: "1px 0", background: "transparent" }} />
+                        {stageReports && <StageReports stage={s} api={stageReports} currentUser={currentUser} />}
                       </div>
                       <button onClick={() => { if (window.confirm(`Удалить этап «${s.name || "без названия"}»?\n\nВажно: если эта работа ещё есть в смете объекта — этап вернётся при следующей синхронизации. Чтобы убрать навсегда, удалите работу из сметы.`)) patch({ stages: stages.filter(x => x.id !== s.id) }); }}
                         title="Удалить этап" style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "0 2px", flexShrink: 0, alignSelf: "flex-start" }}>×</button>
