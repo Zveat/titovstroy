@@ -1,5 +1,8 @@
 import { useState, useMemo, useEffect, useLayoutEffect, useRef, Fragment } from "react";
 import { STAGE_STATUSES, emptyProduction } from "./constants.js";
+// Подпись статуса для журнала — из того же справочника, что и в интерфейсе:
+// иначе журнал со временем разойдётся с тем, что человек видел на экране.
+const _stageStatusLabel = (key) => STAGE_STATUSES.find(item => item.key === key)?.label || key || "—";
 import { normCN, contractNetTotal, estimatesForObject, findFinanceProjectForObject, sortProductionStages, moveProductionStage, buildGanttLayout, sortGanttRows, GANTT_SCALES, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "../utils.js";
 import { buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, _stageKey } from "./commands.js";
 import { listProductionDrafts, removeProductionDraft, saveProductionDraft } from "./drafts.js";
@@ -460,6 +463,9 @@ export default function ProductionModule({
   // на клиентский доступ: именно оно и означает «решает, что видит клиент», и
   // по умолчанию есть у руководителя с администратором, но не у прораба. Новый
   // ключ прав заводить не стали — этот настраивается в «Права ролей» как есть.
+  // audit объявлен ниже, а между ним и этим местом есть ранний return — хук
+  // сюда не перенести, поэтому журнал прокидывается через ref.
+  const auditRef = useRef(null);
   const stageReports = useStageReports({
     objectId: openObj?.id,
     storage: stageReportsStorage,
@@ -467,6 +473,8 @@ export default function ProductionModule({
     canReview: !baseReadOnly && actionPermissions.clientAccess !== false,
     readOnly: stagesReadOnly,
     onChanged: onStageReportsChanged,
+    onAudit: (event) => auditRef.current?.(event),
+    stageName: (stageId) => (localProdRef.current?.stages || []).find((item) => item.id === stageId)?.name || "",
   });
   const tabReadOnly = embedTab === "stages" ? stagesReadOnly
     : embedTab === "today" ? todayReadOnly
@@ -501,10 +509,18 @@ export default function ProductionModule({
   // Статус этапа с вкладки «Сегодня»: сразу проставляем факт-старт и факт-конец,
   // иначе «в работе» и «готово» не попадают ни в график, ни в прогресс.
   const handleTodayStageStatus = (stageId, status) => {
+    const before = (localProdRef.current?.stages || []).find(stage => stage?.id === stageId);
     const stages = (localProdRef.current?.stages || []).map(stage => (
       stage?.id === stageId ? updateStageStatus(stage, status, localDateKey()) : stage
     ));
     stagesPatch({ stages });
+    // «Готово» ставится одним нажатием и меняет и статус, и фактические даты —
+    // в журнале этого не было вообще, хотя это самое частое действие прораба.
+    if (before && before.status !== status) {
+      auditRef.current?.({ entity: "stage", field: "статус работы", action: "изменил",
+        old: _stageStatusLabel(before.status), new: _stageStatusLabel(status),
+        detail: `работа: ${before.name || "без названия"}` });
+    }
   };
   // Замечание с «Управления» пишем в тот же список, что и вкладка «Замечания»,
   // и правом «качество» — иначе через новую вкладку обошли бы её ограничение.
@@ -513,12 +529,16 @@ export default function ProductionModule({
     if (!value) return;
     const current = localProdRef.current || {};
     qualityPatch({ defects: [{ id: genId(), text: value, done: false, ts: Date.now(), author: currentUser?.name || "—" }, ...(current.defects || [])] });
+    auditRef.current?.({ entity: "object", field: "замечание", action: "добавил", old: "—", new: value.slice(0, 120) });
   };
   // Закрытие дня пишет отчёт И строку в журнал объекта: держать две ленты про
   // одно и то же незачем — история объекта живёт в журнале. Строка одна на день
   // и автора: повторное сохранение обновляет её, а не плодит дубли.
   const handleCloseDay = (report) => {
     const current = localProdRef.current || {};
+    auditRef.current?.({ entity: "object", field: "отчёт за день", action: "закрыл день",
+      old: "—", new: report.workers !== "" && report.workers != null ? `людей: ${report.workers}` : "без цифр",
+      detail: [report.blockers ? `мешало: ${report.blockers}` : "", report.tomorrowNeeds ? `нужно завтра: ${report.tomorrowNeeds}` : ""].filter(Boolean).join(" · ") });
     const reports = upsertDailyReport(current.dailyReports || [], report, Date.now());
     const journalId = `daily:${report.date}:${report.createdById}`;
     const parts = [
@@ -603,6 +623,7 @@ export default function ProductionModule({
   const _objLbl = openObj.clientName || openObj.address || "Объект";
   // try/catch: журнал не должен мешать сохранению производственных данных
   const audit = (ev) => { try { if (onAudit) onAudit({ objectId: openObj.id, label: _objLbl, source: "manual", ...ev }); } catch (e) { console.warn("audit failed", e); } };
+  auditRef.current = audit;
   return (
     <div style={{ maxWidth: 1600, margin: "0 auto" }}>
       {(tabReadOnly || (embedTab === "info" && clientAccessReadOnly)) && <div style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 14px", fontSize: 12.5, color: "#64748b", marginBottom: 12 }}>👁 Режим просмотра — часть действий недоступна для вашей роли.</div>}
@@ -620,7 +641,7 @@ export default function ProductionModule({
       {embedTab === "today" && <ObjectControlModule mode="today" object={openObj} production={localProd} currentUser={currentUser} readOnly={todayReadOnly}
         onStageStatus={handleTodayStageStatus} onCloseDay={handleCloseDay} onPatchProduction={stagesPatch} onPlanDates={handlePlanDates} renderStageReports={(stage) => <StageReports stage={stage} api={stageReports} currentUser={currentUser} />} />}
       {embedTab === "stages" && <StagesTab prod={localProd} patch={stagesPatch} genId={genId} fmt={fmt} buildStagesFromEstimate={buildStagesFromEstimate} objId={openObj.id} audit={audit} stageReports={stageReports} currentUser={currentUser} />}
-      {embedTab === "finance" && <FinanceTab prod={localProd} patch={mainPatch} fmt={fmt} finSummary={finSummary} stageReports={stageReports} currentUser={currentUser} />}
+      {embedTab === "finance" && <FinanceTab prod={localProd} patch={mainPatch} fmt={fmt} finSummary={finSummary} stageReports={stageReports} currentUser={currentUser} audit={audit} />}
       {embedTab === "journal" && <JournalTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} />}
       {embedTab === "defects" && <DefectsTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} />}
       </fieldset>}
@@ -816,13 +837,13 @@ function InfoTab({ prod, obj, estimates, contracts, fmt, patch, clientAccessPatc
       </fieldset>
 
       {/* Клиент: доступ к прогрессу + сообщение */}
-      <ClientAccessBlock obj={obj} prod={prod} patch={clientAccessPatch} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} readOnly={clientAccessReadOnly} />
+      <ClientAccessBlock obj={obj} prod={prod} patch={clientAccessPatch} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} readOnly={clientAccessReadOnly} audit={audit} />
     </div>
   );
 }
 
 // ─── Блок «Клиент»: доступ к прогрессу + сообщение (внизу вкладки «Информация») ───
-function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, onSetClientVis, currentUser, readOnly=false }) {
+function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, onSetClientVis, currentUser, readOnly=false, audit=null }) {
   const [shareLink, setShareLink] = useState(null); // ссылка для клиента после включения доступа
   const [shareBusy, setShareBusy] = useState(false);
   if (currentUser?.role === "viewer") return null;
@@ -870,7 +891,7 @@ function ClientAccessBlock({ obj, prod, patch, onToggleClientShare, onSetClientV
       )}
       {onToggleClientShare && <div style={{ borderTop: "1px solid #f1f5f9" }} />}
       {/* Сообщение клиенту — общий комментарий от компании на странице прогресса */}
-      <ClientMessageCard prod={prod} patch={patch} embedded />
+      <ClientMessageCard prod={prod} patch={patch} embedded audit={audit} />
     </fieldset>
   );
 }
@@ -1042,7 +1063,7 @@ function ChecklistTab({ kind, prod, patch, genId, title }) {
 
 // ─── Сообщение клиенту (общий комментарий от компании на странице прогресса) ───
 // Свёрнут по умолчанию, чтобы не занимать место над вкладками; разворачивается по кнопке.
-function ClientMessageCard({ prod, patch, embedded = false }) {
+function ClientMessageCard({ prod, patch, embedded = false, audit = null }) {
   const saved = prod.clientMessage && typeof prod.clientMessage === "object" ? prod.clientMessage : null;
   const savedText = saved ? (saved.text || "") : (typeof prod.clientMessage === "string" ? prod.clientMessage : "");
   const [open, setOpen] = useState(false);
@@ -1050,12 +1071,16 @@ function ClientMessageCard({ prod, patch, embedded = false }) {
   // Сброс поля при переключении объекта
   useEffect(() => { setText(savedText); setOpen(false); }, [prod.objectId]); // eslint-disable-line react-hooks/exhaustive-deps
   const dirty = text.trim() !== savedText.trim();
+  // Это сообщение видит клиент — тем более ему место в журнале объекта.
+  const logMessage = (next) => audit?.({ entity: "object", field: "сообщение клиенту", action: next ? "изменил" : "убрал",
+    old: savedText.slice(0, 120) || "—", new: next.slice(0, 120) || "—" });
   const save = () => {
     const t = text.trim();
+    logMessage(t);
     patch({ clientMessage: t ? { text: t, updatedAt: Date.now() } : null });
     setOpen(false);
   };
-  const clear = () => { setText(""); patch({ clientMessage: null }); setOpen(false); };
+  const clear = () => { logMessage(""); setText(""); patch({ clientMessage: null }); setOpen(false); };
   // В embedded-режиме карточка встроена в родительскую — без своей рамки/фона/отступов
   const wrap = embedded
     ? { background: "transparent", border: "none", borderRadius: 0, padding: 0, marginBottom: 0 }
@@ -1277,7 +1302,7 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
                             title="Удалить этап" style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: "2px 0 0", flexShrink: 0 }}>×</button>
                         </div>
                         <div className="st-meta">
-                          <select value={s.status} onChange={e => upd(s.id, { status: e.target.value })}
+                          <select value={s.status} onChange={e => { auditStage(s, "статус работы", _stageStatusLabel(s.status), _stageStatusLabel(e.target.value)); upd(s.id, { status: e.target.value }); }}
                             style={{ border: "1px solid #e2e8f0", borderRadius: 7, padding: "6px 7px", fontSize: 11.5, fontFamily: "inherit", color: st.color, background: st.bg, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>
                             {STAGE_STATUSES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
                           </select>
@@ -1296,13 +1321,19 @@ function StagesTab({ prod, patch, genId, fmt, buildStagesFromEstimate, objId, au
                           <span className="st-dh">План</span>
                           <span className="st-dh">Факт</span>
                           <span className="st-dr">Старт</span>
-                          <input type="date" value={s.planStart || ""} onChange={e => upd(s.id, { planStart: e.target.value })} style={dInp} />
-                          <input type="date" value={s.factStart || ""} onChange={e => upd(s.id, { factStart: e.target.value })} style={dInp} />
+                          <input type="date" value={s.planStart || ""} onChange={e => upd(s.id, { planStart: e.target.value })}
+                            onFocus={e => { _stFocus.current = e.target.value; }}
+                            onBlur={e => auditStage(s, "старт план", _fmtDate(_stFocus.current), _fmtDate(e.target.value))} style={dInp} />
+                          <input type="date" value={s.factStart || ""} onChange={e => upd(s.id, { factStart: e.target.value })}
+                            onFocus={e => { _stFocus.current = e.target.value; }}
+                            onBlur={e => auditStage(s, "старт факт", _fmtDate(_stFocus.current), _fmtDate(e.target.value))} style={dInp} />
                           <span className="st-dr">Конец</span>
                           <input type="date" value={s.planEnd || ""} onChange={e => upd(s.id, { planEnd: e.target.value })}
                             onFocus={e => { _stFocus.current = e.target.value; }}
-                            onBlur={e => auditStage(s, "срок этапа (план)", _fmtDate(_stFocus.current), _fmtDate(e.target.value))} style={dInp} />
-                          <input type="date" value={s.factEnd || ""} onChange={e => upd(s.id, { factEnd: e.target.value })} style={dInp} />
+                            onBlur={e => auditStage(s, "конец план", _fmtDate(_stFocus.current), _fmtDate(e.target.value))} style={dInp} />
+                          <input type="date" value={s.factEnd || ""} onChange={e => upd(s.id, { factEnd: e.target.value })}
+                            onFocus={e => { _stFocus.current = e.target.value; }}
+                            onBlur={e => auditStage(s, "конец факт", _fmtDate(_stFocus.current), _fmtDate(e.target.value))} style={dInp} />
                         </div>
                       </div>
                     </div>
@@ -1681,12 +1712,24 @@ function PerUnitCell({ total, qty, onChange, ph = "—" }) {
   );
 }
 
-function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser }) {
+function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser, audit }) {
+  // Деньги по этапам не попадали в журнал вообще: цену, себестоимость и отметку
+  // «оплачено» можно было поменять, и следа не оставалось. Для сумм это хуже,
+  // чем для сроков.
+  const auditMoney = (stage, field, oldV, newV) => {
+    if (!audit || Math.round(Number(oldV) || 0) === Math.round(Number(newV) || 0)) return;
+    audit({ entity: "stage", field, action: "изменил",
+      old: `${fmt(Number(oldV) || 0)} ₸`, new: `${fmt(Number(newV) || 0)} ₸`,
+      detail: `работа: ${stage.name || "без названия"}` });
+  };
   // Отчёт прораба о расчёте с бригадой живёт здесь, а не в «Этапах»: это про
   // деньги, строки те же этапы, и рядом стоит «Себ. факт», которую отчёт как
   // раз и обосновывает. В «Этапах» остаются только фото — они для клиента.
   const [openPay, setOpenPay] = useState("");
   const stages = prod.stages || [];
+  // Объявлено ПОСЛЕ stages: раньше стояло выше и падало с «Cannot access
+  // 'stages' before initialization» — вкладка «Финансы» уходила в белый экран.
+  const openStage = stages.find((item) => item.id === openPay) || null;
   const upd = (id, p) => patch({ stages: stages.map(s => s.id === id ? { ...s, ...p } : s) });
   const num = (v) => Number(v) || 0;
   const tot = stages.reduce((a, s) => { a.priceClient += num(s.priceClient); a.costPlan += num(s.costPlan); a.costFact += num(s.costFact); return a; }, { priceClient: 0, costPlan: 0, costFact: 0 });
@@ -1779,18 +1822,18 @@ function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser })
                     const mPlanSum = pc - num(s.costPlan), mpl = pc ? Math.round(mPlanSum / pc * 100) : 0;
                     const mFactSum = cf ? pc - cf : null, mft = (pc && cf) ? Math.round((pc - cf) / pc * 100) : null;
                     const row = (
-                      <tr key={s.id} style={{ borderTop: "1px solid #f1f5f9", background: s.paid ? "#f0fdf4" : "transparent" }}>
+                      <tr key={s.id} style={{ borderTop: "1px solid #f1f5f9", background: openPay === s.id ? "#eff6ff" : s.paid ? "#f0fdf4" : "transparent" }}>
                         <td style={{ ...tdc, minWidth: 200 }}>
                           <div style={{ fontWeight: 600, color: "#0f172a", fontSize: 12.5 }}>{s.name || "—"}</div>
                           {(s.qty > 0 || s.unit) && <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 1 }}>{s.qty > 0 ? fmt(s.qty) : ""} {s.unit || ""}</div>}
                           <input value={s.note || ""} onChange={e => upd(s.id, { note: e.target.value })} placeholder="+ примечание" style={{ width: "100%", maxWidth: 240, border: "none", borderBottom: "1px dashed #e2e8f0", fontSize: 11, color: "#64748b", fontFamily: "inherit", outline: "none", marginTop: 3, padding: "1px 0", background: "transparent" }} />
                         </td>
-                        <td style={{ ...tdc, minWidth: 92 }}><NumCell value={s.priceClient} onChange={v => upd(s.id, { priceClient: v })} /></td>
-                        <td style={{ ...tdc, minWidth: 92 }}><PerUnitCell total={s.costPlan} qty={s.qty} onChange={v => upd(s.id, { costPlan: v })} /></td>
-                        <td style={{ ...tdc, minWidth: 92 }}><PerUnitCell total={s.costFact} qty={s.qty} onChange={v => upd(s.id, { costFact: v })} /></td>
+                        <td style={{ ...tdc, minWidth: 92 }}><NumCell value={s.priceClient} onChange={v => { auditMoney(s, "цена для клиента", s.priceClient, v); upd(s.id, { priceClient: v }); }} /></td>
+                        <td style={{ ...tdc, minWidth: 92 }}><PerUnitCell total={s.costPlan} qty={s.qty} onChange={v => { auditMoney(s, "себестоимость план", s.costPlan, v); upd(s.id, { costPlan: v }); }} /></td>
+                        <td style={{ ...tdc, minWidth: 92 }}><PerUnitCell total={s.costFact} qty={s.qty} onChange={v => { auditMoney(s, "себестоимость факт", s.costFact, v); upd(s.id, { costFact: v }); }} /></td>
                         <td style={{ padding: "6px 8px", textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}>{margCell(mPlanSum, mpl)}</td>
                         <td style={{ padding: "6px 8px", textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}>{margCell(mFactSum, mft)}</td>
-                        <td style={{ padding: "6px 8px", textAlign: "center", verticalAlign: "top" }}><input type="checkbox" checked={!!s.paid} onChange={e => upd(s.id, { paid: e.target.checked })} title="Оплачено клиентом" style={{ width: 17, height: 17, cursor: "pointer" }} /></td>
+                        <td style={{ padding: "6px 8px", textAlign: "center", verticalAlign: "top" }}><input type="checkbox" checked={!!s.paid} onChange={e => { audit && audit({ entity: "stage", field: "оплата работы клиентом", action: "изменил", old: s.paid ? "оплачено" : "не оплачено", new: e.target.checked ? "оплачено" : "не оплачено", detail: `работа: ${s.name || "без названия"}` }); upd(s.id, { paid: e.target.checked }); }} title="Оплачено клиентом" style={{ width: 17, height: 17, cursor: "pointer" }} /></td>
                         {stageReports && (() => {
                           const reports = listPayments(stageReports.list, s.id);
                           const mine = stageReports.canReview ? reports : reports.filter(r => String(r.authorId || "") === String(currentUser?.id || ""));
@@ -1809,21 +1852,7 @@ function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser })
                         })()}
                       </tr>
                     );
-                    // Панель раскрывается сразу под своей строкой. Отдельным блоком
-                    // в конце раздела она вводила в заблуждение: жмёшь на первой
-                    // работе, а отчёты появляются под третьей.
-                    return openPay === s.id && stageReports
-                      ? (
-                        <Fragment key={s.id}>
-                          {row}
-                          <tr>
-                            <td colSpan={8} style={{ padding: "0 8px 10px" }}>
-                              <PaymentPanel stage={s} api={stageReports} currentUser={currentUser} />
-                            </td>
-                          </tr>
-                        </Fragment>
-                      )
-                      : row;
+                    return row;
                   })}
                 </Fragment>
               ))}
@@ -1843,6 +1872,21 @@ function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser })
           </table>
         )}
       </div>
+      {/* Панель отчёта живёт ВНЕ таблицы. Внутри она наследовала её ширину
+          (860px с боковой прокруткой), и на телефоне форма рендерилась шириной
+          860 в экране 390: подписи обрезались, поля уезжали за край. Здесь она
+          занимает ширину экрана и на телефоне выглядит как обычная форма. */}
+      {stageReports && openStage && (
+        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
+          <style>{STAGE_REPORTS_CSS}</style>
+          <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", marginBottom: 2 }}>
+            <span style={{ fontSize: 13.5, fontWeight: 800, color: "#0f172a", minWidth: 0, overflowWrap: "anywhere" }}>{openStage.name || "Работа"}</span>
+            <button type="button" onClick={() => setOpenPay("")}
+              style={{ marginLeft: "auto", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 7, padding: "5px 10px", fontSize: 11.5, fontWeight: 800, color: "#64748b", cursor: "pointer", fontFamily: "inherit" }}>Закрыть</button>
+          </div>
+          <PaymentPanel stage={openStage} api={stageReports} currentUser={currentUser} />
+        </div>
+      )}
     </div>
   );
 }
