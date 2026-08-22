@@ -110,6 +110,53 @@ const CSS = STAGE_REPORTS_CSS + `
   .oc-head{flex-direction:column!important;align-items:stretch!important}
 }`;
 
+// Подвкладки внутри вкладки объекта. Намеренно МЕЛЬЧЕ основных вкладок: тёмные
+// пилюли подразделов выглядели крупнее самих разделов, и глаз читал их как
+// главную навигацию. Здесь это переключатель-сегмент на сером фоне — сразу
+// видно, что он вложен в раздел, а не стоит с ним рядом.
+const SUBTABS_CSS = `
+.oc-subtabs{display:inline-flex;gap:2px;padding:3px;background:#f1f5f9;border:1px solid #e2e8f0;
+  border-radius:10px;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.oc-subtabs::-webkit-scrollbar{display:none}
+.oc-subtab{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer;
+  font-family:inherit;font-size:12px;font-weight:700;line-height:1;border:0;border-radius:8px;
+  padding:6px 10px;background:transparent;color:#64748b}
+.oc-subtab[data-on="1"]{background:#fff;color:#0f172a;font-weight:800;box-shadow:0 1px 2px rgba(15,23,42,.09)}
+.oc-subtab-n{font-size:10.5px;font-weight:800;border-radius:20px;padding:1px 6px;
+  background:#e2e8f0;color:#475569}
+.oc-subtab-n[data-tone="warn"]{background:#fef3c7;color:#b45309}
+.oc-subtab-n[data-tone="bad"]{background:#fee2e2;color:#b91c1c}
+.oc-subtab[data-on="1"] .oc-subtab-n{background:#eff6ff;color:#2563eb}
+.oc-subtab[data-on="1"] .oc-subtab-n[data-tone="warn"]{background:#fef3c7;color:#b45309}
+.oc-subtab[data-on="1"] .oc-subtab-n[data-tone="bad"]{background:#fee2e2;color:#b91c1c}
+@media(max-width:700px){.oc-subtabs{display:flex;width:100%}.oc-subtab{flex:1 1 auto;justify-content:center}}`;
+
+// tabs: [{ key, label, icon, count, tone }] — count с tone "bad"/"warn" рисуется
+// цветом: подвкладка прячет содержимое, и то, что горит, должно быть видно на
+// самой кнопке, иначе просроченная задача просто исчезнет с глаз.
+export function SubTabs({ tabs, value, onChange }) {
+  const shown = tabs.filter(Boolean);
+  if (shown.length < 2) return null;
+  return (
+    <div>
+      <style>{SUBTABS_CSS}</style>
+      <div className="oc-subtabs" role="tablist">
+        {shown.map((tab) => {
+          const on = tab.key === value;
+          return (
+            <button key={tab.key} type="button" role="tab" aria-selected={on}
+              className="oc-subtab" data-on={on ? "1" : "0"} onClick={() => onChange(tab.key)}>
+              {tab.icon && <span aria-hidden="true">{tab.icon}</span>}
+              <span>{tab.label}</span>
+              {tab.count > 0 && <span className="oc-subtab-n" data-tone={tab.tone || ""}>{tab.count}</span>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // Работа — карточка с ОДНИМ главным действием. Раньше это была строка с тремя
 // одинаково мелкими кнопками: на телефоне в них надо целиться, и было непонятно,
 // что нажимать. Теперь главное действие зависит от статуса и занимает всю
@@ -170,6 +217,12 @@ function ControlView({ production, currentUser, readOnly, onPatchProduction, onA
   const stages = production.stages || [];
   const active = stages.filter((stage) => ["progress", "delayed"].includes(stage.status));
   const latestReport = [...(production.dailyReports || [])].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0];
+  // Три блока подряд одной лентой — это полтора экрана прокрутки, где состояние
+  // объекта, замечания и задачи слиты в сплошной текст. Разводим по страницам,
+  // а счётчики выносим на кнопки, чтобы спрятанное не пропало из виду.
+  const [page, setPage] = useState("state");
+  const openDefects = (Array.isArray(production?.defects) ? production.defects : []).filter((item) => !isDefectClosed(item));
+  const tasks = useMemo(() => buildTaskSummary(Array.isArray(production?.tasks) ? production.tasks : [], today), [production?.tasks, today]);
 
   // Вместо «Нужен контроль» без объяснений — конкретные причины. Ровно то же
   // правило, по которому объект попадает наверх диспетчерской.
@@ -187,6 +240,13 @@ function ControlView({ production, currentUser, readOnly, onPatchProduction, onA
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <style>{CSS}</style>
+      <SubTabs value={page} onChange={setPage} tabs={[
+        { key: "state", label: "Состояние", icon: "📊" },
+        { key: "defects", label: "Замечания", icon: "⚠️", count: openDefects.length, tone: "bad" },
+        { key: "tasks", label: "Задачи", icon: "✓", count: tasks.open, tone: tasks.overdue ? "bad" : "" },
+      ]} />
+
+      {page === "state" && (<>
       {/* Одна панель состояния вместо тёмной шапки и пяти плиток. Три плитки из
           пяти почти всегда показывали ноль — это был шум, из-за которого главное
           (готовность и причины) терялось. Теперь: полоса готовности, а рядом
@@ -235,9 +295,12 @@ function ControlView({ production, currentUser, readOnly, onPatchProduction, onA
           ) : <div style={emptyNote}>Отчётов пока нет. Прораб закрывает день на вкладке «Сегодня».</div>}
         </section>
       </div>
+      </>)}
 
-      <OpenDefects production={production} readOnly={defectsReadOnly} onAdd={onAddDefect} />
-      <WorkCoordination production={production} currentUser={currentUser} readOnly={readOnly} onPatchProduction={onPatchProduction} />
+      {page === "defects" && <OpenDefects production={production} readOnly={defectsReadOnly} onAdd={onAddDefect} />}
+      {page === "tasks" && (
+        <WorkCoordination production={production} currentUser={currentUser} readOnly={readOnly} onPatchProduction={onPatchProduction} />
+      )}
     </div>
   );
 }
@@ -296,6 +359,10 @@ function TodayView({ object, production, currentUser, readOnly, onStageStatus, o
   const [form, setForm] = useState({ workers: "", blockers: "", tomorrowNeeds: "", note: "" });
   const [saved, setSaved] = useState(false);
   const [dayOpen, setDayOpen] = useState(false);
+  // Две страницы вместо одной ленты: работы дня и задачи. Прораб на объекте
+  // открывает вкладку ради работ, а задачи листал сквозь них.
+  const [page, setPage] = useState("plan");
+  const tasksSummary = useMemo(() => buildTaskSummary(Array.isArray(production?.tasks) ? production.tasks : [], today), [production?.tasks, today]);
 
   useEffect(() => {
     setForm({
@@ -326,6 +393,17 @@ function TodayView({ object, production, currentUser, readOnly, onStageStatus, o
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <style>{CSS}</style>
+      <SubTabs value={page} onChange={setPage} tabs={[
+        { key: "plan", label: "План дня", icon: "📋" },
+        { key: "tasks", label: "Задачи", icon: "✓", count: tasksSummary.open,
+          tone: tasksSummary.overdue ? "bad" : "" },
+      ]} />
+
+      {page === "tasks" && (
+        <WorkCoordination production={production} currentUser={currentUser} readOnly={readOnly} onPatchProduction={onPatchProduction} />
+      )}
+
+      {page === "plan" && (<>
       {/* Шапка одной строкой. Заголовок «План на сегодня» убран: вкладка и так
           называется «Сегодня», а он занимал строку. Нулевые счётчики не рисуем —
           у большинства объектов сроков нет, и три нуля были просто шумом. */}
@@ -399,8 +477,7 @@ function TodayView({ object, production, currentUser, readOnly, onStageStatus, o
         )}
         </>)}
       </section>
-
-      <WorkCoordination production={production} currentUser={currentUser} readOnly={readOnly} onPatchProduction={onPatchProduction} compact />
+      </>)}
     </div>
   );
 }
@@ -422,21 +499,25 @@ const makeWorkId = (prefix) => {
   return uuid ? `${prefix}_${uuid}` : `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 };
 
-function WorkCoordination({ production, currentUser, readOnly, onPatchProduction, compact = false }) {
+// Задачи — своя страница и на «Сегодня», и на «Управлении». Раньше на «Сегодня»
+// показывалось только срочное («полный список — на Управлении»): это была
+// уступка тесноте одной ленты. На отдельной странице прятать нечего, и прорабу
+// не нужно уходить на чужую вкладку, чтобы увидеть свои же поручения.
+function WorkCoordination({ production, currentUser, readOnly, onPatchProduction }) {
   const today = localDateKey();
   const tasks = Array.isArray(production?.tasks) ? production.tasks : [];
   const taskSummary = useMemo(() => buildTaskSummary(tasks, today), [tasks, today]);
   const [taskForm, setTaskForm] = useState({ title: "", assignee: "", dueDate: "", priority: "normal" });
-  // На «Сегодня» форму держим свёрнутой: прорабу чаще нужно посмотреть, а не завести.
-  const [openForm, setOpenForm] = useState(compact ? "" : "task");
+  // Форма раскрыта, только когда задач ещё нет: тогда завести — единственное,
+  // что тут можно сделать. Если задачи есть, человек пришёл на них посмотреть, а
+  // форма из четырёх полей на телефоне отодвигала список за нижний край экрана.
+  const [openForm, setOpenForm] = useState(() => (tasks.some((item) => !["done", "cancelled"].includes(item?.status)) ? "" : "task"));
   // Выполненные не исчезают: их видно отдельным свёрнутым списком, и любую
   // можно вернуть в работу. Раньше нажал «Готово» — и задача пропадала совсем.
   const [showDone, setShowDone] = useState(false);
 
   const isOpenTask = (item) => !["done", "cancelled"].includes(item?.status);
-  // Компактный режим: только то, что горит — просрочено, на сегодня, срочное.
-  const urgentTask = (item) => item?.priority === "high" || (item?.dueDate && item.dueDate <= today);
-  const visibleTasks = tasks.filter(item => isOpenTask(item) && (!compact || urgentTask(item))).slice(0, compact ? 4 : 10);
+  const visibleTasks = tasks.filter(isOpenTask).slice(0, 10);
   const doneTasks = tasks.filter(item => !isOpenTask(item))
     .sort((a, b) => String(b?.completedAt || "").localeCompare(String(a?.completedAt || "")));
   const actor = currentUser?.name || currentUser?.login || "Сотрудник";
@@ -463,7 +544,7 @@ function WorkCoordination({ production, currentUser, readOnly, onPatchProduction
       <div className="oc-head" style={{ padding: "13px 16px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>✓ Задачи по объекту</div>
-          <div style={sectionNote}>{compact ? "Только срочное — полный список на вкладке «Управление»" : "Поручения прорабу: что сделать, кому и к какому сроку"}</div>
+          <div style={sectionNote}>Поручения прорабу: что сделать, кому и к какому сроку</div>
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           <span style={chip(taskSummary.overdue ? "#b91c1c" : "#2563eb", taskSummary.overdue ? "#fef2f2" : "#eff6ff")}>Открыто: {taskSummary.open}{taskSummary.overdue ? ` · просрочено ${taskSummary.overdue}` : ""}</span>
@@ -491,11 +572,9 @@ function WorkCoordination({ production, currentUser, readOnly, onPatchProduction
             {!readOnly && task.status === "open" && <button type="button" onClick={() => setTaskStatus(task.id, "in_progress")} style={action("#2563eb", "#eff6ff")}>Начать</button>}
             {!readOnly && task.status !== "done" && <button type="button" onClick={() => setTaskStatus(task.id, "done")} style={action("#047857", "#ecfdf5")}>Готово</button>}
           </Row>
-        )) : <div style={emptyNote}>{compact
-          ? (taskSummary.open ? `Срочных задач нет. Всего открыто: ${taskSummary.open}` : "Открытых задач нет.")
-          : "Открытых задач нет. Нажмите «+ Задача», чтобы поставить поручение."}</div>}
+        )) : <div style={emptyNote}>Открытых задач нет. Нажмите «+ Задача», чтобы поставить поручение.</div>}
 
-        {!compact && doneTasks.length > 0 && (
+        {doneTasks.length > 0 && (
           <div style={{ marginTop: 10 }}>
             <button type="button" onClick={() => setShowDone(value => !value)}
               style={{ border: 0, background: "transparent", padding: 0, cursor: "pointer", fontFamily: "inherit",
