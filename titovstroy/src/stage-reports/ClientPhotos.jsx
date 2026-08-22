@@ -2,11 +2,10 @@
 // проверочный стенд: иначе вёрстку на телефоне пришлось бы проверять на копии
 // разметки, а копия расходится с оригиналом.
 //
-// Показываем двумя способами сразу и намеренно: отдельным разделом «Фотоотчёт»,
-// где работы с фото собраны вместе и их удобно листать, и значком прямо в ленте
-// этапов — чтобы фото нашлось там, где клиент читает про конкретную работу.
-// Отдельная вкладка на этой странице не нужна: она одна и прокручивается, а
-// вкладка спрятала бы главное, ради чего клиент и заходит.
+// Фотоотчёт — своя вкладка кабинета. Одной лентой он тонул между готовностью и
+// оплатой, хотя ради него клиент страницу и открывает. Дополнительно значок с
+// числом снимков стоит прямо в ленте этапов — чтобы фото нашлось и там, где
+// клиент читает про конкретную работу.
 import React, { useEffect } from "react";
 import { PHOTO_KINDS } from "./model.js";
 
@@ -24,22 +23,46 @@ export function stagesWithPhotos(stages = []) {
     .filter((item) => item.list.length > 0);
 }
 
+// Вкладки кабинета. Живут здесь же, а не в App.jsx: их рендерит проверочный
+// стенд, а копия разметки в стенде рано или поздно расходится с оригиналом.
+// Раньше кабинет был одной лентой, и фотоотчёт тонул между готовностью и
+// оплатой — при том что ради него клиент страницу и открывает.
+export function ClientTabs({ items = [], active, onPick, ui, badges = {} }) {
+  if (items.length < 2) return null;
+  const { INK, MUT } = ui;
+  return (
+    <div style={{ display: "flex", gap: 7, overflowX: "auto", padding: "0 14px 4px", margin: "0 0 14px", WebkitOverflowScrolling: "touch" }}>
+      {items.map(([key, label, icon]) => {
+        const on = key === active;
+        return (
+          <button key={key} onClick={() => onPick?.(key)}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0, cursor: "pointer",
+              fontFamily: "inherit", fontSize: 13, fontWeight: on ? 800 : 600, borderRadius: 20,
+              padding: "9px 15px", border: "1px solid " + (on ? "transparent" : "rgba(15,23,42,.08)"),
+              background: on ? INK : "#fff", color: on ? "#fff" : MUT, whiteSpace: "nowrap",
+              boxShadow: on ? "0 6px 16px -8px rgba(15,23,42,.5)" : "none" }}>
+            <span>{icon}</span>{label}
+            {badges[key] ? <span style={{ fontSize: 11, fontWeight: 800, opacity: .65 }}>{badges[key]}</span> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function ClientPhotoReport({ groups = [], ui, expanded, onExpand, onOpen }) {
   if (!groups.length) return null;
   const { card, INK, BRASS, FAINT, BLUE } = ui;
   const total = groups.reduce((sum, group) => sum + group.list.length, 0);
-  // Сначала три работы: при двадцати работах с фото страница иначе превращается
-  // в бесконечную ленту, и оплата с документами уезжает вниз.
+  // На своей вкладке разворачиваем всё сразу. Свёртка до трёх работ осталась
+  // на случай, если блок понадобится вставить обратно в общую ленту.
   const shown = expanded ? groups : groups.slice(0, 3);
   return (
     <div style={card}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-        <span style={{ fontSize: 15 }}>📷</span>
-        <span style={{ fontSize: 15.5, fontWeight: 800, color: INK, letterSpacing: "-.01em" }}>Фотоотчёт</span>
-        <span style={{ fontSize: 11, color: FAINT, fontWeight: 700, background: "#f8fafc", borderRadius: 20, padding: "2px 9px", marginLeft: "auto", flexShrink: 0 }}>{total} фото</span>
-      </div>
+      {/* Своего заголовка нет: название и счётчик уже стоят во вкладке, и второй
+          раз подряд «Фотоотчёт · 5 фото» читается как ошибка вёрстки. */}
       <div style={{ fontSize: 12, color: FAINT, marginBottom: 14, lineHeight: 1.45 }}>
-        Снимки по каждой работе, включая скрытые работы — то, что после отделки уже не увидеть.
+        {total} {total === 1 ? "снимок" : total < 5 ? "снимка" : "снимков"} по работам, включая скрытые работы — то, что после отделки уже не увидеть.
       </div>
       {shown.map((group, index) => {
         const last = index === shown.length - 1;

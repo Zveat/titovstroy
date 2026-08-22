@@ -1,7 +1,7 @@
 // Две кнопки в карточке этапа и панели под ними: «Фото» и «Расчёт с рабочими».
 // Обе панели рассчитаны на телефон в первую очередь — прораб заполняет их
 // стоя на объекте, а не за столом.
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   PHOTO_KINDS, PAY_MODES, MAX_PHOTOS_PER_KIND,
   REVIEW_APPROVED, REVIEW_REJECTED, REVIEW_PENDING,
@@ -22,6 +22,9 @@ export const STAGE_REPORTS_CSS = `
 .sr-tiles{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}
 .sr-tile{position:relative;width:82px;height:82px;border-radius:8px;overflow:hidden;border:1px solid #e2e8f0;background:#f1f5f9}
 .sr-tile img{width:100%;height:100%;object-fit:cover;display:block}
+.sr-add{border:1px dashed #cbd5e1;background:#fff;display:flex;flex-direction:column;gap:2px;
+  align-items:center;justify-content:center;cursor:pointer;color:#475569;font-size:16px;text-align:center;padding:4px}
+.sr-add span{font-size:10px;font-weight:800;line-height:1.1}
 .sr-field{width:100%;box-sizing:border-box;border:1px solid #dbe3ee;border-radius:8px;padding:9px 10px;
   font-family:inherit;font-size:13px;color:#0f172a;background:#fff;outline:none}
 .sr-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
@@ -128,7 +131,6 @@ function PhotoPanel({ stage, api, onOpen }) {
   const [kind, setKind] = useState("during");
   const [note, setNote] = useState("");
   const [showClient, setShowClient] = useState(true);
-  const inputRef = useRef(null);
   const photos = listPhotos(api.list, stage.id).filter((item) => item.kind === kind);
   const queued = api.pending.filter((item) => String(item.stageId) === String(stage.id) && item.kind === kind && !item.receipt);
   const used = countPhotosOfKind(api.list, stage.id, kind) + queued.length;
@@ -173,13 +175,21 @@ function PhotoPanel({ stage, api, onOpen }) {
       <div className="sr-tiles">
         {photos.map((photo) => <PhotoTile key={photo.id} photo={photo} api={api} onOpen={onOpen} />)}
         {queued.map((entry) => <QueuedTile key={entry.id} entry={entry} activeId={api.activeId} onDrop={api.dropQueued} />)}
+        {/* Две плитки, а не одна: capture="environment" открывает камеру сразу и
+            галерею при этом не показывает вовсе — снять на месте удобно, но
+            дослать вечером уже снятое было нельзя. Съёмка и галерея — разные
+            входы, и оба нужны. */}
         {!api.readOnly && left > 0 && (
-          <label className="sr-tile" style={{ border: "1px dashed #cbd5e1", background: "#fff", display: "flex",
-            alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#475569",
-            fontSize: 11, fontWeight: 800, textAlign: "center", padding: 4 }}>
-            + Снять
-            <input ref={inputRef} type="file" accept="image/*" capture="environment" multiple
+          <label className="sr-tile sr-add" title="Снять камерой">
+            📷<span>Снять</span>
+            <input type="file" accept="image/*" capture="environment" multiple
               style={{ display: "none" }} onChange={pick} />
+          </label>
+        )}
+        {!api.readOnly && left > 0 && (
+          <label className="sr-tile sr-add" title="Выбрать из галереи">
+            🖼<span>Галерея</span>
+            <input type="file" accept="image/*" multiple style={{ display: "none" }} onChange={pick} />
           </label>
         )}
       </div>
@@ -302,10 +312,14 @@ function PaymentForm({ stage, api, onDone }) {
                 border: "1px solid #fecaca", background: "#fff", color: "#dc2626", cursor: "pointer", fontSize: 11, lineHeight: 1 }}>×</button>
           </div>
         ))}
-        <label className="sr-tile" style={{ border: "1px dashed #cbd5e1", background: "#fff", display: "flex",
-          alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#475569",
-          fontSize: 10.5, fontWeight: 800, textAlign: "center", padding: 4 }}>
-          + Чек / перевод
+        {/* Чек чаще всего уже лежит в галерее — это скриншот перевода, а не то,
+            что фотографируют на месте. Поэтому здесь галерея первой. */}
+        <label className="sr-tile sr-add" title="Выбрать из галереи">
+          🖼<span>Чек из галереи</span>
+          <input type="file" accept="image/*" multiple style={{ display: "none" }} onChange={attach} />
+        </label>
+        <label className="sr-tile sr-add" title="Снять камерой">
+          📷<span>Снять чек</span>
           <input type="file" accept="image/*" capture="environment" multiple style={{ display: "none" }} onChange={attach} />
         </label>
       </div>
@@ -395,7 +409,7 @@ function PaymentCard({ report, api, currentUser }) {
   );
 }
 
-function PaymentPanel({ stage, api, currentUser }) {
+export function PaymentPanel({ stage, api, currentUser }) {
   const [adding, setAdding] = useState(false);
   const reports = listPayments(api.list, stage.id);
   const visible = api.canReview ? reports : reports.filter((item) => String(item.authorId || "") === String(currentUser?.id || ""));
@@ -423,54 +437,53 @@ function PaymentPanel({ stage, api, currentUser }) {
 // Сводка по объекту для руководителя. Нужна ровно потому, что фото уходит
 // клиенту только после подтверждения: без этой строки непроверенные снимки тихо
 // копятся, клиент не видит ничего и никто не понимает почему.
-export function StageReportsSummary({ api }) {
+export function StageReportsSummary({ api, kind = "photo" }) {
   if (!api?.canReview) return null;
   const { awaitingPhotos, payments } = api.summary;
-  if (!awaitingPhotos && !payments.pending && !payments.overpaid) return null;
+  const photos = kind === "photo";
+  if (photos ? !awaitingPhotos : (!payments.pending && !payments.overpaid)) return null;
   return (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center",
       background: "#fff", border: "1px solid #e2e8f0", borderRadius: 11, padding: "10px 13px", marginBottom: 12 }}>
       <span style={{ fontSize: 12.5, fontWeight: 800, color: "#0f172a" }}>Ждёт вашего решения</span>
-      {awaitingPhotos > 0 && <span style={chip("#b45309", "#fffbeb")}>📷 фото: {awaitingPhotos}</span>}
-      {payments.pending > 0 && <span style={chip("#b45309", "#fffbeb")}>💵 отчётов: {payments.pending}</span>}
-      {payments.overpaid > 0 && (
+      {photos && <span style={chip("#b45309", "#fffbeb")}>📷 фото: {awaitingPhotos}</span>}
+      {!photos && payments.pending > 0 && <span style={chip("#b45309", "#fffbeb")}>💵 отчётов: {payments.pending}</span>}
+      {!photos && payments.overpaid > 0 && (
         <span style={chip("#b91c1c", "#fef2f2")}>⚠ выше согласованного на {money(payments.deviation)} ₸</span>
       )}
       <span style={{ fontSize: 11, color: "#94a3b8", flexBasis: "100%" }}>
-        {awaitingPhotos > 0 ? "Пока фото не подтверждено, клиент его не видит. " : ""}
-        Решения — в карточке работы на вкладке «Этапы».
+        {photos
+          ? "Пока фото не подтверждено, клиент его не видит. Решения — в карточке работы на вкладке «Этапы»."
+          : "Отчёты прораба — в строках работ ниже. Финансовых операций они не создают."}
       </span>
     </div>
   );
 }
 
 // Точка входа: две компактные кнопки, панели раскрываются под карточкой этапа.
+// Точка входа для вкладок «Этапы», «Сегодня» и «Управление»: только фото.
+// Расчёты с рабочими сюда намеренно не попадают — они про деньги и живут во
+// вкладке «Финансы», где строки те же этапы и рядом стоит себестоимость факт.
+// Клиенту в этапах важны снимки, а не чужие расчёты с бригадой.
 export default function StageReports({ stage, api, currentUser, onOpenPhoto }) {
-  const [open, setOpen] = useState("");
+  const [open, setOpen] = useState(false);
   if (!stage?.id || !api) return null;
   const photoCount = countStagePhotos(api.list, stage.id);
   const queuedCount = api.pending.filter((item) => String(item.stageId) === String(stage.id) && !item.receipt).length;
-  const reports = listPayments(api.list, stage.id);
-  const mineOrAll = api.canReview ? reports : reports.filter((item) => String(item.authorId || "") === String(currentUser?.id || ""));
-  const pendingReports = mineOrAll.filter((item) => item.status === "pending").length;
-  const overpaid = mineOrAll.filter(isOverpaid).length;
-  const toggle = (name) => setOpen((prev) => (prev === name ? "" : name));
+  const waiting = api.canReview
+    ? listPhotos(api.list, stage.id).filter((item) => item.showClient !== false && item.review === REVIEW_PENDING && item.url).length
+    : 0;
 
   return (
-    <div style={{ marginTop: 8 }}>
+    <div style={{ marginTop: 2 }}>
       <div className="sr-acts">
-        <button type="button" className="sr-btn" data-on={open === "photo" ? "1" : "0"} onClick={() => toggle("photo")}>
+        <button type="button" className="sr-btn" data-on={open ? "1" : "0"} onClick={() => setOpen((prev) => !prev)}>
           📷 Фото{photoCount > 0 ? ` · ${photoCount}` : ""}
           {queuedCount > 0 && <span style={chip("#b45309", "#fffbeb")}>{queuedCount}</span>}
-        </button>
-        <button type="button" className="sr-btn" data-on={open === "pay" ? "1" : "0"} onClick={() => toggle("pay")}>
-          💵 Расчёт{mineOrAll.length > 0 ? ` · ${mineOrAll.length}` : ""}
-          {pendingReports > 0 && <span style={chip("#b45309", "#fffbeb")}>{pendingReports}</span>}
-          {overpaid > 0 && <span style={chip("#b91c1c", "#fef2f2")}>⚠ {overpaid}</span>}
+          {waiting > 0 && <span style={chip("#b45309", "#fffbeb")}>ждут: {waiting}</span>}
         </button>
       </div>
-      {open === "photo" && <PhotoPanel stage={stage} api={api} onOpen={onOpenPhoto} />}
-      {open === "pay" && <PaymentPanel stage={stage} api={api} currentUser={currentUser} />}
+      {open && <PhotoPanel stage={stage} api={api} onOpen={onOpenPhoto} />}
     </div>
   );
 }
