@@ -5401,7 +5401,7 @@ function PublicProgress({ token }) {
       <div style={{ position: "absolute", top: -45, right: -35, width: 160, height: 160, borderRadius: "50%", background: "radial-gradient(circle, rgba(184,144,74,.24), transparent 70%)" }} />
       <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 11, marginBottom: 18 }}>
         <div style={{ width: 36, height: 36, borderRadius: 10, background: BRASS, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 21, fontWeight: 900, color: "#0c0e1a", boxShadow: "0 4px 14px rgba(184,144,74,.45)" }}>T</div>
-        <div style={{ fontSize: 17, fontWeight: 800, flex: 1, minWidth: 0, letterSpacing: "-.01em" }}>TitovStroy <span style={{ color: FAINT, fontWeight: 600 }}>· ремонт</span></div>
+        <div style={{ fontSize: 17, fontWeight: 800, flex: 1, minWidth: 0, letterSpacing: "-.01em" }}>TitovStroy</div>
         <button onClick={refresh} disabled={refreshing} title="Обновить"
           style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.1)", border: "1px solid rgba(255,255,255,.16)", color: "#e2e8f0", borderRadius: 10, padding: "7px 12px", fontSize: 12.5, fontWeight: 700, cursor: refreshing ? "default" : "pointer", fontFamily: "inherit", flexShrink: 0 }}>
           <span style={{ display: "inline-block", transition: "transform .6s ease", transform: refreshing ? "rotate(360deg)" : "none" }}>⟳</span>{refreshing ? "" : "Обновить"}
@@ -16257,7 +16257,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 {/* Журнал изменений по объекту (только админ) */}
                 {objWsTab==="changes" && _isAdmin && (
                   <div style={{marginTop:8}}>
-                    <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Кто и когда менял статус, сумму, оплаты, сроки, прораба и доступ клиента по этому объекту.</div>
+                    <div style={{fontSize:12,color:"#64748b",marginBottom:10,lineHeight:1.5}}>Кто и когда менял статус работ, сроки, суммы и оплаты, добавлял фото и отчёты о расчётах, менял прораба и доступ клиента по этому объекту.</div>
                     <AuditTab objectId={obj.id} />
                   </div>
                 )}
