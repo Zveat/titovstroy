@@ -471,6 +471,10 @@ export default function ProductionModule({
     storage: stageReportsStorage,
     currentUser,
     canReview: !baseReadOnly && actionPermissions.clientAccess !== false,
+    // Владелец — последняя инстанция и сам заводит часть выплат. Запрет «своё не
+    // подтверждают» нужен против прораба, который закрывал бы сам себя, а не
+    // против администратора.
+    allowSelfReview: currentUser?.role === "admin",
     readOnly: stagesReadOnly,
     onChanged: onStageReportsChanged,
     onAudit: (event) => auditRef.current?.(event),
@@ -1726,6 +1730,10 @@ function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser, a
   // деньги, строки те же этапы, и рядом стоит «Себ. факт», которую отчёт как
   // раз и обосновывает. В «Этапах» остаются только фото — они для клиента.
   const [openPay, setOpenPay] = useState("");
+  // Внутри «Финансов» две страницы: деньги по работам и взаиморасчёты с
+  // мастерами. Одной лентой второй раздел уезжал под длинную таблицу и
+  // читался как приписка к ней, а это отдельный учёт.
+  const [finPage, setFinPage] = useState("works");
   const stages = prod.stages || [];
   const upd = (id, p) => patch({ stages: stages.map(s => s.id === id ? { ...s, ...p } : s) });
   const num = (v) => Number(v) || 0;
@@ -1745,8 +1753,30 @@ function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser, a
   const grouped = groupByCat(sortProductionStages(stages));
 
   const mCol = (p) => p >= 30 ? "#059669" : p >= 0 ? "#d97706" : "#dc2626";
+  const finTabs = [["works", "Работы и маржа", "📊"], ["settle", "Взаиморасчёты", "💵"]];
+  const finTab = (key, label, icon) => {
+    const on = finPage === key;
+    const pending = key === "settle" && stageReports ? stageReports.summary.payments.pending : 0;
+    return (
+      <button key={key} type="button" onClick={() => setFinPage(key)}
+        style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", fontFamily: "inherit",
+          fontSize: 13, fontWeight: on ? 800 : 600, borderRadius: 10, padding: "9px 14px", whiteSpace: "nowrap",
+          border: "1px solid " + (on ? "transparent" : "#e2e8f0"), background: on ? "#0f172a" : "#fff",
+          color: on ? "#fff" : "#64748b" }}>
+        <span>{icon}</span>{label}
+        {pending > 0 && <span style={{ fontSize: 11, fontWeight: 800, color: on ? "#fde68a" : "#b45309" }}>{pending}</span>}
+      </button>
+    );
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {stageReports && (
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>{finTabs.map(([k, l, i]) => finTab(k, l, i))}</div>
+      )}
+      {/* Сводка объекта — на странице работ: на взаиморасчётах она только
+          отвлекает, там свой итог «выплачено». */}
+      {finPage === "works" && (<>
       {/* Сводка: если есть финпроект — по факту (бюджет/оплаты/расходы),
           иначе — по плану из сметы/этапов (объект ещё не в производстве/финансах). */}
       {finSummary ? (
@@ -1789,8 +1819,8 @@ function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser, a
           </div>
         </div>
       )}
-      {stageReports && <StageReportsSummary api={stageReports} kind="pay" />}
-      {/* Компактная таблица финансов по этапам */}
+      </>)}
+      {finPage === "works" && (
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, overflowX: "auto" }}>
         <style>{STAGE_REPORTS_CSS}</style>
         <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>Финансы по этапам</div>
@@ -1840,7 +1870,7 @@ function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser, a
                           return (
                             <td style={{ padding: "6px 8px", textAlign: "right", verticalAlign: "top", whiteSpace: "nowrap" }}>
                               {totals.count === 0 ? <span style={{ color: "#cbd5e1" }}>—</span> : (
-                                <button type="button" onClick={() => setOpenPay(prev => prev === s.id ? "" : s.id)}
+                                <button type="button" onClick={() => { setOpenPay(s.id); setFinPage("settle"); }}
                                   title="Показать выплаты по этой работе"
                                   style={{ background: "none", border: 0, padding: 0, cursor: "pointer", fontFamily: "inherit", textAlign: "right" }}>
                                   <b style={{ fontSize: 12.5, color: totals.over > 0 ? "#b91c1c" : "#0f172a" }}>{fmt(totals.fact)} ₸</b>
@@ -1874,13 +1904,15 @@ function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser, a
           </table>
         )}
       </div>
+      )}
       {/* Раздел живёт ВНЕ таблицы. Внутри он наследовал её ширину (860px с
           боковой прокруткой), и на телефоне форма рендерилась шириной 860 в
           экране 390: подписи обрезались, поля уезжали за край. */}
-      {stageReports && (
+      {finPage === "settle" && stageReports && (<>
+        <StageReportsSummary api={stageReports} kind="pay" />
         <PaymentsSection stages={sortProductionStages(stages)} api={stageReports} currentUser={currentUser}
           filterStageId={openPay} onClearFilter={() => setOpenPay("")} />
-      )}
+      </>)}
     </div>
   );
 }
