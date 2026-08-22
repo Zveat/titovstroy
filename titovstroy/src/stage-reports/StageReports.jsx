@@ -6,8 +6,8 @@ import {
   PHOTO_KINDS, PAY_MODES, MAX_PHOTOS_PER_KIND,
   REVIEW_APPROVED, REVIEW_REJECTED, REVIEW_PENDING,
   listPhotos, listPayments, countPhotosOfKind, countStagePhotos,
-  paymentDeviation, isOverpaid, reportStatusMeta, canReviewPayment,
-  validatePaymentReport,
+  paymentDeviation, isOverpaid, paymentRemainder, payModeMeta, isPartialPayment,
+  reportStatusMeta, canReviewPayment, validatePaymentReport,
 } from "./model.js";
 import { entryStatus, QUEUE_STATUS_LABELS, QUEUE_FAILED, QUEUE_UPLOADING } from "./queue.js";
 
@@ -230,7 +230,13 @@ function PhotoPanel({ stage, api, onOpen }) {
 }
 
 function PaymentForm({ stage, api, onDone }) {
-  const [form, setForm] = useState({ mode: "paid", payee: "", agreed: "", fact: "", note: "", date: new Date().toISOString().slice(0, 10) });
+  // Согласованную сумму подставляем из «Себ. план» работы: прораб не должен
+  // переписывать руками то, что уже посчитано в смете. Поправить можно.
+  const plannedCost = Math.round(Number(stage?.costPlan) || 0);
+  const [form, setForm] = useState({
+    mode: "full", payee: "", agreed: plannedCost > 0 ? String(plannedCost) : "",
+    fact: "", note: "", date: new Date().toISOString().slice(0, 10),
+  });
   const [receipts, setReceipts] = useState([]);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState("");
@@ -267,7 +273,7 @@ function PaymentForm({ stage, api, onDone }) {
           подсказка исчезает, и в форме про деньги остаются два одинаковых числа,
           про которые уже не скажешь, где согласовано, а где факт. */}
       <div className="sr-form">
-        <label className="sr-lab">Режим
+        <label className="sr-lab">Вид оплаты
           <select className="sr-field" value={form.mode} onChange={(event) => set({ mode: event.target.value })}>
             {PAY_MODES.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
           </select>
@@ -282,6 +288,7 @@ function PaymentForm({ stage, api, onDone }) {
         <label className="sr-lab">Согласовано, ₸
           <input className="sr-field" inputMode="numeric" value={form.agreed} onChange={(event) => set({ agreed: event.target.value })}
             placeholder="150 000" />
+          {plannedCost > 0 && <span style={{ fontWeight: 600, color: "#94a3b8" }}>из сметы: {money(plannedCost)} ₸</span>}
         </label>
         <label className="sr-lab">Фактически, ₸
           <input className="sr-field" inputMode="numeric" value={form.fact} onChange={(event) => set({ fact: event.target.value })}
@@ -293,15 +300,20 @@ function PaymentForm({ stage, api, onDone }) {
         </label>
       </div>
 
-      {/* Отклонение показываем сразу при вводе, а не после сохранения: прораб
-          видит, что расхождение заметят, ещё до отправки. */}
-      {(form.agreed || form.fact) && (
-        <div style={{ marginTop: 9, ...chip(delta > 0 ? "#b91c1c" : delta < 0 ? "#047857" : "#64748b",
-          delta > 0 ? "#fef2f2" : delta < 0 ? "#ecfdf5" : "#f1f5f9"), padding: "6px 10px", fontSize: 12 }}>
-          {delta > 0 ? `⚠ Выше согласованной на ${money(delta)} ₸`
-            : delta < 0 ? `Ниже согласованной на ${money(-delta)} ₸` : "Совпадает с согласованной"}
-        </div>
-      )}
+      {/* Расхождение показываем сразу при вводе, а не после сохранения: прораб
+          видит, что его заметят, ещё до отправки. При авансе и частичной оплате
+          недоплата — это остаток, а не экономия, и называть её выгодой нельзя. */}
+      {String(form.fact).trim() !== "" && (() => {
+        const partial = isPartialPayment(form);
+        const rest = partial ? paymentRemainder({ mode: form.mode, agreed: form.agreed, fact: form.fact }) : 0;
+        const tone = delta > 0 ? ["#b91c1c", "#fef2f2"] : (!partial && delta < 0) ? ["#047857", "#ecfdf5"] : ["#64748b", "#f1f5f9"];
+        const label = delta > 0 ? `⚠ Выше согласованной на ${money(delta)} ₸`
+          : partial ? (rest > 0 ? `Останется отдать ${money(rest)} ₸` : "Согласованная сумма закрыта полностью")
+            : delta < 0 ? `Ниже согласованной на ${money(-delta)} ₸` : "Совпадает с согласованной";
+        return (
+          <div style={{ marginTop: 9, ...chip(tone[0], tone[1]), padding: "6px 10px", fontSize: 12 }}>{label}</div>
+        );
+      })()}
 
       <div className="sr-tiles">
         {receipts.map((receipt) => (
@@ -349,17 +361,16 @@ function PaymentCard({ report, api, currentUser }) {
         <span style={{ fontSize: 13, fontWeight: 800, color: "#0f172a", minWidth: 0, overflowWrap: "anywhere" }}>{report.payee}</span>
         <span style={chip(meta.color, meta.bg)}>{meta.label}</span>
         <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: "auto" }}>
-          {PAY_MODES.find((item) => item.key === report.mode)?.label} · {shortDate(report.date)}
+          {payModeMeta(report.mode).label} · {shortDate(report.date)}
         </span>
       </div>
       <div className="sr-sums">
         <span style={{ fontSize: 12, color: "#64748b" }}>согласовано <b style={{ color: "#0f172a" }}>{money(report.agreed)} ₸</b></span>
         <span style={{ fontSize: 12, color: "#64748b" }}>факт <b style={{ color: "#0f172a" }}>{money(report.fact)} ₸</b></span>
-        {delta !== 0 && (
-          <span style={chip(delta > 0 ? "#b91c1c" : "#047857", delta > 0 ? "#fef2f2" : "#ecfdf5")}>
-            {delta > 0 ? `⚠ выше на ${money(delta)} ₸` : `ниже на ${money(-delta)} ₸`}
-          </span>
-        )}
+        {delta > 0 && <span style={chip("#b91c1c", "#fef2f2")}>⚠ выше на {money(delta)} ₸</span>}
+        {delta < 0 && (isPartialPayment(report)
+          ? <span style={chip("#64748b", "#f1f5f9")}>остаток {money(paymentRemainder(report))} ₸</span>
+          : <span style={chip("#047857", "#ecfdf5")}>ниже на {money(-delta)} ₸</span>)}
       </div>
       {report.note && <div style={{ fontSize: 12, color: "#475569", marginTop: 6, lineHeight: 1.4 }}>{report.note}</div>}
       {report.receipts?.length > 0 && (

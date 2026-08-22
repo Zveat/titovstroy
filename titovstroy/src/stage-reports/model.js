@@ -46,11 +46,22 @@ export const REVIEW_APPROVED = "approved";
 export const REVIEW_REJECTED = "rejected";
 
 // ── ОТЧЁТ О РАСЧЁТЕ ─────────────────────────────────────────────────────────
+// Вид оплаты, а не «оплачено / не оплачено». Разница нужна для расхождения:
+// при авансе и частичной оплате факт МЕНЬШЕ согласованного по определению, и
+// показывать это как экономию — врать. Там это остаток, а не выгода.
 export const PAY_MODES = [
-  { key: "due", label: "Нужно оплатить" },
-  { key: "paid", label: "Оплачено" },
+  { key: "full", label: "Полная оплата", partial: false },
+  { key: "partial", label: "Частичная", partial: true },
+  { key: "advance", label: "Аванс", partial: true },
 ];
 export const PAY_MODE_KEYS = PAY_MODES.map((item) => item.key);
+// Записи, созданные до разделения видов оплаты, читаем по-старому — иначе у них
+// пропала бы подпись режима.
+const LEGACY_PAY_MODES = { paid: "Полная оплата", due: "Частичная" };
+export const payModeMeta = (key) =>
+  PAY_MODES.find((item) => item.key === key)
+  || (LEGACY_PAY_MODES[key] ? { key, label: LEGACY_PAY_MODES[key], partial: key === "due" } : PAY_MODES[0]);
+export const isPartialPayment = (report) => payModeMeta(report?.mode).partial === true;
 
 // «Нужны пояснения» — не отказ: отчёт возвращается прорабу, он дописывает и
 // отправляет снова, история проверки при этом не теряется.
@@ -230,7 +241,7 @@ export function validatePaymentReport(input = {}) {
   const errors = [];
   if (!text(input.objectId)) errors.push("Не указан объект");
   if (!text(input.stageId)) errors.push("Отчёт нужно привязать к этапу");
-  if (!PAY_MODE_KEYS.includes(input.mode)) errors.push("Не выбрано: нужно оплатить или оплачено");
+  if (!PAY_MODE_KEYS.includes(input.mode)) errors.push("Не выбран вид оплаты: полная, частичная или аванс");
   if (!text(input.payee)) errors.push("Не указано, кому платим");
   if (!(num(input.agreed) > 0)) errors.push("Согласованная сумма должна быть больше нуля");
   if (num(input.fact) < 0) errors.push("Фактическая сумма не может быть отрицательной");
@@ -266,7 +277,14 @@ export function makePaymentReport(input = {}) {
 // Отклонение = факт − согласовано. Ради этой строки всё и делается: если прораб
 // нашёл бригаду за 150, а отчитался за 250, разница видна сразу.
 export const paymentDeviation = (report) => Math.round(num(report?.fact) - num(report?.agreed));
+// Переплата — всегда повод для разговора, при любом виде оплаты.
 export const isOverpaid = (report) => paymentDeviation(report) > 0;
+// Сколько ещё осталось отдать. Считаем только для аванса и частичной: при
+// полной оплате недоплата — это экономия, а не долг перед бригадой.
+export const paymentRemainder = (report) => {
+  if (!isPartialPayment(report)) return 0;
+  return Math.max(0, Math.round(num(report?.agreed) - num(report?.fact)));
+};
 
 export const addPaymentReport = (list, report) => [...normalizeStageReports(list), report];
 

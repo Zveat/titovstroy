@@ -3,7 +3,8 @@
 // пишется производство: два устройства не затрут друг друга.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  stageReportsKey, normalizeStageReports, emptyStageReports,
+  stageReportsKey, normalizeStageReports, emptyStageReports, PHOTO_KINDS, findRecord,
+  reportStatusMeta, paymentDeviation,
   makePhotoRecord, addPhoto, patchPhoto, reviewPhoto as reviewPhotoIn, removeRecord,
   makePaymentReport, addPaymentReport, patchPaymentReport, reviewPaymentReport,
   countAwaitingReview, summarizePayments,
@@ -15,7 +16,8 @@ import { createQueue, indexedDbBackend, flushQueue } from "./queue.js";
 let _queue = null;
 const sharedQueue = () => (_queue ||= createQueue(indexedDbBackend()));
 
-export function useStageReports({ objectId, storage, currentUser, canReview = false, readOnly = false, queue = null, onChanged = null }) {
+export function useStageReports({ objectId, storage, currentUser, canReview = false, readOnly = false,
+  queue = null, onChanged = null, onAudit = null, stageName = null }) {
   const bag = queue || sharedQueue();
   const [list, setList] = useState(emptyStageReports);
   const [pending, setPending] = useState([]);
@@ -24,6 +26,15 @@ export function useStageReports({ objectId, storage, currentUser, canReview = fa
   const [busy, setBusy] = useState(false);
   const listRef = useRef(list);
   listRef.current = list;
+  // Журнал изменений объекта. Фото и расчёты — такие же действия людей, как
+  // смена срока или суммы: без записи в журнал непонятно, кто добавил снимок
+  // и кто решил показать его клиенту.
+  const workOf = useCallback((stageId) => {
+    const name = stageName?.(stageId);
+    return name ? `работа: ${name}` : "";
+  }, [stageName]);
+  const audit = useCallback((event) => { try { onAudit?.(event); } catch { /* журнал не должен ломать действие */ } }, [onAudit]);
+  const kindLabel = (kind) => PHOTO_KINDS.find((item) => item.key === kind)?.label || kind || "";
   const key = objectId ? stageReportsKey(objectId) : "";
 
   const refreshQueue = useCallback(async () => {
@@ -90,6 +101,8 @@ export function useStageReports({ objectId, storage, currentUser, canReview = fa
             try { return addPhoto(current, makePhotoRecord(uploaded)); }
             catch { return current; } // упёрлись в лимит на тип — молча не добавляем
           });
+          audit({ entity: "stage", field: "фотоотчёт", action: "добавил фото",
+            old: "—", new: kindLabel(uploaded.kind), detail: workOf(uploaded.stageId) });
         },
       });
       setError(result.failed ? "Фото не уходит — проверьте связь" : "");
@@ -98,7 +111,7 @@ export function useStageReports({ objectId, storage, currentUser, canReview = fa
       setActiveId(null);
       refreshQueue();
     }
-  }, [bag, objectId, readOnly, send, commit, refreshQueue]);
+  }, [bag, objectId, readOnly, send, commit, refreshQueue, audit, workOf]);
 
   const addPhotos = useCallback(async (stageId, kind, files, options = {}) => {
     if (readOnly || !objectId || !files?.length) return;
@@ -136,19 +149,33 @@ export function useStageReports({ objectId, storage, currentUser, canReview = fa
     };
   }, [objectId, readOnly, flush]);
 
-  const setPhotoClientVisible = useCallback((photoId, showClient) =>
-    commit((current) => patchPhoto(current, photoId, { showClient: !!showClient })), [commit]);
+  const setPhotoClientVisible = useCallback((photoId, showClient) => {
+    const photo = findRecord(listRef.current, photoId);
+    audit({ entity: "stage", field: "фото для клиента", action: "изменил",
+      old: photo?.showClient === false ? "скрыто" : "показывается",
+      new: showClient ? "показывается" : "скрыто", detail: workOf(photo?.stageId) });
+    return commit((current) => patchPhoto(current, photoId, { showClient: !!showClient }));
+  }, [commit, audit, workOf]);
 
   const setPhotoNote = useCallback((photoId, note) =>
     commit((current) => patchPhoto(current, photoId, { note: String(note || "") })), [commit]);
 
   const decidePhoto = useCallback((photoId, verdict) => {
     if (!canReview) return null;
+    const photo = findRecord(listRef.current, photoId);
+    audit({ entity: "stage", field: "фотоотчёт",
+      action: verdict === "approved" ? "подтвердил фото" : verdict === "rejected" ? "отклонил фото" : "вернул фото на проверку",
+      old: kindLabel(photo?.kind), new: verdict === "approved" ? "видно клиенту" : "клиенту не видно",
+      detail: workOf(photo?.stageId) });
     return commit((current) => reviewPhotoIn(current, photoId, verdict, currentUser || {}));
-  }, [commit, canReview, currentUser]);
+  }, [commit, canReview, currentUser, audit, workOf]);
 
-  const dropPhoto = useCallback((photoId) =>
-    commit((current) => removeRecord(current, photoId)), [commit]);
+  const dropPhoto = useCallback((photoId) => {
+    const photo = findRecord(listRef.current, photoId);
+    audit({ entity: "stage", field: "фотоотчёт", action: "удалил фото",
+      old: kindLabel(photo?.kind), new: "—", detail: workOf(photo?.stageId) });
+    return commit((current) => removeRecord(current, photoId));
+  }, [commit, audit, workOf]);
 
   const dropQueued = useCallback(async (entryId) => {
     await bag.remove(entryId);
@@ -174,16 +201,25 @@ export function useStageReports({ objectId, storage, currentUser, canReview = fa
     if (readOnly) return null;
     const report = makePaymentReport({ ...input, objectId, ...author });
     await commit((current) => addPaymentReport(current, report));
+    const delta = paymentDeviation(report);
+    audit({ entity: "stage", field: "расчёт с рабочими", action: "создал отчёт",
+      old: `согласовано ${report.agreed.toLocaleString("ru-RU")} ₸`,
+      new: `факт ${report.fact.toLocaleString("ru-RU")} ₸${delta > 0 ? ` (выше на ${delta.toLocaleString("ru-RU")})` : ""}`,
+      detail: [workOf(report.stageId), report.payee].filter(Boolean).join(" · ") });
     return report;
-  }, [readOnly, objectId, author, commit]);
+  }, [readOnly, objectId, author, commit, audit, workOf]);
 
   const updatePayment = useCallback((reportId, patch) =>
     commit((current) => patchPaymentReport(current, reportId, patch)), [commit]);
 
   const decidePayment = useCallback((reportId, verdict, comment) => {
     if (!canReview) return null;
+    const report = findRecord(listRef.current, reportId);
+    audit({ entity: "stage", field: "расчёт с рабочими", action: "проверил отчёт",
+      old: reportStatusMeta(report?.status).label, new: reportStatusMeta(verdict).label,
+      detail: [workOf(report?.stageId), report?.payee, comment].filter(Boolean).join(" · ") });
     return commit((current) => reviewPaymentReport(current, reportId, verdict, currentUser || {}, comment));
-  }, [commit, canReview, currentUser]);
+  }, [commit, canReview, currentUser, audit, workOf]);
 
   const dropPayment = useCallback((reportId) =>
     commit((current) => removeRecord(current, reportId)), [commit]);

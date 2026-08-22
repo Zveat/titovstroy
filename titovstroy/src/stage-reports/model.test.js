@@ -8,6 +8,7 @@ import {
   countAwaitingReview, isClientVisible,
   makePaymentReport, validatePaymentReport, addPaymentReport, patchPaymentReport,
   reviewPaymentReport, canReviewPayment, paymentDeviation, isOverpaid,
+  paymentRemainder, payModeMeta, isPartialPayment,
   listPayments, summarizePayments,
 } from "./model.js";
 
@@ -16,7 +17,7 @@ const photoInput = (over = {}) => ({
   author: "Прораб", authorId: "u1", ...over,
 });
 const payInput = (over = {}) => ({
-  objectId: "o1", stageId: "s1", mode: "paid", payee: "Бригада Ержана",
+  objectId: "o1", stageId: "s1", mode: "full", payee: "Бригада Ержана",
   agreed: 150000, fact: 250000, author: "Прораб", authorId: "u1", ...over,
 });
 const approvedPhoto = (list, record) => reviewPhoto(addPhoto(list, record), record.id, REVIEW_APPROVED, { id: "u2", name: "Рук" });
@@ -196,7 +197,7 @@ describe("расчёт с рабочими: обязательные поля", 
     expect(validatePaymentReport({})).toEqual([
       "Не указан объект",
       "Отчёт нужно привязать к этапу",
-      "Не выбрано: нужно оплатить или оплачено",
+      "Не выбран вид оплаты: полная, частичная или аванс",
       "Не указано, кому платим",
       "Согласованная сумма должна быть больше нуля",
     ]);
@@ -241,6 +242,24 @@ describe("расчёт с рабочими: отклонение", () => {
   it("совпадение сумм — ноль", () => {
     expect(paymentDeviation({ agreed: 150000, fact: 150000 })).toBe(0);
     expect(isOverpaid({ agreed: 150000, fact: 150000 })).toBe(false);
+  });
+
+  it("при авансе и частичной недоплата — остаток, а не экономия", () => {
+    expect(paymentRemainder({ mode: "advance", agreed: 150000, fact: 50000 })).toBe(100000);
+    expect(paymentRemainder({ mode: "partial", agreed: 150000, fact: 90000 })).toBe(60000);
+    expect(paymentRemainder({ mode: "full", agreed: 150000, fact: 90000 })).toBe(0);
+  });
+
+  it("переплата остаётся переплатой при любом виде оплаты", () => {
+    expect(isOverpaid({ mode: "advance", agreed: 150000, fact: 200000 })).toBe(true);
+    expect(paymentRemainder({ mode: "advance", agreed: 150000, fact: 200000 })).toBe(0);
+  });
+
+  it("старые записи не теряют подпись вида оплаты", () => {
+    expect(payModeMeta("paid").label).toBe("Полная оплата");
+    expect(payModeMeta("due").label).toBe("Частичная");
+    expect(isPartialPayment({ mode: "due" })).toBe(true);
+    expect(isPartialPayment({ mode: "paid" })).toBe(false);
   });
 
   it("сводка по объекту: сколько на проверке и на сколько переплата", () => {

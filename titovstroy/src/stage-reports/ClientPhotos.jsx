@@ -31,7 +31,10 @@ export function ClientTabs({ items = [], active, onPick, ui, badges = {} }) {
   if (items.length < 2) return null;
   const { INK, MUT } = ui;
   return (
-    <div style={{ display: "flex", gap: 7, overflowX: "auto", padding: "0 14px 4px", margin: "0 0 14px", WebkitOverflowScrolling: "touch" }}>
+    /* Перенос строкой, а не боковая прокрутка: последняя вкладка уезжала за
+       край и выглядела обрезанной, а на компьютере про горизонтальную прокрутку
+       вообще никто не догадается. */
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 7, padding: "0 14px", margin: "0 0 14px" }}>
       {items.map(([key, label, icon]) => {
         const on = key === active;
         return (
@@ -76,12 +79,14 @@ export function ClientPhotoReport({ groups = [], ui, expanded, onExpand, onOpen 
               return (
                 <div key={phase.key} style={{ marginBottom: 10 }}>
                   <div style={{ fontSize: 10.5, fontWeight: 800, color: BRASS, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>{phase.label}</div>
-                  {/* Лента прокручивается вбок внутри карточки: на телефоне четыре
-                      снимка в ряд не помещаются, а перенос строкой рвёт стадию пополам. */}
-                  <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, WebkitOverflowScrolling: "touch" }}>
+                  {/* Сетка, а не боковая лента: снимки за краем клиент просто не
+                      найдёт. Колонки подбираются под ширину, поэтому на телефоне
+                      это три штуки в ряд, а на компьютере ряд заполняется целиком
+                      и одинокое фото не теряется в пустой карточке. */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(min(100%,120px),1fr))", gap: 8 }}>
                     {items.map((photo, i) => (
                       <button key={photo.id || i} onClick={() => onOpen?.({ list: group.list, i: group.list.indexOf(photo), title: group.stage.name })}
-                        style={{ border: "1px solid #eef1f5", borderRadius: 12, padding: 0, background: "#f1f5f9", cursor: "pointer", flexShrink: 0, width: 104, height: 104, overflow: "hidden", lineHeight: 0 }}>
+                        style={{ border: "1px solid #eef1f5", borderRadius: 12, padding: 0, background: "#f1f5f9", cursor: "pointer", aspectRatio: "1", overflow: "hidden", lineHeight: 0 }}>
                         <img src={photo.thumbUrl || photo.url} alt={phase.label} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
                       </button>
                     ))}
