@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { STAGE_REPORTS_CSS } from "../stage-reports/StageReports.jsx";
 import {
   buildObjectHealth,
   buildTaskSummary,
@@ -80,7 +81,7 @@ const emptyNote = { color: "#94a3b8", fontSize: 12.5, padding: "16px 0" };
 // Мобильная раскладка. Инлайновые стили медиа-запросов не умеют, а весь модуль
 // на них: без этого блока формы уезжают за край телефона, а ряды кнопок
 // разваливаются на неровные ступеньки.
-const CSS = `
+const CSS = STAGE_REPORTS_CSS + `
 .oc-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:12px}
 .oc-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;
   padding:11px 0;border-bottom:1px solid #eef2f7}
@@ -113,7 +114,7 @@ const CSS = `
 // одинаково мелкими кнопками: на телефоне в них надо целиться, и было непонятно,
 // что нажимать. Теперь главное действие зависит от статуса и занимает всю
 // ширину, остальные — второстепенные и мельче.
-function StageLine({ stage, readOnly, onStatus, compact }) {
+function StageLine({ stage, readOnly, onStatus, compact, reports }) {
   const meta = statusMeta[stage.status] || statusMeta.todo;
   const today = localDateKey();
   const late = stage.status !== "done" && stage.planEnd && stage.planEnd < today;
@@ -154,12 +155,16 @@ function StageLine({ stage, readOnly, onStatus, compact }) {
           <button type="button" onClick={() => onStatus(stage.id, "progress")} style={action("#64748b", "#f1f5f9")}>Вернуть в работу</button>
         </div>
       )}
+      {/* Фото и расчёт с рабочими — те же панели, что на вкладке «Этапы».
+          Прораб работает здесь, и гонять его на другую вкладку ради снимка
+          скрытых работ значит, что снимка не будет. */}
+      {reports ? <div style={{ gridColumn: "1 / -1" }}>{reports(stage)}</div> : null}
     </div>
   );
 }
 
 // ─── ВКЛАДКА «УПРАВЛЕНИЕ» — экран руководителя ───
-function ControlView({ production, currentUser, readOnly, onPatchProduction, onAddDefect, defectsReadOnly }) {
+function ControlView({ production, currentUser, readOnly, onPatchProduction, onAddDefect, defectsReadOnly, renderStageReports }) {
   const today = localDateKey();
   const health = useMemo(() => buildObjectHealth(production, today), [production, today]);
   const stages = production.stages || [];
@@ -214,7 +219,7 @@ function ControlView({ production, currentUser, readOnly, onPatchProduction, onA
         <section style={panel}>
           <div style={sectionTitle}>Сейчас в работе</div>
           {active.length
-            ? active.slice(0, 8).map((stage) => <StageLine key={stage.id} stage={stage} readOnly />)
+            ? active.slice(0, 8).map((stage) => <StageLine key={stage.id} stage={stage} readOnly reports={renderStageReports} />)
             : <div style={emptyNote}>Ни один этап не отмечен «В работе». Отметьте на вкладке «Сегодня» — тогда здесь будет видно, чем занят объект.</div>}
         </section>
         <section style={panel}>
@@ -282,7 +287,7 @@ function ReportField({ label, value }) {
 }
 
 // ─── ВКЛАДКА «СЕГОДНЯ» — экран прораба ───
-function TodayView({ object, production, currentUser, readOnly, onStageStatus, onCloseDay, onPatchProduction, onPlanDates }) {
+function TodayView({ object, production, currentUser, readOnly, onStageStatus, onCloseDay, onPatchProduction, onPlanDates, renderStageReports }) {
   const today = localDateKey();
   const stages = production.stages || [];
   const groups = useMemo(() => buildTodayStageGroups(stages, today), [stages, today]);
@@ -353,7 +358,7 @@ function TodayView({ object, production, currentUser, readOnly, onStageStatus, o
           {groups.isFallback && <span style={{ fontSize: 11.5, color: "#94a3b8" }}>сроки не заданы — показаны первые незавершённые</span>}
         </div>
         {groups.focus.length
-          ? groups.focus.map((stage) => <StageLine key={stage.id} stage={stage} readOnly={readOnly} onStatus={onStageStatus} compact />)
+          ? groups.focus.map((stage) => <StageLine key={stage.id} stage={stage} readOnly={readOnly} onStatus={onStageStatus} compact reports={renderStageReports} />)
           : <div style={{ color: "#047857", background: "#ecfdf5", border: "1px solid #bbf7d0", borderRadius: 11, padding: 16, marginTop: 8, fontWeight: 800, fontSize: 13.5 }}>✓ Все работы завершены</div>}
       </div>
 
