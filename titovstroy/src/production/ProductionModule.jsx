@@ -638,7 +638,7 @@ export default function ProductionModule({
         <ChecklistTab kind="checklistHandover" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист сдачи объекта" />
         <WarrantyTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} fmt={fmt} audit={audit} />
       </>}
-      {embedTab === "control" && <StageReportsSummary api={stageReports} />}
+      {embedTab === "control" && <StageReportsSummary api={stageReports} kind="all" />}
       {embedTab === "control" && <ObjectControlModule mode="control" object={openObj} production={localProd} currentUser={currentUser}
         readOnly={controlReadOnly} onPatchProduction={stagesPatch}
         defectsReadOnly={qualityReadOnly} onAddDefect={handleAddDefect} renderStageReports={(stage) => <StageReports stage={stage} api={stageReports} currentUser={currentUser} />} />}
