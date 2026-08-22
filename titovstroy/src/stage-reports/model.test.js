@@ -10,7 +10,7 @@ import {
   reviewPaymentReport, canReviewPayment, paymentDeviation, isOverpaid,
   paymentRemainder, payModeMeta, isPartialPayment, paymentLines, paymentAmount,
   allocatedTotal, agreedTotal, unallocated, allocateByPlan, stagePaymentTotals,
-  listPayments, listAllPayments, summarizePayments, canEditPayment, editPaymentReport,
+  listPayments, listAllPayments, summarizePayments, canEditPayment, canDeletePayment, editPaymentReport,
 } from "./model.js";
 
 const photoInput = (over = {}) => ({
@@ -302,6 +302,18 @@ describe("расчёт с рабочими: проверка руководит�
     expect(canEditPayment(report, { id: "u1" }, {})).toBe(true);
     expect(canEditPayment(report, { id: "u2" }, { canReview: true })).toBe(true);
     expect(canEditPayment(report, { id: "u3" }, {})).toBe(false);
+  });
+
+  it("автор удаляет свою выплату только до проверки, проверяющий — всегда", () => {
+    const report = makePaymentReport(pay());
+    expect(canDeletePayment(report, { id: "u1" }, {})).toBe(true);
+    expect(canDeletePayment(report, { id: "u3" }, {})).toBe(false);
+    const decided = listAllPayments(
+      reviewPaymentReport(addPaymentReport(emptyStageReports(), report), report.id, "approved", { id: "u2", name: "Титов" })
+    )[0];
+    // Подтверждённую свою — уже нельзя: под ней стоит чужое решение.
+    expect(canDeletePayment(decided, { id: "u1" }, {})).toBe(false);
+    expect(canDeletePayment(decided, { id: "u2" }, { canReview: true })).toBe(true);
   });
 
   it("правка сумм возвращает выплату на проверку и стирает прежнее решение", () => {

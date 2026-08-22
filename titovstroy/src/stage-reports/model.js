@@ -417,6 +417,16 @@ export function canEditPayment(report, user, permissions = {}) {
   return permissions.canReview === true;
 }
 
+// Удаление выплаты. Автор убирает только свою и только пока её не проверили:
+// после решения руководителя запись — часть этой проверки, стирать её задним
+// числом нельзя. У проверяющего право есть всегда: ошибочную запись должен уметь
+// убрать тот, кто за неё отвечает.
+export function canDeletePayment(report, user, permissions = {}) {
+  if (!report || !user) return false;
+  if (permissions.canReview === true) return true;
+  return String(report.authorId || "") === String(user.id || "") && report.status === REVIEW_PENDING;
+}
+
 export function reviewPaymentReport(list, reportId, verdict, reviewer = {}, comment = "") {
   if (!REPORT_STATUS_KEYS.includes(verdict) || verdict === "pending") {
     throw new Error("Неизвестное решение по отчёту");

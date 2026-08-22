@@ -1,14 +1,14 @@
 // Две кнопки в карточке этапа и панели под ними: «Фото» и «Расчёт с рабочими».
 // Обе панели рассчитаны на телефон в первую очередь — прораб заполняет их
 // стоя на объекте, а не за столом.
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   PHOTO_KINDS, PAY_MODES, MAX_PHOTOS_PER_KIND,
   REVIEW_APPROVED, REVIEW_REJECTED, REVIEW_PENDING,
   listPhotos, listPayments, countPhotosOfKind, countStagePhotos,
   paymentDeviation, isOverpaid, paymentRemainder, payModeMeta, isPartialPayment,
   paymentLines, paymentAmount, allocatedTotal, unallocated, allocateByPlan,
-  listAllPayments, summarizePayments, canEditPayment,
+  listAllPayments, summarizePayments, canEditPayment, canDeletePayment,
   reportStatusMeta, canReviewPayment, validatePaymentReport,
 } from "./model.js";
 import { entryStatus, QUEUE_STATUS_LABELS, QUEUE_FAILED, QUEUE_UPLOADING } from "./queue.js";
@@ -33,7 +33,44 @@ export const STAGE_REPORTS_CSS = `
 .sr-wide{grid-column:1/-1}
 .sr-lab{display:grid;gap:4px;font-size:11px;font-weight:700;color:#64748b;min-width:0}
 .sr-rep{border:1px solid #e2e8f0;border-radius:9px;background:#fff;padding:10px 11px;margin-top:8px}
-.sr-sums{display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;margin-top:5px}
+.sr-sums{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+/* Содержимое держим в читаемой колонке. На широком мониторе карточка
+   растягивалась на всю ширину: название работы у левого края, сумма у правого,
+   между ними полтора метра пустоты — глазу не за что зацепиться. */
+.sr-col{max-width:900px}
+/* Строки распределения — настоящая таблица: работа, сумма, отклонение.
+   Раньше это был поток из текста и плашек, и три числа читались как одно. */
+.sr-lines{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:5px 12px;align-items:center;
+  margin-top:9px;padding-top:9px;border-top:1px solid #f1f5f9}
+.sr-lines b{white-space:nowrap;text-align:right}
+.sr-head{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.sr-meta{font-size:11.5px;color:#94a3b8;margin-top:2px}
+/* Правка — выделенная панель, а не продолжение карточки: иначе непонятно,
+   где кончается запись и начинается форма. */
+.sr-edit{margin-top:10px;border:1px solid #bfdbfe;background:#f8fbff;border-radius:10px;padding:11px}
+/* Форма выплаты — шторка поверх экрана, а не продолжение карточки. Внутри
+   карточки на телефоне получалась бесконечная прокрутка: пока долистаешь до
+   полей, уже не помнишь, какую запись правишь. */
+.sr-back{position:fixed;inset:0;z-index:9998;background:rgba(15,23,42,.45);
+  display:flex;align-items:flex-end;justify-content:center}
+.sr-sheet{background:#fff;width:100%;max-width:760px;max-height:92vh;display:flex;flex-direction:column;
+  border-radius:18px 18px 0 0;box-shadow:0 -10px 40px -12px rgba(15,23,42,.45)}
+.sr-sheet-head{position:sticky;top:0;z-index:2;background:#fff;padding:14px 14px 11px;display:flex;gap:10px;
+  align-items:center;border-bottom:1px solid #f1f5f9;border-radius:18px 18px 0 0}
+.sr-sheet-body{overflow-y:auto;padding:12px 14px calc(14px + env(safe-area-inset-bottom))}
+/* Кнопка отправки прилипает к низу: в длинной форме до неё иначе не дотянуться,
+   не прокрутив всё обратно. */
+.sr-sheet-foot{position:sticky;bottom:0;background:#fff;padding:10px 0 0;margin-top:10px;
+  border-top:1px solid #f1f5f9;display:flex;gap:8px;flex-wrap:wrap}
+@media(min-width:701px){
+  .sr-back{align-items:center;padding:20px}
+  .sr-sheet{border-radius:16px;max-height:88vh}
+  .sr-sheet-head{border-radius:16px 16px 0 0}
+}
+@media(max-width:700px){
+  .sr-lines{grid-template-columns:minmax(0,1fr) auto;gap:4px 8px}
+  .sr-lines>span:nth-child(3n){grid-column:1/-1;justify-self:start}
+}
 @media(max-width:700px){
   .sr-form{grid-template-columns:minmax(0,1fr)}
   .sr-note{flex:1 1 100%!important;order:3}
@@ -64,6 +101,34 @@ const small = (color, background) => ({
   border: `1px solid ${color}33`, background, color, borderRadius: 7, padding: "6px 10px",
   fontSize: 11.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
 });
+
+// Шторка поверх экрана: снизу на телефоне, окном по центру на компьютере.
+function Sheet({ title, subtitle, onClose, children }) {
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (event) => { if (event.key === "Escape") onClose?.(); };
+    window.addEventListener("keydown", onKey);
+    return () => { document.body.style.overflow = previous; window.removeEventListener("keydown", onKey); };
+  }, [onClose]);
+  return (
+    <div className="sr-back" onClick={onClose}>
+      <div className="sr-sheet" onClick={(event) => event.stopPropagation()}>
+        <div className="sr-sheet-head">
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>{title}</div>
+            {subtitle && <div style={{ fontSize: 11.5, color: "#94a3b8", marginTop: 2, overflowWrap: "anywhere" }}>{subtitle}</div>}
+          </div>
+          <button type="button" onClick={onClose} aria-label="Закрыть"
+            style={{ width: 34, height: 34, borderRadius: 9, border: "1px solid #e2e8f0", background: "#f8fafc",
+              color: "#64748b", fontSize: 16, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, lineHeight: 1 }}>✕</button>
+        </div>
+        <div className="sr-sheet-body">{children}</div>
+      </div>
+    </div>
+  );
+}
 
 // Плитка снимка, который ещё не ушёл в облако. Показываем сразу и из локального
 // файла: иначе прораб на слабой связи не понимает, приняло приложение фото или
@@ -231,6 +296,113 @@ function PhotoPanel({ stage, api, onOpen }) {
   );
 }
 
+// Строка работы в выборе: галка, смета и — если работа выбрана — сумма по ней.
+function WorkRow({ stage, on, plan, line, value, onToggle, onAmount }) {
+  const delta = line ? line.fact - line.agreed : 0;
+  return (
+    <div style={{ border: "1px solid " + (on ? "#bfdbfe" : "#e2e8f0"), background: on ? "#f8fbff" : "#fff",
+      borderRadius: 9, padding: "8px 10px", display: "grid", gap: 6 }}>
+      <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", minWidth: 0 }}>
+        <input type="checkbox" checked={on} onChange={onToggle} style={{ marginTop: 2, flexShrink: 0 }} />
+        <span style={{ minWidth: 0 }}>
+          <span style={{ fontSize: 12.5, fontWeight: on ? 800 : 600, color: "#0f172a", overflowWrap: "anywhere" }}>{stage.name || "Работа"}</span>
+          {plan > 0 && <span style={{ display: "block", fontSize: 11, color: "#94a3b8" }}>по смете {money(plan)} ₸</span>}
+        </span>
+      </label>
+      {on && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <input className="sr-field" inputMode="numeric" style={{ flex: "1 1 120px", minWidth: 0 }}
+            value={value} placeholder="сумма по этой работе" onChange={(event) => onAmount(event.target.value)} />
+          {line && line.fact > 0 && line.agreed > 0 && (
+            <span style={chip(delta > 0 ? "#b91c1c" : delta < 0 ? "#64748b" : "#047857",
+              delta > 0 ? "#fef2f2" : delta < 0 ? "#f1f5f9" : "#ecfdf5")}>
+              {delta > 0 ? `⚠ выше сметы на ${money(delta)} ₸` : delta < 0 ? `ниже сметы на ${money(-delta)} ₸` : "как в смете"}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Выбор работ под чек. На объекте их бывает под сорок: сплошным списком нужную
+// не найти, а прокрутка внутри блока на телефоне ловится пальцем случайно.
+// Поэтому три вещи: поиск, разделы сметы (свёрнуты, когда работ много) и
+// выбранные всегда сверху — иначе введённая сумма прячется под фильтр.
+function WorkPicker({ stages, picked, planOf, lines, onToggle, onAmount }) {
+  const [query, setQuery] = useState("");
+  const [opened, setOpened] = useState({});
+  const needle = query.trim().toLowerCase();
+  const hit = (stage) => !needle
+    || String(stage.name || "").toLowerCase().includes(needle)
+    || String(stage.cat || "").toLowerCase().includes(needle);
+
+  const chosen = stages.filter((stage) => stage.id in picked);
+  const rest = stages.filter((stage) => !(stage.id in picked) && hit(stage));
+  // Разделы — в порядке сметы, а не по алфавиту: прораб ищет глазами там же,
+  // где привык видеть работу в смете.
+  const groups = [];
+  for (const stage of rest) {
+    const cat = String(stage.cat || "").trim() || "Прочее";
+    const found = groups.find((item) => item.cat === cat);
+    if (found) found.rows.push(stage);
+    else groups.push({ cat, rows: [stage] });
+  }
+  // Свёрнуто только когда сворачивать есть что. При поиске раскрываем всё:
+  // человек уже сказал, что ищет, лишний клик тут — издевательство.
+  const foldable = !needle && rest.length > 10;
+  const isOpen = (cat) => !foldable || opened[cat] === true;
+
+  const row = (stage) => (
+    <WorkRow key={stage.id} stage={stage} on={stage.id in picked} plan={planOf(stage)}
+      line={lines.find((item) => item.stageId === stage.id)} value={picked[stage.id] ?? ""}
+      onToggle={() => onToggle(stage)} onAmount={(next) => onAmount(stage.id, next)} />
+  );
+
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <div style={{ position: "relative" }}>
+        <input className="sr-field" value={query} onChange={(event) => setQuery(event.target.value)}
+          placeholder="Поиск работы — например, «перегород»" style={{ paddingLeft: 30, paddingRight: query ? 30 : 10 }} />
+        <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", fontSize: 12, color: "#94a3b8" }}>🔍</span>
+        {query && (
+          <button type="button" onClick={() => setQuery("")} aria-label="Очистить поиск"
+            style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", width: 22, height: 22,
+              borderRadius: 6, border: 0, background: "#f1f5f9", color: "#64748b", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>✕</button>
+        )}
+      </div>
+
+      {chosen.length > 0 && (
+        <div style={{ display: "grid", gap: 6 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "#2563eb" }}>Выбрано: {chosen.length}</div>
+          {chosen.map(row)}
+        </div>
+      )}
+
+      {groups.map((group) => (
+        <div key={group.cat} style={{ display: "grid", gap: 6 }}>
+          {foldable ? (
+            <button type="button" onClick={() => setOpened((prev) => ({ ...prev, [group.cat]: !prev[group.cat] }))}
+              style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", textAlign: "left", cursor: "pointer",
+                border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: 9, padding: "8px 10px", fontFamily: "inherit" }}>
+              <span style={{ fontSize: 10, color: "#94a3b8" }}>{isOpen(group.cat) ? "▾" : "▸"}</span>
+              <span style={{ fontSize: 12, fontWeight: 800, color: "#334155", minWidth: 0, overflowWrap: "anywhere" }}>{group.cat}</span>
+              <span style={{ marginLeft: "auto", fontSize: 11, color: "#94a3b8" }}>{group.rows.length}</span>
+            </button>
+          ) : (
+            <div style={{ fontSize: 11, fontWeight: 800, color: "#94a3b8", marginTop: 2 }}>{group.cat}</div>
+          )}
+          {isOpen(group.cat) && group.rows.map(row)}
+        </div>
+      ))}
+
+      {needle && rest.length === 0 && chosen.filter(hit).length === 0 && (
+        <div style={{ fontSize: 12, color: "#94a3b8", padding: "6px 2px" }}>По запросу «{query.trim()}» работ не нашлось.</div>
+      )}
+    </div>
+  );
+}
+
 // Форма выплаты. Одна выплата — один чек, но закрывать она может несколько
 // работ: заплатили мастеру 300 000, из них 100 000 за демонтаж и 200 000 за
 // остальное. Поэтому суммы вводятся построчно, а не одним полем.
@@ -306,7 +478,7 @@ function PaymentForm({ stages, api, onDone, preselect = "", edit = null }) {
   };
 
   return (
-    <div style={{ borderTop: "1px solid #e2e8f0", marginTop: 10, paddingTop: 10 }}>
+    <div>
       <div className="sr-form">
         <label className="sr-lab">Вид оплаты
           <select className="sr-field" value={form.mode} onChange={(event) => set({ mode: event.target.value })}>
@@ -333,40 +505,10 @@ function PaymentForm({ stages, api, onDone, preselect = "", edit = null }) {
             <button type="button" onClick={spreadByPlan} style={small("#2563eb", "#eff6ff")}>Разложить по смете</button>
           )}
         </div>
-        <div style={{ display: "grid", gap: 6, maxHeight: 260, overflowY: "auto" }}>
-          {stages.map((stage) => {
-            const on = stage.id in picked;
-            return (
-              <div key={stage.id} style={{ border: "1px solid " + (on ? "#bfdbfe" : "#e2e8f0"), background: on ? "#f8fbff" : "#fff",
-                borderRadius: 9, padding: "8px 10px", display: "grid", gap: 6 }}>
-                <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", minWidth: 0 }}>
-                  <input type="checkbox" checked={on} onChange={() => toggle(stage)} style={{ marginTop: 2, flexShrink: 0 }} />
-                  <span style={{ minWidth: 0 }}>
-                    <span style={{ fontSize: 12.5, fontWeight: on ? 800 : 600, color: "#0f172a", overflowWrap: "anywhere" }}>{stage.name || "Работа"}</span>
-                    {planOf(stage) > 0 && <span style={{ display: "block", fontSize: 11, color: "#94a3b8" }}>по смете {money(planOf(stage))} ₸</span>}
-                  </span>
-                </label>
-                {on && (() => {
-                  const line = lines.find((item) => item.stageId === stage.id) || { agreed: 0, fact: 0 };
-                  const delta = line.fact - line.agreed;
-                  return (
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                      <input className="sr-field" inputMode="numeric" style={{ flex: "1 1 120px", minWidth: 0 }}
-                        value={picked[stage.id]} placeholder="сумма по этой работе"
-                        onChange={(event) => setPicked((prev) => ({ ...prev, [stage.id]: event.target.value }))} />
-                      {line.fact > 0 && line.agreed > 0 && (
-                        <span style={chip(delta > 0 ? "#b91c1c" : delta < 0 ? "#64748b" : "#047857",
-                          delta > 0 ? "#fef2f2" : delta < 0 ? "#f1f5f9" : "#ecfdf5")}>
-                          {delta > 0 ? `⚠ выше сметы на ${money(delta)} ₸` : delta < 0 ? `ниже сметы на ${money(-delta)} ₸` : "как в смете"}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
-            );
-          })}
-        </div>
+        {/* Без своей прокрутки: вложенный скролл внутри страницы на телефоне
+            ловится пальцем случайно и уводит не туда. Шторка листается целиком. */}
+        <WorkPicker stages={stages} picked={picked} planOf={planOf} lines={lines} onToggle={toggle}
+          onAmount={(stageId, value) => setPicked((prev) => ({ ...prev, [stageId]: value }))} />
       </div>
 
       {/* Сходится ли разложенное с чеком. Остаток сохранять не мешает — прораб
@@ -408,9 +550,9 @@ function PaymentForm({ stages, api, onDone, preselect = "", edit = null }) {
       </label>
 
       {problem && <div style={{ marginTop: 8, fontSize: 12, color: "#b91c1c", fontWeight: 700 }}>{problem}</div>}
-      <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-        <button type="button" onClick={submit} disabled={saving} style={{ ...primary, opacity: saving ? .6 : 1 }}>
-          {saving ? "Сохраняю…" : edit ? "Сохранить и отправить на проверку" : "Отправить на проверку"}
+      <div className="sr-sheet-foot">
+        <button type="button" onClick={submit} disabled={saving} style={{ ...primary, flex: "1 1 200px", opacity: saving ? .6 : 1 }}>
+          {saving ? "Сохраняю…" : edit ? "Сохранить и на проверку" : "Отправить на проверку"}
         </button>
         <button type="button" onClick={onDone} style={small("#64748b", "#f1f5f9")}>Отмена</button>
       </div>
@@ -432,34 +574,37 @@ function PaymentCard({ report, api, currentUser, stageName, stages, onEdit, edit
   const mine = String(report.authorId || "") === String(currentUser?.id || "");
   const mayReview = canReviewPayment(report, currentUser, { canReview: api.canReview, allowSelfReview: api.allowSelfReview });
   const mayEdit = !api.readOnly && canEditPayment(report, currentUser, { canReview: api.canReview });
+  const mayDrop = !api.readOnly && canDeletePayment(report, currentUser, { canReview: api.canReview });
 
   return (
     <div className="sr-rep" style={{ borderLeft: `3px solid ${meta.color}` }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-        <span style={{ fontSize: 13.5, fontWeight: 800, color: "#0f172a", minWidth: 0, overflowWrap: "anywhere" }}>{report.payee}</span>
-        <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>{money(amount)} ₸</span>
-        <span style={chip(meta.color, meta.bg)}>{meta.label}</span>
-        <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: "auto" }}>
-          {payModeMeta(report.mode).label} · {shortDate(report.date)}
-        </span>
-      </div>
+      <div className="sr-col">
+        <div className="sr-head">
+          <span style={{ fontSize: 15, fontWeight: 800, color: "#0f172a", minWidth: 0, overflowWrap: "anywhere" }}>{money(amount)} ₸</span>
+          <span style={{ fontSize: 13.5, fontWeight: 700, color: "#334155", minWidth: 0, overflowWrap: "anywhere" }}>{report.payee}</span>
+          <span style={{ ...chip(meta.color, meta.bg), marginLeft: "auto" }}>{meta.label}</span>
+        </div>
+        <div className="sr-meta">
+          {payModeMeta(report.mode).label} · {shortDate(report.date)} · {report.author || "—"}
+          {report.reviewedBy ? ` · проверил ${report.reviewedBy}` : ""}
+        </div>
 
-      <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
-        {lines.map((line) => {
-          const over = line.fact - line.agreed;
-          return (
-            <div key={line.stageId} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", fontSize: 12 }}>
-              <span style={{ color: "#475569", flex: "1 1 140px", minWidth: 0, overflowWrap: "anywhere" }}>{stageName?.(line.stageId) || "Работа"}</span>
-              <span style={{ fontWeight: 800, color: "#0f172a", whiteSpace: "nowrap" }}>{money(line.fact)} ₸</span>
-              {line.agreed > 0 && over !== 0 && (
-                <span style={chip(over > 0 ? "#b91c1c" : "#64748b", over > 0 ? "#fef2f2" : "#f1f5f9")}>
-                  {over > 0 ? `⚠ +${money(over)}` : `−${money(-over)}`} к смете
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </div>
+        <div className="sr-lines">
+          {lines.map((line) => {
+            const over = line.fact - line.agreed;
+            return (
+              <Fragment key={line.stageId}>
+                <span style={{ fontSize: 12.5, color: "#475569", minWidth: 0, overflowWrap: "anywhere" }}>{stageName?.(line.stageId) || "Работа"}</span>
+                <b style={{ fontSize: 12.5, color: "#0f172a" }}>{money(line.fact)} ₸</b>
+                <span>{line.agreed > 0 && over !== 0 ? (
+                  <span style={chip(over > 0 ? "#b91c1c" : "#64748b", over > 0 ? "#fef2f2" : "#f1f5f9")}>
+                    {over > 0 ? `⚠ +${money(over)}` : `−${money(-over)}`} к смете
+                  </span>
+                ) : null}</span>
+              </Fragment>
+            );
+          })}
+        </div>
 
       <div className="sr-sums">
         {rest !== 0 && (
@@ -473,7 +618,7 @@ function PaymentCard({ report, api, currentUser, stageName, stages, onEdit, edit
           : <span style={chip("#047857", "#ecfdf5")}>ниже сметы на {money(-delta)} ₸</span>)}
       </div>
 
-      {report.note && <div style={{ fontSize: 12, color: "#475569", marginTop: 6, lineHeight: 1.4 }}>{report.note}</div>}
+      {report.note && <div style={{ fontSize: 12, color: "#475569", marginTop: 8, lineHeight: 1.4 }}>{report.note}</div>}
       {report.receipts?.length > 0 && (
         <div className="sr-tiles">
           {report.receipts.map((receipt) => (
@@ -483,17 +628,17 @@ function PaymentCard({ report, api, currentUser, stageName, stages, onEdit, edit
           ))}
         </div>
       )}
-      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 7 }}>
-        {report.author || "—"}{report.reviewedBy ? ` · проверил ${report.reviewedBy}` : ""}
       </div>
       {report.reviewNote && (
-        <div style={{ marginTop: 7, background: meta.bg, border: `1px solid ${meta.color}26`, borderRadius: 7, padding: "7px 9px", fontSize: 12, color: meta.color }}>
+        <div className="sr-col" style={{ marginTop: 7, background: meta.bg, border: `1px solid ${meta.color}26`, borderRadius: 7, padding: "7px 9px", fontSize: 12, color: meta.color }}>
           {report.reviewNote}
         </div>
       )}
 
-      {mayReview && (
-        <div style={{ marginTop: 9, borderTop: "1px solid #f1f5f9", paddingTop: 9 }}>
+      {/* Кнопки — в той же читаемой колонке, что и содержимое: иначе на широком
+          мониторе «Удалить» уезжает к правому краю экрана, за метр от карточки. */}
+      {(mayReview || mayEdit || mayDrop) && (
+        <div className="sr-col" style={{ marginTop: 9, borderTop: "1px solid #f1f5f9", paddingTop: 9 }}>
           {open ? (
             <div style={{ display: "grid", gap: 8 }}>
               <textarea className="sr-field" rows={2} value={comment} onChange={(event) => setComment(event.target.value)}
@@ -506,24 +651,33 @@ function PaymentCard({ report, api, currentUser, stageName, stages, onEdit, edit
               </div>
             </div>
           ) : (
-            <button type="button" onClick={() => setOpen(true)} style={small("#0f172a", "#f1f5f9")}>
-              {report.status === "pending" ? "Проверить выплату" : "Изменить решение"}
-            </button>
-          )}
-        </div>
-      )}
-      {mayEdit && (
-        <div style={{ marginTop: 8 }}>
-          <button type="button" onClick={() => onEdit?.(editing ? "" : report.id)} style={small("#2563eb", "#eff6ff")}>
-            {editing ? "Отменить правку" : "Исправить"}
-          </button>
-          {report.status !== "pending" && !editing && (
-            <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: 8 }}>после правки выплата вернётся на проверку</span>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              {mayReview && (
+                <button type="button" onClick={() => setOpen(true)} style={small("#0f172a", "#f1f5f9")}>
+                  {report.status === "pending" ? "Проверить выплату" : "Изменить решение"}
+                </button>
+              )}
+              {mayEdit && (
+                <button type="button" onClick={() => onEdit?.(report.id)} style={small("#2563eb", "#eff6ff")}>Исправить</button>
+              )}
+              {/* Удаление — справа и отдельно от остальных: рядом с «Исправить»
+                  на телефоне промахиваются пальцем. Сумму и получателя называем
+                  в вопросе, иначе не понять, какую именно запись стираешь. */}
+              {mayDrop && (
+                <button type="button" style={{ ...small("#b91c1c", "#fff"), marginLeft: "auto" }}
+                  onClick={() => {
+                    if (confirm(`Удалить выплату ${money(amount)} ₸ — ${report.payee || "без получателя"}?\nВосстановить будет нельзя.`)) api.dropPayment(report.id);
+                  }}>Удалить</button>
+              )}
+            </div>
           )}
         </div>
       )}
       {editing && (
-        <PaymentForm stages={stages} api={api} edit={report} onDone={() => onEdit?.("")} />
+        <Sheet title="Правка выплаты" subtitle={`${report.payee} · ${money(amount)} ₸ · после сохранения вернётся на проверку`}
+          onClose={() => onEdit?.("")}>
+          <PaymentForm stages={stages} api={api} edit={report} onDone={() => onEdit?.("")} />
+        </Sheet>
       )}
       {/* Своё подтвердить нельзя — в этом и смысл проверки. Владельцу это не
           мешает: у него право проверять себя есть. */}
@@ -560,12 +714,16 @@ export function PaymentsSection({ stages = [], api, currentUser, filterStageId =
           <button type="button" onClick={() => setAdding(true)} style={{ ...primary, marginLeft: "auto" }}>+ Выплата</button>
         )}
       </div>
-      <div style={{ fontSize: 11.5, color: "#94a3b8", marginTop: 3, lineHeight: 1.45 }}>
+      <div className="sr-col" style={{ fontSize: 11.5, color: "#94a3b8", marginTop: 3, lineHeight: 1.45 }}>
         Один чек может закрывать несколько работ — суммы разносятся по ним внутри выплаты.
         Внутренний документ: финансовых операций не создаёт.
       </div>
 
-      {adding && <PaymentForm stages={stages} api={api} preselect={filterStageId} onDone={() => setAdding(false)} />}
+      {adding && (
+        <Sheet title="Новая выплата" subtitle="Один чек может закрывать несколько работ" onClose={() => setAdding(false)}>
+          <PaymentForm stages={stages} api={api} preselect={filterStageId} onDone={() => setAdding(false)} />
+        </Sheet>
+      )}
 
       {visible.length === 0 && !adding && (
         <div style={{ fontSize: 12.5, color: "#94a3b8", padding: "14px 0 2px" }}>
@@ -583,24 +741,28 @@ export function PaymentsSection({ stages = [], api, currentUser, filterStageId =
 // Сводка по объекту для руководителя. Нужна ровно потому, что фото уходит
 // клиенту только после подтверждения: без этой строки непроверенные снимки тихо
 // копятся, клиент не видит ничего и никто не понимает почему.
+// kind: "photo" — только фото, "pay" — только выплаты, "all" — и то и другое
+// (экран «Управление»: руководитель заходит туда, а не листает финансы).
 export function StageReportsSummary({ api, kind = "photo" }) {
   if (!api?.canReview) return null;
   const { awaitingPhotos, payments } = api.summary;
-  const photos = kind === "photo";
-  if (photos ? !awaitingPhotos : (!payments.pending && !payments.overpaid)) return null;
+  const photos = kind === "photo" || kind === "all";
+  const pays = kind === "pay" || kind === "all";
+  const showPhotos = photos && awaitingPhotos > 0;
+  const showPays = pays && (payments.pending > 0 || payments.overpaid > 0);
+  if (!showPhotos && !showPays) return null;
   return (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center",
       background: "#fff", border: "1px solid #e2e8f0", borderRadius: 11, padding: "10px 13px", marginBottom: 12 }}>
       <span style={{ fontSize: 12.5, fontWeight: 800, color: "#0f172a" }}>Ждёт вашего решения</span>
-      {photos && <span style={chip("#b45309", "#fffbeb")}>📷 фото: {awaitingPhotos}</span>}
-      {!photos && payments.pending > 0 && <span style={chip("#b45309", "#fffbeb")}>💵 отчётов: {payments.pending}</span>}
-      {!photos && payments.overpaid > 0 && (
-        <span style={chip("#b91c1c", "#fef2f2")}>⚠ выше согласованного на {money(payments.deviation)} ₸</span>
+      {showPhotos && <span style={chip("#b45309", "#fffbeb")}>📷 фото: {awaitingPhotos}</span>}
+      {showPays && payments.pending > 0 && <span style={chip("#b45309", "#fffbeb")}>💵 выплат: {payments.pending}</span>}
+      {showPays && payments.overpaid > 0 && (
+        <span style={chip("#b91c1c", "#fef2f2")}>⚠ выше сметы на {money(payments.deviation)} ₸</span>
       )}
       <span style={{ fontSize: 11, color: "#94a3b8", flexBasis: "100%" }}>
-        {photos
-          ? "Пока фото не подтверждено, клиент его не видит. Решения — в карточке работы на вкладке «Этапы»."
-          : "Отчёты прораба — в строках работ ниже. Финансовых операций они не создают."}
+        {[showPhotos ? "Пока фото не подтверждено, клиент его не видит — решения в карточке работы на вкладке «Этапы»." : "",
+          showPays ? "Выплаты мастерам — во вкладке «Финансы» → «Взаиморасчёты»." : ""].filter(Boolean).join(" ")}
       </span>
     </div>
   );

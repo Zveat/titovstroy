@@ -237,8 +237,16 @@ export function useStageReports({ objectId, storage, currentUser, canReview = fa
     return commit((current) => reviewPaymentReport(current, reportId, verdict, currentUser || {}, comment));
   }, [commit, canReview, currentUser, audit, workOf]);
 
-  const dropPayment = useCallback((reportId) =>
-    commit((current) => removeRecord(current, reportId)), [commit]);
+  // Удаление обязательно в журнале: выплата — про деньги, и «была запись, а
+  // теперь нет» без следа означало бы, что её можно тихо убрать.
+  const dropPayment = useCallback((reportId) => {
+    const report = findRecord(listRef.current, reportId);
+    const works = paymentLines(report).map((line) => stageName?.(line.stageId)).filter(Boolean);
+    audit({ entity: "object", field: "взаиморасчёт с мастером", action: "удалил выплату",
+      old: `${paymentAmount(report).toLocaleString("ru-RU")} ₸ · ${report?.payee || "—"}`, new: "—",
+      detail: works.length ? `работы: ${works.join(", ")}` : "" });
+    return commit((current) => removeRecord(current, reportId));
+  }, [commit, audit, stageName]);
 
   const summary = useMemo(() => ({
     awaitingPhotos: countAwaitingReview(list),
