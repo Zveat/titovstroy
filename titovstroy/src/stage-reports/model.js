@@ -378,11 +378,42 @@ export function patchPaymentReport(list, reportId, patch) {
   return replaceById(list, { ...current, ...patch, rec: REC_PAYMENT, id: current.id, updatedAt: Date.now() });
 }
 
-// Свой отчёт не подтверждают. В этом весь смысл проверки: иначе прораб закрывает
-// сам себя и контроль превращается в формальность.
+// Правка сумм после проверки возвращает выплату на проверку и стирает прежнее
+// решение. Иначе можно было бы получить «подтверждено», а потом тихо переписать
+// сумму — и подпись руководителя стояла бы под другими цифрами.
+export function editPaymentReport(list, reportId, input = {}) {
+  const current = findRecord(list, reportId);
+  if (!current || current.rec !== REC_PAYMENT) return normalizeStageReports(list);
+  const draft = { ...current, ...input, objectId: current.objectId, id: current.id };
+  const errors = validatePaymentReport(draft);
+  if (errors.length) throw new Error(errors.join("; "));
+  const lines = paymentLines(draft);
+  return replaceById(list, {
+    ...current,
+    mode: draft.mode, payee: text(draft.payee), note: text(draft.note),
+    date: text(draft.date) || current.date,
+    amount: Math.round(num(draft.amount)),
+    lines, stageId: lines[0].stageId,
+    receipts: Array.isArray(draft.receipts) ? draft.receipts.filter(Boolean) : current.receipts,
+    status: "pending", reviewNote: "", reviewedBy: "", reviewedById: "", reviewedAt: 0,
+    updatedAt: Date.now(),
+  });
+}
+
+// Свой отчёт обычно не подтверждают: иначе прораб закрывает сам себя и контроль
+// превращается в формальность. Исключение — владелец: он последняя инстанция и
+// сам же заводит часть выплат, запрещать ему проверять их бессмысленно.
 export function canReviewPayment(report, user, permissions = {}) {
+  if (!report || !user || permissions.canReview !== true) return false;
+  const own = String(report.authorId || "") === String(user.id || "");
+  return !own || permissions.allowSelfReview === true;
+}
+
+// Правку разрешаем автору и тем, кто проверяет: ошибиться в сумме легко, а без
+// правки останется только удалить и завести заново, потеряв историю проверки.
+export function canEditPayment(report, user, permissions = {}) {
   if (!report || !user) return false;
-  if (String(report.authorId || "") === String(user.id || "")) return false;
+  if (String(report.authorId || "") === String(user.id || "")) return true;
   return permissions.canReview === true;
 }
 

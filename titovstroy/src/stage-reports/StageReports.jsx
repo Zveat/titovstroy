@@ -8,7 +8,7 @@ import {
   listPhotos, listPayments, countPhotosOfKind, countStagePhotos,
   paymentDeviation, isOverpaid, paymentRemainder, payModeMeta, isPartialPayment,
   paymentLines, paymentAmount, allocatedTotal, unallocated, allocateByPlan,
-  listAllPayments, summarizePayments,
+  listAllPayments, summarizePayments, canEditPayment,
   reportStatusMeta, canReviewPayment, validatePaymentReport,
 } from "./model.js";
 import { entryStatus, QUEUE_STATUS_LABELS, QUEUE_FAILED, QUEUE_UPLOADING } from "./queue.js";
@@ -234,11 +234,16 @@ function PhotoPanel({ stage, api, onOpen }) {
 // Форма выплаты. Одна выплата — один чек, но закрывать она может несколько
 // работ: заплатили мастеру 300 000, из них 100 000 за демонтаж и 200 000 за
 // остальное. Поэтому суммы вводятся построчно, а не одним полем.
-function PaymentForm({ stages, api, onDone, preselect = "" }) {
+function PaymentForm({ stages, api, onDone, preselect = "", edit = null }) {
   const today = new Date().toISOString().slice(0, 10);
-  const [form, setForm] = useState({ mode: "full", payee: "", amount: "", note: "", date: today });
-  const [picked, setPicked] = useState(() => (preselect ? { [preselect]: "" } : {}));
-  const [receipts, setReceipts] = useState([]);
+  const editLines = edit ? paymentLines(edit) : [];
+  const [form, setForm] = useState(edit
+    ? { mode: edit.mode, payee: edit.payee, amount: String(paymentAmount(edit)), note: edit.note || "", date: edit.date || today }
+    : { mode: "full", payee: "", amount: "", note: "", date: today });
+  const [picked, setPicked] = useState(() => (edit
+    ? Object.fromEntries(editLines.map((line) => [line.stageId, String(line.fact)]))
+    : (preselect ? { [preselect]: "" } : {})));
+  const [receipts, setReceipts] = useState(edit?.receipts || []);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState("");
   const set = (patch) => setForm((prev) => ({ ...prev, ...patch }));
@@ -269,8 +274,9 @@ function PaymentForm({ stages, api, onDone, preselect = "" }) {
       return next;
     });
   };
-  // Одна работа — вся сумма чека уходит в неё, лишний ввод ни к чему.
-  const oneStage = chosen.length === 1 ? chosen[0].id : "";
+  // Одна работа — вся сумма чека уходит в неё, лишний ввод ни к чему. При правке
+  // не трогаем: там суммы уже заданы человеком.
+  const oneStage = (!edit && chosen.length === 1) ? chosen[0].id : "";
   useEffect(() => {
     if (!oneStage || !amount) return;
     setPicked((prev) => (String(prev[oneStage] || "") === "" ? { ...prev, [oneStage]: String(amount) } : prev));
@@ -292,7 +298,8 @@ function PaymentForm({ stages, api, onDone, preselect = "" }) {
     if (errors.length) { setProblem(errors[0]); return; }
     setSaving(true); setProblem("");
     try {
-      await api.savePayment({ ...form, amount, lines, receipts });
+      if (edit) await api.editPayment(edit.id, { ...form, amount, lines, receipts });
+      else await api.savePayment({ ...form, amount, lines, receipts });
       onDone?.();
     } catch (failure) { setProblem(failure?.message || "Не удалось сохранить выплату"); }
     finally { setSaving(false); }
@@ -403,7 +410,7 @@ function PaymentForm({ stages, api, onDone, preselect = "" }) {
       {problem && <div style={{ marginTop: 8, fontSize: 12, color: "#b91c1c", fontWeight: 700 }}>{problem}</div>}
       <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
         <button type="button" onClick={submit} disabled={saving} style={{ ...primary, opacity: saving ? .6 : 1 }}>
-          {saving ? "Сохраняю…" : "Отправить на проверку"}
+          {saving ? "Сохраняю…" : edit ? "Сохранить и отправить на проверку" : "Отправить на проверку"}
         </button>
         <button type="button" onClick={onDone} style={small("#64748b", "#f1f5f9")}>Отмена</button>
       </div>
@@ -413,7 +420,7 @@ function PaymentForm({ stages, api, onDone, preselect = "" }) {
 
 // Карточка выплаты. Видно и общую сумму чека, и на какие работы она разошлась —
 // иначе «300 000 Ержану» не проверить: неясно, за что именно платили.
-function PaymentCard({ report, api, currentUser, stageName }) {
+function PaymentCard({ report, api, currentUser, stageName, stages, onEdit, editing }) {
   const [comment, setComment] = useState("");
   const [open, setOpen] = useState(false);
   const meta = reportStatusMeta(report.status);
@@ -423,7 +430,8 @@ function PaymentCard({ report, api, currentUser, stageName }) {
   const rest = amount - spread;
   const delta = paymentDeviation(report);
   const mine = String(report.authorId || "") === String(currentUser?.id || "");
-  const mayReview = canReviewPayment(report, currentUser, { canReview: api.canReview });
+  const mayReview = canReviewPayment(report, currentUser, { canReview: api.canReview, allowSelfReview: api.allowSelfReview });
+  const mayEdit = !api.readOnly && canEditPayment(report, currentUser, { canReview: api.canReview });
 
   return (
     <div className="sr-rep" style={{ borderLeft: `3px solid ${meta.color}` }}>
@@ -504,9 +512,22 @@ function PaymentCard({ report, api, currentUser, stageName }) {
           )}
         </div>
       )}
-      {/* Своё подтвердить нельзя — в этом и смысл проверки. Объясняем прямо,
-          иначе автор ищет пропавшую кнопку. */}
-      {mine && api.canReview && (
+      {mayEdit && (
+        <div style={{ marginTop: 8 }}>
+          <button type="button" onClick={() => onEdit?.(editing ? "" : report.id)} style={small("#2563eb", "#eff6ff")}>
+            {editing ? "Отменить правку" : "Исправить"}
+          </button>
+          {report.status !== "pending" && !editing && (
+            <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: 8 }}>после правки выплата вернётся на проверку</span>
+          )}
+        </div>
+      )}
+      {editing && (
+        <PaymentForm stages={stages} api={api} edit={report} onDone={() => onEdit?.("")} />
+      )}
+      {/* Своё подтвердить нельзя — в этом и смысл проверки. Владельцу это не
+          мешает: у него право проверять себя есть. */}
+      {mine && api.canReview && !api.allowSelfReview && (
         <div style={{ marginTop: 8, fontSize: 11, color: "#94a3b8" }}>Свою выплату подтверждает другой человек.</div>
       )}
     </div>
@@ -517,6 +538,7 @@ function PaymentCard({ report, api, currentUser, stageName }) {
 // Прораб не видит чужие выплаты — только свои и их статус.
 export function PaymentsSection({ stages = [], api, currentUser, filterStageId = "", onClearFilter }) {
   const [adding, setAdding] = useState(false);
+  const [editId, setEditId] = useState("");
   const all = filterStageId ? listPayments(api.list, filterStageId) : listAllPayments(api.list);
   const visible = api.canReview ? all : all.filter((item) => String(item.authorId || "") === String(currentUser?.id || ""));
   const nameOf = (stageId) => stages.find((item) => item.id === stageId)?.name || "";
@@ -551,7 +573,8 @@ export function PaymentsSection({ stages = [], api, currentUser, filterStageId =
         </div>
       )}
       {visible.map((report) => (
-        <PaymentCard key={report.id} report={report} api={api} currentUser={currentUser} stageName={nameOf} />
+        <PaymentCard key={report.id} report={report} api={api} currentUser={currentUser} stageName={nameOf}
+          stages={stages} editing={editId === report.id} onEdit={setEditId} />
       ))}
     </div>
   );

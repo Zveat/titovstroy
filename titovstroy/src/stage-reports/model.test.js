@@ -10,7 +10,7 @@ import {
   reviewPaymentReport, canReviewPayment, paymentDeviation, isOverpaid,
   paymentRemainder, payModeMeta, isPartialPayment, paymentLines, paymentAmount,
   allocatedTotal, agreedTotal, unallocated, allocateByPlan, stagePaymentTotals,
-  listPayments, listAllPayments, summarizePayments,
+  listPayments, listAllPayments, summarizePayments, canEditPayment, editPaymentReport,
 } from "./model.js";
 
 const photoInput = (over = {}) => ({
@@ -289,10 +289,38 @@ describe("расчёт с рабочими: проверка руководит�
     lines: [{ stageId: "s1", agreed: 150000, fact: 250000 }], author: "Прораб", authorId: "u1", ...over,
   });
 
-  it("свой отчёт подтвердить нельзя даже с правами", () => {
+  it("свой отчёт подтвердить нельзя — кроме владельца", () => {
     const report = makePaymentReport(pay());
     expect(canReviewPayment(report, { id: "u1" }, { canReview: true })).toBe(false);
     expect(canReviewPayment(report, { id: "u2" }, { canReview: true })).toBe(true);
+    // Владелец — последняя инстанция и сам заводит часть выплат.
+    expect(canReviewPayment(report, { id: "u1" }, { canReview: true, allowSelfReview: true })).toBe(true);
+  });
+
+  it("править может автор и проверяющий, посторонний — нет", () => {
+    const report = makePaymentReport(pay());
+    expect(canEditPayment(report, { id: "u1" }, {})).toBe(true);
+    expect(canEditPayment(report, { id: "u2" }, { canReview: true })).toBe(true);
+    expect(canEditPayment(report, { id: "u3" }, {})).toBe(false);
+  });
+
+  it("правка сумм возвращает выплату на проверку и стирает прежнее решение", () => {
+    const report = makePaymentReport(pay());
+    let list = reviewPaymentReport(addPaymentReport(emptyStageReports(), report), report.id, "approved", { id: "u2", name: "Титов" }, "ок");
+    expect(listAllPayments(list)[0].status).toBe("approved");
+    list = editPaymentReport(list, report.id, { amount: 120000, lines: [{ stageId: "s1", agreed: 150000, fact: 120000 }] });
+    const saved = listAllPayments(list)[0];
+    expect(saved).toMatchObject({ status: "pending", reviewNote: "", reviewedBy: "", reviewedById: "", reviewedAt: 0 });
+    expect(paymentAmount(saved)).toBe(120000);
+    expect(saved.id).toBe(report.id);
+    expect(saved.createdAt).toBe(report.createdAt);
+  });
+
+  it("правку с неверными данными не пропускаем", () => {
+    const report = makePaymentReport(pay());
+    const list = addPaymentReport(emptyStageReports(), report);
+    expect(() => editPaymentReport(list, report.id, { amount: 0 })).toThrow(/больше нуля/);
+    expect(() => editPaymentReport(list, report.id, { payee: "  " })).toThrow(/кому платим/);
   });
 
   it("без права проверки нельзя никому", () => {

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   stageReportsKey, normalizeStageReports, emptyStageReports, PHOTO_KINDS, findRecord,
   reportStatusMeta, paymentDeviation, paymentAmount, paymentLines, unallocated,
+  editPaymentReport,
   makePhotoRecord, addPhoto, patchPhoto, reviewPhoto as reviewPhotoIn, removeRecord,
   makePaymentReport, addPaymentReport, patchPaymentReport, reviewPaymentReport,
   countAwaitingReview, summarizePayments,
@@ -17,7 +18,7 @@ let _queue = null;
 const sharedQueue = () => (_queue ||= createQueue(indexedDbBackend()));
 
 export function useStageReports({ objectId, storage, currentUser, canReview = false, readOnly = false,
-  queue = null, onChanged = null, onAudit = null, stageName = null }) {
+  queue = null, onChanged = null, onAudit = null, stageName = null, allowSelfReview = false }) {
   const bag = queue || sharedQueue();
   const [list, setList] = useState(emptyStageReports);
   const [pending, setPending] = useState([]);
@@ -214,6 +215,19 @@ export function useStageReports({ objectId, storage, currentUser, canReview = fa
   const updatePayment = useCallback((reportId, patch) =>
     commit((current) => patchPaymentReport(current, reportId, patch)), [commit]);
 
+  // Правка сумм возвращает выплату на проверку — иначе подпись руководителя
+  // стояла бы под цифрами, которых он не видел.
+  const editPayment = useCallback(async (reportId, input) => {
+    const before = findRecord(listRef.current, reportId);
+    const next = await commit((current) => editPaymentReport(current, reportId, input));
+    const saved = findRecord(next, reportId);
+    audit({ entity: "object", field: "взаиморасчёт с мастером", action: "исправил выплату",
+      old: `${paymentAmount(before).toLocaleString("ru-RU")} ₸`,
+      new: `${paymentAmount(saved).toLocaleString("ru-RU")} ₸`,
+      detail: saved?.payee || before?.payee || "" });
+    return next;
+  }, [commit, audit]);
+
   const decidePayment = useCallback((reportId, verdict, comment) => {
     if (!canReview) return null;
     const report = findRecord(listRef.current, reportId);
@@ -232,9 +246,9 @@ export function useStageReports({ objectId, storage, currentUser, canReview = fa
   }), [list]);
 
   return {
-    list, pending, activeId, error, busy, summary, canReview, readOnly,
+    list, pending, activeId, error, busy, summary, canReview, readOnly, allowSelfReview, objectId,
     reload, retry: flush,
     addPhotos, setPhotoClientVisible, setPhotoNote, decidePhoto, dropPhoto, dropQueued,
-    uploadReceipts, savePayment, updatePayment, decidePayment, dropPayment,
+    uploadReceipts, savePayment, updatePayment, editPayment, decidePayment, dropPayment,
   };
 }
