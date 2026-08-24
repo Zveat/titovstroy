@@ -21,8 +21,9 @@ import { buildAnalytics, makeManagerResolver, REFUSE_REASONS } from "./analytics
 import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
+import { getAuth, signInAnonymously, signInWithCustomToken, signOut, onAuthStateChanged } from "firebase/auth";
 import { clientPhotosByStage, stageReportsKey, normalizeStageReports } from "./stage-reports/model.js";
+import { requestServerLogin, lockoutMessage } from "./auth/loginClient.js";
 import { ClientPhotoReport, ClientTabs, PhotoLightbox, stagesWithPhotos } from "./stage-reports/ClientPhotos.jsx";
 import { normCN, contractNetTotal, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, resolveEstimateRows, existingEstimateRowKey, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
 
@@ -1055,6 +1056,44 @@ try {
     }).catch(()=>{});
   }
 } catch(e) {}
+
+// ── ВХОД СОТРУДНИКА В САМ FIREBASE ─────────────────────────────────────────
+// Анонимный вход выше остаётся: он нужен публичным страницам — клиентскому кабинету
+// и КП, которые открывает человек без учётки. Но для сотрудника анонимного мало:
+// правилам базы не на что опереться, «аноним» — это и прораб, и любой прохожий.
+// После проверки пароля на сервере (/api/login) приложение входит КАСТОМНЫМ токеном
+// с claims {staff:true, role}. Сессия хранится самим SDK и обновляется сама, поэтому
+// после перезагрузки страницы повторный вход не нужен.
+const signInAsStaff = async (customToken) => {
+  if (!_fbAuth || !customToken) return false;
+  try {
+    // Со сроком. Если облако не отвечает, SDK уходит в свои повторы с нарастающей
+    // паузой, и кнопка входа осталась бы «Проверка…» навсегда — ровно та беда, из-за
+    // которой ниже стоит таймаут у _fbAuthReady. Лучше честная ошибка и «попробуйте ещё раз».
+    const timedOut = Symbol("timeout");
+    const outcome = await Promise.race([
+      signInWithCustomToken(_fbAuth, customToken),
+      new Promise(resolve => setTimeout(() => resolve(timedOut), 15000)),
+    ]);
+    if (outcome === timedOut) return false;
+    // Дальнейшие чтения/записи должны ждать УЖЕ сотрудника, а не прежнего анонима:
+    // иначе первая же запись после входа уйдёт со старым токеном и правила её отобьют.
+    _fbAuthReady = Promise.resolve();
+    return true;
+  } catch (e) { console.warn("staff sign-in failed", e); return false; }
+};
+// Выход: снимаем права сотрудника СРАЗУ, не дожидаясь закрытия вкладки. Иначе после
+// «Выйти» в браузере остаётся живой токен с claims, и через консоль из него всё ещё
+// читается база — при том, что интерфейс уже показывает экран входа.
+const signOutStaff = async () => {
+  if (!_fbAuth) return;
+  try {
+    await signOut(_fbAuth);
+    const back = signInAnonymously(_fbAuth).catch(() => {});
+    _fbAuthReady = Promise.race([back, new Promise(resolve => setTimeout(resolve, 5000))]);
+    await _fbAuthReady;
+  } catch (e) { console.warn("staff sign-out failed", e); }
+};
 
 const WORKS_DATA = [
   { code:"DEM-001", cat:"Черновые", sub:"Демонтаж", name:"Снятие обоев (не до основания)", unit:"м²", tiers:[], cost:200, margin:0.4, fixedPrice:333 },
@@ -2348,6 +2387,51 @@ function LoginScreen({ onLogin }) {
     }
     setLoading(true); setError("");
 
+    // Общий хвост удачного входа — один и для серверной проверки, и для запасной
+    // браузерной: сессия, журнал, переход в приложение.
+    const finishLogin = (user) => {
+      clearLoginAttempts(login.trim());
+      const { password: _pw, ...safeUser } = user; // не храним пароль в сессии
+      const sessUser = { ...safeUser, authAt: Date.now() }; // время входа — для инвалидации сессии при смене пароля
+      try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: sessUser, savedAt: Date.now() })); } catch(e) {}
+      // Вход в систему — базовое событие журнала: без него нельзя понять, кто вообще
+      // мог что-то сделать в конкретный день, и не заходил ли уволенный сотрудник.
+      logChange(sessUser, { entity: "session", entityId: sessUser.id, label: sessUser.name || sessUser.login,
+        field: "вход", action: "вошёл в систему", old: "", new: sessUser.role || "" });
+      onLogin(sessUser);
+    };
+    const failLogin = (message) => {
+      registerFailedLogin(login.trim());
+      // Неудачные попытки тоже пишем: подбор пароля должен быть виден.
+      logChange({ id: "?", name: login.trim() }, { entity: "session", entityId: "",
+        label: login.trim(), field: "вход", action: "неудачная попытка входа", old: "", new: "" });
+      setError(message);
+      setLoading(false);
+    };
+
+    // ── ОСНОВНОЙ ПУТЬ: пароль проверяет сервер ──
+    // Он же выдаёт кастомный токен Firebase с claims {staff:true, role}. Только после
+    // этого правила базы могут отличить сотрудника от постороннего, а список
+    // пользователей (с хэшами паролей) браузеру читать больше не нужно.
+    const server = await requestServerLogin(login.trim(), password);
+    if (server.status === "locked") { setError(lockoutMessage(server.retryAfterMs)); setLoading(false); return; }
+    if (server.status === "invalid") { failLogin("Неверный логин или пароль"); return; }
+    if (server.status === "ok") {
+      if (!(await signInAsStaff(server.token))) {
+        setError("Пароль верный, но войти в облако не удалось. Проверьте интернет и попробуйте снова.");
+        setLoading(false);
+        return;
+      }
+      finishLogin(server.user);
+      return; // компонент размонтируется, setLoading вызывать нельзя
+    }
+
+    // ── ЗАПАСНОЙ ПУТЬ: сервер входа ещё не настроен ──
+    // Работает ровно до того момента, пока правила базы открыты. Как только их закрутят,
+    // titovstroy-users перестанет читаться из браузера, и этот путь отомрёт сам. Нужен
+    // он только на время выкатки: код уезжает раньше, чем проставлены ключи функции, и
+    // без запасного пути обновление заперло бы снаружи всех, включая владельца.
+
     // Загружаем пользователей. КРИТИЧНО различать "база подтверждённо пуста" (первый
     // запуск — можно войти дефолтным admin) и "база недоступна" (сеть моргнула) — раньше
     // оба случая тихо падали на DEFAULT_USERS по таймауту в 1.5с, а значит логин/пароль
@@ -2382,27 +2466,13 @@ function LoginScreen({ onLogin }) {
     const ok = candidate ? await verifyPassword(password, candidate.password) : false;
 
     if (ok) {
-      clearLoginAttempts(login.trim());
       // Пароль не мигрируем ДО получения editor-lock: экран входа не имеет права менять общую
       // базу, пока другая вкладка может быть активным редактором. Миграция выполняется только
       // при следующей явной смене пароля из авторизованной вкладки.
-      const { password: _pw, ...safeUser } = candidate; // не храним пароль в сессии
-      const sessUser = { ...safeUser, authAt: Date.now() }; // время входа — для инвалидации сессии при смене пароля
-      try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: sessUser, savedAt: Date.now() })); } catch(e) {}
-      // Вход в систему — базовое событие журнала: без него нельзя понять, кто вообще
-      // мог что-то сделать в конкретный день, и не заходил ли уволенный сотрудник.
-      logChange(sessUser, { entity: "session", entityId: sessUser.id, label: sessUser.name || sessUser.login,
-        field: "вход", action: "вошёл в систему", old: "", new: sessUser.role || "" });
-      onLogin(sessUser);
+      finishLogin(candidate);
       return; // компонент размонтируется, setLoading вызывать нельзя
-    } else {
-      registerFailedLogin(login.trim());
-      // Неудачные попытки тоже пишем: подбор пароля должен быть виден.
-      logChange({ id: "?", name: login.trim() }, { entity: "session", entityId: "",
-        label: login.trim(), field: "вход", action: "неудачная попытка входа", old: "", new: "" });
-      setError("Неверный логин или пароль");
     }
-    setLoading(false);
+    failLogin("Неверный логин или пароль");
   };
 
   return (
@@ -7305,6 +7375,11 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       try{ stopProductionSession(); }catch(e){}
       _prodRetryCmds.current.clear(); _prodUnsyncedIds.current.clear(); _refreshProdUnsynced();
       try{ await storage.releaseEditLease(); }catch(e){}
+      // Права сотрудника в самом Firebase снимаем ЗДЕСЬ — после того, как всё дожато и
+      // lease отпущен. Раньше было бы рано: незавершённая запись ушла бы уже анонимом и
+      // её отбили бы правила. Позже — некуда: интерфейс уже показывает экран входа, а
+      // токен с claims в браузере ещё живой.
+      try{ await signOutStaff(); }catch(e){}
       setCurrentUser(null); setLogoutConfirm(false);
     } finally {
       _endingSessionRef.current = false;
@@ -9697,9 +9772,62 @@ ${reqBlock}`;
     window.alert(`Объект создан ✓ Смета перенесена в «Объекты»`);
   };
 
+  // ── ЖУРНАЛ ПО СМЕТАМ ───────────────────────────────────────────────────────
+  // Смета — главный денежный документ, а в журнале по ней до сих пор было пусто:
+  // писалась только смена статуса. Проблема была в том, ЧТО именно писать: смета
+  // автосохраняется каждые 0,9 секунды, и запись на каждое сохранение превратила бы
+  // журнал в ленту нажатий клавиш. Поэтому пишем ИТОГ сессии редактирования —
+  // сравниваем смету в момент открытия и в момент выхода, одна запись на заход.
+  const _estAuditBase = useRef(null);
+  const _estSnapshot = (est) => {
+    if (!est) return null;
+    const rows = Object.entries(est.rows || {}).filter(([, r]) => Number(r?.qty) > 0);
+    return {
+      id: est.id,
+      name: est.proj?.name || est.proj?.address || "Смета",
+      total: Math.round(Number(est.total) || 0),
+      count: rows.length,
+      discount: Number(est.discount) || 0,
+      markup: Number(est.markup) || 0,
+      status: est.status || "new",
+      codes: new Set(rows.map(([code]) => code)),
+    };
+  };
+  const _auditEstimateSession = useCallback((nextEst) => {
+    const was = _estAuditBase.current;
+    _estAuditBase.current = null;
+    if (!was || !nextEst || was.id !== nextEst.id) return;
+    const now = _estSnapshot(nextEst);
+    if (!now) return;
+    const added = [...now.codes].filter(c => !was.codes.has(c)).length;
+    const gone = [...was.codes].filter(c => !now.codes.has(c)).length;
+    const label = `${now.name}${nextEst.dsNumber ? ` (ДС №${nextEst.dsNumber})` : ""}`;
+    const ev = { entity: "estimate", entityId: now.id, label, objectId: nextEst.objectId || "" };
+    // Сумма — главное, что человек ищет в журнале. Отдельной записью, с разбором:
+    // «+3 работы, −1» объясняет, откуда взялась разница, без списка на сорок строк.
+    if (now.total !== was.total) {
+      const parts = [added ? `+${added} работ` : "", gone ? `−${gone} работ` : ""].filter(Boolean);
+      logChange(currentUser, { ...ev, field: "сумма сметы", action: "изменил смету",
+        old: `${was.total.toLocaleString("ru-RU")} ₸`, new: `${now.total.toLocaleString("ru-RU")} ₸`,
+        detail: parts.join(", ") });
+    } else if (added || gone) {
+      // Состав поменялся, а сумма нет — это тоже правка, и как раз такую хочется видеть.
+      logChange(currentUser, { ...ev, field: "состав сметы", action: "изменил смету",
+        old: `${was.count} работ`, new: `${now.count} работ`,
+        detail: [added ? `+${added}` : "", gone ? `−${gone}` : ""].filter(Boolean).join(", ") });
+    }
+    if (now.discount !== was.discount) {
+      logChange(currentUser, { ...ev, field: "скидка", action: "изменил смету", old: `${was.discount}%`, new: `${now.discount}%` });
+    }
+    if (now.markup !== was.markup) {
+      logChange(currentUser, { ...ev, field: "наценка", action: "изменил смету", old: `${was.markup}%`, new: `${now.markup}%` });
+    }
+  }, [currentUser]);
+
   // ── Открыть смету на редактирование ──
   const openEstimate = (est) => {
     if (!canEditEstimate(est)) return;
+    _estAuditBase.current = _estSnapshot(est);
     setCurrentId(est.id);
     setCurrentParentId(est.parentId || null);
     setCurrentDsNumber(est.dsNumber || null);
@@ -9801,6 +9929,12 @@ ${reqBlock}`;
     if (_autoSaveRef.current) clearTimeout(_autoSaveRef.current);
     estimatesRef.current = newList;
     setEstimates(newList);
+    // Итог правки — в журнал. Здесь, а не в автосохранении: одна запись за заход в
+    // смету вместо ленты из сорока по ходу набора.
+    if (exists) _auditEstimateSession(updated);
+    else logChange(currentUser, { entity: "estimate", entityId: updated.id, objectId: updated.objectId || "",
+      label: updated.proj?.name || updated.proj?.address || "Смета", field: "смета", action: "создал смету",
+      old: "—", new: `${Math.round(Number(updated.total) || 0).toLocaleString("ru-RU")} ₸` });
     // Навигируем сразу (не ждём облако), сохраняем в фоне — иначе кнопка «не нажимается» при медленном сохранении
     const retObj = objectReturnId;
     const retDeal = dealReturnId;
@@ -9864,6 +9998,11 @@ ${reqBlock}`;
     const newList = estimatesRef.current.filter(e => e.id !== id);
     estimatesRef.current = newList;
     setEstimates(newList);
+    // Удаление сметы в журнал: восстановить её можно только из бэкапа, и без записи
+    // непонятно, была ли она вообще и кто её убрал.
+    logChange(currentUser, { entity: "estimate", entityId: id, objectId: target.objectId || "",
+      label: target.proj?.name || target.proj?.address || "Смета", field: "смета", action: "удалил смету",
+      old: `${Math.round(Number(target.total) || 0).toLocaleString("ru-RU")} ₸`, new: "—" });
     // явное удаление — разрешаем пустой результат и удаляем по id из объединённого набора
     _allowEmptySave.current = true;
     await saveEstimates(newList, { removedIds: [id] });
@@ -12153,7 +12292,20 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             <span style={{flex:1}}/>
                             <span style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>{fmtDate(est.updatedAt)}</span>
                             {author&&<span style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>· {author}</span>}
+                            {/* Договор по этой смете уже есть — видно ДО нажатия. Именно так
+                                появились №1040 и №1041: одну смету выгрузили в договор дважды
+                                с разницей в час, и оба ушли клиенту. */}
+                            {(()=>{ const made = contracts.find(c=>c.estId===est.id && (c.type||"repair_fiz")!=="annex");
+                              return made ? <span title={`Договор уже создан ${fmtDate(made.date)}`}
+                                style={{fontSize:10,color:"#047857",background:"#ecfdf5",border:"1px solid #bbf7d0",borderRadius:4,padding:"1px 6px",whiteSpace:"nowrap",flexShrink:0}}>
+                                📄 {made.number ? "№"+made.number : "есть"}</span> : null; })()}
                             {accessAllows(currentPermissions.documentCreate, isOwnEstimate(est)) && <button onClick={()=>{
+                              // Второй договор по той же смете — почти всегда промах, а не замысел.
+                              const twin = contracts.find(c=>c.estId===est.id && (c.type||"repair_fiz")!=="annex");
+                              if (twin && !est.parentId) {
+                                const sum = (twin.works||[]).reduce((s,w)=>s+Math.round((Number(w.price)||0)*(Number(w.quantity)||0)),0);
+                                if (!window.confirm(`По этой смете уже есть договор ${twin.number?"№"+twin.number:"(без номера)"} от ${fmtDate(twin.date)} на ${sum.toLocaleString("ru-RU")} ₸.\n\nСоздать ВТОРОЙ договор по той же смете?\n\nOK — создать ещё один.\nОтмена — открыть существующий не отсюда, а во вкладке «Документы».`)) return;
+                              }
                               const catalog = getEffectiveCatalog();
                               const pricing = _estPricingOf(est);
                               const works = resolveEstimateRows(est.rows, catalog, { extraCat: EXTRA_CAT }).map(({ row: r, work: w, qty })=>{
@@ -14287,6 +14439,23 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   return [v.contractNo,v.customerName,v.customerPhone,v.address,v.category,p.comment]
                     .some(x=>String(x||"").toLowerCase().includes(q));
                 });
+              // ── ДОГОВОР ЕСТЬ, ПРОЕКТА НЕТ ──
+              // Виртуальные строки выше подхватывают объект в рабочем статусе. Но договор
+              // подписывают ещё на «Согласовании», и такая сделка не попадает в «Проекты»
+              // вообще: денег по ней никто не ждёт, долг не считается. Так пропали шесть
+              // договоров на 17,7 млн ₸. Строкой ниже — список, чтобы это было видно сразу.
+              const _seenCN = new Set([...finProjects, ...virtualProjects].map(p=>normCN(p.contractNo)).filter(Boolean));
+              const _seenObj = new Set([..._coveredObjIds, ...virtualProjects.map(p=>p.objectId)].filter(Boolean));
+              const _deadStatus = new Set(["refuse","archive","cancel"]);
+              const orphanContracts = contracts.filter(c => {
+                const type = String(c.type || "repair_fiz");
+                if (type === "annex" || type === "reservation" || type === "podryad" || type === "podryad_annex") return false;
+                if (!String(c.number || "").trim()) return false;
+                if (_seenCN.has(normCN(c.number))) return false;
+                const o = c.objectId ? liveObjects.find(x => x.id === c.objectId) : null;
+                if (!o || _seenObj.has(o.id)) return false;
+                return !_deadStatus.has(unifiedStatusOf(o));
+              });
               const days = (a,b) => { if(!a||!b) return null; const d=Math.round((new Date(b)-new Date(a))/86400000); return d>=0?d:null; };
               const yesno = v => v==="да"||v==="yes"||v===true||v==="1"||v==="Да"||v==="ДА";
               // totals
@@ -14319,6 +14488,32 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       {allCats.map(c=><option key={c} value={c}>{c}</option>)}
                     </select>}
                   </div>
+
+                  {orphanContracts.length > 0 && (
+                    <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:11,padding:"12px 14px",marginBottom:14}}>
+                      <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
+                        <span style={{fontSize:13,fontWeight:800,color:"#92400e"}}>Договор есть, проекта нет — {orphanContracts.length}</span>
+                        <span style={{fontSize:11.5,color:"#b45309"}}>деньги по ним никуда не считаются: ни оплат, ни долга</span>
+                      </div>
+                      <div style={{display:"grid",gap:6,marginTop:9}}>
+                        {orphanContracts.slice(0,8).map(c=>{
+                          const o = liveObjects.find(x=>x.id===c.objectId);
+                          const sum = (c.works||[]).reduce((s,w)=>s+Math.round((Number(w.price)||0)*(Number(w.quantity)||0)),0);
+                          return (
+                            <div key={c.id} style={{display:"flex",gap:9,alignItems:"center",flexWrap:"wrap",background:"#fff",border:"1px solid #fde68a",borderRadius:8,padding:"7px 10px"}}>
+                              <b style={{fontSize:12.5,color:"#0f172a",whiteSpace:"nowrap"}}>№{c.number}</b>
+                              <span style={{fontSize:12.5,color:"#475569",minWidth:0,overflowWrap:"anywhere"}}>{o?.clientName || c.estClient || "—"}</span>
+                              <span style={{fontSize:11.5,color:"#94a3b8",whiteSpace:"nowrap"}}>{fmtDate(c.date)}</span>
+                              <b style={{fontSize:12.5,color:"#0f172a",whiteSpace:"nowrap",marginLeft:"auto"}}>{fmt(sum)} ₸</b>
+                              {o && <button onClick={()=>openObjectFromFinance(o)}
+                                style={{background:"#fff",color:"#b45309",border:"1px solid #fde68a",borderRadius:7,padding:"5px 10px",fontSize:11.5,fontWeight:800,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Открыть объект</button>}
+                            </div>
+                          );
+                        })}
+                        {orphanContracts.length > 8 && <div style={{fontSize:11.5,color:"#b45309"}}>…и ещё {orphanContracts.length-8}</div>}
+                      </div>
+                    </div>
+                  )}
                   {/* Итого-плитки */}
                   {filtered.length>0 && (()=>{
                     const tiles=[
@@ -14867,6 +15062,22 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                 placeholder="— без проекта —"/>
                               {finTxProjSearch && <span onMouseDown={e=>{e.preventDefault();setFinTxProjSearch("");set("contractNo","");setFinTxProjOpen(false);}} style={{position:"absolute",right:8,cursor:"pointer",color:"#94a3b8",fontSize:14,lineHeight:1}}>✕</span>}
                             </div>
+                            {/* Номер, которого нет ни в одном договоре и проекте. Операция
+                                сохранится (номер может быть от ещё не заведённого договора),
+                                но деньги по ней никуда не попадут — ни в оплаты, ни в долг.
+                                Так три операции на 385 000 ₸ уехали на «11.0» из старого импорта
+                                и не попали никуда. */}
+                            {(()=>{
+                              const cn = String(m.contractNo || "").trim();
+                              if (!cn) return null;
+                              const key = normCN(cn);
+                              const known = finProjects.some(p=>normCN(p.contractNo)===key) || contracts.some(c=>normCN(c.number)===key);
+                              return known ? null : (
+                                <div style={{marginTop:5,fontSize:11.5,color:"#b45309",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:7,padding:"5px 9px",lineHeight:1.35}}>
+                                  Договора «{cn}» нет ни в проектах, ни в договорах. Операция сохранится, но в оплаты и долг по проекту не попадёт.
+                                </div>
+                              );
+                            })()}
                             {finTxProjOpen && (
                               <div style={{position:"absolute",zIndex:999,top:"100%",left:0,right:0,background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,.13)",maxHeight:220,overflowY:"auto",marginTop:2}}>
                                 <div onMouseDown={e=>{e.preventDefault();setFinTxProjSearch("");set("contractNo","");setFinTxProjOpen(false);}} style={{padding:"9px 14px",fontSize:12,color:"#94a3b8",cursor:"pointer",borderBottom:"1px solid #f1f5f9"}}
@@ -16296,6 +16507,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     buildStagesFromEstimate={buildStagesFromEstimate}
                     finProjects={finProjects}
                     financeTx={financeTx}
+                    reports={reports.filter(r=>r.objectId===obj.id)}
                     staffOptions={nonViewerUsers}
                     fmt={fmt}
                     genId={genId}
