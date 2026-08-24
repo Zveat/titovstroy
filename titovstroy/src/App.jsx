@@ -6355,6 +6355,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   // (ловили дубль по №1034). Ref держит признак «запись уже идёт».
   const finProjSavingRef = useRef(false);
   const [finProjSearch, setFinProjSearch] = useState("");
+  const [orphanOpen, setOrphanOpen] = useState(false); // список «договор есть, проекта нет» — свёрнут по умолчанию
   const [finProjStatusFilter, setFinProjStatusFilter] = useState("");
   const [finProjCatFilter, setFinProjCatFilter] = useState("");
 
@@ -14489,29 +14490,37 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     </select>}
                   </div>
 
+                  {/* Свёрнуто в одну строку: это подсказка, а не раздел. Раньше жёлтый блок
+                      во всю ширину перекрикивал и заголовок, и сами проекты. */}
                   {orphanContracts.length > 0 && (
-                    <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:11,padding:"12px 14px",marginBottom:14}}>
-                      <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
-                        <span style={{fontSize:13,fontWeight:800,color:"#92400e"}}>Договор есть, проекта нет — {orphanContracts.length}</span>
-                        <span style={{fontSize:11.5,color:"#b45309"}}>деньги по ним никуда не считаются: ни оплат, ни долга</span>
-                      </div>
-                      <div style={{display:"grid",gap:6,marginTop:9}}>
-                        {orphanContracts.slice(0,8).map(c=>{
-                          const o = liveObjects.find(x=>x.id===c.objectId);
-                          const sum = (c.works||[]).reduce((s,w)=>s+Math.round((Number(w.price)||0)*(Number(w.quantity)||0)),0);
-                          return (
-                            <div key={c.id} style={{display:"flex",gap:9,alignItems:"center",flexWrap:"wrap",background:"#fff",border:"1px solid #fde68a",borderRadius:8,padding:"7px 10px"}}>
-                              <b style={{fontSize:12.5,color:"#0f172a",whiteSpace:"nowrap"}}>№{c.number}</b>
-                              <span style={{fontSize:12.5,color:"#475569",minWidth:0,overflowWrap:"anywhere"}}>{o?.clientName || c.estClient || "—"}</span>
-                              <span style={{fontSize:11.5,color:"#94a3b8",whiteSpace:"nowrap"}}>{fmtDate(c.date)}</span>
-                              <b style={{fontSize:12.5,color:"#0f172a",whiteSpace:"nowrap",marginLeft:"auto"}}>{fmt(sum)} ₸</b>
-                              {o && <button onClick={()=>openObjectFromFinance(o)}
-                                style={{background:"#fff",color:"#b45309",border:"1px solid #fde68a",borderRadius:7,padding:"5px 10px",fontSize:11.5,fontWeight:800,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Открыть объект</button>}
-                            </div>
-                          );
-                        })}
-                        {orphanContracts.length > 8 && <div style={{fontSize:11.5,color:"#b45309"}}>…и ещё {orphanContracts.length-8}</div>}
-                      </div>
+                    <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,marginBottom:14,overflow:"hidden"}}>
+                      <button type="button" onClick={()=>setOrphanOpen(v=>!v)}
+                        style={{width:"100%",display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",background:"transparent",border:0,
+                          padding:"11px 14px",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                        <span style={{width:7,height:7,borderRadius:"50%",background:"#d97706",flexShrink:0}}/>
+                        <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>Договор есть, проекта нет</span>
+                        <span style={{fontSize:11.5,fontWeight:800,color:"#b45309",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:20,padding:"1px 8px"}}>{orphanContracts.length}</span>
+                        <span style={{fontSize:12,color:"#94a3b8"}}>оплаты и долг по ним не считаются</span>
+                        <span style={{marginLeft:"auto",fontSize:11,color:"#94a3b8"}}>{orphanOpen?"Свернуть ▲":"Показать ▼"}</span>
+                      </button>
+                      {orphanOpen && (
+                        <div style={{borderTop:"1px solid #f1f5f9"}}>
+                          {orphanContracts.map(c=>{
+                            const o = liveObjects.find(x=>x.id===c.objectId);
+                            const sum = (c.works||[]).reduce((s,w)=>s+Math.round((Number(w.price)||0)*(Number(w.quantity)||0)),0);
+                            return (
+                              <div key={c.id} style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",padding:"9px 14px",borderBottom:"1px solid #f8fafc"}}>
+                                <b style={{fontSize:12.5,color:"#0f172a",whiteSpace:"nowrap"}}>№{c.number}</b>
+                                <span style={{fontSize:12.5,color:"#475569",minWidth:0,overflowWrap:"anywhere"}}>{o?.clientName || c.estClient || "—"}</span>
+                                <span style={{fontSize:11.5,color:"#cbd5e1",whiteSpace:"nowrap"}}>{fmtDate(c.date)}</span>
+                                <b style={{fontSize:12.5,color:"#0f172a",whiteSpace:"nowrap",marginLeft:"auto"}}>{fmt(sum)} ₸</b>
+                                {o && <button onClick={()=>openObjectFromFinance(o)}
+                                  style={{background:"#f8fafc",color:"#2563eb",border:"1px solid #e2e8f0",borderRadius:7,padding:"5px 11px",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Открыть объект</button>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                   {/* Итого-плитки */}
@@ -15285,6 +15294,17 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 
           const openObjectContract = (obj, fromEst=null) => {
             if (!accessAllows(currentPermissions.documentCreate, estimatorObjectIds.has(obj.id))) return;
+            // Второй договор по той же смете — почти всегда промах. Так появились №1040 и
+            // №1041 на 4 435 030 ₸ каждый: одну смету выгрузили дважды с разницей в час, и
+            // оба ушли клиенту. Проверка стоит ЗДЕСЬ, а не у кнопки: договор создают из
+            // нескольких мест, и у каждой кнопки свою проверку пришлось бы дублировать.
+            if (fromEst && !fromEst.parentId) {
+              const twin = contractsRef.current.find(c => c.estId === fromEst.id && (c.type||"repair_fiz") !== "annex");
+              if (twin) {
+                const sum = (twin.works||[]).reduce((s,w)=>s+Math.round((Number(w.price)||0)*(Number(w.quantity)||0)),0);
+                if (!window.confirm(`По этой смете уже есть договор ${twin.number?"№"+twin.number:"(без номера)"} от ${fmtDate(twin.date)} на ${sum.toLocaleString("ru-RU")} ₸.\n\nСоздать ВТОРОЙ договор по той же смете?\n\nОК — создать ещё один.\nОтмена — открыть существующий из списка документов ниже.`)) return;
+              }
+            }
             const clientId = ensureObjClient(obj); // синхронно (записи в фон) — редактор открывается сразу
           // Цены позиций уже клиентские (наценка и скидка внутри), поэтому документ
           // самодостаточен: его сумма = сумме позиций, и все экраны видят одно число.
@@ -16249,6 +16269,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                             <div className="est-card-acts" style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
                               <div style={{fontWeight:800,fontSize:15,color:"#0f172a"}}>{fmt(est.total||0)} ₸</div>
                               <div className="est-card-btns" style={{display:"flex",gap:4}} onClick={e=>e.stopPropagation()}>
+                                {/* Договор по этой смете уже есть — видно ДО нажатия, чтобы
+                                    не выгружать одну смету в документ второй раз. */}
+                                {!isChild && (()=>{ const made = contracts.find(c=>c.estId===est.id && (c.type||"repair_fiz")!=="annex");
+                                  return made ? <span title={`Договор уже создан ${fmtDate(made.date)}`}
+                                    style={{background:"#ecfdf5",color:"#047857",border:"1px solid #bbf7d0",borderRadius:4,padding:"2px 8px",fontSize:10,fontWeight:700,whiteSpace:"nowrap"}}>
+                                    📄 {made.number ? "№"+made.number : "есть"}</span> : null; })()}
                                 {canCreateDocument && <button title={isChild?"Создать доп. соглашение из этой доп. сметы":"Создать договор из сметы"} onClick={()=>openObjectContract(obj,est)}
                                   style={{background:"rgba(184,144,74,.08)",color:"#2563eb",border:"1px solid #eff6ff",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄 {isChild?"Доп. соглашение":"Договор"}</button>
                                 }
