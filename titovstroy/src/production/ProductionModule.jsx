@@ -314,6 +314,7 @@ export default function ProductionModule({
   autoCreate = false, // ТАБУ: авто-создание карточки при открытии объекта — ТОЛЬКО где явно включено (App: dev-база)
   onDeleteProduction, onToggleClientShare, onSetClientVis, buildStagesFromEstimate,
   finProjects, financeTx,
+  reports = [], // акты/АВР по этому объекту — для проверки готовности к сдаче
   fmt, genId, currentUser, readOnly: externallyReadOnly = false, onAudit,
   staffOptions = [], // сотрудники системы для выбора ответственного (свободный ввод убран)
   actionPermissions = {},
@@ -635,6 +636,8 @@ export default function ProductionModule({
       {embedTab !== "info" && <fieldset disabled={tabReadOnly} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
       {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист запуска объекта" />}
       {embedTab === "handover" && <>
+        <HandoverReadiness obj={openObj} prod={localProd} estimates={estimates} contracts={contracts}
+          finProjects={finProjects} financeTx={financeTx} reports={reports} stageReports={stageReports} fmt={fmt} />
         <ChecklistTab kind="checklistHandover" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист сдачи объекта" />
         <WarrantyTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} fmt={fmt} audit={audit} />
       </>}
@@ -1022,6 +1025,89 @@ function WarrantyTab({ prod, patch, genId, currentUser, fmt, audit }) {
             })}
           </div>}
     </div>
+  );
+}
+
+// Проверка перед сдачей. Перед тем как отдать объект, нужно свести пять вещей из
+// пяти разных вкладок: доделаны ли работы, закрыты ли замечания, подписаны ли акты,
+// нет ли долга и есть ли фото по этапам. Раньше это собиралось в голове — и потому
+// не собиралось. Здесь только чтение: ничего не меняет и не сохраняет.
+export function HandoverReadiness({ obj, prod, estimates, contracts, finProjects, financeTx, reports, stageReports, fmt }) {
+  const num = (v) => Number(v) || 0;
+  const stages = prod?.stages || [];
+  const doneStages = stages.filter(s => s?.status === "done").length;
+  const openDefects = (Array.isArray(prod?.defects) ? prod.defects : [])
+    .filter(d => d && !d.done && !d.closedAt).length;
+
+  const acts = (reports || []).filter(r => r && !r.deletedAt);
+  const avr = acts.filter(r => String(r.type || "") === "avr").length;
+
+  // Долг: бюджет проекта минус приходы по номеру договора — тем же способом, что и в «Финансах».
+  const project = findFinanceProjectForObject(obj, contracts || [], finProjects || []);
+  const estTotal = estimatesForObject(estimates || [], obj?.id).reduce((s, e) => s + num(e.total), 0);
+  const contractTotal = (contracts || [])
+    .filter(c => String(c.type || "") !== "reservation")
+    .reduce((s, c) => s + (c.works || []).reduce((w, x) => w + Math.round(num(x.price) * num(x.quantity)), 0), 0);
+  const budget = estTotal || contractTotal || num(project?.budget);
+  const cn = normCN(project?.contractNo || (contracts || [])[0]?.number || "");
+  const paid = cn ? (financeTx || [])
+    .filter(t => t && !t.deletedAt && t.included !== false && t.type === "income" && normCN(t.contractNo) === cn)
+    .reduce((s, t) => s + num(t.amount), 0) : 0;
+  const debt = Math.max(0, Math.round(budget - paid));
+
+  // Фото: считаем этапы, у которых есть хотя бы один подтверждённый снимок для клиента.
+  const photos = Array.isArray(stageReports?.list) ? stageReports.list : [];
+  const shot = new Set(photos.filter(p => p?.rec === "photo" && p.url && p.review === "approved").map(p => String(p.stageId)));
+  const withPhoto = stages.filter(s => shot.has(String(s.id))).length;
+
+  const handover = Array.isArray(prod?.checklistHandover) ? prod.checklistHandover : [];
+  const checked = handover.filter(i => i?.done).length;
+
+  const rows = [
+    { key: "stages", label: "Работы завершены", value: `${doneStages} из ${stages.length}`,
+      ok: stages.length > 0 && doneStages === stages.length, empty: stages.length === 0,
+      hint: "вкладка «Этапы»" },
+    { key: "defects", label: "Замечания устранены", value: openDefects ? `открыто ${openDefects}` : "открытых нет",
+      ok: openDefects === 0, hint: "вкладка «Замечания»" },
+    { key: "acts", label: "Акты подписаны", value: acts.length ? `${acts.length} шт${avr ? `, из них АВР ${avr}` : ""}` : "актов нет",
+      ok: acts.length > 0, hint: "вкладка «Документы»" },
+    { key: "money", label: "Оплата закрыта", value: budget > 0 ? (debt > 0 ? `долг ${fmt(debt)} ₸` : "долга нет") : "бюджет не задан",
+      ok: budget > 0 && debt === 0, empty: budget <= 0, hint: "«Финансы» → «Проекты»" },
+    { key: "photo", label: "Фото по работам", value: stages.length ? `${withPhoto} из ${stages.length}` : "этапов нет",
+      ok: stages.length > 0 && withPhoto === stages.length, empty: stages.length === 0,
+      soft: true, hint: "фото подтверждает руководитель" },
+    { key: "check", label: "Чек-лист сдачи", value: handover.length ? `${checked} из ${handover.length}` : "пункты не заведены",
+      ok: handover.length > 0 && checked === handover.length, empty: handover.length === 0, hint: "ниже на этой вкладке" },
+  ];
+  // «Мягкие» пункты (фото) в вердикт не входят: снимки — не условие приёмки,
+  // а обещание клиенту. Иначе объект без фотоотчёта нельзя было бы сдать вообще.
+  const hard = rows.filter(r => !r.soft);
+  const blocking = hard.filter(r => !r.ok);
+  const allGood = blocking.length === 0;
+
+  return (
+    <section style={{ background: "#fff", border: "1px solid " + (allGood ? "#bbf7d0" : "#e2e8f0"), borderRadius: 12, padding: 15, marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 9, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>Готовность к сдаче</span>
+        <span style={{ fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 7, whiteSpace: "nowrap",
+          color: allGood ? "#047857" : "#b45309", background: allGood ? "#ecfdf5" : "#fffbeb",
+          border: "1px solid " + (allGood ? "#bbf7d0" : "#fde68a") }}>
+          {allGood ? "✓ Всё сведено" : `Осталось: ${blocking.length}`}
+        </span>
+      </div>
+      <div style={{ display: "grid", gap: 6, marginTop: 11 }}>
+        {rows.map(r => (
+          <div key={r.key} style={{ display: "flex", gap: 9, alignItems: "baseline", flexWrap: "wrap",
+            borderTop: "1px solid #f1f5f9", paddingTop: 8 }}>
+            <span style={{ fontSize: 13, flexShrink: 0, width: 16, textAlign: "center",
+              color: r.ok ? "#047857" : r.empty ? "#94a3b8" : "#b45309" }}>{r.ok ? "✓" : r.empty ? "—" : "!"}</span>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: "#0f172a", minWidth: 0 }}>{r.label}</span>
+            <span style={{ fontSize: 12.5, color: r.ok ? "#047857" : r.empty ? "#94a3b8" : "#b45309", fontWeight: r.ok ? 600 : 800 }}>{r.value}</span>
+            <span style={{ fontSize: 11, color: "#cbd5e1", marginLeft: "auto", whiteSpace: "nowrap" }}>{r.hint}</span>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
