@@ -7823,6 +7823,9 @@ ${reqBlock}`;
   }, [mutateProductions]);
 
   // ── ДОСТУП КЛИЕНТА К ПРОГРЕССУ (публичная ссылка #/progress/<токен>) ──
+  // Когда какой объект публиковали последний раз — ключи «p:<id>» (снимок) и «d:<id>»
+  // (документы). Общий тормоз для всех путей публикации, включая фоновые.
+  const _pubAt = useRef(new Map());
   const prodEntriesRef = useRef([]);
   useEffect(() => { prodEntriesRef.current = prodEntries; }, [prodEntries]);
   // Отчёты по этапам лежат отдельным узлом на объект (см. stage-reports/model.js)
@@ -7902,9 +7905,20 @@ ${reqBlock}`;
       publishedAt: Date.now(), viewCount: prev.viewCount || 0, viewedAt: prev.viewedAt || null,
     };
   }, []);
-  const publishProgress = useCallback(async (objectId) => {
+  const publishProgress = useCallback(async (objectId, opts = {}) => {
     const obj = objectsRef.current.find(o => o.id === objectId);
     if (!obj || !obj.progressShared || !obj.progressToken) return;
+    // ТОРМОЗ. Публикация читает ноду прогресса и отчёты по этапам, то есть стоит
+    // трафика. Раньше она срабатывала от массивов, которые меняют идентичность на
+    // каждый чих (productions, prodEntries), и по кругу гоняла ВСЕ открытые кабинеты
+    // в КАЖДОЙ вкладке. За двое суток это вылилось в 58 ГБ исходящего трафика базы
+    // и 57 долларов. Клиентская страница сама обновляется раз в 10 секунд, так что
+    // задержка в минуту незаметна, а фоновая публикация перестаёт крутиться вхолостую.
+    if (!opts.force) {
+      const last = _pubAt.current.get("p:" + objectId) || 0;
+      if (Date.now() - last < 60_000) return;
+    }
+    _pubAt.current.set("p:" + objectId, Date.now());
     const showRemarks = (obj.clientVis || {}).remarks !== false;
     // Замечания СКРЫТЫ клиенту → сначала заберём уже присланные замечания в производство,
     // чтобы они не потерялись, ПЕРЕД тем как вычистить их из публичной ноды.
@@ -7970,7 +7984,10 @@ ${reqBlock}`;
     try { await storage.set(DOCS_NODE(token), JSON.stringify({ revoked: true })); } catch {}
   }, []);
   // Опрос замечаний клиента раз в минуту (клиент пишет прямо в ноду — производственных событий нет)
+  // Только во вкладке-редакторе: фоновая работа не должна умножаться на число открытых
+  // вкладок. Раньше умножалась — и каждая вкладка гоняла свой круг публикаций.
   useEffect(() => {
+    if (!editorTab) return undefined;
     const tick = () => {
       objectsRef.current.filter(o => o.progressShared && o.progressToken).forEach(async o => {
         // Срок истёк — гасим доступ насовсем вместо очередной republish'и (иначе «истёк» был
@@ -7980,14 +7997,15 @@ ${reqBlock}`;
           try { await _revokeProgressAccess(o.progressToken); } catch {}
           return;
         }
+        // Только забрать замечания клиента — ради этого опрос и заведён. Публикацию
+        // снимка и документов отсюда убрал: они и так вызываются при изменении данных,
+        // а раз в минуту по всем кабинетам перевыкладывали одно и то же.
         try { await syncRemarksRef.current?.(o.id); } catch {}
-        try { await publishProgressRef.current?.(o.id); } catch {}
-        try { await _publishDocsRef.current?.(o.id); } catch {}
       });
     };
     const iv = setInterval(tick, 60000);
     return () => clearInterval(iv);
-  }, [saveObjects, _revokeProgressAccess]);
+  }, [saveObjects, _revokeProgressAccess, editorTab]);
   // Включить/выключить доступ клиента; возвращает ссылку (или null при выключении)
   const toggleClientShare = useCallback(async (objectId) => {
     if (!accessAllows(currentPermissions.productionClientAccess, estimatorObjectIds.has(objectId))) return null;
@@ -8008,7 +8026,7 @@ ${reqBlock}`;
     await saveObjects([...objectsRef.current.filter(o => o.id !== objectId), { ...obj, progressShared: true, progressToken: token, progressExpiresAt, updatedAt: Date.now() }]);
     const snap = buildProgressSnapshot(objectId, {}, await _readStageReports(objectId));
     if (snap) { try { await storage.set(PROGRESS_NODE(token), JSON.stringify(snap)); } catch {} }
-    try { await _publishDocsRef.current?.(objectId); } catch {}
+    try { await _publishDocsRef.current?.(objectId, { force: true }); } catch {}
     logChange(currentUser, { entity: "publish", entityId: objectId, objectId, label: _objLabel(obj), action: "открыл доступ клиенту" });
     return linkOf(token);
   }, [saveObjects, buildProgressSnapshot, _revokeProgressAccess, currentPermissions.productionClientAccess, estimatorObjectIds]);
@@ -8021,8 +8039,9 @@ ${reqBlock}`;
     const clientVis = { ...(obj.clientVis || {}), ...patch };
     await saveObjects([...objectsRef.current.filter(o => o.id !== objectId), { ...obj, clientVis, updatedAt: Date.now() }]);
     setCurrentObject(p => (p && p.id === objectId) ? { ...p, clientVis } : p);
-    try { await publishProgressRef.current?.(objectId); } catch {}
-    try { await _publishDocsRef.current?.(objectId); } catch {}
+    // Владелец переключил, что видит клиент — публикуем немедленно, мимо тормоза.
+    try { await publishProgressRef.current?.(objectId, { force: true }); } catch {}
+    try { await _publishDocsRef.current?.(objectId, { force: true }); } catch {}
     // журнал: каждый переключённый раздел видимости
     const VIS_LBL = { payments: "оплата", docs: "документы", stages: "этапы работ", remarks: "замечания", photos: "фотоотчёт" };
     for (const f of Object.keys(patch || {})) {
@@ -8034,21 +8053,25 @@ ${reqBlock}`;
   // Публикация документов клиента (договоры/акты) при их изменении — для открытых объектов
   const _docsPubTimer = useRef(null);
   useEffect(() => {
+    if (!editorTab) return undefined;
     const shared = objectsRef.current.filter(_progActive);
-    if (!shared.length) return;
+    if (!shared.length) return undefined;
     if (_docsPubTimer.current) clearTimeout(_docsPubTimer.current);
     _docsPubTimer.current = setTimeout(() => { shared.forEach(o => { try { _publishDocsRef.current?.(o.id); } catch {} }); }, 1500);
     return () => { if (_docsPubTimer.current) clearTimeout(_docsPubTimer.current); };
-  }, [contracts, reports, estimates]);
+  }, [contracts, reports, estimates, editorTab]);
   // Живое авто-обновление: при любом изменении производства/оплат пере-публикуем снимки всех открытых объектов
   const _progPubTimer = useRef(null);
   useEffect(() => {
+    if (!editorTab) return undefined;
     const shared = objectsRef.current.filter(_progActive);
-    if (!shared.length) return;
+    if (!shared.length) return undefined;
     if (_progPubTimer.current) clearTimeout(_progPubTimer.current);
-    _progPubTimer.current = setTimeout(() => { shared.forEach(async o => { try { await syncRemarksRef.current?.(o.id); } catch {} publishProgressRef.current?.(o.id); }); }, 1200);
+    _progPubTimer.current = setTimeout(() => { shared.forEach(o => { publishProgressRef.current?.(o.id); }); }, 1200);
     return () => { if (_progPubTimer.current) clearTimeout(_progPubTimer.current); };
-  }, [prodEntries, productions]);
+    // syncRemarks отсюда убран: он читает ноду по каждому кабинету, а зависимости этого
+    // эффекта меняются постоянно. Замечания клиента забирает опрос раз в минуту выше.
+  }, [prodEntries, productions, editorTab]);
 
   // Построить этапы из привязанной к объекту сметы: группировка по категориям сметы
   const buildStagesFromEstimate = useCallback((objectId) => {
@@ -10625,9 +10648,16 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 </body></html>`;
     } catch (e) { console.warn("estimateToClientHtml err", e); return null; }
   };
-  const publishDocs = async (objectId) => {
+  const publishDocs = async (objectId, opts = {}) => {
     const obj = objectsRef.current.find(o => o.id === objectId);
     if (!obj || !obj.progressShared || !obj.progressToken) return;
+    // Тот же тормоз, но реже: документы клиента меняются раз в недели, а перегенерация
+    // тянет договоры, сметы и акты и собирает HTML заново — самая дорогая из публикаций.
+    if (!opts.force) {
+      const last = _pubAt.current.get("d:" + objectId) || 0;
+      if (Date.now() - last < 600_000) return;
+    }
+    _pubAt.current.set("d:" + objectId, Date.now());
     // Документы отключены в настройках видимости — пишем пустую ноду, чтобы клиент не видел
     // старые документы после выключения тумблера.
     if (obj.clientVis && obj.clientVis.docs === false) {
