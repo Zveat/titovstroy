@@ -789,7 +789,7 @@ export function resolveProgressBudget(entryBudget, stages = []) {
 
 export function startPublicProgressAutoRefresh(load, {
   doc = typeof document !== "undefined" ? document : null,
-  intervalMs = 10000,
+  intervalMs = 120000,   // не чаще раза в две минуты: каждое обновление — полное чтение узла кабинета
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
 } = {}) {

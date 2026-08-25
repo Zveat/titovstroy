@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, useRef, Fragment, lazy, Suspense } from "react";
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, get, set, runTransaction } from "firebase/database";
+import { getDatabase, ref, get, set, runTransaction, onValue } from "firebase/database";
 import ProductionModule, { flushPendingProduction, stopProductionSession, hasPendingProduction, productionDraftsAreDurable, startProductionSession, setProductionCommandHandler } from "./production/ProductionModule.jsx";
 import { emptyProduction } from "./production/constants.js";
 import { applyProductionCommand, runVerifiedProductionTransaction, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, isRegenerableProductionCommand, productionCommandObjectIds, _stageKey, normalizeProductionIds } from "./production/commands.js";
@@ -2095,6 +2095,25 @@ const storage = {
   async get(key) {
     const r = await this.getResult(key);
     return r.status === "found" ? { value: r.value } : null;
+  },
+  // ── ПОДПИСКА НА КЛЮЧ ──
+  // База у нас realtime, но приложение исторически с ней работало как с обычным сервером:
+  // никаких подписок, только повторные ПОЛНЫЕ чтения по таймеру. Клиентский кабинет читал
+  // свой узел каждые 10 секунд, приложение обходило все кабинеты раз в минуту — и так
+  // круглосуточно, пока открыта хоть одна вкладка. За сутки набегало 21 ГБ скачивания при
+  // базе в 44 МБ, то есть базу выкачивали примерно 485 раз в день.
+  // Подписка меняет это в корне: узел приходит ОДИН раз, дальше данные идут только когда
+  // они реально изменились. Простаивающая вкладка не стоит ничего.
+  // Возвращает функцию отписки или null, если SDK недоступен (тогда вызывающий остаётся на
+  // старом опросе — на REST-фолбэке подписок нет).
+  watch(key, onData) {
+    if (!_fbDb || typeof onData !== "function") return null;
+    try {
+      return onValue(ref(_fbDb, _fbKey(key)), (snap) => {
+        const v = snap && snap.exists() ? snap.val() : null;
+        try { onData(v == null ? null : (typeof v === "string" ? v : JSON.stringify(v))); } catch {}
+      }, (e) => { console.warn("watch error", key, e?.message || e); });
+    } catch (e) { console.warn("watch failed", key, e); return null; }
   },
   // Запись ТОЛЬКО в облако (SDK, затем REST). НЕ пишет в localStorage/_mem и НЕ ставит dirty,
   // когда облако не ответило — иначе неудачная запись при ВОССТАНОВЛЕНИИ осела бы «грязной»
@@ -5345,7 +5364,11 @@ function PublicProgress({ token }) {
     };
     let ok = false;
     try {
-      const r = await readFresh(PROGRESS_NODE(token));
+      // opts.value — значение, которое уже принесла подписка. Второй раз его не запрашиваем:
+      // иначе каждое изменение стоило бы двух скачиваний узла вместо одного.
+      const r = opts.value !== undefined
+        ? { status: opts.value ? "found" : "empty", value: opts.value }
+        : await readFresh(PROGRESS_NODE(token));
       if (r.status === "found" && r.value) {
         let data = null; try { data = JSON.parse(r.value); } catch {}
         if (data && data.expiresAt && Date.now() > data.expiresAt) {
@@ -5370,12 +5393,26 @@ function PublicProgress({ token }) {
     }
   }, [token]);
   useEffect(() => {
+    // ПОДПИСКА вместо опроса. Раньше страница перечитывала свой узел каждые 10 секунд — 360
+    // полных скачиваний в час с каждой открытой вкладки, круглосуточно, даже когда на объекте
+    // неделями ничего не меняется. Клиент оставил кабинет открытым на телефоне — и он один
+    // давал гигабайты в сутки. Теперь узел приходит один раз при открытии, дальше — только
+    // когда прораб реально что-то обновил. И это ещё и БЫСТРЕЕ прежнего: изменения видны
+    // сразу, а не через десять секунд.
+    // Первичное чтение оставляем: подписка живёт поверх WebSocket, а он у части клиентов
+    // закрыт корпоративной сетью или мобильным оператором. Тогда onValue просто никогда не
+    // сработает, и страница осталась бы пустой — а load умеет упасть на REST-фолбэк.
     load();
+    const stop = storage.watch(PROGRESS_NODE(token), (value) => {
+      load({ isRefresh: true, value: value == null ? "" : value });
+    });
+    if (stop) return stop;
+    // SDK недоступен вовсе — остаёмся на опросе, но редком: две минуты вместо десяти секунд.
     return startPublicProgressAutoRefresh(load, {
       doc: typeof document !== "undefined" ? document : null,
-      intervalMs: 10000,
+      intervalMs: 120000,
     });
-  }, [load]);
+  }, [load, token]);
   const refresh = async () => {
     if (refreshing) return;
     setRefreshing(true);
@@ -8070,26 +8107,46 @@ ${reqBlock}`;
   // Опрос замечаний клиента раз в минуту (клиент пишет прямо в ноду — производственных событий нет)
   // Только во вкладке-редакторе: фоновая работа не должна умножаться на число открытых
   // вкладок. Раньше умножалась — и каждая вкладка гоняла свой круг публикаций.
+  // Подпись набора опубликованных кабинетов. Именно она в зависимостях эффекта, а не сами
+  // объекты: objects меняется от любой правки, и подписки пересоздавались бы постоянно —
+  // а каждое пересоздание заново качает все узлы. Строка меняется только когда кабинет
+  // реально открыли или закрыли.
+  const _progWatchKey = useMemo(
+    () => objects.filter(o => o?.progressShared && o?.progressToken).map(o => `${o.id}:${o.progressToken}`).sort().join(","),
+    [objects],
+  );
   useEffect(() => {
     if (!editorTab) return undefined;
-    const tick = () => {
+    // ПОДПИСКА вместо опроса. Раньше приложение раз в минуту читало узел КАЖДОГО
+    // опубликованного кабинета целиком, с каждого рабочего места: десять кабинетов и три
+    // открытые вкладки = тридцать полных чтений в минуту круглосуточно. Замечания клиента
+    // приходят редко, а платили за них постоянно. Теперь узел приходит один раз, дальше —
+    // только когда клиент действительно что-то написал (и приходит сразу, а не через минуту).
+    const stops = [];
+    for (const pair of _progWatchKey ? _progWatchKey.split(",") : []) {
+      const objectId = pair.slice(0, pair.lastIndexOf(":"));
+      const token = pair.slice(pair.lastIndexOf(":") + 1);
+      if (!objectId || !token) continue;
+      const stop = storage.watch(PROGRESS_NODE(token), () => {
+        try { syncRemarksRef.current?.(objectId); } catch {}
+      });
+      if (stop) stops.push(stop);
+    }
+    // Срок доступа. Раньше проверялся тем же ежеминутным опросом; теперь отдельным редким
+    // таймером — истёкший кабинет не та срочность, чтобы проверять его каждую минуту.
+    const checkExpiry = () => {
       objectsRef.current.filter(o => o.progressShared && o.progressToken).forEach(async o => {
-        // Срок истёк — гасим доступ насовсем вместо очередной republish'и (иначе «истёк» был
-        // бы виден только в интерфейсе, а сама нода продолжала бы обновляться в базе).
-        if (o.progressExpiresAt && Date.now() > o.progressExpiresAt) {
-          try { await saveObjects([...objectsRef.current.filter(x => x.id !== o.id), { ...o, progressShared: false, updatedAt: Date.now() }]); } catch {}
-          try { await _revokeProgressAccess(o.progressToken); } catch {}
-          return;
-        }
-        // Только забрать замечания клиента — ради этого опрос и заведён. Публикацию
-        // снимка и документов отсюда убрал: они и так вызываются при изменении данных,
-        // а раз в минуту по всем кабинетам перевыкладывали одно и то же.
-        try { await syncRemarksRef.current?.(o.id); } catch {}
+        if (!o.progressExpiresAt || Date.now() <= o.progressExpiresAt) return;
+        // Гасим доступ насовсем: иначе «истёк» был бы виден только в интерфейсе, а сама нода
+        // продолжала бы жить и читаться по старому токену.
+        try { await saveObjects([...objectsRef.current.filter(x => x.id !== o.id), { ...o, progressShared: false, updatedAt: Date.now() }]); } catch {}
+        try { await _revokeProgressAccess(o.progressToken); } catch {}
       });
     };
-    const iv = setInterval(tick, 60000);
-    return () => clearInterval(iv);
-  }, [saveObjects, _revokeProgressAccess, editorTab]);
+    checkExpiry();
+    const iv = setInterval(checkExpiry, 30 * 60 * 1000);
+    return () => { clearInterval(iv); for (const stop of stops) { try { stop(); } catch {} } };
+  }, [saveObjects, _revokeProgressAccess, editorTab, _progWatchKey]);
   // Включить/выключить доступ клиента; возвращает ссылку (или null при выключении)
   const toggleClientShare = useCallback(async (objectId) => {
     if (!accessAllows(currentPermissions.productionClientAccess, estimatorObjectIds.has(objectId))) return null;
