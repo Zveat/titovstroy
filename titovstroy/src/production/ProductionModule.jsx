@@ -4,7 +4,7 @@ import { STAGE_STATUSES, emptyProduction } from "./constants.js";
 // иначе журнал со временем разойдётся с тем, что человек видел на экране.
 const _stageStatusLabel = (key) => STAGE_STATUSES.find(item => item.key === key)?.label || key || "—";
 import { normCN, contractNetTotal, estimatesForObject, findFinanceProjectForObject, sortProductionStages, moveProductionStage, buildGanttLayout, sortGanttRows, GANTT_SCALES, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "../utils.js";
-import { buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, _stageKey } from "./commands.js";
+import { buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, retryDelayMs, _stageKey } from "./commands.js";
 import { listProductionDrafts, removeProductionDraft, saveProductionDraft } from "./drafts.js";
 import ObjectControlModule, { SubTabs } from "../object-control/ObjectControlModule.jsx";
 import { planStageSchedule, updateStageStatus, upsertDailyReport } from "../object-control/objectControl.js";
@@ -81,6 +81,25 @@ let _draftStore = null;
 let _draftFailureShown = false;
 const _changeIdOf = (objId) => "cm_" + objId; // стабилен ПО ОБЪЕКТУ (не по попытке) — см. flush
 
+// ── ПАУЗА МЕЖДУ ПОВТОРАМИ ──
+// Правка, которая не проходит (нет сети, отказ прав, чужая блокировка), раньше повторялась
+// КАЖДЫЕ 12 СЕКУНД без конца. Каждая попытка — транзакция на общий узел производства, а он
+// целиком скачивается: 377 КБ × 300 попыток в час = 113 МБ в час с ОДНОГО зависшего
+// устройства. За сутки — почти 3 ГБ трафика и столько же долларов по тарифу Firebase.
+// Теперь пауза растёт: 12с → 30с → 1м → 2м → 5м → 10м (потолок). Ничего не теряется:
+// черновик лежит в localStorage, любая НОВАЯ правка сбрасывает паузу, а уход со страницы,
+// выход из аккаунта и «Повторить сейчас» отправляют немедленно, минуя паузу.
+const _retryByObj = new Map();     // objectId -> { fails, nextAt }
+const _noteFlushOk = (objId) => { _retryByObj.delete(objId); };
+function _noteFlushFail(objId) {
+  const fails = (_retryByObj.get(objId)?.fails || 0) + 1;
+  _retryByObj.set(objId, { fails, nextAt: Date.now() + retryDelayMs(fails) });
+}
+const _retryDue = (objId) => {
+  const rec = _retryByObj.get(objId);
+  return !rec || Date.now() >= rec.nextAt;
+};
+
 function _persistEntry(objId, entry) {
   if (!_draftUid || !_draftStore || !entry) return false;
   const ok = saveProductionDraft(_draftStore, _draftUid, objId, entry);
@@ -114,6 +133,7 @@ async function _flushRun(objId) {
       // ЯВНО гасим changeId в App (resolve-change) — иначе после ошибки баннер завис бы навсегда.
       // await: «Повторить сейчас»/logout ждут и снятия баннера, а не только записи.
       _pendingByObj.delete(objId);
+      _noteFlushOk(objId);
       _removeEntryDraft(objId, startRev);
       try { await _cmdFn({ type: "resolve-change", changeId: _changeIdOf(objId) }); } catch { /* без записи в базу */ }
       return;
@@ -134,6 +154,7 @@ async function _flushRun(objId) {
       if (curRev === startRev) {
         // новых правок не было — объект синхронизирован
         _pendingByObj.delete(objId);
+        _noteFlushOk(objId);
         _removeEntryDraft(objId, startRev);
         if (_uiApply && confirmed) _uiApply(objId, confirmed);
         return;
@@ -178,11 +199,12 @@ async function _flushRun(objId) {
           continue;
         }
         _pendingByObj.delete(objId); _draftByObj.delete(objId); _confirmedByObj.delete(objId);
+        _noteFlushOk(objId);
         _removeEntryDraft(objId);
         try { await _cmdFn({ type: "resolve-change", changeId: _changeIdOf(objId) }); } catch { /* без записи в базу */ }
         return;
       }
-      if (!server) return; // ensure есть, а конфликт без серверной карточки — оставляем фоновому повтору
+      if (!server) { _noteFlushFail(objId); return; } // ensure есть, а конфликт без серверной карточки — оставляем фоновому повтору
       const merged = rebaseLocalProduction(e.base, e.local, server, objId, {
         // Правленный локально элемент удалён с другого устройства — ЯВНЫЙ выбор пользователя,
         // а не молчаливое воскрешение (чужое удаление — тоже данные, терять его молча нельзя).
@@ -205,6 +227,9 @@ async function _flushRun(objId) {
     }
     // Сетевая/прочая ошибка: entry остаётся в pending — повтор при следующей правке, фоновом
     // интервале, уходе со страницы или явном «Повторить сейчас» (flushPendingProduction).
+    // Пауза до следующего фонового повтора растёт (см. RETRY_BACKOFF_MS): бесконечные попытки
+    // раз в 12 секунд скачивали весь узел производства и съедали гигабайты трафика.
+    _noteFlushFail(objId);
     return;
   }
 }
@@ -215,17 +240,26 @@ function _flushObj(objId) {
   if (running) return running;
   const p = _flushRun(objId).catch(error => {
     console.error("Production flush failed", objId, error);
+    _noteFlushFail(objId);
   }).then(() => { if (_flushPromises.get(objId) === p) _flushPromises.delete(objId); });
   _flushPromises.set(objId, p);
   return p;
 }
-function _flushAllPending() { for (const objId of Array.from(_pendingByObj.keys())) _flushObj(objId); }
+// force=true — отправить всё немедленно, не глядя на паузу между повторами: это уход со
+// страницы, выход из аккаунта и явное «Повторить сейчас», когда терять правки нельзя.
+function _flushAllPending(force = false) {
+  for (const objId of Array.from(_pendingByObj.keys())) {
+    if (force) _retryByObj.delete(objId);
+    else if (!_retryDue(objId)) continue;
+    _flushObj(objId);
+  }
+}
 
 // Начать production-сессию ПОСЛЕ получения editor-lock, но ДО монтирования MainApp.
 // Поднимает только черновики этого uid; данные другого пользователя даже не попадают в память.
 export function startProductionSession(uid, store = (typeof localStorage !== "undefined" ? localStorage : null)) {
   _sessionN++;
-  _pendingByObj.clear(); _flushPromises.clear(); _revByObj.clear(); _confirmedByObj.clear(); _draftByObj.clear();
+  _pendingByObj.clear(); _flushPromises.clear(); _revByObj.clear(); _confirmedByObj.clear(); _draftByObj.clear(); _retryByObj.clear();
   _cmdFn = null; _uiApply = null;
   _draftUid = uid == null ? null : String(uid);
   _draftStore = store;
@@ -256,7 +290,11 @@ export function setProductionCommandHandler(fn) {
 // Для App («Повторить сейчас», logout): дожать несохранённые правки производства.
 // Резолвится, когда ВСЕ flush-циклы реально завершились (включая повторные отправки внутри цикла).
 export function flushPendingProduction() {
-  return Promise.all(Array.from(_pendingByObj.keys()).map(objId => _flushObj(objId)));
+  // Явное действие пользователя — паузу между повторами сбрасываем и шлём немедленно.
+  return Promise.all(Array.from(_pendingByObj.keys()).map(objId => {
+    _retryByObj.delete(objId);
+    return _flushObj(objId);
+  }));
 }
 // Есть ли несохранённые правки производства (для logout-подтверждения).
 export function hasPendingProduction() { return _pendingByObj.size; }
@@ -275,13 +313,16 @@ export function productionDraftsAreDurable() {
 // функциями: одна регистрация (guard _bgTimer), ничего не копится при повторных монтированиях,
 // pending повторяется даже когда компонент размонтирован (пользователь ушёл из карточки объекта).
 let _bgTimer = null;
-function _bgTick() { if (_pendingByObj.size && _cmdFn) _flushAllPending(); }
-function _bgOnHide() { if (document.visibilityState === "hidden") _bgTick(); }
+// Тик по таймеру уважает паузу между повторами (force=false), уход со страницы — нет:
+// там последний шанс сохранить, и трафик уже не важен.
+function _bgTick(force = false) { if (_pendingByObj.size && _cmdFn) _flushAllPending(force); }
+const _bgTickNow = () => _bgTick(true);
+function _bgOnHide() { if (document.visibilityState === "hidden") _bgTickNow(); }
 function _ensureBgFlush() {
   if (_bgTimer != null) return;
   _bgTimer = setInterval(_bgTick, 12000);
   if (typeof document !== "undefined") document.addEventListener("visibilitychange", _bgOnHide);
-  if (typeof window !== "undefined") { window.addEventListener("beforeunload", _bgTick); window.addEventListener("pagehide", _bgTick); }
+  if (typeof window !== "undefined") { window.addEventListener("beforeunload", _bgTickNow); window.addEventListener("pagehide", _bgTickNow); }
 }
 
 // ВЫХОД ИЗ АККАУНТА / размонтирование MainApp: ПОЛНАЯ остановка и очистка module-scope
@@ -294,9 +335,9 @@ export function stopProductionSession() {
   _sessionN++;
   if (_bgTimer != null) { clearInterval(_bgTimer); _bgTimer = null; }
   if (typeof document !== "undefined") document.removeEventListener("visibilitychange", _bgOnHide);
-  if (typeof window !== "undefined") { window.removeEventListener("beforeunload", _bgTick); window.removeEventListener("pagehide", _bgTick); }
+  if (typeof window !== "undefined") { window.removeEventListener("beforeunload", _bgTickNow); window.removeEventListener("pagehide", _bgTickNow); }
   _cmdFn = null; _uiApply = null;
-  _pendingByObj.clear(); _flushPromises.clear(); _revByObj.clear(); _confirmedByObj.clear(); _draftByObj.clear();
+  _pendingByObj.clear(); _flushPromises.clear(); _revByObj.clear(); _confirmedByObj.clear(); _draftByObj.clear(); _retryByObj.clear();
   _draftUid = null; _draftStore = null; _draftFailureShown = false;
 }
 
@@ -503,6 +544,9 @@ export default function ProductionModule({
     // оставлять её только в React-state.
     _persistEntry(objId, entry);
     _pendingByObj.set(objId, entry);
+    // Новая правка — повод попробовать снова прямо сейчас: паузу после прошлых неудач снимаем,
+    // иначе человек нажал бы галочку, а отправка ждала бы конца десятиминутного отката.
+    _retryByObj.delete(objId);
     localProdRef.current = next; setLocalProd(next);
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => _flushObj(objId), 600);

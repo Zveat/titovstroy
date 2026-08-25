@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { applyProductionCommand, syncEstimateStages, isUntouchedLegacyEstimateStage, isRegenerableProductionCommand, _stageKey, diffProductionToCommands, buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, createTxnApplier, runVerifiedProductionTransaction, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, productionCommandObjectIds } from "./commands.js";
+import { applyProductionCommand, syncEstimateStages, isUntouchedLegacyEstimateStage, isRegenerableProductionCommand, _stageKey, diffProductionToCommands, buildFlushBatch, normalizeProductionIds, rebaseLocalProduction, createTxnApplier, runVerifiedProductionTransaction, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, productionCommandObjectIds, retryDelayMs } from "./commands.js";
 import { flushPendingProduction, stopProductionSession, hasPendingProduction, productionDraftsAreDurable, startProductionSession, __prodQueueTesting } from "./ProductionModule.jsx";
 import { countAllProductionRecovery, listProductionDrafts, listProductionRetries, productionDraftKey, saveProductionDraft, saveProductionRetry, removeProductionDraft, removeProductionRetry } from "./drafts.js";
 
@@ -839,5 +839,25 @@ describe("этап 2Б — durable-черновики производства �
       if (previousWindow === undefined) delete globalThis.window;
       else globalThis.window = previousWindow;
     }
+  });
+});
+
+describe("пауза между повторами отправки", () => {
+  it("растёт от 12 секунд до десяти минут", () => {
+    expect([1, 2, 3, 4, 5, 6].map(retryDelayMs)).toEqual([12_000, 30_000, 60_000, 120_000, 300_000, 600_000]);
+  });
+
+  it("после шестой неудачи не растёт — потолок десять минут", () => {
+    expect(retryDelayMs(7)).toBe(600_000);
+    expect(retryDelayMs(500)).toBe(600_000);
+  });
+
+  // Мусор на входе не должен превратиться в нулевую паузу: нулевая пауза — это и есть
+  // тот самый бесконечный цикл повторов, из-за которого набежал счёт.
+  it("мусор и ноль дают первую паузу, а не нулевую", () => {
+    expect(retryDelayMs(0)).toBe(12_000);
+    expect(retryDelayMs(-3)).toBe(12_000);
+    expect(retryDelayMs(undefined)).toBe(12_000);
+    expect(retryDelayMs("нет")).toBe(12_000);
   });
 });

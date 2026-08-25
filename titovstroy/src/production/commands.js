@@ -508,3 +508,14 @@ export function productionCommandObjectIds(command) {
   visit(command);
   return ids;
 }
+
+// Пауза перед следующим фоновым повтором неудавшейся отправки. Правка, которая не проходит
+// (нет сети, отказ прав, чужая блокировка), раньше повторялась каждые 12 секунд без конца,
+// а каждая попытка скачивает весь узел производства — одно зависшее устройство давало
+// почти 3 ГБ трафика в сутки. Пауза удваивается до десяти минут и там остаётся: правка не
+// теряется (черновик в localStorage), но фон перестаёт долбить базу.
+export const RETRY_BACKOFF_MS = Object.freeze([12_000, 30_000, 60_000, 120_000, 300_000, 600_000]);
+export function retryDelayMs(fails) {
+  const n = Math.max(1, Math.floor(Number(fails) || 1));
+  return RETRY_BACKOFF_MS[Math.min(n - 1, RETRY_BACKOFF_MS.length - 1)];
+}
