@@ -24,6 +24,7 @@ import { createDocumentTemplateRuntime } from "./documents/documentTemplateRunti
 import { getAuth, signInAnonymously, signInWithCustomToken, signOut, onAuthStateChanged } from "firebase/auth";
 import { clientPhotosByStage, stageReportsKey, normalizeStageReports } from "./stage-reports/model.js";
 import { requestServerLogin, lockoutMessage } from "./auth/loginClient.js";
+import { backupIndexKey, backupItemKey, normalizeIndex, pushIndex, mergeBackupViews, makeSnapshot, loadSnapshotData } from "./backups.js";
 import { ClientPhotoReport, ClientTabs, PhotoLightbox, stagesWithPhotos } from "./stage-reports/ClientPhotos.jsx";
 import { normCN, contractNetTotal, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, resolveEstimateRows, existingEstimateRowKey, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
 
@@ -8370,14 +8371,16 @@ ${reqBlock}`;
       objects:     { backupKey: OBJECTS_BACKUPS_KEY,     label: "объектов",    save: (l)=>saveObjects(l, {replace:true, allowEmpty:true}) },
     }[kind];
     if (!cfg) return;
-    const bRaw = await storage.get(cfg.backupKey);
-    let items = []; try { if (bRaw?.value) items = JSON.parse(bRaw.value); } catch {}
+    // Оба источника: новые снимки по указателю и старые из общего массива.
+    const [bRaw, iRaw] = await Promise.all([storage.get(cfg.backupKey), storage.get(backupIndexKey(cfg.backupKey))]);
+    const items = mergeBackupViews(bRaw?.value, iRaw?.value, cfg.backupKey);
     setListBackups({
       label: cfg.label,
-      items: Array.isArray(items) ? items : [],
+      items,
       onRestore: async (snap) => {
-        if (!snap?.data) return;
-        let list; try { list = JSON.parse(snap.data); } catch { window.alert("Бэкап повреждён"); return; }
+        const data = await loadSnapshotData(snap, async (k) => (await storage.get(k))?.value || null);
+        if (!data) { window.alert("Снимок не читается — возможно, облако недоступно. Попробуйте ещё раз."); return; }
+        let list; try { list = JSON.parse(data); } catch { window.alert("Бэкап повреждён"); return; }
         if (!Array.isArray(list)) { window.alert("Бэкап повреждён"); return; }
         if (!window.confirm(`Восстановить список ${cfg.label} на ${new Date(snap.ts).toLocaleString("ru-RU")}? Записей: ${list.length}.`)) return;
         const wasN = ({ list: contractsRef, contracts: contractsRef, clients: clientsRef,
@@ -8675,18 +8678,24 @@ ${reqBlock}`;
     setSaving(true);
     setSyncStatus("saving");
     try {
-      // Авто-бэкап предыдущего состояния (последние 20)
+      // Авто-бэкап предыдущего состояния (последние 20). Каждый снимок — свой ключ,
+      // читаем только оглавление: архив смет весил 5,4 МБ и читался на КАЖДОЕ
+      // сохранение, а смета автосохраняется раз в 0,9 секунды. См. src/backups.js.
       try {
         if (prevStatus === "found" && prevValue) {
-          const bRaw = await storage.get(BACKUPS_KEY);
-          let backups = [];
-          try { if (bRaw && bRaw.value) backups = JSON.parse(bRaw.value); } catch {}
-          if (!Array.isArray(backups)) backups = [];
-          const last = backups[0];
-          if (!last || last.data !== prevValue) {
-            backups.unshift({ ts: Date.now(), by: currentUser?.name || "", count: stored.length, data: prevValue });
-            backups = backups.slice(0, 20);
-            await storage.set(BACKUPS_KEY, JSON.stringify(backups));
+          const idxKey = backupIndexKey(BACKUPS_KEY);
+          let index = [];
+          try { const raw = await storage.get(idxKey); index = normalizeIndex(raw?.value); } catch {}
+          const sameAsLast = index[0] && index[0].count === stored.length && Date.now() - index[0].ts < 60_000;
+          if (!sameAsLast) {
+            const ts = Date.now();
+            const snap = makeSnapshot({ ts, by: currentUser?.name || "", count: stored.length, data: prevValue });
+            const step = pushIndex(index, snap);
+            await storage.setCloudOnly(backupItemKey(BACKUPS_KEY, ts), JSON.stringify(snap));
+            await storage.setCloudOnly(idxKey, JSON.stringify(step.index));
+            for (const oldTs of step.drop) {
+              try { await storage.setCloudOnly(backupItemKey(BACKUPS_KEY, oldTs), null); } catch {}
+            }
           }
         }
       } catch(e) { console.warn("backup err", e); }
@@ -8830,13 +8839,24 @@ ${reqBlock}`;
 
     try {
       if (prevStatus === "found" && prevValue) {
-        const bRaw = await storage.get(backupKey);
-        let backups = [];
-        try { if (bRaw && bRaw.value) backups = JSON.parse(bRaw.value); } catch {}
-        if (!Array.isArray(backups)) backups = [];
-        if (!backups[0] || backups[0].data !== prevValue) {
-          backups.unshift({ ts: Date.now(), by: currentUser?.name || "", count: stored.length, data: prevValue });
-          await storage.set(backupKey, JSON.stringify(backups.slice(0, 20)));
+        // Снимок — в свой ключ, в указателе только оглавление. Читаем оглавление
+        // (сотни байт), а не весь архив (мегабайты): см. src/backups.js.
+        const idxKey = backupIndexKey(backupKey);
+        let index = [];
+        try { const raw = await storage.get(idxKey); index = normalizeIndex(raw?.value); } catch {}
+        // Тот же самый список уже лежит верхним снимком — второй раз не пишем.
+        const lastCount = index[0] ? index[0].count : null;
+        const sameAsLast = lastCount === stored.length && index[0] && Date.now() - index[0].ts < 60_000;
+        if (!sameAsLast) {
+          const ts = Date.now();
+          const snap = makeSnapshot({ ts, by: currentUser?.name || "", count: stored.length, data: prevValue });
+          const step = pushIndex(index, snap);
+          await storage.setCloudOnly(backupItemKey(backupKey, ts), JSON.stringify(snap));
+          await storage.setCloudOnly(idxKey, JSON.stringify(step.index));
+          // Вытесненные снимки стираем, иначе база растёт без предела.
+          for (const oldTs of step.drop) {
+            try { await storage.setCloudOnly(backupItemKey(backupKey, oldTs), null); } catch {}
+          }
         }
       }
       const res = await storage.set(key, JSON.stringify(finalList));
@@ -8886,19 +8906,21 @@ ${reqBlock}`;
   // ── Бэкапы / восстановление ──
   const openBackups = async () => {
     try {
-      const bRaw = await storage.get(BACKUPS_KEY);
-      let backups = [];
-      try { if (bRaw && bRaw.value) backups = JSON.parse(bRaw.value); } catch {}
-      if (!Array.isArray(backups)) backups = [];
-      setBackupsModal(backups);
+      // Новые снимки лежат по указателю, старые — в общем массиве. Показываем и те, и те.
+      const [bRaw, iRaw] = await Promise.all([storage.get(BACKUPS_KEY), storage.get(backupIndexKey(BACKUPS_KEY))]);
+      setBackupsModal(mergeBackupViews(bRaw?.value, iRaw?.value, BACKUPS_KEY));
     } catch(e) { setBackupsModal([]); }
   };
+  // Данные снимка: у старого они в самой строке, у нового — в своём ключе.
+  const _snapData = async (snap) => loadSnapshotData(snap, async (k) => (await storage.get(k))?.value || null);
   // ТОЧЕЧНОЕ ВОССТАНОВЛЕНИЕ: вернуть ТОЛЬКО пропавшие сметы из снимка (по id),
   // не трогая ни одну существующую смету и вообще ничего больше (финансы/объекты — не при чём).
   const recoverMissingFromBackup = async (snap) => {
-    if (!snap || !snap.data) return;
+    if (!snap) return;
+    const data = await _snapData(snap);
+    if (!data) { window.alert("Снимок не читается — возможно, облако недоступно. Попробуйте ещё раз."); return; }
     let list;
-    try { list = JSON.parse(snap.data); } catch { window.alert("Не удалось прочитать бэкап"); return; }
+    try { list = JSON.parse(data); } catch { window.alert("Не удалось прочитать бэкап"); return; }
     if (!Array.isArray(list)) { window.alert("Бэкап повреждён"); return; }
     list = list.filter(e => e && typeof e==="object" && e.id);
     const haveIds = new Set(estimatesRef.current.map(e => e.id));
@@ -8912,9 +8934,11 @@ ${reqBlock}`;
     window.alert(`Возвращено смет: ${missing.length} ✓\nОстальное осталось как было.`);
   };
   const restoreBackup = async (snap) => {
-    if (!snap || !snap.data) return;
+    if (!snap) return;
+    const data = await _snapData(snap);
+    if (!data) { window.alert("Снимок не читается — возможно, облако недоступно. Попробуйте ещё раз."); return; }
     let list;
-    try { list = JSON.parse(snap.data); } catch { window.alert("Не удалось прочитать бэкап"); return; }
+    try { list = JSON.parse(data); } catch { window.alert("Не удалось прочитать бэкап"); return; }
     if (!Array.isArray(list)) { window.alert("Бэкап повреждён"); return; }
     // Отфильтровываем мусор (null/undefined/без id), чтобы не записать битые записи
     list = list.filter(e => e && typeof e==="object" && e.id);
@@ -8956,22 +8980,28 @@ ${reqBlock}`;
             f: financeTxRef.current.length,
           },
         };
-        const raw = await storage.get(WORKSPACE_BACKUPS_KEY);
-        let arr = []; try { if (raw?.value) arr = JSON.parse(raw.value); } catch {}
-        if (!Array.isArray(arr)) arr = [];
-        const prev = arr[0];
+        // Оглавление вместо всего архива: снимок весит ~350 КБ, и тридцать штук в одном
+        // ключе давали 8,4 МБ, которые читались и переписывались после КАЖДОЙ правки.
+        const wsIdxKey = backupIndexKey(WORKSPACE_BACKUPS_KEY);
+        let wsIndex = [];
+        try { const iRaw = await storage.get(wsIdxKey); wsIndex = normalizeIndex(iRaw?.value); } catch {}
         // Сигнатура по counts ловит добавление/удаление записей, но НЕ ловит правку поля
         // без изменения количества (напр. поменяли цену/статус) — добавляем max updatedAt,
         // чтобы такие правки тоже создавали новый снимок.
         const maxTs = Math.max(0, ...[...objectsRef.current, ...estimatesRef.current, ...contractsRef.current, ...financeTxRef.current].map(x => x?.updatedAt || x?.createdAt || 0));
         const sig = `${snap.counts.o}|${snap.counts.e}|${snap.counts.c}|${snap.counts.f}|${maxTs}`;
-        if (prev && prev._sig === sig) return;
+        // Подпись держим в оглавлении: «ничего не изменилось» видно, не читая сам снимок.
+        if (wsIndex[0] && wsIndex[0].sig === sig) return;
         snap._sig = sig;
-        arr = [snap, ...arr].slice(0, 30);
         // Автоматический технический снимок не является пользовательской правкой.
         // При недоступном облаке просто повторим его после следующего изменения/входа,
         // но не создаём dirty-копию и не блокируем выход ложным предупреждением.
-        await storage.setCloudOnly(WORKSPACE_BACKUPS_KEY, JSON.stringify(arr));
+        const step = pushIndex(wsIndex, { ts: snap.ts, by: snap.by, count: snap.counts.e, sig, counts: snap.counts }, 30);
+        await storage.setCloudOnly(backupItemKey(WORKSPACE_BACKUPS_KEY, snap.ts), JSON.stringify(snap));
+        await storage.setCloudOnly(wsIdxKey, JSON.stringify(step.index));
+        for (const oldTs of step.drop) {
+          try { await storage.setCloudOnly(backupItemKey(WORKSPACE_BACKUPS_KEY, oldTs), null); } catch {}
+        }
       } catch (e) { console.warn("ws snapshot err", e); }
     }, 8000);
     return () => { if (_wsSnapTimer.current) clearTimeout(_wsSnapTimer.current); };
@@ -8980,10 +9010,28 @@ ${reqBlock}`;
 
   const openWorkspaceBackups = async () => {
     try {
-      const raw = await storage.get(WORKSPACE_BACKUPS_KEY);
-      let arr = []; try { if (raw?.value) arr = JSON.parse(raw.value); } catch {}
-      setWsBackupsModal(Array.isArray(arr) ? arr : []);
+      // Список строим по оглавлению — сами снимки (по 350 КБ) не читаем. Старый общий
+      // массив тоже показываем: снимки, сделанные до перехода, никуда не делись.
+      const [raw, iRaw] = await Promise.all([
+        storage.get(WORKSPACE_BACKUPS_KEY), storage.get(backupIndexKey(WORKSPACE_BACKUPS_KEY)),
+      ]);
+      let legacy = []; try { if (raw?.value) legacy = JSON.parse(raw.value); } catch {}
+      const idx = normalizeIndex(iRaw?.value).map(r => ({ ...r, key: backupItemKey(WORKSPACE_BACKUPS_KEY, r.ts) }));
+      const seen = new Set(idx.map(r => r.ts));
+      const old = Array.isArray(legacy) ? legacy.filter(x => x?.ts && !seen.has(x.ts)) : [];
+      setWsBackupsModal([...idx, ...old].sort((a, b) => (b.ts || 0) - (a.ts || 0)));
     } catch { setWsBackupsModal([]); }
+  };
+  // Полный снимок рабочей области: у старых он лежит прямо в строке, у новых — в своём ключе.
+  const _wsFull = async (row) => {
+    if (row && Array.isArray(row.objects)) return row;
+    if (!row?.key) return null;
+    try {
+      const raw = await storage.get(row.key);
+      if (!raw?.value) return null;
+      const parsed = JSON.parse(raw.value);
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch { return null; }
   };
 
   // ── ПОЛНЫЙ БЭКАП В ФАЙЛ: выгрузка всех рабочих данных в один JSON и загрузка обратно ──
@@ -9388,7 +9436,9 @@ ${reqBlock}`;
 
   // Точечно вытащить ТОЛЬКО пропавшие сметы из снимка рабочего пространства,
   // не восстанавливая финансы/объекты/договоры (их не трогаем совсем).
-  const recoverMissingEstimatesFromWs = async (snap) => {
+  const recoverMissingEstimatesFromWs = async (row) => {
+    const snap = await _wsFull(row);
+    if (!snap) { window.alert("Снимок не читается — возможно, облако недоступно. Попробуйте ещё раз."); return; }
     const list = Array.isArray(snap?.estimates) ? snap.estimates.filter(e => e && e.id) : [];
     if (!list.length) { window.alert("В этом снимке нет смет."); return; }
     const haveIds = new Set(estimatesRef.current.map(e => e.id));
@@ -9403,8 +9453,10 @@ ${reqBlock}`;
     setWsBackupsModal(null);
     window.alert(`Возвращено смет: ${missing.length} ✓\nФинансы и всё остальное не тронуты.`);
   };
-  const restoreWorkspace = async (snap) => {
-    if (!snap) return;
+  const restoreWorkspace = async (row) => {
+    if (!row) return;
+    const snap = await _wsFull(row);
+    if (!snap) { window.alert("Снимок не читается — возможно, облако недоступно. Попробуйте ещё раз."); return; }
     const o = Array.isArray(snap.objects) ? snap.objects : [];
     const e = Array.isArray(snap.estimates) ? snap.estimates : [];
     const c = Array.isArray(snap.contracts) ? snap.contracts : [];
