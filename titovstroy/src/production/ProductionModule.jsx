@@ -634,11 +634,11 @@ export default function ProductionModule({
       {(tabReadOnly || (embedTab === "info" && clientAccessReadOnly)) && <div style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 14px", fontSize: 12.5, color: "#64748b", marginBottom: 12 }}>👁 Режим просмотра — часть действий недоступна для вашей роли.</div>}
       {embedTab === "info" && <InfoTab prod={localProd} obj={openObj} estimates={estimates} contracts={contracts} fmt={fmt} patch={mainPatch} clientAccessPatch={clientAccessPatch} onToggleClientShare={onToggleClientShare} onSetClientVis={onSetClientVis} currentUser={currentUser} clientInfoCard={clientInfoCard} audit={audit} readOnly={mainReadOnly} clientAccessReadOnly={clientAccessReadOnly} staffOptions={staffOptions} />}
       {embedTab !== "info" && <fieldset disabled={tabReadOnly} style={{ border: "none", margin: 0, padding: 0, minWidth: 0 }}>
-      {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист запуска объекта" />}
+      {embedTab === "launch" && <ChecklistTab kind="checklistLaunch" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист запуска объекта" audit={audit} />}
       {embedTab === "handover" && <>
         <HandoverReadiness obj={openObj} prod={localProd} estimates={estimates} contracts={contracts}
           finProjects={finProjects} financeTx={financeTx} reports={reports} stageReports={stageReports} fmt={fmt} />
-        <ChecklistTab kind="checklistHandover" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист сдачи объекта" />
+        <ChecklistTab kind="checklistHandover" prod={localProd} patch={qualityPatch} genId={genId} title="Чек-лист сдачи объекта" audit={audit} />
         <WarrantyTab prod={localProd} patch={qualityPatch} genId={genId} currentUser={currentUser} fmt={fmt} audit={audit} />
       </>}
       {embedTab === "control" && <StageReportsSummary api={stageReports} kind="all" />}
@@ -1111,11 +1111,29 @@ export function HandoverReadiness({ obj, prod, estimates, contracts, finProjects
   );
 }
 
-function ChecklistTab({ kind, prod, patch, genId, title }) {
+function ChecklistTab({ kind, prod, patch, genId, title, audit = null }) {
   const items = prod[kind] || [];
   const [newText, setNewText] = useState("");
-  const upd = (id, p) => patch({ [kind]: items.map(it => it.id === id ? { ...it, ...p } : it) });
-  const add = (section = "") => { if (!newText.trim()) return; patch({ [kind]: [...items, { id: genId(), text: newText.trim(), section, done: false, responsible: "", note: "" }] }); setNewText(""); };
+  // Чек-листы запуска и сдачи — это подтверждение, что работа принята. Раньше они
+  // единственные из карточки не попадали в журнал: галочку могли снять, и следа не
+  // оставалось. Пишем отметку и удаление; правку текста пункта — нет, иначе журнал
+  // засорится на каждую букву.
+  const label = kind === "checklistHandover" ? "чек-лист сдачи" : "чек-лист запуска";
+  const upd = (id, p) => {
+    if ("done" in p) {
+      const it = items.find(x => x.id === id);
+      audit?.({ entity: "stage", field: label, action: p.done ? "отметил пункт" : "снял отметку",
+        old: p.done ? "не сделано" : "сделано", new: p.done ? "сделано" : "не сделано",
+        detail: it?.text || "" });
+    }
+    patch({ [kind]: items.map(it => it.id === id ? { ...it, ...p } : it) });
+  };
+  const add = (section = "") => {
+    if (!newText.trim()) return;
+    audit?.({ entity: "stage", field: label, action: "добавил пункт", old: "—", new: newText.trim() });
+    patch({ [kind]: [...items, { id: genId(), text: newText.trim(), section, done: false, responsible: "", note: "" }] });
+    setNewText("");
+  };
   const doneCount = items.filter(i => i.done).length;
   // Группируем по разделам с сохранением порядка появления
   const groups = []; const gmap = {};
