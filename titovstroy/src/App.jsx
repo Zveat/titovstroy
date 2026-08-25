@@ -6169,10 +6169,18 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   useEffect(() => { contragentsRef.current = contragents; }, [contragents]);
   // «Мастера» — внешний справочник с naimi.kz. Пишет отдельный парсер (GitHub Actions)
   // в ключ titovstroy-masters; приложение только ЧИТАЕТ, боевых данных не касается.
+  // Справочники мастеров грузятся ТОЛЬКО когда человек открыл раздел «Мастера».
+  // Вместе они весят около 4 МБ (одна база с OLX — 3,4 МБ), а используются ровно на
+  // одном экране. Раньше качались при КАЖДОМ входе в систему, кто бы туда ни заходил:
+  // четыре пятых всего трафика загрузки приложения уходило на справочник, который
+  // большинство сотрудников не открывает никогда.
+  const [mastersNeeded, setMastersNeeded] = useState(false);
+  useEffect(() => { if (screen === "masters") setMastersNeeded(true); }, [screen]);
   const [masters, setMasters] = useState([]);
   const [mastersMeta, setMastersMeta] = useState(null);
   const [mastersLoaded, setMastersLoaded] = useState(false);
   useEffect(() => {
+    if (!mastersNeeded) return undefined;
     let alive = true;
     storage.getResult(MASTERS_KEY).then(res => {
       if (!alive) return;
@@ -6186,10 +6194,11 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       }
     }).catch(() => { if (alive) setMastersLoaded(true); });
     return () => { alive = false; };
-  }, []);
+  }, [mastersNeeded]);
   // Настройки парсера (частота/«Обновить сейчас») — редактирует Админ, читает парсер.
   const [mastersConfig, setMastersConfig] = useState(null);
   useEffect(() => {
+    if (!mastersNeeded) return undefined;
     let alive = true;
     storage.getResult(MASTERS_CONFIG_KEY).then(res => {
       if (!alive) return;
@@ -6197,7 +6206,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       else setMastersConfig({});
     }).catch(() => { if (alive) setMastersConfig({}); });
     return () => { alive = false; };
-  }, []);
+  }, [mastersNeeded]);
   const saveMastersConfig = useCallback(async (patch) => {
     if (!accessAllows(currentPermissions.mastersManage, true)) return false;
     const next = { ...(mastersConfig || {}), ...patch, updatedAt: Date.now() };
@@ -6218,6 +6227,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [mastersOlxLoaded, setMastersOlxLoaded] = useState(false);
   const [mastersOlxConfig, setMastersOlxConfig] = useState(null);
   useEffect(() => {
+    if (!mastersNeeded) return undefined;
     let alive = true;
     storage.getResult(MASTERS_OLX_KEY).then(res => {
       if (!alive) return;
@@ -6236,7 +6246,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       else setMastersOlxConfig({});
     }).catch(() => { if (alive) setMastersOlxConfig({}); });
     return () => { alive = false; };
-  }, []);
+  }, [mastersNeeded]);
   const saveMastersOlxConfig = useCallback(async (patch) => {
     if (!accessAllows(currentPermissions.mastersManage, true)) return false;
     const next = { ...(mastersOlxConfig || {}), ...patch, updatedAt: Date.now() };
@@ -6255,6 +6265,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   // парсер может полностью заменить свои списки, не затронув заметки и собственную базу.
   const [mastersCrm, setMastersCrm] = useState(() => normalizeMasterCrm(null));
   useEffect(() => {
+    if (!mastersNeeded) return undefined;
     let alive = true;
     storage.getResult(MASTERS_CRM_KEY).then(res => {
       if (!alive) return;
@@ -6263,7 +6274,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       }
     }).catch(() => {});
     return () => { alive = false; };
-  }, []);
+  }, [mastersNeeded]);
   const saveMastersCrm = useCallback(async (nextValue) => {
     if (currentPermissions.masters === "none") return false;
     const next = normalizeMasterCrm(nextValue);
@@ -7836,6 +7847,8 @@ ${reqBlock}`;
   // Когда какой объект публиковали последний раз — ключи «p:<id>» (снимок) и «d:<id>»
   // (документы). Общий тормоз для всех путей публикации, включая фоновые.
   const _pubAt = useRef(new Map());
+  // Подпись последнего опубликованного снимка по объекту — чтобы не публиковать одно и то же.
+  const _pubSig = useRef(new Map());
   const prodEntriesRef = useRef([]);
   useEffect(() => { prodEntriesRef.current = prodEntries; }, [prodEntries]);
   // Отчёты по этапам лежат отдельным узлом на объект (см. stage-reports/model.js)
@@ -7924,11 +7937,29 @@ ${reqBlock}`;
     // в КАЖДОЙ вкладке. За двое суток это вылилось в 58 ГБ исходящего трафика базы
     // и 57 долларов. Клиентская страница сама обновляется раз в 10 секунд, так что
     // задержка в минуту незаметна, а фоновая публикация перестаёт крутиться вхолостую.
+    // ПОДПИСЬ ИЗ ПАМЯТИ — до любого обращения к базе. Публикация читает ноду прогресса
+    // дважды и отчёты по этапам, а дёргается она от изменений производства, то есть по
+    // всем открытым кабинетам сразу. Если по объекту ничего из видимого клиенту не
+    // поменялось, публиковать нечего — и тогда мы не тратим НИ ОДНОГО чтения.
+    // Особенно важно на нескольких устройствах: замок редактора живёт в браузере, то
+    // есть телефон и компьютер считаются отдельными редакторами и работают параллельно.
+    const prodNow = productionsRef.current.find(p => p.objectId === objectId) || {};
+    const entryNow = (prodEntriesRef.current || []).find(e => e.objectId === objectId) || {};
+    const sig = JSON.stringify([
+      obj.updatedAt, obj.clientVis, obj.progressShared, obj.progressExpiresAt,
+      prodNow.updatedAt,
+      (prodNow.stages || []).map(st => [st.id, st.status, st.name, st.planEnd, st.factEnd, st.paid, st.priceClient]),
+      (prodNow.checklistHandover || []).map(i => [i.id, i.done, i.section, i.text]),
+      (prodNow.defects || []).map(d => [d.id, d.done, d.clientRemarkId]),
+      prodNow.clientMessage, entryNow.budget, entryNow.paid,
+    ]);
+    if (!opts.force && _pubSig.current.get(objectId) === sig) return;
     if (!opts.force) {
       const last = _pubAt.current.get("p:" + objectId) || 0;
       if (Date.now() - last < 60_000) return;
     }
     _pubAt.current.set("p:" + objectId, Date.now());
+    _pubSig.current.set(objectId, sig);
     const showRemarks = (obj.clientVis || {}).remarks !== false;
     // Замечания СКРЫТЫ клиенту → сначала заберём уже присланные замечания в производство,
     // чтобы они не потерялись, ПЕРЕД тем как вычистить их из публичной ноды.
@@ -16620,7 +16651,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     onToggleClientShare={toggleClientShare}
                     onSetClientVis={setClientVis}
                     stageReportsStorage={storage}
-                    onStageReportsChanged={(objectId) => { try { publishProgressRef.current?.(objectId); } catch {} }}
+                    onStageReportsChanged={(objectId) => { try { publishProgressRef.current?.(objectId, { force: true }); } catch {} }}
                     buildStagesFromEstimate={buildStagesFromEstimate}
                     finProjects={finProjects}
                     financeTx={financeTx}
