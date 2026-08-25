@@ -5303,6 +5303,8 @@ function PublicProgress({ token }) {
   // лентой фотоотчёт тонул между готовностью и оплатой, а ради него клиент
   // страницу и открывает.
   const [tab, setTab] = useState("work");
+  // Когда последний раз читали ноду документов — см. комментарий в load().
+  const _docsReadAt = useRef(0);
   // Загрузка снимка прогресса + документов. isRefresh: не сбрасываем страницу в
   // "недоступно" и не накручиваем счётчик просмотров при ручном обновлении.
   const load = useCallback(async (opts = {}) => {
@@ -5330,8 +5332,15 @@ function PublicProgress({ token }) {
       }
     } catch {}
     if (!ok && !isRefresh) setState("notfound");
-    // Документы клиента (договоры/акты) из отдельной ноды
-    try { const r2 = await readFresh(DOCS_NODE(token)); if (r2.status === "found" && r2.value) { try { setDocs(JSON.parse(r2.value)); } catch {} } } catch {}
+    // Документы клиента (договоры/акты) из отдельной ноды. НЕ на каждом автообновлении:
+    // нода весит под сотню килобайт, а страница обновляется раз в 10 секунд — это 30 МБ
+    // в час с одной открытой вкладки клиента. Документы меняются раз в недели, поэтому
+    // читаем их при открытии страницы и не чаще раза в 10 минут при обновлениях.
+    const docsFresh = Date.now() - _docsReadAt.current < 600_000;
+    if (!isRefresh || !docsFresh) {
+      _docsReadAt.current = Date.now();
+      try { const r2 = await readFresh(DOCS_NODE(token)); if (r2.status === "found" && r2.value) { try { setDocs(JSON.parse(r2.value)); } catch {} } } catch {}
+    }
   }, [token]);
   useEffect(() => {
     load();
