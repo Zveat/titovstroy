@@ -5943,7 +5943,14 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [needsReauth, setNeedsReauth] = useState(false);
   useEffect(() => {
     let alive = true;
-    hasStaffClaim().then(ok => { if (alive && !ok) setNeedsReauth(true); });
+    (async () => {
+      // ЖДЁМ восстановления сессии. Firebase поднимает её из браузера асинхронно, и без
+      // этого ожидания проверка попадает в момент, когда currentUser ещё null — плашка
+      // показывалась у того, у кого всё в порядке.
+      try { await _fbAuthReady; } catch {}
+      const ok = await hasStaffClaim();
+      if (alive) setNeedsReauth(!ok);
+    })();
     return () => { alive = false; };
   }, []);
   const [dirtyCount, setDirtyCount] = useState(0); // СВОИ незасинканные dirty-записи storage (этот пользователь+вкладка) — участвует в баннере
@@ -11732,7 +11739,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#f8fafc",minHeight:"100vh",color:"#0f172a",display:"flex",flexDirection:"column"}}>
       {/* Сессия браузера ещё анонимная: база уже закрыта правилами, читать нечего.
           Показываем это отдельно от «облако недоступно» — причина другая и лечится входом. */}
-      {needsReauth && (
+      {needsReauth && loadError && (
         <div style={{position:"fixed",top:0,left:0,right:0,zIndex:501,background:"#b45309",color:"#fff",padding:"10px 16px",paddingTop:"calc(10px + env(safe-area-inset-top,0px))",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,flexWrap:"wrap",boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
           🔑 Нужно войти заново — в этом браузере старый вход, база его больше не пускает. Данные целы.
           <button onClick={()=>doLogout()} style={{background:"#fff",color:"#b45309",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Выйти и войти</button>
