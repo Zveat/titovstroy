@@ -1032,6 +1032,13 @@ function WarrantyTab({ prod, patch, genId, currentUser, fmt, audit }) {
 // пяти разных вкладок: доделаны ли работы, закрыты ли замечания, подписаны ли акты,
 // нет ли долга и есть ли фото по этапам. Раньше это собиралось в голове — и потому
 // не собиралось. Здесь только чтение: ничего не меняет и не сохраняет.
+const HANDOVER_CSS = `
+.hr-grid{display:grid;gap:9px;grid-template-columns:repeat(3,minmax(0,1fr))}
+@media(min-width:1400px){.hr-grid{grid-template-columns:repeat(6,minmax(0,1fr))}}
+@media(max-width:1080px){.hr-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.hr-grid{grid-template-columns:1fr}}
+`;
+
 export function HandoverReadiness({ obj, prod, estimates, contracts, finProjects, financeTx, reports, stageReports, fmt }) {
   const num = (v) => Number(v) || 0;
   const stages = prod?.stages || [];
@@ -1063,21 +1070,25 @@ export function HandoverReadiness({ obj, prod, estimates, contracts, finProjects
   const handover = Array.isArray(prod?.checklistHandover) ? prod.checklistHandover : [];
   const checked = handover.filter(i => i?.done).length;
 
+  const allDefects = (Array.isArray(prod?.defects) ? prod.defects : []).filter(Boolean).length;
+
   const rows = [
     { key: "stages", label: "Работы завершены", value: `${doneStages} из ${stages.length}`,
       ok: stages.length > 0 && doneStages === stages.length, empty: stages.length === 0,
-      hint: "вкладка «Этапы»" },
+      now: doneStages, total: stages.length, hint: "вкладка «Этапы»" },
     { key: "defects", label: "Замечания устранены", value: openDefects ? `открыто ${openDefects}` : "открытых нет",
-      ok: openDefects === 0, hint: "вкладка «Замечания»" },
+      ok: openDefects === 0, now: allDefects - openDefects, total: allDefects, hint: "вкладка «Замечания»" },
     { key: "acts", label: "Акты подписаны", value: acts.length ? `${acts.length} шт${avr ? `, из них АВР ${avr}` : ""}` : "актов нет",
       ok: acts.length > 0, hint: "вкладка «Документы»" },
     { key: "money", label: "Оплата закрыта", value: budget > 0 ? (debt > 0 ? `долг ${fmt(debt)} ₸` : "долга нет") : "бюджет не задан",
-      ok: budget > 0 && debt === 0, empty: budget <= 0, hint: "«Финансы» → «Проекты»" },
+      ok: budget > 0 && debt === 0, empty: budget <= 0,
+      now: Math.min(paid, budget), total: budget, hint: "«Финансы» → «Проекты»" },
     { key: "photo", label: "Фото по работам", value: stages.length ? `${withPhoto} из ${stages.length}` : "этапов нет",
       ok: stages.length > 0 && withPhoto === stages.length, empty: stages.length === 0,
-      soft: true, hint: "фото подтверждает руководитель" },
+      now: withPhoto, total: stages.length, soft: true, hint: "подтверждает руководитель" },
     { key: "check", label: "Чек-лист сдачи", value: handover.length ? `${checked} из ${handover.length}` : "пункты не заведены",
-      ok: handover.length > 0 && checked === handover.length, empty: handover.length === 0, hint: "ниже на этой вкладке" },
+      ok: handover.length > 0 && checked === handover.length, empty: handover.length === 0,
+      now: checked, total: handover.length, hint: "ниже на этой вкладке" },
   ];
   // «Мягкие» пункты (фото) в вердикт не входят: снимки — не условие приёмки,
   // а обещание клиенту. Иначе объект без фотоотчёта нельзя было бы сдать вообще.
@@ -1085,27 +1096,53 @@ export function HandoverReadiness({ obj, prod, estimates, contracts, finProjects
   const blocking = hard.filter(r => !r.ok);
   const allGood = blocking.length === 0;
 
+  // Плитки, а не сплошной список: шесть проверок читаются глазом за раз, у каждой
+  // своя полоска прогресса. Раньше подсказка «где чинить» уезжала к правому краю
+  // экрана и висела в пустоте — теперь она под своим же пунктом.
+  // Колонки — ровными рядами (6/3/2/1), иначе на широком экране шесть плиток
+  // ложились «пять и одна» и блок выглядел обрубленным.
+  const tone = (r) => r.ok ? { fg: "#047857", bd: "#bbf7d0", bg: "#f6fdfa", bar: "#34d399", mark: "✓" }
+    : r.empty ? { fg: "#94a3b8", bd: "#e2e8f0", bg: "#fff", bar: "#cbd5e1", mark: "—" }
+    : r.soft ? { fg: "#64748b", bd: "#e2e8f0", bg: "#fff", bar: "#94a3b8", mark: "○" }
+    : { fg: "#b45309", bd: "#fde68a", bg: "#fffdf6", bar: "#f59e0b", mark: "!" };
+
   return (
-    <section style={{ background: "#fff", border: "1px solid " + (allGood ? "#bbf7d0" : "#e2e8f0"), borderRadius: 12, padding: 15, marginBottom: 12 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 9, flexWrap: "wrap" }}>
+    <section style={{ background: "#fff", border: "1px solid " + (allGood ? "#bbf7d0" : "#e2e8f0"), borderRadius: 14, padding: 16, marginBottom: 12 }}>
+      <style>{HANDOVER_CSS}</style>
+      <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 12 }}>
         <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>Готовность к сдаче</span>
-        <span style={{ fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 7, whiteSpace: "nowrap",
+        <span style={{ fontSize: 11, fontWeight: 800, padding: "3px 9px", borderRadius: 999, whiteSpace: "nowrap",
           color: allGood ? "#047857" : "#b45309", background: allGood ? "#ecfdf5" : "#fffbeb",
           border: "1px solid " + (allGood ? "#bbf7d0" : "#fde68a") }}>
           {allGood ? "✓ Всё сведено" : `Осталось: ${blocking.length}`}
         </span>
+        <span style={{ fontSize: 11.5, color: "#94a3b8", marginLeft: "auto", whiteSpace: "nowrap" }}>
+          готово {hard.length - blocking.length} из {hard.length}
+        </span>
       </div>
-      <div style={{ display: "grid", gap: 6, marginTop: 11 }}>
-        {rows.map(r => (
-          <div key={r.key} style={{ display: "flex", gap: 9, alignItems: "baseline", flexWrap: "wrap",
-            borderTop: "1px solid #f1f5f9", paddingTop: 8 }}>
-            <span style={{ fontSize: 13, flexShrink: 0, width: 16, textAlign: "center",
-              color: r.ok ? "#047857" : r.empty ? "#94a3b8" : "#b45309" }}>{r.ok ? "✓" : r.empty ? "—" : "!"}</span>
-            <span style={{ fontSize: 12.5, fontWeight: 700, color: "#0f172a", minWidth: 0 }}>{r.label}</span>
-            <span style={{ fontSize: 12.5, color: r.ok ? "#047857" : r.empty ? "#94a3b8" : "#b45309", fontWeight: r.ok ? 600 : 800 }}>{r.value}</span>
-            <span style={{ fontSize: 11, color: "#cbd5e1", marginLeft: "auto", whiteSpace: "nowrap" }}>{r.hint}</span>
-          </div>
-        ))}
+      <div className="hr-grid">
+        {rows.map(r => {
+          const t = tone(r);
+          const pct = r.total > 0 ? Math.max(0, Math.min(100, Math.round((r.now / r.total) * 100))) : null;
+          return (
+            <div key={r.key} style={{ border: "1px solid " + t.bd, background: t.bg, borderRadius: 11, padding: "10px 12px 11px", minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <span style={{ width: 17, height: 17, flexShrink: 0, borderRadius: "50%", background: "#fff",
+                  border: "1px solid " + t.bd, color: t.fg, fontSize: 10, fontWeight: 900, lineHeight: "15px", textAlign: "center" }}>{t.mark}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#334155", minWidth: 0 }}>{r.label}</span>
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: t.fg, margin: "7px 0 0", lineHeight: 1.25, wordBreak: "break-word" }}>{r.value}</div>
+              {pct !== null && (
+                <div style={{ height: 4, borderRadius: 3, background: "#f1f5f9", marginTop: 8, overflow: "hidden" }}>
+                  <div style={{ width: pct + "%", height: "100%", borderRadius: 3, background: t.bar }} />
+                </div>
+              )}
+              <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: pct !== null ? 7 : 8, minWidth: 0, overflowWrap: "anywhere" }}>
+                {r.soft && !r.ok ? "не блокирует · " : ""}{r.hint}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </section>
   );
