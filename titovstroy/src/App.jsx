@@ -6569,6 +6569,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [dealReturnId, setDealReturnId] = useState(null);
   const [contractClientsTab, setContractClientsTab] = useState("list");
   const [sideCollapsed, setSideCollapsed] = useState(false);
+  const [mobMoreOpen, setMobMoreOpen] = useState(false); // лист «Ещё» нижней панели телефона
   const [stampsBase64, setStampsBase64] = useState({});
   useEffect(()=>{
     let cancelled = false;
@@ -11698,6 +11699,21 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     ];
   }, [currentPermissions]);
 
+  // Нижняя панель телефона: максимум пять мест. Разделов бывает восемь, а подписи русские —
+  // больше пяти в строку читаемо не помещается ни на одном телефоне. Редко используемые
+  // уходят под «Ещё» в порядке этого списка; если и после этого больше четырёх — убираем
+  // с конца. Порядок самих пунктов не меняется, чтобы привычные места не «прыгали».
+  const [mobPrimary, mobMore] = useMemo(() => {
+    if (NAV_ITEMS.length <= 5) return [NAV_ITEMS, []];
+    const hidden = new Set();
+    for (const id of ["masters", "admin", "contracts", "calendar"]) {
+      if (NAV_ITEMS.length - hidden.size <= 4) break;
+      if (NAV_ITEMS.some(i => i.id === id)) hidden.add(id);
+    }
+    for (let i = NAV_ITEMS.length - 1; i >= 0 && NAV_ITEMS.length - hidden.size > 4; i -= 1) hidden.add(NAV_ITEMS[i].id);
+    return [NAV_ITEMS.filter(i => !hidden.has(i.id)), NAV_ITEMS.filter(i => hidden.has(i.id))];
+  }, [NAV_ITEMS]);
+
   // Роли доступа
   const _r = currentUser.role;
   const _isAdmin = _r === "admin", _isMgr = _r === "manager", _isSalesHead = _r === "sales_head", _isForeman = _r === "foreman", _isUser = _r === "user", _isViewer = _r === "viewer";
@@ -11952,7 +11968,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         @media(max-width:700px){
           .sidebar{display:none!important}
           .sidebar-content{margin-left:0!important;padding-top:env(safe-area-inset-top,0px)!important;padding-bottom:calc(68px + env(safe-area-inset-bottom,0px))!important}
-          .mob-nav{display:flex!important}
+          .mob-nav-wrap{display:block!important}
           /* Полоска под часами и вырезом. Приложение открыто как отдельное
              (apple-mobile-web-app-capable), строка состояния прозрачная, поэтому
              прокручиваемый список проезжал прямо под часами и уровнем сети —
@@ -12010,9 +12026,25 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         @media(max-width:380px){
           .kpi-grid{grid-template-columns:1fr!important}
         }
-        .mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:#ffffff;border-top:1px solid #e2e8f0;z-index:50;box-shadow:0 -4px 16px rgba(15,23,42,.06);padding-bottom:env(safe-area-inset-bottom,0px);overflow-x:auto;-webkit-overflow-scrolling:touch}
-        .mob-nav-item{flex:1 0 62px;min-width:62px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;gap:3px;border-top:2px solid transparent;transition:all .15s}
+        /* Нижнее меню. Разделов у админа восемь, и в панель телефона (412px) они не влезали:
+           «Мастера» обрезались посередине, «Админка» уезжала за экран, снизу появлялась полоса
+           прокрутки. Ужимать подписи бесполезно — русские слова по 9 букв требуют ~55px, а на
+           восемь пунктов приходится по 51px. Поэтому в панели максимум ПЯТЬ мест: если разделов
+           больше, редкие уходят под «Ещё» (лист над панелью). Пункты делят ширину поровну
+           (flex:1 1 0), так что на любом экране ничего не режется и не прокручивается. */
+        .mob-nav-wrap{display:none;position:fixed;bottom:0;left:0;right:0;z-index:50}
+        .mob-nav{display:flex;background:#ffffff;border-top:1px solid #e2e8f0;box-shadow:0 -4px 16px rgba(15,23,42,.06);padding-bottom:env(safe-area-inset-bottom,0px)}
+        .mob-nav-item{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;gap:3px;border-top:2px solid transparent;transition:all .15s}
         .mob-nav-item.active{border-top-color:#2563eb;background:rgba(37,99,235,.06)}
+        .mob-nav-label{font-size:9.5px;font-weight:600;line-height:1.15;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+        .mob-more{background:#fff;border-top:1px solid #e2e8f0;border-radius:14px 14px 0 0;box-shadow:0 -10px 28px rgba(15,23,42,.12);padding:6px 0 4px}
+        .mob-more-item{display:flex;align-items:center;gap:12px;padding:12px 18px;cursor:pointer;font-size:14px;font-weight:600;color:#334155}
+        .mob-more-item.active{color:#2563eb;background:rgba(37,99,235,.06)}
+        .mob-more-bd{position:fixed;inset:0;z-index:49;background:rgba(15,23,42,.18)}
+        @media(max-width:365px){.mob-nav-item{padding:8px 2px}.mob-nav-label{font-size:9px}}
+        /* Панели нет — не должно быть и затемнения: иначе поворот телефона в планшетную
+           ширину оставил бы серую пелену поверх интерфейса. */
+        @media(min-width:701px){.mob-more-bd{display:none}}
         .fin-row:hover{background:#f8fafc}
         .fin-row:hover{box-shadow:0 8px 24px rgba(15,23,42,.10)!important;transform:translateY(-2px)}
         /* ── rep-table: ДДС и ОПУ ─────────────────────────────── */
@@ -12089,20 +12121,45 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       </div>
 
       {/* ── МОБИЛЬНАЯ НАВИГАЦИЯ ── */}
-      <div className="mob-nav">
-        {NAV_ITEMS.map(item=>{
-          const isActiveEst = effScreen==="editor" && !objectReturnId && item.id==="list";
-          const isActiveObjEst = effScreen==="editor" && !!objectReturnId && item.id==="objects";
-          const isActive = effScreen===item.id || isActiveEst || isActiveObjEst;
-          return (
-          <div key={item.id} className={"mob-nav-item"+(isActive?" active":"")}
-            onClick={()=>{ setDealReturnId(null); setObjectReturnId(null); navigate(item.id, undefined); }}>
-            <span style={{fontSize:20}}>{item.icon}</span>
-            <span style={{fontSize:9.5,color:isActive?"#2563eb":"#64748b",fontWeight:600,whiteSpace:"nowrap"}}>{item.short||item.label}</span>
+      {(() => {
+        const goto = (id) => { setMobMoreOpen(false); setDealReturnId(null); setObjectReturnId(null); navigate(id, undefined); };
+        const activeOf = (item) => effScreen===item.id
+          || (effScreen==="editor" && !objectReturnId && item.id==="list")
+          || (effScreen==="editor" && !!objectReturnId && item.id==="objects");
+        const moreActive = mobMore.some(activeOf);
+        return (
+        <div className="mob-nav-wrap">
+          {mobMoreOpen && mobMore.length>0 && (
+            <div className="mob-more">
+              {mobMore.map(item=>(
+                <div key={item.id} className={"mob-more-item"+(activeOf(item)?" active":"")} onClick={()=>goto(item.id)}>
+                  <span style={{fontSize:17,width:22,textAlign:"center",flexShrink:0}}>{item.icon}</span>
+                  <span>{item.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mob-nav">
+            {mobPrimary.map(item=>{
+              const isActive = activeOf(item);
+              return (
+              <div key={item.id} className={"mob-nav-item"+(isActive?" active":"")} onClick={()=>goto(item.id)}>
+                <span style={{fontSize:19,lineHeight:1}}>{item.icon}</span>
+                <span className="mob-nav-label" style={{color:isActive?"#2563eb":"#64748b"}}>{item.short||item.label}</span>
+              </div>
+              );
+            })}
+            {mobMore.length>0 && (
+              <div className={"mob-nav-item"+(moreActive||mobMoreOpen?" active":"")} onClick={()=>setMobMoreOpen(v=>!v)}>
+                <span style={{fontSize:19,lineHeight:1}}>⋯</span>
+                <span className="mob-nav-label" style={{color:moreActive||mobMoreOpen?"#2563eb":"#64748b"}}>Ещё</span>
+              </div>
+            )}
           </div>
-          );
-        })}
-      </div>
+        </div>
+        );
+      })()}
+      {mobMoreOpen && mobMore.length>0 && <div className="mob-more-bd" onClick={()=>setMobMoreOpen(false)}/>}
 
       {/* ── КОНТЕНТ ── */}
       <div className={"sidebar-content"+(sideCollapsed?" collapsed":"")} inert={!editorTab ? "" : undefined} aria-disabled={!editorTab}>
@@ -16417,22 +16474,30 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     if (Math.abs(gap)/Math.max(estSum,conSum) <= 0.02) return null;
                     const short = gap>0;
                     return (
-                      <div style={{background:"#fff",border:"1px solid "+(short?"#fde68a":"#e2e8f0"),borderRadius:11,padding:"11px 14px",marginBottom:12,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-                        <span style={{width:7,height:7,borderRadius:"50%",background:short?"#d97706":"#64748b",flexShrink:0}}/>
-                        <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>
-                          {short ? "Смета не покрыта договором" : "Договоров больше, чем смет"}
-                        </span>
-                        <span style={{fontSize:12.5,fontWeight:800,color:short?"#b45309":"#64748b",whiteSpace:"nowrap"}}>
-                          {fmt(Math.abs(gap))} ₸
-                        </span>
-                        <span style={{fontSize:11.5,color:"#94a3b8",marginLeft:"auto",whiteSpace:"nowrap"}}>
-                          сметы {fmt(estSum)} ₸ · договоры {fmt(conSum)} ₸
-                        </span>
-                        <span style={{fontSize:11.5,color:"#94a3b8",flexBasis:"100%"}}>
-                          {short
-                            ? "Работы засметированы, но бумаги на них нет — оформите приложение к договору."
-                            : "Либо есть лишний договор, либо потеряна доп. смета."}
-                        </span>
+                      /* Всё содержимое — одной левой колонкой. Раньше строка с суммами
+                         прижималась вправо (marginLeft:auto): на широком экране она стояла
+                         в конце заголовка, а на телефоне переносилась и висела у правого
+                         края, из-за чего плашка выглядела кривой. */
+                      <div style={{background:"#fff",border:"1px solid "+(short?"#fde68a":"#e2e8f0"),borderRadius:11,padding:"11px 14px",marginBottom:12,display:"flex",gap:10,alignItems:"flex-start"}}>
+                        <span style={{width:7,height:7,borderRadius:"50%",background:short?"#d97706":"#64748b",flexShrink:0,marginTop:6}}/>
+                        <div style={{minWidth:0,display:"grid",gap:4}}>
+                          <div style={{display:"flex",gap:8,alignItems:"baseline",flexWrap:"wrap"}}>
+                            <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>
+                              {short ? "Смета не покрыта договором" : "Договоров больше, чем смет"}
+                            </span>
+                            <span style={{fontSize:12.5,fontWeight:800,color:short?"#b45309":"#64748b",whiteSpace:"nowrap"}}>
+                              {fmt(Math.abs(gap))} ₸
+                            </span>
+                          </div>
+                          <div style={{fontSize:11.5,color:"#64748b",overflowWrap:"anywhere"}}>
+                            сметы {fmt(estSum)} ₸ · договоры {fmt(conSum)} ₸
+                          </div>
+                          <div style={{fontSize:11.5,color:"#94a3b8"}}>
+                            {short
+                              ? "Работы засметированы, но бумаги на них нет — оформите приложение к договору."
+                              : "Либо есть лишний договор, либо потеряна доп. смета."}
+                          </div>
+                        </div>
                       </div>
                     );
                   })()}
