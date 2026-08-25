@@ -7099,19 +7099,12 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     let ok = true;
     let prodOk = true;
     try {
-      const [cr, cl, ca, ob, pd, rp, wk, py, stf, pmap, acc] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY), storage.getResult(OBJECTS_KEY), storage.getResult(PRODUCTIONS_KEY), storage.getResult(REPORTS_KEY), storage.getResult(WORKERS_KEY), storage.getResult(PODRYADS_KEY), storage.getResult(STAFF_KEY), storage.getResult(PAYROLL_MAP_KEY), storage.getResult(ACCRUALS_KEY)]);
-      // ФОТ. Раздел новый, у большинства баз этих ключей ещё нет — пустой ответ здесь
-      // норма и НЕ должен ронять общий флаг загрузки ok (иначе заблокировалось бы
-      // сохранение договоров и объектов из-за отсутствующего справочника сотрудников).
-      // Пустой ключ — нормальный исход (раздел новый), недоступный — нет: только он
-      // должен запрещать запись, чтобы не затереть облачный справочник пустым списком.
-      _payrollLoaded.current = stf.status !== "unavailable" && acc.status !== "unavailable";
-      if (stf.status === "found" && stf.value) { try { const p = JSON.parse(stf.value); if (Array.isArray(p)) { setStaff(p); staffRef.current = p; } } catch {} }
-      else if (stf.status === "empty") { setStaff([]); staffRef.current = []; }
-      if (pmap.status === "found" && pmap.value) { try { const p = JSON.parse(pmap.value); if (p && typeof p === "object" && !Array.isArray(p)) { setPayrollMap(p); payrollMapRef.current = p; } } catch {} }
-      else if (pmap.status === "empty") { setPayrollMap({}); payrollMapRef.current = {}; }
-      if (acc.status === "found" && acc.value) { try { const p = JSON.parse(acc.value); if (Array.isArray(p)) { setAccruals(p); accrualsRef.current = p; } } catch {} }
-      else if (acc.status === "empty") { setAccruals([]); accrualsRef.current = []; }
+      // ФОТ (зарплаты, начисления, справочник сотрудников) грузится ОТДЕЛЬНО и только тем,
+      // кому он открыт — см. loadPayroll ниже. Раньше эти три ключа читались здесь, при
+      // старте, у ЛЮБОЙ роли: замерщик и наблюдатель скачивали зарплаты всей компании,
+      // хотя раздел им закрыт. Это и лишний трафик в каждом запуске, и данные в чужом
+      // браузере.
+      const [cr, cl, ca, ob, pd, rp, wk, py] = await Promise.all([storage.getResult(CONTRACTS_KEY), storage.getResult(CLIENTS_KEY), storage.getResult(CONTRAGENTS_KEY), storage.getResult(OBJECTS_KEY), storage.getResult(PRODUCTIONS_KEY), storage.getResult(REPORTS_KEY), storage.getResult(WORKERS_KEY), storage.getResult(PODRYADS_KEY)]);
       // Договоры
       if (cr.status === "found" && cr.value) { try { const p = JSON.parse(cr.value); if (Array.isArray(p)) { setContracts(p); contractsRef.current = p; } } catch {} }
       else if (cr.status === "empty") { setContracts([]); contractsRef.current = []; }
@@ -8684,7 +8677,35 @@ ${reqBlock}`;
     _bumpLoaded();
   }, [_bumpLoaded]);
 
+  // ФОТ отдельной загрузкой и только тем, кому он нужен: зарплаты — самые чувствительные
+  // данные в базе, и качать их в браузер каждому при входе незачем. Отдельным эффектом с
+  // зависимостью от прав (а не внутри loadContracts) — иначе права, которые приезжают
+  // асинхронно, на момент старта ещё не известны и гейт сработал бы наугад.
+  const loadPayroll = useCallback(async () => {
+    try {
+      const [stf, pmap, acc] = await Promise.all([
+        storage.getResult(STAFF_KEY), storage.getResult(PAYROLL_MAP_KEY), storage.getResult(ACCRUALS_KEY),
+      ]);
+      // Пустой ключ — нормальный исход (раздел новый), недоступный — нет: только он должен
+      // запрещать запись, чтобы не затереть облачный справочник пустым списком.
+      _payrollLoaded.current = stf.status !== "unavailable" && acc.status !== "unavailable";
+      if (stf.status === "found" && stf.value) { try { const p = JSON.parse(stf.value); if (Array.isArray(p)) { setStaff(p); staffRef.current = p; } } catch {} }
+      else if (stf.status === "empty") { setStaff([]); staffRef.current = []; }
+      if (pmap.status === "found" && pmap.value) { try { const p = JSON.parse(pmap.value); if (p && typeof p === "object" && !Array.isArray(p)) { setPayrollMap(p); payrollMapRef.current = p; } } catch {} }
+      else if (pmap.status === "empty") { setPayrollMap({}); payrollMapRef.current = {}; }
+      if (acc.status === "found" && acc.value) { try { const p = JSON.parse(acc.value); if (Array.isArray(p)) { setAccruals(p); accrualsRef.current = p; } } catch {} }
+      else if (acc.status === "empty") { setAccruals([]); accrualsRef.current = []; }
+    } catch (e) { console.warn("loadPayroll", e); }
+    _bumpLoaded();
+  }, [_bumpLoaded]);
+
   useEffect(() => { loadEstimates(); loadContracts(); }, []);
+  // Финансы читают справочник сотрудников (выплаты зарплаты в расходах), поэтому грузим ФОТ
+  // и тем, у кого открыты деньги. Всем остальным — не грузим вовсе, и запись остаётся
+  // заблокированной (_payrollLoaded=false).
+  useEffect(() => {
+    if (currentPermissions.payroll !== "none" || currentPermissions.finance !== "none") loadPayroll();
+  }, [currentPermissions.payroll, currentPermissions.finance, loadPayroll]);
   // Финансы грузим для админа, руководителя и прораба (прораб видит финансы ВНУТРИ объекта:
   // вкладка Финансы + карточки. Сам раздел «Финансы» ему всё равно закрыт через effScreen).
   // Замерщику финансы НЕ грузим — он видит себестоимость/маржу только в смете при заполнении.
