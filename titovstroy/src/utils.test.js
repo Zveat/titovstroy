@@ -2099,3 +2099,34 @@ describe("поручения по объекту попадают в пробл�
     expect(run([{ id: "t5", title: "Отменено", dueDate: "2026-01-01", status: "cancelled" }])).toHaveLength(0);
   });
 });
+
+const { splitAuditMonths } = utils;
+describe("срок хранения журнала изменений", () => {
+  it("оставляет четыре месяца, включая текущий", () => {
+    const months = ["2026-08", "2026-07", "2026-06", "2026-05", "2026-04", "2026-03"];
+    const r = splitAuditMonths(months, "2026-08");
+    expect(r.keep).toEqual(["2026-08", "2026-07", "2026-06", "2026-05"]);
+    expect(r.drop).toEqual(["2026-04", "2026-03"]);
+  });
+
+  it("правильно переходит через год", () => {
+    const months = ["2027-01", "2026-12", "2026-11", "2026-10", "2026-09"];
+    const r = splitAuditMonths(months, "2027-01");
+    expect(r.keep).toEqual(["2027-01", "2026-12", "2026-11", "2026-10"]);
+    expect(r.drop).toEqual(["2026-09"]);
+  });
+
+  it("пока месяцев мало — не удаляет ничего", () => {
+    expect(splitAuditMonths(["2026-08", "2026-07"], "2026-08").drop).toEqual([]);
+  });
+
+  it("мусор в списке месяцев отбрасывается, а не ломает разбор", () => {
+    const r = splitAuditMonths(["2026-08", "не месяц", null, "2026-08", "2026-01"], "2026-08");
+    expect(r.keep).toEqual(["2026-08"]);
+    expect(r.drop).toEqual(["2026-01"]);
+  });
+
+  it("без внятного текущего месяца ничего не удаляем", () => {
+    expect(splitAuditMonths(["2026-01"], "").drop).toEqual([]);
+  });
+});

@@ -26,7 +26,7 @@ import { clientPhotosByStage, stageReportsKey, normalizeStageReports } from "./s
 import { requestServerLogin, lockoutMessage } from "./auth/loginClient.js";
 import { backupIndexKey, backupItemKey, normalizeIndex, pushIndex, mergeBackupViews, makeSnapshot, loadSnapshotData } from "./backups.js";
 import { ClientPhotoReport, ClientTabs, PhotoLightbox, stagesWithPhotos } from "./stage-reports/ClientPhotos.jsx";
-import { normCN, contractNetTotal, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, resolveEstimateRows, existingEstimateRowKey, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
+import { normCN, contractNetTotal, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, resolveEstimateRows, existingEstimateRowKey, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, splitAuditMonths, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -1086,6 +1086,18 @@ const signInAsStaff = async (customToken) => {
 // Выход: снимаем права сотрудника СРАЗУ, не дожидаясь закрытия вкладки. Иначе после
 // «Выйти» в браузере остаётся живой токен с claims, и через консоль из него всё ещё
 // читается база — при том, что интерфейс уже показывает экран входа.
+// Есть ли у текущей сессии Firebase признак сотрудника. Нужен для понятного объяснения:
+// после закрытия базы правилами старая анонимная сессия в браузере перестаёт что-либо
+// читать, и без этой проверки человек видит красное «не удалось загрузить данные» и
+// думает, что сломалась система, хотя нужно просто войти заново.
+const hasStaffClaim = async () => {
+  try {
+    const user = _fbAuth?.currentUser;
+    if (!user) return false;
+    const res = await user.getIdTokenResult();
+    return res?.claims?.staff === true;
+  } catch { return false; }
+};
 const signOutStaff = async () => {
   if (!_fbAuth) return;
   try {
@@ -2601,6 +2613,21 @@ function AuditTab({ objectId = null }) {
       if (!Array.isArray(idx)) idx = [];
       const cur = _auditYM();
       idx = [...new Set([cur, ...idx])].sort().reverse();
+      // СРОК ХРАНЕНИЯ. Журнал рос бы вечно: помесячные ключи накапливаются, а каждая
+      // запись переписывает весь месяц целиком. Держим последние четыре месяца — этого
+      // хватает разобрать любой спор «кто поменял сумму». Чистим только при ОТКРЫТИИ
+      // полного журнала (не во встроенном виде в карточке объекта), то есть по явному
+      // заходу человека, а не фоном.
+      if (!embed) {
+        const split = splitAuditMonths(idx, cur);
+        if (split.drop.length) {
+          for (const ym of split.drop) {
+            try { await storage.setCloudOnly(AUDIT_MONTH_KEY(ym), null); } catch {}
+          }
+          idx = split.keep;
+          try { await storage.set(AUDIT_INDEX_KEY, JSON.stringify(idx)); } catch {}
+        }
+      }
       setMonths(idx);
       if (!embed) setMonth((m) => m || idx[0] || cur);
     })();
@@ -5911,6 +5938,14 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const endSessionSafelyRef = useRef(null);
   const doLogout = () => { endSessionSafelyRef.current && endSessionSafelyRef.current({ forced: false }); };
   const [loadError, setLoadError] = useState(false); // не удалось загрузить из Firebase — сохранение заблокировано
+  // Вход в браузере остался анонимным (заходили до перевода на серверный вход) — база
+  // закрыта правилами и ничего не отдаёт. Лечится одним повторным входом.
+  const [needsReauth, setNeedsReauth] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    hasStaffClaim().then(ok => { if (alive && !ok) setNeedsReauth(true); });
+    return () => { alive = false; };
+  }, []);
   const [dirtyCount, setDirtyCount] = useState(0); // СВОИ незасинканные dirty-записи storage (этот пользователь+вкладка) — участвует в баннере
   const [legacyDirtyN, setLegacyDirtyN] = useState(0); // legacy-маркеры без владельца (карантин — не авто-отправляются)
   const [cloudError, setCloudError] = useState(false); // последнее сохранение не ушло в облако (только локально)
@@ -11695,8 +11730,16 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 
   return (
     <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#f8fafc",minHeight:"100vh",color:"#0f172a",display:"flex",flexDirection:"column"}}>
+      {/* Сессия браузера ещё анонимная: база уже закрыта правилами, читать нечего.
+          Показываем это отдельно от «облако недоступно» — причина другая и лечится входом. */}
+      {needsReauth && (
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:501,background:"#b45309",color:"#fff",padding:"10px 16px",paddingTop:"calc(10px + env(safe-area-inset-top,0px))",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,flexWrap:"wrap",boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
+          🔑 Нужно войти заново — в этом браузере старый вход, база его больше не пускает. Данные целы.
+          <button onClick={()=>doLogout()} style={{background:"#fff",color:"#b45309",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Выйти и войти</button>
+        </div>
+      )}
       {/* Баннер: данные не загрузились — редактирование опасно */}
-      {loadError && (
+      {loadError && !needsReauth && (
         <div style={{position:"fixed",top:0,left:0,right:0,zIndex:500,background:"#dc2626",color:"#fff",padding:"10px 16px",paddingTop:"calc(10px + env(safe-area-inset-top,0px))",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
           ⚠️ Не удалось загрузить данные из базы. НЕ редактируйте сметы — сохранение отключено для защиты данных.
           <button onClick={()=>window.location.reload()} style={{background:"#fff",color:"#dc2626",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Обновить</button>
@@ -16352,6 +16395,40 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 
                 {objWsTab==="documents" && currentPermissions.estimates !== "none" && (
                 <div style={{marginTop:0}}>
+                  {/* СМЕТЫ ПРОТИВ ДОГОВОРОВ. Работы считают в смете, а бумагу оформляют
+                      договором и приложениями — и они расходятся молча. На боевой нашлось
+                      1 423 886 ₸ работ у объекта в работе, на которые договора нет. Считаем
+                      здесь, где рядом лежат обе стопки и где создают недостающее приложение. */}
+                  {(()=>{
+                    const estSum = objEsts.reduce((sum,e)=>sum+(Number(e.total)||0),0);
+                    const conSum = objCons
+                      .filter(c=>String(c.type||"")!=="reservation" && !String(c.type||"").startsWith("podryad"))
+                      .reduce((sum,c)=>sum+(c.works||[]).reduce((w,x)=>w+Math.round((Number(x.price)||0)*(Number(x.quantity)||0)),0),0);
+                    if (estSum<=0 || conSum<=0) return null;
+                    const gap = estSum - conSum;
+                    // Порог в 2%: копеечные расхождения от округления — не повод кричать.
+                    if (Math.abs(gap)/Math.max(estSum,conSum) <= 0.02) return null;
+                    const short = gap>0;
+                    return (
+                      <div style={{background:"#fff",border:"1px solid "+(short?"#fde68a":"#e2e8f0"),borderRadius:11,padding:"11px 14px",marginBottom:12,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                        <span style={{width:7,height:7,borderRadius:"50%",background:short?"#d97706":"#64748b",flexShrink:0}}/>
+                        <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>
+                          {short ? "Смета не покрыта договором" : "Договоров больше, чем смет"}
+                        </span>
+                        <span style={{fontSize:12.5,fontWeight:800,color:short?"#b45309":"#64748b",whiteSpace:"nowrap"}}>
+                          {fmt(Math.abs(gap))} ₸
+                        </span>
+                        <span style={{fontSize:11.5,color:"#94a3b8",marginLeft:"auto",whiteSpace:"nowrap"}}>
+                          сметы {fmt(estSum)} ₸ · договоры {fmt(conSum)} ₸
+                        </span>
+                        <span style={{fontSize:11.5,color:"#94a3b8",flexBasis:"100%"}}>
+                          {short
+                            ? "Работы засметированы, но бумаги на них нет — оформите приложение к договору."
+                            : "Либо есть лишний договор, либо потеряна доп. смета."}
+                        </span>
+                      </div>
+                    );
+                  })()}
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                     <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>📋 Сметы ({objEsts.length})</div>
                     {accessAllows(currentPermissions.estimateCreate, estimatorObjectIds.has(obj.id)) && (

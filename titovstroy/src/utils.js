@@ -731,6 +731,27 @@ export function resolveFinanceProjectBudget({ project = {}, object = null, estim
   return { budget: Number(project?.budget) || 0, source: "legacy", estimateCount: linkedEstimates.length, calcMode };
 }
 
+// ── СРОК ХРАНЕНИЯ ЖУРНАЛА ИЗМЕНЕНИЙ ──
+// Журнал пишется помесячными ключами и рос бы вечно. Владелец решил хранить последние
+// четыре месяца: этого хватает, чтобы разобрать любой спор «кто поменял сумму», и при
+// этом ключи не копятся годами.
+export const AUDIT_KEEP_MONTHS = 4;
+
+// Разложить список месяцев на «оставить» и «удалить». Месяцы в формате YYYY-MM,
+// поэтому сравнение строк работает как сравнение дат.
+export function splitAuditMonths(months = [], currentYm = "", keep = AUDIT_KEEP_MONTHS) {
+  const list = [...new Set((months || []).filter(m => /^\d{4}-\d{2}$/.test(String(m || ""))))].sort().reverse();
+  if (!/^\d{4}-\d{2}$/.test(String(currentYm || "")) || keep < 1) return { keep: list, drop: [] };
+  const [y, m] = currentYm.split("-").map(Number);
+  // Граница: месяц, который на (keep-1) назад от текущего. Всё раньше — под удаление.
+  const edge = new Date(Date.UTC(y, m - 1 - (keep - 1), 1));
+  const cutoff = `${edge.getUTCFullYear()}-${String(edge.getUTCMonth() + 1).padStart(2, "0")}`;
+  return {
+    keep: list.filter(x => x >= cutoff),
+    drop: list.filter(x => x < cutoff),
+  };
+}
+
 export function hasInvalidFinanceProjectDate(value, now = Date.now()) {
   if (value == null || value === "") return false;
   const date = new Date(value);
