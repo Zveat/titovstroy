@@ -22,6 +22,7 @@ const USERS_NODE = "titovstroy_users";
 // Счётчик неудачных попыток. Тот, что в браузере (localStorage), защищает ровно до
 // первого «Очистить данные сайта» — подбор пароля должен упираться в сервер.
 const GUARD_NODE = "titovstroy_login_guard";
+const ROLE_PERMS_NODE = "titovstroy_role_permissions";
 const MAX_ATTEMPTS = 8;
 const LOCK_MS = 10 * 60 * 1000;
 const TOKEN_TTL_S = 3600;
@@ -46,6 +47,36 @@ function signJwt(claims, privateKey) {
 const fbKey = (key) => String(key).replace(/[^a-zA-Z0-9_]/g, "_");
 
 // Значение узла — строка JSON (новый формат) или вложенный объект (старый).
+// ЧТО МОЖНО ПИСАТЬ — ВЫЧИСЛЯЕМ ЗДЕСЬ И КЛАДЁМ В ТОКЕН.
+//
+// Правила базы не умеют читать матрицу «Права ролей»: она лежит одной строкой JSON, а
+// строку правила разобрать не могут. Если зашить в правила «только admin», они разойдутся
+// с настройкой в админке: интерфейс кнопку покажет, а база запись отклонит — молча.
+// Поэтому матрицу читает сервер входа (сервисным ключом) и кладёт в токен четыре флага.
+// Правила смотрят на флаги, а не на роль, и всегда совпадают с тем, что настроено.
+//
+// Флаг ставится только при явном праве на РЕДАКТИРОВАНИЕ. Роль admin всегда получает все
+// четыре: в приложении её права принудительно полные, чтобы систему нельзя было запереть.
+// Матрица недоступна или роли в ней нет — падаем на «полные права только у admin»:
+// для остальных это отказ, то есть безопасная сторона.
+function writeScopeForRole(role, rawMatrix) {
+  const isAdmin = String(role) === "admin";
+  const base = { fin: isAdmin, pay: isAdmin, cat: isAdmin, usr: isAdmin };
+  const matrix = parseNode(rawMatrix);
+  const perms = matrix && typeof matrix === "object" && !Array.isArray(matrix) ? matrix[role] : null;
+  if (!perms || typeof perms !== "object") return base;
+  const has = (key) => {
+    const v = perms[key];
+    return v !== undefined && v !== null && v !== "none" && v !== false;
+  };
+  return {
+    fin: isAdmin || perms.finance === "edit",
+    pay: isAdmin || perms.payroll === "edit",
+    cat: isAdmin || has("adminCatalog") || has("adminPrices"),
+    usr: isAdmin || has("adminUsers") || has("adminRoles"),
+  };
+}
+
 function parseNode(value) {
   if (value == null) return null;
   if (typeof value === "string") { try { return JSON.parse(value); } catch { return null; } }
@@ -195,12 +226,23 @@ function createLoginHandler(options = {}) {
 
     const seconds = Math.floor(now() / 1000);
     const role = String(candidate.role || "");
+    // Матрицу прав читаем ТУТ ЖЕ, тем же сервисным токеном. Ошибка чтения не запирает вход:
+    // writeScopeForRole без матрицы даёт полные права только админу, остальным — отказ.
+    let rawPerms = null;
+    try {
+      const permsResponse = await fetchImpl(nodeUrl(ROLE_PERMS_NODE, token));
+      if (permsResponse.ok) rawPerms = await permsResponse.json().catch(() => null);
+    } catch { rawPerms = null; }
+    const scope = writeScopeForRole(role, rawPerms);
     const customToken = signJwt({
       iss: account.clientEmail, sub: account.clientEmail, aud: CUSTOM_TOKEN_AUD,
       uid: String(candidate.id || candidate.login), iat: seconds, exp: seconds + TOKEN_TTL_S,
       // staff — то, на что смотрят правила базы: «это сотрудник, а не посетитель сайта».
       // role оставляем для правил, которые могут отличать роли (например, админку).
-      claims: { staff: true, role, login: String(candidate.login || "") },
+      // fin/pay/cat/usr — что этой роли РАЗРЕШЕНО ПИСАТЬ по матрице «Права ролей»:
+      // деньги, зарплаты, каталог с прайсом, пользователи с правами. Правила смотрят на
+      // них, поэтому настройка в админке и правила базы не могут разойтись.
+      claims: { staff: true, role, login: String(candidate.login || ""), ...scope },
     }, account.privateKey);
 
     return send(res, 200, { ok: true, token: customToken, user: safeUser(candidate) });
@@ -211,5 +253,6 @@ const handler = createLoginHandler();
 module.exports = handler;
 module.exports.createLoginHandler = createLoginHandler;
 module.exports.passwordMatches = passwordMatches;
+module.exports.writeScopeForRole = writeScopeForRole;
 module.exports.safeUser = safeUser;
 module.exports.parseNode = parseNode;
