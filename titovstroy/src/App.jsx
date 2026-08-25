@@ -14613,13 +14613,13 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     .some(x=>String(x||"").toLowerCase().includes(q));
                 });
               // ── ДОГОВОР ЕСТЬ, ПРОЕКТА НЕТ ──
-              // Виртуальные строки выше подхватывают объект в рабочем статусе. Но договор
-              // подписывают ещё на «Согласовании», и такая сделка не попадает в «Проекты»
-              // вообще: денег по ней никто не ждёт, долг не считается. Так пропали шесть
-              // договоров на 17,7 млн ₸. Строкой ниже — список, чтобы это было видно сразу.
+              // Сделка живая (подписан / в работе / пауза / сдан), договор оформлен, а строки
+              // в «Проектах» нет: приходы по нему не считаются, долг не виден. Такие и ловим.
+              // На «Согласовании» договор часто печатают ЗАРАНЕЕ, до подписания — денег по нему
+              // ещё никто не ждёт, и в списке это был бы шум. Поэтому статусы те же, что и у
+              // виртуальных строк выше (_projectStatuses), а не «все, кроме отказа».
               const _seenCN = new Set([...finProjects, ...virtualProjects].map(p=>normCN(p.contractNo)).filter(Boolean));
               const _seenObj = new Set([..._coveredObjIds, ...virtualProjects.map(p=>p.objectId)].filter(Boolean));
-              const _deadStatus = new Set(["refuse","archive","cancel"]);
               const orphanContracts = contracts.filter(c => {
                 const type = String(c.type || "repair_fiz");
                 if (type === "annex" || type === "reservation" || type === "podryad" || type === "podryad_annex") return false;
@@ -14627,7 +14627,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 if (_seenCN.has(normCN(c.number))) return false;
                 const o = c.objectId ? liveObjects.find(x => x.id === c.objectId) : null;
                 if (!o || _seenObj.has(o.id)) return false;
-                return !_deadStatus.has(unifiedStatusOf(o));
+                return _projectStatuses.has(unifiedStatusOf(o));
               });
               const days = (a,b) => { if(!a||!b) return null; const d=Math.round((new Date(b)-new Date(a))/86400000); return d>=0?d:null; };
               const yesno = v => v==="да"||v==="yes"||v===true||v==="1"||v==="Да"||v==="ДА";
