@@ -7053,17 +7053,35 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     updated.history = _appendHistory(exists, updated);
     return exists ? cur.map(e=>e.id===currentId?updated:e) : [updated,...cur];
   };
+  // Подпись содержимого сметы БЕЗ служебных полей. updatedAt меняется при каждой пересборке,
+  // поэтому сравнивать целиком нельзя — иначе «изменений нет» не наступает никогда.
+  const _estSig = (e) => e ? JSON.stringify([e.rows, e.proj, e.discount, e.markup, e.note,
+    e.status, e.sentAt, e.comment, e.objectId || "", e.parentId || "", e.dsNumber || ""]) : "";
+  const _estSavedSig = useRef("");
   const _flushEstimate = () => {
     const newList = _buildEstimateList();
     if (!newList) return;
+    // ГЛАВНОЕ ПО ТРАФИКУ. Каждое сохранение сметы читает ВЕСЬ список смет из базы (слияние с
+    // чужими правками — та самая защита «ничего не теряется»). Автосохранение срабатывало на
+    // любое изменение состояния редактора, в том числе когда содержимое сметы не менялось
+    // вовсе. По метрикам базы час работы со сметами давал 7,45 ГБ скачивания. Сравниваем
+    // подпись: не изменилось — в базу не ходим вообще.
+    const sig = _estSig(newList.find(e => e.id === currentId));
+    if (sig && sig === _estSavedSig.current) return;
+    _estSavedSig.current = sig;
     setEstimates(newList);
     saveEstimates(newList);
   };
+  // Открыли другую смету — прежняя подпись к ней не относится.
+  useEffect(() => { _estSavedSig.current = ""; }, [currentId]);
   useEffect(() => {
     if (!currentId) { _estFlushRef.current = null; return; }
     _estFlushRef.current = currentId;
     if (_autoSaveRef.current) clearTimeout(_autoSaveRef.current);
-    _autoSaveRef.current = setTimeout(_flushEstimate, 900);
+    // 2,5 секунды вместо 0,9: при наборе текста дебаунс в 0,9 с срабатывал почти на каждой
+    // паузе между словами, и каждый раз это был полный обход списка смет. Потерять правку
+    // нельзя: уход из редактора, смена экрана и закрытие вкладки дожимают сохранение сами.
+    _autoSaveRef.current = setTimeout(_flushEstimate, 2500);
     return () => clearTimeout(_autoSaveRef.current);
   }, [rows, proj, discount, markup, note, estStatus, estSentAt, estComment, currentPermissions.estimateEdit, isOwnEstimate]);
   // ПРИНУДИТЕЛЬНЫЙ ФЛЕШ при уходе из редактора сметы: если пользователь ушёл (сменил экран
