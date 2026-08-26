@@ -2130,3 +2130,28 @@ describe("срок хранения журнала изменений", () => {
     expect(splitAuditMonths(["2026-01"], "").drop).toEqual([]);
   });
 });
+
+describe("isPermissionDenied — отказ правил отличаем от сбоя сети", () => {
+  const { isPermissionDenied } = utils;
+  it("узнаёт отказ по коду ошибки Firebase SDK", () => {
+    expect(isPermissionDenied({ code: "PERMISSION_DENIED" })).toBe(true);
+    expect(isPermissionDenied({ code: "permission-denied" })).toBe(true);
+  });
+  it("узнаёт отказ по тексту сообщения", () => {
+    expect(isPermissionDenied(new Error("PERMISSION_DENIED: Permission denied"))).toBe(true);
+    expect(isPermissionDenied("Permission denied")).toBe(true);
+  });
+  it("сбой сети отказом НЕ считает — иначе перестанем дожимать нормальные правки", () => {
+    expect(isPermissionDenied(new Error("timeout"))).toBe(false);
+    expect(isPermissionDenied({ code: "NETWORK_ERROR", message: "Failed to fetch" })).toBe(false);
+    expect(isPermissionDenied("no cloud")).toBe(false);
+  });
+  it("пустой ввод не роняет и не считается отказом", () => {
+    expect(isPermissionDenied(null)).toBe(false);
+    expect(isPermissionDenied(undefined)).toBe(false);
+    expect(isPermissionDenied({})).toBe(false);
+  });
+  it("причина «нет прав» есть в реестре и читается по-человечески", () => {
+    expect(utils.saveFailReasonText("no-rights")).toMatch(/нет прав/i);
+  });
+});

@@ -1865,7 +1865,26 @@ export const SAVE_FAIL_REASONS = {
   "db-unavailable":  "база не ответила при чтении — запись отменена, чтобы не затереть чужое",
   "empty-over-data": "защита: попытка записать пустой список поверх заполненного",
   "cloud-failed":    "облако не подтвердило запись",
+  "no-rights":       "база отклонила запись: у вашей роли нет прав на этот раздел",
 };
+// ОТКАЗ ПРАВИЛ БАЗЫ — НЕ ТО ЖЕ САМОЕ, ЧТО СБОЙ СЕТИ.
+// Раньше код различия не знал: отказ обрабатывался как «облако не ответило», а значит запись
+// повторялась — с паузой, потом REST-фолбэком, потом автофлешем, и так до бесконечности. Толку
+// ноль: правила ответят так же, сколько ни повторяй. Зато на счётчике правил это давало десятки
+// тысяч отказов в сутки, а человек видел «облако недоступно» и искал проблему в интернете.
+// Firebase формулирует отказ по-разному в зависимости от пути (SDK / REST / транзакция),
+// поэтому смотрим и на код ошибки, и на текст.
+export function isPermissionDenied(err) {
+  if (!err) return false;
+  const parts = [];
+  if (typeof err === "string") parts.push(err);
+  else {
+    if (err.code) parts.push(String(err.code));
+    if (err.message) parts.push(String(err.message));
+    if (!err.code && !err.message) parts.push(String(err));
+  }
+  return parts.some(s => /permission[_\s-]?denied/i.test(s));
+}
 export const SAVE_FAIL_LABELS = {
   "titovstroy-objects":          "Объекты",
   "titovstroy-estimates":        "Сметы",
