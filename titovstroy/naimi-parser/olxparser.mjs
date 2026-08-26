@@ -29,6 +29,11 @@ import {
   mergeFreshSnapshot,
   parseStoredJson,
   selectPhoneTargets,
+  buildPhoneQueue,
+  queueRowToTarget,
+  queueRowFromTarget,
+  applyPhoneResults,
+  phoneQueueKey,
 } from "./parser-core.mjs";
 
 // Реакция на ответ телефонного эндпоинта при анти-бот лимите OLX (HTTP 400 «подозрительная
@@ -58,6 +63,10 @@ const num = (k, d) => { const n = Number(env(k, d)); return Number.isFinite(n) ?
 
 const FB_DB_URL     = env("FB_DB_URL", "https://titovstroy-da1cf-default-rtdb.firebaseio.com");
 const MASTERS_KEY   = env("OLX_MASTERS_KEY", "titovstroy-masters-olx");
+// Очередь добора номеров и собранные номера — отдельными МАЛЕНЬКИМИ узлами. Заход за
+// телефонами читает только их (сотни килобайт), а не всю базу мастеров (мегабайты).
+const PHONE_QUEUE_KEY   = MASTERS_KEY + "-phoneq";
+const PHONE_RESULTS_KEY = MASTERS_KEY + "-phones";
 const CONFIG_KEY    = "titovstroy-masters-olx-config";
 const EVENT         = env("EVENT_NAME", "");
 
@@ -244,18 +253,76 @@ const DRAIN_MIN_PENDING = num("OLX_DRAIN_MIN_PENDING", 30);
 function decideRun(cfg) {
   const freq = ["off", "daily", "twice", "weekly"].includes(cfg.frequency) ? cfg.frequency : "daily";
   const runNow = Number(cfg.runNow) || 0;
-  if (EVENT === "workflow_dispatch") return { run: true, reason: "ручной запуск", runNow };
-  if (runNow > (Number(cfg.lastRunNow) || 0)) return { run: true, reason: "«Обновить сейчас»", runNow };
-  if (freq === "off") return { run: false, reason: "выключено", runNow };
+  // ДВА РЕЖИМА ВМЕСТО ОДНОГО.
+  //
+  // Раньше ЛЮБОЙ заход по workflow_dispatch означал полный обход каталога. А внешний крон
+  // дёргает воркфлоу каждые 30 минут круглосуточно — то есть при настройке «Раз в день»
+  // парсер по факту делал под полсотни полных обходов в сутки, включая ночь. Каждый обход
+  // читает базу мастеров целиком, и это был основной фоновый трафик Firebase.
+  //
+  // Убрать частые заходы нельзя: OLX отдаёт телефоны порциями, и именно ими номера и
+  // добираются (drain-режим ниже). Поэтому работа разделена:
+  //   full   — обойти каталог, обновить список, потом добрать телефоны;
+  //   phones — ТОЛЬКО добор телефонов, каталог не трогаем.
+  // Каталог за полчаса не меняется настолько, чтобы обходить его каждые полчаса.
+  if (env("FORCE_OLX", "") === "1") return { run: true, mode: "full", reason: "форс FORCE_OLX", runNow };
+  if (runNow > (Number(cfg.lastRunNow) || 0)) return { run: true, mode: "full", reason: "«Обновить сейчас»", runNow };
+  if (freq === "off") return { run: false, mode: "skip", reason: "выключено", runNow };
   const sinceLast = Date.now() - (Number(cfg.lastRunAt) || 0);
   const pending = Number(cfg.lastPendingPhone) || 0;
   const progressed = cfg.lastGotPhones == null || Number(cfg.lastGotPhones) > 0; // null = ещё не мерили
-  if (pending > DRAIN_MIN_PENDING && progressed && sinceLast >= DRAIN_GAP_MS) {
-    return { run: true, reason: `добор номеров (осталось ~${pending}), drain-режим`, runNow };
-  }
   const iv = INTERVALS[freq] || INTERVALS.daily;
-  const run = sinceLast >= iv;
-  return { run, reason: run ? `по расписанию (${freq})` : `ещё рано (${freq})`, runNow };
+  if (sinceLast >= iv) return { run: true, mode: "full", reason: `по расписанию (${freq})`, runNow };
+  // Полный обход ещё рано. Номера ждут — добираем их, каталог не обходим.
+  // Зазор между доборами — свой (DRAIN_GAP_MS), он же и был тут раньше.
+  const sincePhones = Date.now() - Math.max(Number(cfg.lastPhoneRunAt) || 0, Number(cfg.lastRunAt) || 0);
+  if (pending > DRAIN_MIN_PENDING && progressed && sincePhones >= DRAIN_GAP_MS) {
+    return { run: true, mode: "phones", reason: `добор номеров (осталось ~${pending}), без обхода каталога`, runNow };
+  }
+  return { run: false, mode: "skip", reason: `ещё рано (${freq}), номера подождут`, runNow };
+}
+
+// ── ДОБОР НОМЕРОВ ─────────────────────────────────────────────────────────────
+// Вынесено в функцию, потому что режимов теперь два (полный обход и добор без обхода),
+// а цикл с троттлингом OLX должен быть у них ОДИН — иначе логика ожидания бана разъедется.
+// save() вызывается раз в PHONE_SAVE_EVERY проверок: каждый режим сохраняет по-своему.
+async function collectPhones(targets, save) {
+  const deadline = Date.now() + PHONE_BUDGET_MS;
+  let gotPhones = 0, done = 0, retryErrors = 0, throttleHits = 0, lastPhoneError = "", firstRaw = true;
+  let throttleStreak = 0;
+  for (let idx = 0; idx < targets.length; idx++) {
+    if (Date.now() > deadline) { console.warn(`  ! бюджет времени исчерпан на ${done}/${targets.length}`); break; }
+    const m = targets[idx];
+    const result = await fetchPhone(m.phoneOfferId || m.offerId);
+    if (firstRaw) { console.log(`  · первый ответ телефона: ${result.status}${result.error ? " " + result.error : ""}`); firstRaw = false; }
+
+    // Троттлинг (OLX прикрыл выдачу): мастера НЕ помечаем — ждём паузу и повторяем его же.
+    const plan = planPhoneStep(result, throttleStreak, { giveUpAfter: PHONE_THROTTLE_GIVEUP, backoffMs: PHONE_THROTTLE_BACKOFF_MS });
+    throttleStreak = plan.streak;
+    if (plan.action !== "accept") {
+      throttleHits++;
+      lastPhoneError = `OLX ограничил темп (${result.error || "HTTP 400"})`;
+      if (plan.action === "giveup") {
+        console.warn(`  ! OLX держит лимит ${throttleStreak} раз подряд — стоп до следующего прогона (собрано ${gotPhones})`);
+        break;
+      }
+      console.warn(`  ! троттлинг ${throttleStreak}: тихая пауза ${Math.round(plan.waitMs / 1000)}с (даём бану истечь), потом повтор`);
+      await sleep(plan.waitMs);
+      idx--;                                              // повторить того же мастера
+      continue;
+    }
+
+    Object.assign(m, applyPhoneAttempt(m, result));
+    if (result.status === "found") gotPhones++;
+    if (result.status === "retry") { retryErrors++; lastPhoneError = result.error || "Временная ошибка OLX"; }
+    done++;
+    if (done % PHONE_SAVE_EVERY === 0) {
+      try { await save(gotPhones, done); } catch {}
+    }
+    await sleep(rnd(PHONE_DELAY_MIN, PHONE_DELAY_MAX));
+  }
+  console.log(`телефоны: получено ${gotPhones}, обработано ${done}, троттлингов ${throttleHits}, прочих ошибок ${retryErrors}`);
+  return { gotPhones, done, retryErrors, throttleHits, lastPhoneError };
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
@@ -267,51 +334,135 @@ function decideRun(cfg) {
   console.log(`решение: ${decision.run ? "ЗАПУСК" : "ПРОПУСК"} — ${decision.reason}`);
   if (!decision.run) { await admin.app().delete(); return; }
 
-  const regionId = num("OLX_REGION_ID", Number(cfg.regionId) || 5);
+  // РЕГИОНОВ МОЖЕТ БЫТЬ НЕСКОЛЬКО: «5» или «5,18,1» — Караганда, Астана, Алматы и т.д.
+  // Раньше принималось одно число, и добавить второй город было нельзя без правки кода.
+  // Города ВНУТРИ региона парсер и так находит сам (разбиение по cityIds ниже).
+  const regionIds = String(env("OLX_REGION_ID", "") || cfg.regionId || "5")
+    .split(",").map(x => Number(String(x).trim())).filter(n => Number.isFinite(n) && n > 0);
+  if (!regionIds.length) regionIds.push(5);
   const selectedCategoryIds = (env("OLX_CATEGORY_IDS", "") || String(cfg.categoryIds || "") || "188")
     .split(",").map(s => s.trim()).filter(Boolean);
   const categoryIds = expandOlxCategoryIds(selectedCategoryIds);
   const configuredPhones = Number(cfg.phonesPerRun);
   const phonesPerRun = num("OLX_PHONES_PER_RUN", Number.isFinite(configuredPhones) ? configuredPhones : 60);
-  console.log(`OLX-parser · регион=${regionId} категории=[${categoryIds}] телефоны/прогон=${phonesPerRun}`);
+  console.log(`OLX-parser · регионы=[${regionIds}] категории=[${categoryIds}] телефоны/прогон=${phonesPerRun}`);
+
+  // ── РЕЖИМ «ТОЛЬКО НОМЕРА» ───────────────────────────────────────────────────
+  // Базу мастеров не читаем ВООБЩЕ — ради этого всё и затевалось. Берём компактную очередь
+  // (её выложил прошлый полный обход), добираем порцию номеров и складываем собранное
+  // отдельным маленьким узлом. Полный обход внесёт номера в базу и пересоберёт очередь.
+  if (decision.mode === "phones") {
+    const queueRaw = await readJson(PHONE_QUEUE_KEY, []);
+    const rows = Array.isArray(queueRaw) ? queueRaw : [];
+    if (!rows.length) {
+      // Очереди нет (первый запуск после обновления) — ждём ближайшего полного обхода,
+      // он её и выложит. Отмечаемся, чтобы не долбиться каждые полчаса впустую.
+      console.log("очередь номеров пуста — ждём полного обхода, он её соберёт");
+      const c = await readJson(CONFIG_KEY, {});
+      c.lastPhoneRunAt = Date.now();
+      await writeJson(CONFIG_KEY, c);
+      await admin.app().delete();
+      return;
+    }
+    const targets = selectPhoneTargets(rows.map(queueRowToTarget), {
+      limit: Math.min(Math.max(0, phonesPerRun), PHONES_HARD_CAP),
+    });
+    console.log(`очередь: ${rows.length} кандидатов, цель ${targets.length} (без чтения базы мастеров)`);
+    const results = (await readJson(PHONE_RESULTS_KEY, {})) || {};
+    const byKey = new Map(targets.map(t => [t.key, t]));
+    // Состояние попытки складываем в результат: полный обход перенесёт его в базу.
+    const harvest = () => {
+      for (const t of targets) {
+        if (!t.phoneCheckedAt) continue;                 // до этого кандидата не дошли
+        results[t.key] = {
+          phone: t.phone || "", phoneStatus: t.phoneStatus || "",
+          phoneCheckedAt: t.phoneCheckedAt, phoneAttempts: Number(t.phoneAttempts) || 0,
+          phoneError: t.phoneError || "",
+        };
+      }
+    };
+    const run = await collectPhones(targets, async (got, done) => {
+      harvest();
+      await writeJson(PHONE_RESULTS_KEY, results);
+      console.log(`  … собрано (номеров ${got}/${done})`);
+    });
+    harvest();
+    // Очередь: у кого номер нашёлся — выбывает, остальным обновляем состояние попытки.
+    const nextQueue = [];
+    for (const row of rows) {
+      const t = byKey.get(row.k);
+      if (!t) { nextQueue.push(row); continue; }          // до него не дошли — оставляем как был
+      if (t.phone) continue;                              // номер получен — из очереди убираем
+      nextQueue.push(queueRowFromTarget({ ...t, key: row.k }));
+    }
+    await writeJson(PHONE_RESULTS_KEY, results);
+    await writeJson(PHONE_QUEUE_KEY, nextQueue);
+    console.log(`✔ очередь: было ${rows.length}, осталось ${nextQueue.length}; собранных номеров в узле результатов: ${Object.keys(results).length}`);
+    const c = await readJson(CONFIG_KEY, {});
+    c.lastPhoneRunAt = Date.now();                        // lastRunAt НЕ трогаем: срок полного обхода не сдвигается
+    c.lastGotPhones = run.gotPhones;
+    c.lastPendingPhone = nextQueue.length;
+    c.lastPhoneError = run.lastPhoneError;
+    if (decision.runNow) c.lastRunNow = decision.runNow;
+    await writeJson(CONFIG_KEY, c);
+    await admin.app().delete();
+    return;
+  }
+
 
   // уже собранное → мержим (телефоны не теряем)
   const existingDoc = await readJson(MASTERS_KEY, { items: [] });
   if (!existingDoc || typeof existingDoc !== "object" || Array.isArray(existingDoc) || !Array.isArray(existingDoc.items)) {
     throw new Error(`${MASTERS_KEY}: ожидался объект с массивом items; запись остановлена`);
   }
-  const existing = existingDoc.items;
+  let existing = existingDoc.items;
+  // Номера, собранные заходами «только номера», лежат отдельным узлом — вносим их в базу
+  // и чистим узел. Без этого шага добранные телефоны в CRM бы не появились.
+  try {
+    const harvested = (await readJson(PHONE_RESULTS_KEY, {})) || {};
+    const keys = Object.keys(harvested);
+    if (keys.length) {
+      const merged = applyPhoneResults(existing, harvested);
+      existing = merged.items;
+      console.log(`внесено собранных номеров: ${merged.applied} из ${keys.length}`);
+      await writeJson(PHONE_RESULTS_KEY, {});
+    }
+  } catch (e) { console.warn("не удалось внести собранные номера:", e?.message || e); }
   const freshByUser = new Map();
   console.log(`в базе уже: ${existing.length} (${existing.filter(m => m.phone).length} с телефоном)`);
 
   // сбор объявлений по категориям
   let crawlComplete = true;
   const seenOfferIds = new Set();
-  for (const cid of categoryIds) {
-    const addOffer = (offer) => {
-      const offerKey = String(offer.id || "");
-      if (!offerKey || seenOfferIds.has(offerKey)) return;
-      seenOfferIds.add(offerKey);
-      upsert(freshByUser, offer, OLX_CAT_NAMES[offer.category?.id] || OLX_CAT_NAMES[cid] || "Услуга");
-    };
-    const regionResult = await crawlOffers(cid, regionId, "", addOffer);
-    let categoryComplete = regionResult.complete;
-    let partitioned = false;
-    // Публичная выдача OLX обрезается на 1000. Для таких категорий повторяем
-    // обход по каждому найденному городу региона и схлопываем дубли по offer.id.
-    if (regionResult.total >= MAX_PAGES * PAGE_LIMIT && regionResult.cityIds.size) {
-      partitioned = true;
-      categoryComplete = true;
-      for (const cityId of regionResult.cityIds) {
-        const cityResult = await crawlOffers(cid, regionId, cityId, addOffer);
-        if (!cityResult.complete) categoryComplete = false;
+  // Дубли схлопываются по offer.id ЧЕРЕЗ ВСЕ регионы и категории (seenOfferIds общий),
+  // поэтому объявление, попавшее в выдачу двух регионов, не задвоится в базе.
+  for (const regionId of regionIds) {
+    for (const cid of categoryIds) {
+      const addOffer = (offer) => {
+        const offerKey = String(offer.id || "");
+        if (!offerKey || seenOfferIds.has(offerKey)) return;
+        seenOfferIds.add(offerKey);
+        upsert(freshByUser, offer, OLX_CAT_NAMES[offer.category?.id] || OLX_CAT_NAMES[cid] || "Услуга");
+      };
+      const regionResult = await crawlOffers(cid, regionId, "", addOffer);
+      let categoryComplete = regionResult.complete;
+      let partitioned = false;
+      // Публичная выдача OLX обрезается на 1000. Для таких категорий повторяем
+      // обход по каждому найденному городу региона и схлопываем дубли по offer.id.
+      if (regionResult.total >= MAX_PAGES * PAGE_LIMIT && regionResult.cityIds.size) {
+        partitioned = true;
+        categoryComplete = true;
+        for (const cityId of regionResult.cityIds) {
+          const cityResult = await crawlOffers(cid, regionId, cityId, addOffer);
+          if (!cityResult.complete) categoryComplete = false;
+        }
       }
+      if (!categoryComplete) {
+        crawlComplete = false;
+        console.warn(`  ! регион ${regionId}, категория ${cid} собрана частично; старые записи не будут помечены неактивными`);
+      }
+      console.log(`  · регион ${regionId}, категория ${cid}: объявлений ${regionResult.got} (всего ~${regionResult.total})${partitioned ? `, разбито по ${regionResult.cityIds.size} городам` : ""}`);
     }
-    if (!categoryComplete) {
-      crawlComplete = false;
-      console.warn(`  ! категория ${cid} собрана частично; старые записи не будут помечены неактивными`);
-    }
-    console.log(`  · категория ${cid}: объявлений ${regionResult.got} (всего ~${regionResult.total})${partitioned ? `, разбито по ${regionResult.cityIds.size} городам` : ""}`);
   }
   const freshItems = [...freshByUser.values()];
   const all = mergeFreshSnapshot(existing, freshItems, { complete: crawlComplete });
@@ -339,47 +490,22 @@ function decideRun(cfg) {
     { limit: Math.min(Math.max(0, phonesPerRun), PHONES_HARD_CAP) },
   );
   console.log(`телефоны: цель ${targets.length} (темп ~${Math.round((PHONE_DELAY_MIN + PHONE_DELAY_MAX) / 2000)}с, бюджет ${Math.round(PHONE_BUDGET_MS / 60e3)} мин)`);
-  const deadline = Date.now() + PHONE_BUDGET_MS;
-  let gotPhones = 0, done = 0, retryErrors = 0, throttleHits = 0, lastPhoneError = "", firstRaw = true;
-  let throttleStreak = 0;
-  for (let idx = 0; idx < targets.length; idx++) {
-    if (Date.now() > deadline) { console.warn(`  ! бюджет времени исчерпан на ${done}/${targets.length}`); break; }
-    const m = targets[idx];
-    const result = await fetchPhone(m.phoneOfferId || m.offerId);
-    if (firstRaw) { console.log(`  · первый ответ телефона: ${result.status}${result.error ? " " + result.error : ""}`); firstRaw = false; }
-
-    // Троттлинг (OLX прикрыл выдачу): мастера НЕ помечаем — ждём растущую паузу и повторяем его же.
-    // После PHONE_THROTTLE_GIVEUP отказов подряд — стоп партии (лучше добрать в следующем прогоне),
-    // остальные мастера остаются «непроверенными» и уйдут в очередь без ложной отметки «номера нет».
-    const plan = planPhoneStep(result, throttleStreak, { giveUpAfter: PHONE_THROTTLE_GIVEUP, backoffMs: PHONE_THROTTLE_BACKOFF_MS });
-    throttleStreak = plan.streak;
-    if (plan.action !== "accept") {
-      throttleHits++;
-      lastPhoneError = `OLX ограничил темп (${result.error || "HTTP 400"})`;
-      if (plan.action === "giveup") {
-        console.warn(`  ! OLX держит лимит ${throttleStreak} раз подряд — стоп до следующего прогона (собрано ${gotPhones})`);
-        break;
-      }
-      console.warn(`  ! троттлинг ${throttleStreak}: тихая пауза ${Math.round(plan.waitMs / 1000)}с (даём бану истечь), потом повтор`);
-      await sleep(plan.waitMs);
-      idx--;                                              // повторить того же мастера
-      continue;
-    }
-
-    Object.assign(m, applyPhoneAttempt(m, result));
-    if (result.status === "found") gotPhones++;
-    if (result.status === "retry") { retryErrors++; lastPhoneError = result.error || "Временная ошибка OLX"; }
-    done++;
-    if (done % PHONE_SAVE_EVERY === 0) {
-      try { await writeJson(MASTERS_KEY, buildPayload()); console.log(`  … сохранено (номеров ${gotPhones}/${done})`); } catch {}
-    }
-    await sleep(rnd(PHONE_DELAY_MIN, PHONE_DELAY_MAX));
-  }
-  console.log(`телефоны: получено ${gotPhones}, обработано ${done}, троттлингов ${throttleHits}, прочих ошибок ${retryErrors}`);
+  const phoneRun = await collectPhones(targets, async (got, done) => {
+    await writeJson(MASTERS_KEY, buildPayload());
+    console.log(`  … сохранено (номеров ${got}/${done})`);
+  });
+  const { gotPhones, lastPhoneError } = phoneRun;
 
   const payload = buildPayload();
   await writeJson(MASTERS_KEY, payload);
   console.log(`✔ записано ${payload.count} мастеров (с телефоном: ${payload.withPhone}) в ${fbKey(MASTERS_KEY)}`);
+
+  // Очередь для заходов «только номера»: кто ещё без телефона. Компактно, ~100 байт на строку.
+  try {
+    const queue = buildPhoneQueue(all);
+    await writeJson(PHONE_QUEUE_KEY, queue);
+    console.log(`✔ очередь добора номеров: ${queue.length} кандидатов`);
+  } catch (e) { console.warn("не удалось выложить очередь номеров:", e?.message || e); }
 
   const fresh = await readJson(CONFIG_KEY, {});
   fresh.lastRunAt = Date.now();

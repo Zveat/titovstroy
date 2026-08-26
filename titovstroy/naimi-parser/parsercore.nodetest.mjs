@@ -4,10 +4,14 @@ import assert from "node:assert/strict";
 import {
   OLX_REPAIR_CATEGORIES,
   applyPhoneAttempt,
+  applyPhoneResults,
+  buildPhoneQueue,
+  phoneQueueKey,
+  queueRowFromTarget,
+  queueRowToTarget,
   expandOlxCategoryIds,
   mergeFreshSnapshot,
   parseStoredJson,
-  planPhoneStep,
   selectPhoneTargets,
 } from "./parser-core.mjs";
 
@@ -89,21 +93,6 @@ test("phone attempt stores explicit found, unavailable and retry states", () => 
   assert.equal(retry.phoneError, "HTTP 429");
 });
 
-test("throttled phone responses back off, retry the same master, then give up in a bounded streak", () => {
-  const opts = { giveUpAfter: 4, backoffMs: 20000 };
-
-  // Штатный ответ — принять и обнулить серию.
-  assert.deepEqual(planPhoneStep({ status: "found", phone: "7701" }, 3, opts), { action: "accept", streak: 0, waitMs: 0 });
-  assert.deepEqual(planPhoneStep({ status: "unavailable" }, 2, opts), { action: "accept", streak: 0, waitMs: 0 });
-
-  // Троттлинг — растущая пауза и повтор того же мастера (мастера НЕ помечаем).
-  assert.deepEqual(planPhoneStep({ status: "throttled" }, 0, opts), { action: "backoff", streak: 1, waitMs: 20000 });
-  assert.deepEqual(planPhoneStep({ status: "throttled" }, 1, opts), { action: "backoff", streak: 2, waitMs: 40000 });
-
-  // Серия троттлинга ограничена — на giveUpAfter подряд партия останавливается.
-  assert.deepEqual(planPhoneStep({ status: "throttled" }, 3, opts), { action: "giveup", streak: 4, waitMs: 0 });
-});
-
 test("fresh snapshot refreshes live fields while preserving collected phone history", () => {
   const existing = [{
     source: "olx", extId: "7", phone: "77010000000", phoneStatus: "found",
@@ -144,4 +133,87 @@ test("Firebase JSON parsing distinguishes empty nodes from corrupt data", () => 
   assert.deepEqual(parseStoredJson('{"ok":true}', { key: "cfg", empty: {} }), { ok: true });
   assert.throws(() => parseStoredJson("{bad", { key: "masters", empty: {} }), /masters/);
   assert.throws(() => parseStoredJson(42, { key: "masters", empty: {} }), /masters/);
+});
+
+// ── очередь добора номеров ────────────────────────────────────────────────────
+// Смысл очереди — не читать всю базу мастеров ради порции телефонов. Проверяем, что в неё
+// попадают ровно кандидаты, что поля переживают путь «база → очередь → отметка → результат»
+// и что внесение результатов не затирает уже добытые номера.
+
+const master = (over = {}) => ({
+  source: "olx", extId: "u1", offerId: "111", hasPhoneFlag: true, phone: "", active: true, ...over,
+});
+
+test("в очередь попадают только те, кому реально нужен номер", () => {
+  const queue = buildPhoneQueue([
+    master({ extId: "need" }),
+    master({ extId: "hasPhone", phone: "77771234567" }),
+    master({ extId: "inactive", active: false }),
+    master({ extId: "noFlag", hasPhoneFlag: false }),
+    master({ extId: "noOffer", offerId: null, phoneOfferId: null }),
+    null,
+  ]);
+  assert.deepEqual(queue.map((r) => r.k), ["olx:need"]);
+});
+
+test("очередь несёт поля, по которым выбирается следующий кандидат", () => {
+  const [row] = buildPhoneQueue([master({
+    phoneCheckedAt: "2026-08-01T00:00:00.000Z", phoneStatus: "retry", phoneAttempts: 2, score: 7, reviews: 13,
+  })]);
+  assert.equal(row.c, "2026-08-01T00:00:00.000Z");
+  assert.equal(row.s, "retry");
+  assert.equal(row.a, 2);
+  assert.equal(row.p, 7);
+  assert.equal(row.r, 13);
+  // Пустые поля не пишем: очередь должна оставаться компактной.
+  const [lean] = buildPhoneQueue([master({ extId: "lean" })]);
+  assert.deepEqual(Object.keys(lean).sort(), ["k", "o"]);
+});
+
+test("строка очереди понятна выбору кандидатов и отметке попытки", () => {
+  const [row] = buildPhoneQueue([master({ phoneOfferId: "222" })]);
+  const target = queueRowToTarget(row);
+  assert.equal(target.phoneOfferId, "222");
+  const [picked] = selectPhoneTargets([target], { limit: 5 });
+  assert.equal(picked, target);
+  const after = applyPhoneAttempt(target, { status: "found", phone: "+7 777 123-45-67" });
+  assert.equal(after.phone, "77771234567");
+  assert.equal(after.phoneAttempts, 1);
+  // Обратно в очередь — состояние попытки не теряется.
+  const back = queueRowFromTarget({ ...after, key: row.k });
+  assert.equal(back.a, 1);
+  assert.equal(back.s, "found");
+});
+
+test("результаты вносятся в базу по ключу source:extId", () => {
+  const items = [master({ extId: "a" }), master({ extId: "b" })];
+  const { items: next, applied } = applyPhoneResults(items, {
+    "olx:a": { phone: "77010000001", phoneStatus: "found" },
+  });
+  assert.equal(applied, 1);
+  assert.equal(next[0].phone, "77010000001");
+  assert.equal(next[1].phone, "");
+});
+
+test("уже добытый номер пустым результатом НЕ затирается", () => {
+  const items = [master({ extId: "a", phone: "77010000001" })];
+  const { items: next, applied } = applyPhoneResults(items, {
+    "olx:a": { phone: "", phoneStatus: "unavailable" },
+  });
+  assert.equal(applied, 0);
+  assert.equal(next[0].phone, "77010000001");
+});
+
+test("мусор вместо результатов ничего не ломает и ничего не меняет", () => {
+  const items = [master({ extId: "a" })];
+  for (const junk of [null, undefined, "строка", [], 42]) {
+    const { items: next, applied } = applyPhoneResults(items, junk);
+    assert.equal(applied, 0);
+    assert.deepEqual(next, items);
+  }
+});
+
+test("ключ записи совпадает с тем, по которому склеивается снимок", () => {
+  assert.equal(phoneQueueKey({ source: "olx", extId: "u9" }), "olx:u9");
+  assert.equal(phoneQueueKey(null), ":");
 });

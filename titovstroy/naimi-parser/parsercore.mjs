@@ -66,21 +66,6 @@ export function applyPhoneAttempt(master, result, checkedAt = Date.now()) {
   return next;
 }
 
-// Реакция на ответ телефонного эндпоинта при скользящем анти-бот лимите (напр. OLX
-// на серии быстрых запросов отдаёт HTTP 400 «подозрительная активность» и восстанавливается
-// через время). Чистая функция — её удобно тестировать отдельно от сети.
-//   result.status === "throttled" → лимит: НЕ помечаем мастера (останется в очереди),
-//     ждём растущую паузу и повторяем его же; после giveUpAfter подряд — стоп партии.
-//   иначе → "accept": ответ штатный (found/unavailable/retry), обрабатываем и сбрасываем серию.
-export function planPhoneStep(result, streak = 0, { giveUpAfter = 4, backoffMs = 20000 } = {}) {
-  if (result?.status === "throttled") {
-    const nextStreak = (Number(streak) || 0) + 1;
-    if (nextStreak >= giveUpAfter) return { action: "giveup", streak: nextStreak, waitMs: 0 };
-    return { action: "backoff", streak: nextStreak, waitMs: backoffMs * nextStreak };
-  }
-  return { action: "accept", streak: 0, waitMs: 0 };
-}
-
 const masterKey = (item) => `${item?.source || ""}:${item?.extId || ""}`;
 const PHONE_FIELDS = ["phone", "phoneStatus", "phoneCheckedAt", "phoneAttempts", "phoneError"];
 
@@ -127,4 +112,73 @@ export function parseStoredJson(value, { key = "данные", empty = null } = 
   }
   if (typeof value === "object") return value;
   throw new Error(`${key}: неожиданный тип данных ${typeof value}`);
+}
+
+// ── ОЧЕРЕДЬ ДОБОРА НОМЕРОВ ────────────────────────────────────────────────────
+//
+// ЗАЧЕМ. Телефоны OLX и naimi отдают порциями, поэтому парсер заходит за ними часто —
+// каждые полчаса. Раньше такой заход читал ВСЮ базу мастеров (мегабайты), хотя нужны ему
+// только те, у кого номера ещё нет: ~160 МБ трафика Firebase в сутки на пустом месте.
+//
+// ТЕПЕРЬ полный обход выкладывает компактную очередь — по одной строке на кандидата, только
+// те поля, которые реально нужны для выбора и отметки попытки. Заход за номерами читает
+// очередь (сотня килобайт вместо мегабайтов), а собранное складывает отдельным результатом.
+// Полный обход потом вносит результаты в базу и пересобирает очередь.
+//
+// Ключ записи — «source:extId», тот же, по которому склеивается снимок.
+export const phoneQueueKey = (item) => `${item?.source || ""}:${item?.extId || ""}`;
+
+// Кандидат — активный мастер, у которого объявление обещает номер, а номера ещё нет.
+export function buildPhoneQueue(items) {
+  const out = [];
+  for (const m of Array.isArray(items) ? items : []) {
+    if (!m || m.active === false || m.phone) continue;
+    if (!m.hasPhoneFlag) continue;
+    const offerId = m.phoneOfferId || m.offerId;
+    if (!offerId || !m.source || !m.extId) continue;
+    const row = { k: phoneQueueKey(m), o: String(offerId) };
+    // Поля ниже нужны selectPhoneTargets: по ним считается очередь и пауза перед повтором.
+    if (m.phoneCheckedAt) row.c = m.phoneCheckedAt;
+    if (m.phoneStatus) row.s = m.phoneStatus;
+    if (Number(m.phoneAttempts)) row.a = Number(m.phoneAttempts);
+    if (Number(m.score ?? m.rating)) row.p = Number(m.score ?? m.rating);
+    if (Number(m.reviews)) row.r = Number(m.reviews);
+    out.push(row);
+  }
+  return out;
+}
+
+// Компактная строка очереди → объект в том виде, какой понимают selectPhoneTargets
+// и applyPhoneAttempt. Обратное преобразование — queueRowFromTarget.
+export const queueRowToTarget = (row) => ({
+  key: row?.k || "", offerId: row?.o || "", phoneOfferId: row?.o || "",
+  phone: "", phoneCheckedAt: row?.c || null, phoneStatus: row?.s || "",
+  phoneAttempts: Number(row?.a) || 0, score: Number(row?.p) || 0, reviews: Number(row?.r) || 0,
+});
+
+export function queueRowFromTarget(target) {
+  const row = { k: target?.key || "", o: String(target?.offerId || "") };
+  if (target?.phoneCheckedAt) row.c = target.phoneCheckedAt;
+  if (target?.phoneStatus) row.s = target.phoneStatus;
+  if (Number(target?.phoneAttempts)) row.a = Number(target.phoneAttempts);
+  if (Number(target?.score)) row.p = Number(target.score);
+  if (Number(target?.reviews)) row.r = Number(target.reviews);
+  return row;
+}
+
+// Внести собранные номера в базу мастеров. results — { "source:extId": {phone, phoneStatus, ...} }.
+// Возвращает новый список и сколько записей реально изменилось: по этому числу видно,
+// была ли работа, и не пишем базу впустую.
+export function applyPhoneResults(items, results) {
+  const patches = results && typeof results === "object" && !Array.isArray(results) ? results : {};
+  let applied = 0;
+  const out = (Array.isArray(items) ? items : []).map((m) => {
+    const patch = patches[phoneQueueKey(m)];
+    if (!patch || typeof patch !== "object") return m;
+    // Номер, добытый вручную или прошлым прогоном, НЕ перетираем пустым результатом.
+    if (m.phone && !patch.phone) return m;
+    applied += 1;
+    return { ...m, ...patch };
+  });
+  return { items: out, applied };
 }
