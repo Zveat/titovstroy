@@ -278,6 +278,11 @@ const INTERVALS = { daily: 22 * 3600e3, twice: 11 * 3600e3, weekly: 6.5 * 24 * 3
 // NAIMI_ZERO_GIVEUP ПОДРЯД пустых прогонов (реальное исчерпание), а один-два 0 переживаем.
 // Каждый номер найми = ЗАЯВКА от РЕАЛЬНОГО аккаунта, поэтому зазор «средний» (2ч). Настраивается env.
 const NAIMI_HARVEST_GAP_MS = num("NAIMI_HARVEST_GAP_MS", 2 * 3600e3); // «средний» темп: раз в 2 часа
+// ПОСЛЕ СУТОЧНОГО ЛИМИТА — ЖДЁМ ДОЛЬШЕ. Лимит naimi суточный: заход через два часа после того,
+// как он сработал, соберёт РОВНО НОЛЬ номеров, а стоить будет полного чтения базы мастеров
+// (у неё уже тысячи записей, и она растёт с каждым новым городом). Двенадцать таких пустых
+// заходов в сутки — это мегабайты трафика Firebase впустую. Ждём до следующего дня.
+const NAIMI_LIMIT_COOLDOWN_MS = num("NAIMI_LIMIT_COOLDOWN_MS", 10 * 3600e3);
 const NAIMI_ZERO_GIVEUP = num("NAIMI_ZERO_GIVEUP", 8);                // столько ПОДРЯД пустых прогонов → стоп harvest
 function decideRun(cfg) {
   const freq = ["off", "daily", "twice", "weekly"].includes(cfg.frequency) ? cfg.frequency : "daily";
@@ -296,8 +301,14 @@ function decideRun(cfg) {
   // логики. Выключается только после NAIMI_ZERO_GIVEUP подряд пустых (реально всё выбрано/аккаунт лёг).
   const pending = Number(cfg.lastPendingPhone) || 0;
   const zeroStreak = Number(cfg.naimiZeroStreak) || 0;
-  if (pending > 0 && zeroStreak < NAIMI_ZERO_GIVEUP && sinceLast >= NAIMI_HARVEST_GAP_MS) {
-    return { run: true, reason: `сбор номеров (осталось ~${pending}, пустых подряд ${zeroStreak}), темп ${Math.round(NAIMI_HARVEST_GAP_MS / 3600e3 * 10) / 10}ч`, runNow };
+  // Прошлый заход упёрся в суточный лимит naimi — ждём до следующего дня, а не два часа.
+  const limitHit = /лимит|limit|исчерп|превыш|достиг|quota/i.test(String(cfg.lastPhoneError || ""));
+  const harvestGap = limitHit ? NAIMI_LIMIT_COOLDOWN_MS : NAIMI_HARVEST_GAP_MS;
+  if (pending > 0 && zeroStreak < NAIMI_ZERO_GIVEUP && sinceLast >= harvestGap) {
+    return { run: true, reason: `сбор номеров (осталось ~${pending}, пустых подряд ${zeroStreak}), темп ${Math.round(harvestGap / 3600e3 * 10) / 10}ч${limitHit ? " (после суточного лимита)" : ""}`, runNow };
+  }
+  if (pending > 0 && limitHit && sinceLast < harvestGap) {
+    return { run: false, reason: `суточный лимит naimi — ждём ${Math.round((harvestGap - sinceLast) / 3600e3 * 10) / 10}ч, чтобы не читать базу впустую`, runNow };
   }
   const iv = INTERVALS[freq] || INTERVALS.daily;
   const run = sinceLast >= iv;

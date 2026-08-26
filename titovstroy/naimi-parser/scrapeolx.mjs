@@ -31,22 +31,7 @@ import {
   selectPhoneTargets,
 } from "./parser-core.mjs";
 
-// Реакция на ответ телефонного эндпоинта при скользящем анти-бот лимите OLX (HTTP 400
-// «подозрительная активность» на серии быстрых запросов, восстановление за ~минуту).
-// Вшито прямо сюда, чтобы файл не зависел от версии parser-core.mjs.
-//   throttled → лимит: мастера НЕ помечаем, ждём растущую паузу и повторяем его же;
-//     после giveUpAfter подряд — стоп партии. Иначе → accept (штатный ответ), серия в 0.
-function planPhoneStep(result, streak = 0, { giveUpAfter = 4, backoffMs = 20000 } = {}) {
-  if (result?.status === "throttled") {
-    const nextStreak = (Number(streak) || 0) + 1;
-    if (nextStreak >= giveUpAfter) return { action: "giveup", streak: nextStreak, waitMs: 0 };
-    return { action: "backoff", streak: nextStreak, waitMs: backoffMs * nextStreak };
-  }
-  return { action: "accept", streak: 0, waitMs: 0 };
-}
-
 const API = "https://www.olx.kz/api/v1";
-const SITE = "https://www.olx.kz";
 const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36";
 
 const env = (k, d) => {
@@ -63,15 +48,9 @@ const EVENT         = env("EVENT_NAME", "");
 const PAGE_LIMIT    = 40;                                  // объявлений на страницу API
 const MAX_PAGES     = num("OLX_MAX_PAGES", 25);            // предел пагинации на категорию (25×40=1000, максимум OLX)
 const PHONES_HARD_CAP = num("OLX_PHONES_HARD_CAP", 300);  // очередь честная: за несколько запусков проверит всех
-const PHONE_BUDGET_MS = num("OLX_PHONE_BUDGET_MS", 24 * 60e3); // job timeout 35 мин, краул ~3 мин → запас есть
-// ВАЖНО: /limited-phones/ у OLX — скользящий анти-бот лимит (~8 запросов в короткое окно,
-// затем HTTP 400 «подозрительная активность», восстановление за ~минуту). Замер показал:
-// пауза ~7с держит 100% успеха, а 1.2-3.2с (старое значение) валит ~90% в 400. Поэтому темп
-// ~7-10с + бэкофф на троттлинг (ниже), иначе бюджет прогона сгорает впустую.
-const PHONE_DELAY_MIN = num("OLX_PHONE_DELAY_MIN_MS", 7000);
-const PHONE_DELAY_MAX = num("OLX_PHONE_DELAY_MAX_MS", 10000);
-const PHONE_THROTTLE_BACKOFF_MS = num("OLX_PHONE_BACKOFF_MS", 20000); // база растущей паузы при 400
-const PHONE_THROTTLE_GIVEUP = num("OLX_PHONE_GIVEUP", 4);             // столько троттлингов подряд → стоп партии
+const PHONE_BUDGET_MS = num("OLX_PHONE_BUDGET_MS", 16 * 60e3);
+const PHONE_DELAY_MIN = num("OLX_PHONE_DELAY_MIN_MS", 1200);
+const PHONE_DELAY_MAX = num("OLX_PHONE_DELAY_MAX_MS", 3200);
 const PHONE_SAVE_EVERY = 12;
 
 // Карта категорий OLX «Услуги» → название специальности (чтобы видеть, кто что делает).
@@ -199,12 +178,9 @@ function upsert(byUser, offer, categoryName) {
 async function fetchPhone(offerId) {
   try {
     const r = await fetch(`${API}/offers/${offerId}/limited-phones/`, {
-      headers: { "Accept": "application/json", "User-Agent": UA, "Referer": `${SITE}/`, "Origin": SITE },
+      headers: { "Accept": "application/json", "User-Agent": UA },
     });
     if (r.status === 404 || r.status === 410) return { status: "unavailable" };
-    // 400/403/429 — это скользящий анти-бот лимит («подозрительная активность»), а НЕ «номера нет».
-    // Помечаем как throttled, чтобы цикл ушёл в бэкофф и повторил того же мастера, не тратя его.
-    if (r.status === 400 || r.status === 403 || r.status === 429) return { status: "throttled", error: `HTTP ${r.status}` };
     if (!r.ok) return { status: "retry", error: `HTTP ${r.status}` };
     const j = await r.json();
     const phone = onlyDigits(j?.data?.phones?.[0] || "");
@@ -249,13 +225,18 @@ function decideRun(cfg) {
   console.log(`решение: ${decision.run ? "ЗАПУСК" : "ПРОПУСК"} — ${decision.reason}`);
   if (!decision.run) { await admin.app().delete(); return; }
 
-  const regionId = num("OLX_REGION_ID", Number(cfg.regionId) || 5);
+  // РЕГИОНОВ МОЖЕТ БЫТЬ НЕСКОЛЬКО: «5» или «5,18,1» — Караганда, Астана, Алматы и т.д.
+  // Раньше принималось одно число, и добавить второй город было нельзя без правки кода.
+  // Города ВНУТРИ региона парсер и так находит сам (см. разбиение по cityIds ниже).
+  const regionIds = String(env("OLX_REGION_ID", "") || cfg.regionId || "5")
+    .split(",").map(x => Number(String(x).trim())).filter(n => Number.isFinite(n) && n > 0);
+  if (!regionIds.length) regionIds.push(5);
   const selectedCategoryIds = (env("OLX_CATEGORY_IDS", "") || String(cfg.categoryIds || "") || "188")
     .split(",").map(s => s.trim()).filter(Boolean);
   const categoryIds = expandOlxCategoryIds(selectedCategoryIds);
   const configuredPhones = Number(cfg.phonesPerRun);
   const phonesPerRun = num("OLX_PHONES_PER_RUN", Number.isFinite(configuredPhones) ? configuredPhones : 60);
-  console.log(`OLX-parser · регион=${regionId} категории=[${categoryIds}] телефоны/прогон=${phonesPerRun}`);
+  console.log(`OLX-parser · регионы=[${regionIds}] категории=[${categoryIds}] телефоны/прогон=${phonesPerRun}`);
 
   // уже собранное → мержим (телефоны не теряем)
   const existingDoc = await readJson(MASTERS_KEY, { items: [] });
@@ -269,31 +250,35 @@ function decideRun(cfg) {
   // сбор объявлений по категориям
   let crawlComplete = true;
   const seenOfferIds = new Set();
-  for (const cid of categoryIds) {
-    const addOffer = (offer) => {
-      const offerKey = String(offer.id || "");
-      if (!offerKey || seenOfferIds.has(offerKey)) return;
-      seenOfferIds.add(offerKey);
-      upsert(freshByUser, offer, OLX_CAT_NAMES[offer.category?.id] || OLX_CAT_NAMES[cid] || "Услуга");
-    };
-    const regionResult = await crawlOffers(cid, regionId, "", addOffer);
-    let categoryComplete = regionResult.complete;
-    let partitioned = false;
-    // Публичная выдача OLX обрезается на 1000. Для таких категорий повторяем
-    // обход по каждому найденному городу региона и схлопываем дубли по offer.id.
-    if (regionResult.total >= MAX_PAGES * PAGE_LIMIT && regionResult.cityIds.size) {
-      partitioned = true;
-      categoryComplete = true;
-      for (const cityId of regionResult.cityIds) {
-        const cityResult = await crawlOffers(cid, regionId, cityId, addOffer);
-        if (!cityResult.complete) categoryComplete = false;
+  // Дубли схлопываются по offer.id ЧЕРЕЗ ВСЕ регионы и категории: seenOfferIds общий, поэтому
+  // одно объявление, попавшее в выдачу двух регионов, не задвоится в базе.
+  for (const regionId of regionIds) {
+    for (const cid of categoryIds) {
+      const addOffer = (offer) => {
+        const offerKey = String(offer.id || "");
+        if (!offerKey || seenOfferIds.has(offerKey)) return;
+        seenOfferIds.add(offerKey);
+        upsert(freshByUser, offer, OLX_CAT_NAMES[offer.category?.id] || OLX_CAT_NAMES[cid] || "Услуга");
+      };
+      const regionResult = await crawlOffers(cid, regionId, "", addOffer);
+      let categoryComplete = regionResult.complete;
+      let partitioned = false;
+      // Публичная выдача OLX обрезается на 1000. Для таких категорий повторяем
+      // обход по каждому найденному городу региона и схлопываем дубли по offer.id.
+      if (regionResult.total >= MAX_PAGES * PAGE_LIMIT && regionResult.cityIds.size) {
+        partitioned = true;
+        categoryComplete = true;
+        for (const cityId of regionResult.cityIds) {
+          const cityResult = await crawlOffers(cid, regionId, cityId, addOffer);
+          if (!cityResult.complete) categoryComplete = false;
+        }
       }
+      if (!categoryComplete) {
+        crawlComplete = false;
+        console.warn(`  ! регион ${regionId}, категория ${cid} собрана частично; старые записи не будут помечены неактивными`);
+      }
+      console.log(`  · регион ${regionId}, категория ${cid}: объявлений ${regionResult.got} (всего ~${regionResult.total})${partitioned ? `, разбито по ${regionResult.cityIds.size} городам` : ""}`);
     }
-    if (!categoryComplete) {
-      crawlComplete = false;
-      console.warn(`  ! категория ${cid} собрана частично; старые записи не будут помечены неактивными`);
-    }
-    console.log(`  · категория ${cid}: объявлений ${regionResult.got} (всего ~${regionResult.total})${partitioned ? `, разбито по ${regionResult.cityIds.size} городам` : ""}`);
   }
   const freshItems = [...freshByUser.values()];
   const all = mergeFreshSnapshot(existing, freshItems, { complete: crawlComplete });
@@ -320,34 +305,12 @@ function decideRun(cfg) {
     all.filter(m => m.active !== false && m.hasPhoneFlag && m.offerId),
     { limit: Math.min(Math.max(0, phonesPerRun), PHONES_HARD_CAP) },
   );
-  console.log(`телефоны: цель ${targets.length} (темп ~${Math.round((PHONE_DELAY_MIN + PHONE_DELAY_MAX) / 2000)}с, бюджет ${Math.round(PHONE_BUDGET_MS / 60e3)} мин)`);
+  console.log(`телефоны: цель ${targets.length}`);
   const deadline = Date.now() + PHONE_BUDGET_MS;
-  let gotPhones = 0, done = 0, retryErrors = 0, throttleHits = 0, lastPhoneError = "", firstRaw = true;
-  let throttleStreak = 0;
-  for (let idx = 0; idx < targets.length; idx++) {
+  let gotPhones = 0, done = 0, retryErrors = 0, lastPhoneError = "";
+  for (const m of targets) {
     if (Date.now() > deadline) { console.warn(`  ! бюджет времени исчерпан на ${done}/${targets.length}`); break; }
-    const m = targets[idx];
     const result = await fetchPhone(m.phoneOfferId || m.offerId);
-    if (firstRaw) { console.log(`  · первый ответ телефона: ${result.status}${result.error ? " " + result.error : ""}`); firstRaw = false; }
-
-    // Троттлинг (OLX прикрыл выдачу): мастера НЕ помечаем — ждём растущую паузу и повторяем его же.
-    // После PHONE_THROTTLE_GIVEUP отказов подряд — стоп партии (лучше добрать в следующем прогоне),
-    // остальные мастера остаются «непроверенными» и уйдут в очередь без ложной отметки «номера нет».
-    const plan = planPhoneStep(result, throttleStreak, { giveUpAfter: PHONE_THROTTLE_GIVEUP, backoffMs: PHONE_THROTTLE_BACKOFF_MS });
-    throttleStreak = plan.streak;
-    if (plan.action !== "accept") {
-      throttleHits++;
-      lastPhoneError = `OLX ограничил темп (${result.error || "HTTP 400"})`;
-      if (plan.action === "giveup") {
-        console.warn(`  ! OLX держит лимит ${throttleStreak} раз подряд — стоп до следующего прогона (собрано ${gotPhones})`);
-        break;
-      }
-      console.warn(`  ! троттлинг ${throttleStreak}: пауза ${Math.round(plan.waitMs / 1000)}с и повтор того же мастера`);
-      await sleep(plan.waitMs);
-      idx--;                                              // повторить того же мастера
-      continue;
-    }
-
     Object.assign(m, applyPhoneAttempt(m, result));
     if (result.status === "found") gotPhones++;
     if (result.status === "retry") { retryErrors++; lastPhoneError = result.error || "Временная ошибка OLX"; }
@@ -355,9 +318,13 @@ function decideRun(cfg) {
     if (done % PHONE_SAVE_EVERY === 0) {
       try { await writeJson(MASTERS_KEY, buildPayload()); console.log(`  … сохранено (номеров ${gotPhones}/${done})`); } catch {}
     }
+    if (result.status === "retry" && /HTTP (403|429)/.test(result.error || "")) {
+      console.warn(`  ! OLX временно ограничил телефоны (${result.error}); партия остановлена без ложной отметки «номера нет»`);
+      break;
+    }
     await sleep(rnd(PHONE_DELAY_MIN, PHONE_DELAY_MAX));
   }
-  console.log(`телефоны: получено ${gotPhones}, обработано ${done}, троттлингов ${throttleHits}, прочих ошибок ${retryErrors}`);
+  console.log(`телефоны: получено ${gotPhones}, обработано ${done}, временных ошибок ${retryErrors}`);
 
   const payload = buildPayload();
   await writeJson(MASTERS_KEY, payload);
