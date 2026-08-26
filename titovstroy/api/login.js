@@ -59,9 +59,21 @@ const fbKey = (key) => String(key).replace(/[^a-zA-Z0-9_]/g, "_");
 // четыре: в приложении её права принудительно полные, чтобы систему нельзя было запереть.
 // Матрица недоступна или роли в ней нет — падаем на «полные права только у admin»:
 // для остальных это отказ, то есть безопасная сторона.
+// ФЛАГИ ЗАПИСИ (fin/pay/cat/usr) И ЧТЕНИЯ (finR/payR).
+//
+// Запись и чтение — разные права, и раньше правила знали только про запись: любой вошедший
+// сотрудник ЧИТАЛ всё, включая деньги и ФОТ. Проверено на боевой под учёткой «наблюдателя»
+// (самая бесправная роль): читались операции, зарплаты, клиенты, договоры и себестоимость.
+//
+// Флаги чтения — ЗЕРКАЛО тех условий, по которым приложение само решает грузить раздел
+// (см. App.jsx, эффекты рядом с loadFinance/loadPayroll). Если условия разойдутся, роль
+// получит пустой раздел вместо данных, поэтому менять их надо ПАРОЙ, здесь и там:
+//   finR ← finance !== "none" || financialDetails || objectFinanceSummary   (у прораба это true)
+//   payR ← payroll !== "none" || finance !== "none"
+// Право редактировать всегда включает право видеть, поэтому edit поднимает и флаг чтения.
 function writeScopeForRole(role, rawMatrix) {
   const isAdmin = String(role) === "admin";
-  const base = { fin: isAdmin, pay: isAdmin, cat: isAdmin, usr: isAdmin };
+  const base = { fin: isAdmin, pay: isAdmin, cat: isAdmin, usr: isAdmin, finR: isAdmin, payR: isAdmin };
   const matrix = parseNode(rawMatrix);
   const perms = matrix && typeof matrix === "object" && !Array.isArray(matrix) ? matrix[role] : null;
   if (!perms || typeof perms !== "object") return base;
@@ -69,11 +81,14 @@ function writeScopeForRole(role, rawMatrix) {
     const v = perms[key];
     return v !== undefined && v !== null && v !== "none" && v !== false;
   };
+  const fin = isAdmin || perms.finance === "edit";
+  const pay = isAdmin || perms.payroll === "edit";
   return {
-    fin: isAdmin || perms.finance === "edit",
-    pay: isAdmin || perms.payroll === "edit",
+    fin, pay,
     cat: isAdmin || has("adminCatalog") || has("adminPrices"),
     usr: isAdmin || has("adminUsers") || has("adminRoles"),
+    finR: fin || has("finance") || perms.financialDetails === true || perms.objectFinanceSummary === true,
+    payR: pay || has("payroll") || has("finance"),
   };
 }
 
