@@ -729,8 +729,10 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
                     <option value="weekly">Раз в неделю</option>
                   </select>
                 </label>
-                <label style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600 }}>Регион (Караганда = 5)<br />
-                  <input value={cfgRegion} onChange={e => setCfgRegion(e.target.value)} style={{ ...selStyle, marginTop: 4, width: 120 }} />
+                <label style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600 }}>Регионы (Караганда = 5)<br />
+                  <input value={cfgRegion} onChange={e => setCfgRegion(e.target.value)} placeholder="5 или 5,18,1"
+                    title="Можно несколько через запятую. Города внутри области парсер находит сам."
+                    style={{ ...selStyle, marginTop: 4, width: 150 }} />
                 </label>
                 <label style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600 }}>Телефонов за прогон<br />
                   <input type="number" min="0" max="300" value={cfgPhones} onChange={e => setCfgPhones(e.target.value)} style={{ ...selStyle, marginTop: 4, width: 120 }} />
@@ -746,6 +748,8 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
               <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 12, lineHeight: 1.5 }}>
                 Здесь полный текущий список из раздела OLX «Ремонт и строительство» — {OLX_REPAIR_CATEGORIES.length} специальностей.
                 Телефоны проверяются честной очередью: сначала новые мастера, затем самые давно проверенные. Если автор скрыл номер, это будет указано в карточке.
+                <br />В поле «Регионы» можно перечислить несколько областей через запятую — <b>5,18,1</b>. Города внутри области парсер находит сам, вписывать их не нужно.
+                Номер области видно в адресе запроса OLX: открыть olx.kz с выбранной областью → F12 → вкладка Network → строка <b>offers</b> → в ней <b>region_id=</b>.
                 {config?.lastPendingPhone != null ? <><br />Ожидают проверки: <b>{config.lastPendingPhone}</b>.</> : null}
                 {config?.lastPhoneError ? <><br /><b style={{ color: "#dc2626" }}>{config.lastPhoneError}</b></> : null}
               </div>
