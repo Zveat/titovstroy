@@ -13,7 +13,7 @@ import {
   mergeFreshSnapshot,
   parseStoredJson,
   selectPhoneTargets,
-} from "./parser-core.mjs";
+} from "./parsercore.mjs";
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.parse("2026-07-22T12:00:00.000Z");

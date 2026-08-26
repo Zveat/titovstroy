@@ -29,7 +29,7 @@ import {
   mergeFreshSnapshot,
   parseStoredJson,
   selectPhoneTargets,
-} from "./parser-core.mjs";
+} from "./parsercore.mjs";
 
 const API  = "https://apipub.naimi.kz/app";
 const SITE = "https://naimi.kz";

@@ -7,7 +7,7 @@
   "scripts": {
     "scrape": "node scrape.mjs",
     "scrape-olx": "node olxparser.mjs",
-    "test": "node --test parser-core.node-test.mjs"
+    "test": "node --test parsercore.nodetest.mjs"
   },
   "dependencies": {
     "firebase-admin": "^12.7.0"
