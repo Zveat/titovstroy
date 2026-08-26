@@ -26,7 +26,7 @@ import { clientPhotosByStage, stageReportsKey, normalizeStageReports } from "./s
 import { requestServerLogin, lockoutMessage } from "./auth/loginClient.js";
 import { backupIndexKey, backupItemKey, normalizeIndex, pushIndex, mergeBackupViews, makeSnapshot, loadSnapshotData } from "./backups.js";
 import { ClientPhotoReport, ClientTabs, PhotoLightbox, stagesWithPhotos } from "./stage-reports/ClientPhotos.jsx";
-import { normCN, contractNetTotal, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, resolveEstimateRows, existingEstimateRowKey, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, splitAuditMonths, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
+import { normCN, contractNetTotal, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, resolveEstimateRows, existingEstimateRowKey, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, isPermissionDenied, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, splitAuditMonths, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, saveFailLabel, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -1958,13 +1958,23 @@ const _restToken = async () => {
   try { await _fbAuthReady; const u = _fbAuth && _fbAuth.currentUser; return u ? await u.getIdToken() : null; } catch { return null; }
 };
 const _restUrl = (key, token) => firebaseConfig.databaseURL + "/" + _fbKey(key) + ".json" + (token ? "?auth=" + encodeURIComponent(token) : "");
+// КЛЮЧИ, В КОТОРЫЕ БАЗА ОТКАЗАЛА ПО ПРАВАМ. Отказ правил окончателен: повторять его бесполезно
+// (правила ответят так же), но вредно — каждый повтор это ещё одна оценка правил, а человеку
+// показывается «облако недоступно», хотя сеть в порядке. Ключ отсюда не дожимается автофлешем;
+// локальная копия при этом ОСТАЁТСЯ на месте (ничего не теряется), а в реестре несохранённого
+// появляется честная причина «нет прав». Снимается только явным «Повторить» — после того, как
+// роли выдали право или человек перезашёл с новым токеном.
+const _deniedKeys = new Set();
+const _noteDenied = (key, denied) => { if (denied) _deniedKeys.add(key); else _deniedKeys.delete(key); return denied; };
+// Возвращает { ok, denied }: denied=true — правила отказали (HTTP 401/403), повтор не поможет.
 const _fbRestSet = async (key, value) => {
-  if (!firebaseConfig.databaseURL) return false;
+  if (!firebaseConfig.databaseURL) return { ok: false, denied: false };
   try {
     const token = await _restToken();
     const r = await _race(fetch(_restUrl(key, token), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) }), 12000);
-    return !!(r && r !== _TIMEOUT && r.ok);
-  } catch { return false; }
+    if (!r || r === _TIMEOUT) return { ok: false, denied: false };
+    return { ok: !!r.ok, denied: r.status === 401 || r.status === 403 };
+  } catch { return { ok: false, denied: false }; }
 };
 const _fbRestGet = async (key) => {
   if (!firebaseConfig.databaseURL) return { ok: false };
@@ -2130,15 +2140,19 @@ const storage = {
     let fbOk = false, fbError = null;
     try {
       if (_fbDb) {
+        let denied = false;
         try {
           await _fbAuthReady;
           let res = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000);
           if (res === _TIMEOUT) { await new Promise(r => setTimeout(r, 800)); res = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000); }
           if (res !== _TIMEOUT) fbOk = true; else fbError = "timeout";
-        } catch(e) { fbError = e?.message || String(e); }
-        if (!fbOk) { try { if (await _fbRestSet(key, value)) { fbOk = true; fbError = null; } } catch {} }
+        } catch(e) { denied = isPermissionDenied(e); fbError = denied ? "no-rights" : (e?.message || String(e)); }
+        // При отказе по правам REST-фолбэк не трогаем: он идёт с тем же токеном к тем же
+        // правилам и получит тот же отказ — лишняя оценка правил без единого шанса на успех.
+        if (!fbOk && !denied) { try { const rr = await _fbRestSet(key, value); if (rr.ok) { fbOk = true; fbError = null; } else if (rr.denied) { denied = true; fbError = "no-rights"; } } catch {} }
+        _noteDenied(key, denied && !fbOk);
       } else {
-        try { if (await _fbRestSet(key, value)) fbOk = true; else fbError = "no cloud"; } catch(e) { fbError = e?.message || String(e); }
+        try { const rr = await _fbRestSet(key, value); if (rr.ok) fbOk = true; else { fbError = rr.denied ? "no-rights" : "no cloud"; _noteDenied(key, rr.denied); } } catch(e) { fbError = e?.message || String(e); }
       }
       if (fbOk && _mayApplyEditorResult(op.session) && !_foreignDirty(key)) {
         clearSyncedLocalMirror(localStorage, _mem, key,
@@ -2254,7 +2268,7 @@ const storage = {
     }
     // Firebase — пишем СТРОКУ JSON целиком (а не вложенный объект),
     // иначе ключи с символами / . # $ [ ] (напр. названия работ со слэшем) ломают запись.
-    let fbOk = false, fbError = null;
+    let fbOk = false, fbError = null, denied = false;
     try {
       if (_fbDb) {
         try {
@@ -2268,19 +2282,28 @@ const storage = {
         if (res === _TIMEOUT) { fbError = "timeout"; }
         else { fbOk = true; }
       } catch(e) {
-        fbError = e?.message || String(e); console.warn("FB set error:", e);
-        // повтор после ошибки
-        try {
-          await new Promise(r=>setTimeout(r,800));
-          const res2 = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000);
-          if (res2 !== _TIMEOUT) { fbOk = true; fbError = null; }
-        } catch(e2) { fbError = e2?.message || String(e2); }
+        // ОТКАЗ ПО ПРАВАМ — НЕ СБОЙ СЕТИ: ни повтор через паузу, ни REST не помогут, правила
+        // ответят так же. Раньше на каждой такой записи делалось три попытки подряд, и ключ
+        // потом бесконечно дожимался автофлешем — отсюда десятки тысяч отказов в метрике правил.
+        denied = isPermissionDenied(e);
+        fbError = denied ? "no-rights" : (e?.message || String(e));
+        if (denied) console.warn("FB set: отказано по правам —", key);
+        else {
+          console.warn("FB set error:", e);
+          // повтор после ошибки
+          try {
+            await new Promise(r=>setTimeout(r,800));
+            const res2 = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000);
+            if (res2 !== _TIMEOUT) { fbOk = true; fbError = null; }
+          } catch(e2) { denied = isPermissionDenied(e2); fbError = denied ? "no-rights" : (e2?.message || String(e2)); }
+        }
       }
       // SDK (WebSocket) не смог — пробуем обычным HTTPS-запросом (REST). Часто именно
       // WebSocket заблокирован блокировщиком/сетью, а сама база доступна.
-        if (!fbOk) {
-          try { if (await _fbRestSet(key, value)) { fbOk = true; fbError = null; } } catch {}
+        if (!fbOk && !denied) {
+          try { const rr = await _fbRestSet(key, value); if (rr.ok) { fbOk = true; fbError = null; } else if (rr.denied) { denied = true; fbError = "no-rights"; } } catch {}
         }
+        _noteDenied(key, denied && !fbOk);
       } else {
         fbError = "firebase not configured";
       }
@@ -2311,6 +2334,12 @@ const storage = {
     } catch(e) {}
     return out;
   },
+  // Ключи, в которых база отказала по ПРАВАМ (а не из-за сети). Для баннера: показать
+  // «нет прав на раздел», а не «облако недоступно» — иначе человек чинит интернет вместо прав.
+  deniedKeys() { return Array.from(_deniedKeys); },
+  // Снять пометку и дать записи ещё один шанс. Вызывается кнопкой «Повторить сейчас»: право
+  // могли выдать в матрице, а токен обновиться при перезаходе — тогда попытка уже пройдёт.
+  clearDenied() { _deniedKeys.clear(); },
   // Текущий владелец dirty-записей (id залогиненного пользователя) — для маркеров.
   setDirtyOwner(uid) { _dirtyOwnerUid = uid == null ? null : uid; },
   adoptUserDirty() { return adoptUserDirty(localStorage, _dirtyOwnerUid, _TAB_ID, _DIRTY_SUFFIX); },
@@ -2381,6 +2410,11 @@ const storage = {
     const keys = this.dirtyKeysVisible();
     let done = 0;
     for (const key of keys) {
+      // Ключ, в котором база отказала по правам, автоматически не дожимаем: правила ответят
+      // так же, а каждая попытка — это ещё чтение и три записи впустую. Данные при этом никуда
+      // не деваются: локальная копия и dirty-метка на месте, ключ виден в баннере, и по кнопке
+      // «Повторить» (она снимает пометку) попытка повторится — например, после выдачи прав.
+      if (_deniedKeys.has(key)) continue;
       try {
         const localVal = localStorage.getItem(key);
         if (localVal == null) { try { localStorage.removeItem(key + _DIRTY_SUFFIX); } catch(e){} continue; }
@@ -5996,6 +6030,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   }, []);
   const [dirtyCount, setDirtyCount] = useState(0); // СВОИ незасинканные dirty-записи storage (этот пользователь+вкладка) — участвует в баннере
   const [legacyDirtyN, setLegacyDirtyN] = useState(0); // legacy-маркеры без владельца (карантин — не авто-отправляются)
+  const [deniedN, setDeniedN] = useState(0); // записи, отбитые ПРАВАМИ базы (не сетью) — в баннере отдельной строкой
   const [cloudError, setCloudError] = useState(false); // последнее сохранение не ушло в облако (только локально)
   // ── РЕЕСТР НЕСОХРАНЁННОГО ───────────────────────────────────────────────────
   // Отказ записи внутри saveListProtected/saveEstimates возвращал undefined, и почти
@@ -8724,6 +8759,10 @@ ${reqBlock}`;
     if (resyncing) return;
     setResyncing(true);
     try {
+      // «Повторить» — единственный способ снова попробовать запись, отбитую по ПРАВАМ.
+      // Автоповторов у неё нет специально (правила ответят так же), но к этому моменту право
+      // могли выдать в матрице, а человек — перезайти и получить токен с новым флагом.
+      storage.clearDenied();
       // Дожимаем и ПРОИЗВОДСТВО целиком (правки карточек + фоновые bg_* + хвост очереди команд) —
       // раньше кнопка «Повторить сейчас» гоняла только flushDirty. await: спиннер «Синхронизирую…»
       // держится, пока попытки реально не завершились.
@@ -8783,7 +8822,7 @@ ${reqBlock}`;
   }, [_clearCloudErrorIfAllClean]);
   // Индикатор «есть несинхронизированные изменения» (свои — dirtyCount; legacy-карантин — отдельно)
   useEffect(() => {
-    const upd = () => { setDirtyCount(storage.dirtyKeysVisible().length); setLegacyDirtyN(storage.legacyDirtyKeys().length); };
+    const upd = () => { setDirtyCount(storage.dirtyKeysVisible().length); setLegacyDirtyN(storage.legacyDirtyKeys().length); setDeniedN(storage.deniedKeys().length); };
     upd();
     const iv = setInterval(upd, 5000);
     return () => clearInterval(iv);
@@ -11894,9 +11933,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             Отклонить</button>
         </div>
       )}
-      {!loadError && !syncBannerHidden && (cloudError || prodUnsyncedN > 0 || dirtyCount > 0 || legacyDirtyN > 0) && (
-        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:500,background:"#d97706",color:"#fff",padding:"10px 16px",paddingTop:"calc(10px + env(safe-area-inset-top,0px))",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)",flexWrap:"wrap"}}>
-          ⚠️ {prodUnsyncedN > 0 ? `Изменения производства ожидают синхронизации (${prodUnsyncedN}) — ` : ""}Данные могут быть сохранены ТОЛЬКО на этом устройстве — облако недоступно{dirtyCount>0?` (несинхронизировано: ${dirtyCount})`:""}. Приложение само дожмёт синхронизацию, когда облако ответит. Если баннер не гаснет — проверьте интернет и отключите блокировщик рекламы для этого сайта.{legacyDirtyN>0?` Есть старые несинхронизированные правки без владельца (${legacyDirtyN}) — они НЕ отправляются автоматически, обратитесь к администратору.`:""}
+      {/* ОТКАЗ ПО ПРАВАМ И СБОЙ СЕТИ — РАЗНЫЕ БЕДЫ, И ЛЕЧАТСЯ ПО-РАЗНОМУ.
+          Раньше баннер был один на оба случая и всегда говорил «облако недоступно»: человек с
+          отобранным правом чинил интернет и отключал блокировщик, хотя сеть была в порядке, а
+          приложение в это время молотило повторами, которые правила отбивали снова и снова. */}
+      {!loadError && !syncBannerHidden && (cloudError || prodUnsyncedN > 0 || dirtyCount > 0 || legacyDirtyN > 0 || deniedN > 0) && (
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:500,background:deniedN>0?"#b91c1c":"#d97706",color:"#fff",padding:"10px 16px",paddingTop:"calc(10px + env(safe-area-inset-top,0px))",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)",flexWrap:"wrap"}}>
+          {deniedN > 0
+            ? <>🚫 База отклонила сохранение: у вашей роли нет прав на эти разделы ({deniedN}). Дело НЕ в интернете — повторять бесполезно, пока право не выдадут. Данные остались на этом устройстве и не потеряны: попросите администратора открыть доступ в «Права ролей», затем выйдите и войдите заново и нажмите «Повторить сейчас». Разделы: {storage.deniedKeys().map(k => saveFailLabel(k)).join(", ")}.</>
+            : <>⚠️ {prodUnsyncedN > 0 ? `Изменения производства ожидают синхронизации (${prodUnsyncedN}) — ` : ""}Данные могут быть сохранены ТОЛЬКО на этом устройстве — облако недоступно{dirtyCount>0?` (несинхронизировано: ${dirtyCount})`:""}. Приложение само дожмёт синхронизацию, когда облако ответит. Если баннер не гаснет — проверьте интернет и отключите блокировщик рекламы для этого сайта.{legacyDirtyN>0?` Есть старые несинхронизированные правки без владельца (${legacyDirtyN}) — они НЕ отправляются автоматически, обратитесь к администратору.`:""}</>}
           <button onClick={resyncNow} disabled={resyncing} style={{background:"#fff",color:"#d97706",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:resyncing?"default":"pointer",fontFamily:"inherit"}}>{resyncing?"Синхронизирую…":"🔄 Повторить сейчас"}</button>
           {legacyDirtyN>0 && <button onClick={downloadLegacyDirty} style={{background:"#fff",color:"#92400e",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Скачать старые правки</button>}
           <button onClick={()=>setSyncBannerHidden(true)} style={{background:"rgba(255,255,255,.25)",color:"#fff",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Скрыть</button>
