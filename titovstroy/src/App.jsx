@@ -1965,15 +1965,27 @@ const _restUrl = (key, token) => firebaseConfig.databaseURL + "/" + _fbKey(key) 
 // появляется честная причина «нет прав». Снимается только явным «Повторить» — после того, как
 // роли выдали право или человек перезашёл с новым токеном.
 const _deniedKeys = new Set();
+// Тот же вопрос, что и в _fbRestSet: PERMISSION_DENIED от SDK означает «правила не пустили»
+// ТОЛЬКО если сотрудник действительно вошёл. До завершения входа база отвечает так же,
+// а это состояние временное — повтор поможет, и объявлять «нет прав» нельзя.
+// (_fbAuthReady — гонка с таймаутом в 5 секунд, поэтому дождаться его недостаточно.)
+const _deniedByRules = (err) => isPermissionDenied(err) && !!(_fbAuth && _fbAuth.currentUser);
 const _noteDenied = (key, denied) => { if (denied) _deniedKeys.add(key); else _deniedKeys.delete(key); return denied; };
-// Возвращает { ok, denied }: denied=true — правила отказали (HTTP 401/403), повтор не поможет.
+// Возвращает { ok, denied }: denied=true — правила отказали, повтор не поможет.
+//
+// ОТКАЗ СЧИТАЕМ ОТКАЗОМ, ТОЛЬКО ЕСЛИ ТОКЕН БЫЛ. База отвечает 401 и на «правила не пустили»,
+// и на «запрос пришёл вообще без токена» — по коду ответа их не различить. А без токена
+// запрос уходит, когда запись стартовала раньше, чем поднялась авторизация: на телефоне при
+// первом входе так пишется журнал изменений. Пометить это «нет прав» — соврать человеку и
+// прекратить повторы там, где повтор как раз ПОМОЖЕТ (через секунду токен будет).
+// Поэтому: нет токена → обычная неудача, ключ остаётся в очереди и дожмётся сам.
 const _fbRestSet = async (key, value) => {
   if (!firebaseConfig.databaseURL) return { ok: false, denied: false };
   try {
     const token = await _restToken();
     const r = await _race(fetch(_restUrl(key, token), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) }), 12000);
     if (!r || r === _TIMEOUT) return { ok: false, denied: false };
-    return { ok: !!r.ok, denied: r.status === 401 || r.status === 403 };
+    return { ok: !!r.ok, denied: !!token && (r.status === 401 || r.status === 403) };
   } catch { return { ok: false, denied: false }; }
 };
 const _fbRestGet = async (key) => {
@@ -2146,7 +2158,7 @@ const storage = {
           let res = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000);
           if (res === _TIMEOUT) { await new Promise(r => setTimeout(r, 800)); res = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000); }
           if (res !== _TIMEOUT) fbOk = true; else fbError = "timeout";
-        } catch(e) { denied = isPermissionDenied(e); fbError = denied ? "no-rights" : (e?.message || String(e)); }
+        } catch(e) { denied = _deniedByRules(e); fbError = denied ? "no-rights" : (e?.message || String(e)); }
         // При отказе по правам REST-фолбэк не трогаем: он идёт с тем же токеном к тем же
         // правилам и получит тот же отказ — лишняя оценка правил без единого шанса на успех.
         if (!fbOk && !denied) { try { const rr = await _fbRestSet(key, value); if (rr.ok) { fbOk = true; fbError = null; } else if (rr.denied) { denied = true; fbError = "no-rights"; } } catch {} }
@@ -2285,7 +2297,7 @@ const storage = {
         // ОТКАЗ ПО ПРАВАМ — НЕ СБОЙ СЕТИ: ни повтор через паузу, ни REST не помогут, правила
         // ответят так же. Раньше на каждой такой записи делалось три попытки подряд, и ключ
         // потом бесконечно дожимался автофлешем — отсюда десятки тысяч отказов в метрике правил.
-        denied = isPermissionDenied(e);
+        denied = _deniedByRules(e);
         fbError = denied ? "no-rights" : (e?.message || String(e));
         if (denied) console.warn("FB set: отказано по правам —", key);
         else {
@@ -2295,7 +2307,7 @@ const storage = {
             await new Promise(r=>setTimeout(r,800));
             const res2 = await _race(set(ref(_fbDb, _fbKey(key)), value), 12000);
             if (res2 !== _TIMEOUT) { fbOk = true; fbError = null; }
-          } catch(e2) { denied = isPermissionDenied(e2); fbError = denied ? "no-rights" : (e2?.message || String(e2)); }
+          } catch(e2) { denied = _deniedByRules(e2); fbError = denied ? "no-rights" : (e2?.message || String(e2)); }
         }
       }
       // SDK (WebSocket) не смог — пробуем обычным HTTPS-запросом (REST). Часто именно
