@@ -6450,6 +6450,11 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const reportsRef = useRef([]);
   useEffect(() => { reportsRef.current = reports; }, [reports]);
   const [avrModal, setAvrModal] = useState(null); // черновик акта в построителе
+  // Поиск по работам внутри построителя акта. Держим ОТДЕЛЬНЫМ состоянием, а не полем черновика:
+  // черновик уходит в сохранение акта, и строка поиска там не нужна. Сбрасывается при открытии
+  // и закрытии окна — иначе второй акт открылся бы с чужим фильтром и половиной скрытых работ.
+  const [avrSearch, setAvrSearch] = useState("");
+  useEffect(() => { if (!avrModal) setAvrSearch(""); }, [!!avrModal]);
 
   // Подрядчики (рабочие) и договоры подряда с ними
   const [workers, setWorkers] = useState([]);
@@ -7626,6 +7631,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     const cons = contractsRef.current.filter(c => c.objectId === obj.id && (c.type || "repair_fiz") !== "annex").sort((a, b) => (b.id || 0) - (a.id || 0));
     const con = cons[0];
     const existingNo = reportsRef.current.filter(r => r.objectId === obj.id).length + 1;
+    setAvrSearch("");   // новый акт открываем без чужого фильтра
     setAvrModal({
       id: null, objectId: obj.id, estId: est.id,
       clientName: obj.clientName || "", clientType: obj.clientType || "физ",
@@ -7643,6 +7649,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     const cons = contractsRef.current.filter(c => c.objectId === obj.id && (c.type || "repair_fiz") !== "annex").sort((a, b) => (b.id || 0) - (a.id || 0));
     const con = cons[0];
     const existingNo = reportsRef.current.filter(r => r.objectId === obj.id).length + 1;
+    setAvrSearch("");   // новый акт открываем без чужого фильтра
     setAvrModal({
       id: null, objectId: obj.id, estId: ests?.[0]?.id || null,
       clientName: obj.clientName || "", clientType: obj.clientType || "физ",
@@ -16880,7 +16887,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                       style={{background:"#ecfdf5",color:"#059669",border:"1px solid rgba(5,150,105,.25)",borderRadius:4,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>↩ В смету</button>
                                   )}
                                   {accessAllows(currentPermissions.documentEdit, estimatorObjectIds.has(obj.id)) && (
-                                    <button title="Редактировать акт" onClick={()=>setAvrModal({ ...r, lines:(r.lines||[]).map(l=>({...l,included:true,doneQty:l.doneQty})) })}
+                                    <button title="Редактировать акт" onClick={()=>{ setAvrSearch(""); setAvrModal({ ...r, lines:(r.lines||[]).map(l=>({...l,included:true,doneQty:l.doneQty})) }); }}
                                       style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
                                   )}
                                     {accessAllows(currentPermissions.documentDelete, estimatorObjectIds.has(obj.id)) && (
@@ -17437,8 +17444,24 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         const updLine = (i,patch) => setAvrModal(p=>({...p, lines:p.lines.map((l,idx)=>idx===i?{...l,...patch}:l)}));
         const selected = m.lines.filter(l=>l.included && Number(l.doneQty)>0);
         const total = selected.reduce((s,l)=>s+Math.round((Number(l.price)||0)*(Number(l.doneQty)||0)),0);
-        const allOn = m.lines.length>0 && m.lines.every(l=>l.included);
-        const addLine = ()=>setAvrModal(p=>({...p, lines:[...p.lines, {cat:"",name:"",unit:"",qty:0,price:0,included:true,doneQty:1}]}));
+        // ПОИСК ПО РАБОТАМ. В акте бывает под полсотни строк, и мотать их глазами неудобно.
+        // Фильтруем ОТОБРАЖЕНИЕ, но тащим с собой исходный индекс: updLine и удаление строки
+        // адресуются по позиции в m.lines, и если отдать им номер из отфильтрованного списка,
+        // правка уедет в соседнюю работу. Поэтому visible — пары {l, i} с настоящим i.
+        const q = avrSearch.trim().toLowerCase();
+        const visible = m.lines
+          .map((l, i) => ({ l, i }))
+          .filter(({ l }) => !q || `${l.name || ""} ${l.cat || ""} ${l.unit || ""}`.toLowerCase().includes(q));
+        // «Выбрать все» при активном поиске работает по НАЙДЕННЫМ строкам: набрал «демонтаж» —
+        // отметил весь демонтаж одной кнопкой. Без фильтра ведёт себя как раньше.
+        const scope = q ? visible.map(v => v.l) : m.lines;
+        const allOn = scope.length > 0 && scope.every(l => l.included);
+        const toggleAll = () => {
+          const idx = new Set(visible.map(v => v.i));
+          setAvrModal(p => ({ ...p, lines: p.lines.map((l, i) => (q && !idx.has(i)) ? l : { ...l, included: !allOn }) }));
+        };
+        // Новая строка не совпадёт с фильтром и визуально «не добавится» — поэтому поиск сбрасываем.
+        const addLine = ()=>{ setAvrSearch(""); setAvrModal(p=>({...p, lines:[...p.lines, {cat:"",name:"",unit:"",qty:0,price:0,included:true,doneQty:1}]})); };
         return (
         <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setAvrModal(null)}>
           <div style={{background:"#fff",borderRadius:14,width:"100%",maxWidth:760,maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 24px 70px rgba(0,0,0,.3)",overflow:"hidden"}} onClick={e=>e.stopPropagation()}>
@@ -17463,15 +17486,30 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               </label>
             </div>
             {/* список работ */}
-            <div style={{padding:"8px 20px",borderBottom:"1px solid #f1f5f9",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              <button onClick={()=>setAvrModal(p=>({...p, lines:p.lines.map(l=>({...l,included:!allOn}))}))}
-                style={{background:"none",border:"1px solid #e2e8f0",borderRadius:7,padding:"5px 11px",fontSize:11,fontWeight:600,color:"#475569",cursor:"pointer",fontFamily:"inherit"}}>
-                {allOn?"☐ Снять все":"☑ Выбрать все"}
+            <div style={{padding:"10px 20px 8px",borderBottom:"1px solid #f1f5f9",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <div style={{position:"relative",flex:"1 1 200px",minWidth:0}}>
+                <span style={{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",fontSize:12,color:"#94a3b8",pointerEvents:"none"}}>🔍</span>
+                <input value={avrSearch} onChange={e=>setAvrSearch(e.target.value)} placeholder="Поиск по работам"
+                  style={{width:"100%",padding:"7px 28px 7px 30px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:13,fontFamily:"inherit",outline:"none"}}/>
+                {avrSearch && <button onClick={()=>setAvrSearch("")} title="Очистить"
+                  style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"#94a3b8",fontSize:16,cursor:"pointer",lineHeight:1,padding:2}}>×</button>}
+              </div>
+              <button onClick={toggleAll} disabled={visible.length===0}
+                style={{background:"none",border:"1px solid #e2e8f0",borderRadius:7,padding:"6px 11px",fontSize:11,fontWeight:600,color:visible.length?"#475569":"#cbd5e1",cursor:visible.length?"pointer":"default",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
+                {allOn ? "☐ Снять" : "☑ Выбрать"}{q ? " найденные" : " все"}
               </button>
-              <span style={{fontSize:12,color:"#64748b"}}>Выбрано: <b>{selected.length}</b> из {m.lines.length}</span>
+              <span style={{fontSize:12,color:"#64748b",whiteSpace:"nowrap",flexShrink:0}}>
+                Выбрано: <b>{selected.length}</b> из {m.lines.length}
+                {q && <span style={{color:"#7c3aed",fontWeight:600}}> · найдено {visible.length}</span>}
+              </span>
             </div>
             <div style={{overflowY:"auto",flex:1,padding:"6px 12px"}}>
-              {m.lines.map((l,i)=>(
+              {q && visible.length===0 && (
+                <div style={{padding:"26px 8px",textAlign:"center",color:"#94a3b8",fontSize:13}}>
+                  Ничего не нашлось по запросу «{avrSearch.trim()}»
+                </div>
+              )}
+              {visible.map(({l,i})=>(
                 <div key={i} style={{padding:"10px 8px",borderBottom:"1px solid #f1f5f9",opacity:l.included?1:.5}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
                     <input type="checkbox" checked={l.included} onChange={e=>updLine(i,{included:e.target.checked})} style={{width:16,height:16,flexShrink:0,cursor:"pointer"}}/>
