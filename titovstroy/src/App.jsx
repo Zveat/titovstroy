@@ -6455,6 +6455,11 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   // и закрытии окна — иначе второй акт открылся бы с чужим фильтром и половиной скрытых работ.
   const [avrSearch, setAvrSearch] = useState("");
   useEffect(() => { if (!avrModal) setAvrSearch(""); }, [!!avrModal]);
+  // Реквизиты акта (номер, даты, заказчик, печать) на телефоне занимали почти всё окно, и на
+  // список работ оставалась полоска в одну строку. Поэтому блок сворачивается: на узком экране
+  // закрыт по умолчанию, на широком открыт — там места хватает и прятать нечего.
+  const [avrReqOpen, setAvrReqOpen] = useState(true);
+  const _narrowScreen = () => typeof window !== "undefined" && window.innerWidth <= 640;
 
   // Подрядчики (рабочие) и договоры подряда с ними
   const [workers, setWorkers] = useState([]);
@@ -7632,6 +7637,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     const con = cons[0];
     const existingNo = reportsRef.current.filter(r => r.objectId === obj.id).length + 1;
     setAvrSearch("");   // новый акт открываем без чужого фильтра
+    setAvrReqOpen(!_narrowScreen());
     setAvrModal({
       id: null, objectId: obj.id, estId: est.id,
       clientName: obj.clientName || "", clientType: obj.clientType || "физ",
@@ -7650,6 +7656,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     const con = cons[0];
     const existingNo = reportsRef.current.filter(r => r.objectId === obj.id).length + 1;
     setAvrSearch("");   // новый акт открываем без чужого фильтра
+    setAvrReqOpen(!_narrowScreen());
     setAvrModal({
       id: null, objectId: obj.id, estId: ests?.[0]?.id || null,
       clientName: obj.clientName || "", clientType: obj.clientType || "физ",
@@ -16887,7 +16894,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                       style={{background:"#ecfdf5",color:"#059669",border:"1px solid rgba(5,150,105,.25)",borderRadius:4,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>↩ В смету</button>
                                   )}
                                   {accessAllows(currentPermissions.documentEdit, estimatorObjectIds.has(obj.id)) && (
-                                    <button title="Редактировать акт" onClick={()=>{ setAvrSearch(""); setAvrModal({ ...r, lines:(r.lines||[]).map(l=>({...l,included:true,doneQty:l.doneQty})) }); }}
+                                    <button title="Редактировать акт" onClick={()=>{ setAvrSearch(""); setAvrReqOpen(!_narrowScreen()); setAvrModal({ ...r, lines:(r.lines||[]).map(l=>({...l,included:true,doneQty:l.doneQty})) }); }}
                                       style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
                                   )}
                                     {accessAllows(currentPermissions.documentDelete, estimatorObjectIds.has(obj.id)) && (
@@ -17473,8 +17480,19 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               </div>
               <button onClick={()=>setAvrModal(null)} style={{background:"none",border:"none",fontSize:24,color:"#94a3b8",cursor:"pointer",lineHeight:1}}>×</button>
             </div>
-            {/* реквизиты акта */}
-            <div style={{padding:"14px 20px",borderBottom:"1px solid #f1f5f9",display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
+            {/* реквизиты акта — сворачиваются, чтобы на телефоне список работ не сжимался в полоску */}
+            <button onClick={()=>setAvrReqOpen(v=>!v)}
+              style={{width:"100%",textAlign:"left",background:avrReqOpen?"none":"#f8fafc",border:"none",borderBottom:"1px solid #f1f5f9",padding:"10px 20px",cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:12,color:"#94a3b8",transform:avrReqOpen?"rotate(90deg)":"none",transition:"transform .15s",display:"inline-block"}}>▶</span>
+              <span style={{fontSize:12.5,fontWeight:700,color:"#475569"}}>Реквизиты акта</span>
+              {!avrReqOpen && (
+                <span style={{fontSize:12,color:"#94a3b8",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>
+                  №{m.actNo||"—"} · {m.actDate||"—"}{m.clientName?` · ${m.clientName}`:""}
+                </span>
+              )}
+            </button>
+            {avrReqOpen && (
+            <div style={{padding:"14px 20px",borderBottom:"1px solid #f1f5f9",display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
               <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>№ акта<input className="fi" style={{marginTop:4}} value={m.actNo} onChange={e=>upd({actNo:e.target.value})}/></label>
               <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Дата акта<input type="date" className="fi" style={{marginTop:4}} value={m.actDate} onChange={e=>upd({actDate:e.target.value})}/></label>
               <label style={{fontSize:11,color:"#64748b",fontWeight:600}}>Договор №<input className="fi" style={{marginTop:4}} value={m.contractNo} onChange={e=>upd({contractNo:e.target.value})} placeholder="—"/></label>
@@ -17485,6 +17503,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 🔖 Вставить печать ТОО в акт
               </label>
             </div>
+            )}
             {/* список работ */}
             <div style={{padding:"10px 20px 8px",borderBottom:"1px solid #f1f5f9",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
               <div style={{position:"relative",flex:"1 1 200px",minWidth:0}}>
@@ -17503,7 +17522,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 {q && <span style={{color:"#7c3aed",fontWeight:600}}> · найдено {visible.length}</span>}
               </span>
             </div>
-            <div style={{overflowY:"auto",flex:1,padding:"6px 12px"}}>
+            {/* minHeight: даже с раскрытыми реквизитами списку остаётся читаемая высота,
+                а не полоска в одну строку (flex-элемент со скроллом иначе сжимается до нуля) */}
+            <div style={{overflowY:"auto",flex:1,minHeight:170,padding:"6px 12px",WebkitOverflowScrolling:"touch"}}>
               {q && visible.length===0 && (
                 <div style={{padding:"26px 8px",textAlign:"center",color:"#94a3b8",fontSize:13}}>
                   Ничего не нашлось по запросу «{avrSearch.trim()}»
