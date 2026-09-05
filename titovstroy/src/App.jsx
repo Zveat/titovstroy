@@ -28,6 +28,18 @@ import { backupIndexKey, backupItemKey, normalizeIndex, pushIndex, mergeBackupVi
 import { ClientPhotoReport, ClientTabs, PhotoLightbox, stagesWithPhotos } from "./stage-reports/ClientPhotos.jsx";
 import { normCN, contractNetTotal, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, resolveEstimateRows, existingEstimateRowKey, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, isPermissionDenied, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, splitAuditMonths, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, saveFailLabel, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
 import { WORKS_DATA } from "./catalog/worksData.js";
+// Ключи узлов Firebase — все в одном месте, см. src/storageKeys.js
+import {
+  OBJECTS_KEY, OBJECTS_BACKUPS_KEY, PRODUCTIONS_KEY, PRODUCTIONS_BACKUPS_KEY, REPORTS_KEY,
+  REPORTS_BACKUPS_KEY, WORKERS_KEY, WORKERS_BACKUPS_KEY, PODRYADS_KEY, PODRYADS_BACKUPS_KEY, MASTERS_KEY,
+  MASTERS_CONFIG_KEY, MASTERS_OLX_KEY, MASTERS_OLX_CONFIG_KEY, MASTERS_CRM_KEY, WORKSPACE_BACKUPS_KEY,
+  DEALS_KEY, DEALS_BACKUPS_KEY, STORAGE_KEY, BACKUPS_KEY, USERS_KEY, USERS_BACKUPS_KEY,
+  ROLE_PERMISSIONS_KEY, ROLE_PERMISSIONS_BACKUPS_KEY, SESSION_KEY, PRESENCE_KEY, PRICES_KEY,
+  PRICES_BACKUPS_KEY, PUBLIC_NODES_BACKUPS_KEY, CATALOG_BACKUPS_KEY, CONTRACTS_BACKUPS_KEY,
+  CLIENTS_BACKUPS_KEY, CONTRAGENTS_BACKUPS_KEY, CATALOG_KEY, CONTRACTS_KEY, CLIENTS_KEY, CONTRAGENTS_KEY,
+  AUDIT_KEY, AUDIT_INDEX_KEY, AUDIT_MONTH_KEY, FINANCE_TX_KEY, FINANCE_TX_BACKUPS_KEY, FINANCE_META_KEY,
+  FINANCE_META_BACKUPS_KEY, FINANCE_PROJECTS_KEY, FINANCE_PROJECTS_BACKUPS_KEY, LOGIN_ATTEMPTS_KEY
+} from "./storageKeys.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -1299,27 +1311,8 @@ const PROD_TO_DEAL = { active:"work", paused:"paused", done:"done", cancel:"canc
 // зеркалирования клик по кнопке ничего не менял бы визуально (см. баг «кнопки не работают»).
 const DEAL_TO_PROD = { work:"active", paused:"paused", done:"done", cancel:"cancel" };
 const PROD_STATUSES_LABELS = { new:"Новый", active:"В работе", paused:"Приостановлен", done:"Выполнен", cancel:"Расторгнут" };
-const OBJECTS_KEY         = "titovstroy-objects";
-const OBJECTS_BACKUPS_KEY = "titovstroy-objects-backups";
-const PRODUCTIONS_KEY         = "titovstroy-productions";   // производственные карточки объектов
-const PRODUCTIONS_BACKUPS_KEY = "titovstroy-productions-backups";
-const REPORTS_KEY         = "titovstroy-reports";          // отчёты по объектам (АВР, форма Р-1)
-const REPORTS_BACKUPS_KEY = "titovstroy-reports-backups";
-const WORKERS_KEY         = "titovstroy-workers";          // справочник подрядчиков (рабочих)
-const WORKERS_BACKUPS_KEY = "titovstroy-workers-backups";
-const PODRYADS_KEY        = "titovstroy-podryads";         // договоры подряда с рабочими + их приложения
-const PODRYADS_BACKUPS_KEY= "titovstroy-podryads-backups";
-const MASTERS_KEY         = "titovstroy-masters";          // справочник мастеров с naimi.kz (пишет парсер, читаем только на чтение)
-const MASTERS_CONFIG_KEY  = "titovstroy-masters-config";   // настройки парсера (частота, «Обновить сейчас») — редактирует Админ, читает парсер
-const MASTERS_OLX_KEY        = "titovstroy-masters-olx";       // справочник мастеров с OLX.kz (второй источник, пишет отдельный парсер)
-const MASTERS_OLX_CONFIG_KEY = "titovstroy-masters-olx-config";// настройки OLX-парсера
-const MASTERS_CRM_KEY        = "titovstroy-masters-crm-v1";    // собственная база и история взаимодействий; парсеры этот ключ не меняют
 // единый снимок рабочего пространства: объекты + их сметы + их договора
-const WORKSPACE_BACKUPS_KEY = "titovstroy-workspace-backups";
 // legacy ключ для миграции старых сделок
-const DEALS_KEY          = "titovstroy-deals";
-const DEALS_BACKUPS_KEY  = "titovstroy-deals-backups";
-const STORAGE_KEY        = "titovstroy-estimates";
 // Почему не удалось заморозить цены смет перед сменой прайса. Раньше все причины
 // сваливались в одну фразу «не удалось», и понять, что чинить, было нельзя.
 const PRICE_SEAL_REASONS = {
@@ -1338,36 +1331,9 @@ const PRICE_SEAL_REASONS = {
 const CLIENT_SAVE_FAIL_TEXT = (reason) =>
   `Клиент НЕ сохранён: ${saveFailReasonText(reason)}. Данные в форме на месте — нажмите «Создать и выбрать» ещё раз.`;
 
-const BACKUPS_KEY        = "titovstroy-estimates-backups"; // снимки архива для восстановления
-const USERS_KEY          = "titovstroy-users";
-const USERS_BACKUPS_KEY  = "titovstroy-users-backups";
-const ROLE_PERMISSIONS_KEY = "titovstroy-role-permissions";
-const ROLE_PERMISSIONS_BACKUPS_KEY = "titovstroy-role-permissions-backups";
-const SESSION_KEY        = "titovstroy-session";
-const PRESENCE_KEY       = "titovstroy-presence"; // { [userId]: lastSeenTs } — кто когда был онлайн
 const PRESENCE_ONLINE_MS = 2 * 60 * 1000; // «в сети», если активность была <2 мин назад
-const PRICES_KEY         = "titovstroy-prices";  // переопределённые цены {code: {fixedPrice?, tiers?}}
-const PRICES_BACKUPS_KEY = "titovstroy-prices-backups"; // ОТДЕЛЬНО от каталога: цены — объект другого формата
-const PUBLIC_NODES_BACKUPS_KEY = "titovstroy-public-nodes-backups"; // пред-бэкап публичных нод (КП/кабинеты) перед restore
-const CATALOG_BACKUPS_KEY= "titovstroy-catalog-backups"; // снимки каталога (последние 10)
-const CONTRACTS_BACKUPS_KEY = "titovstroy-contracts-backups";
-const CLIENTS_BACKUPS_KEY   = "titovstroy-clients-backups";
-const CONTRAGENTS_BACKUPS_KEY = "titovstroy-contragents-backups";
-const CATALOG_KEY    = "titovstroy-catalog";
-const CONTRACTS_KEY  = "titovstroy-contracts";
-const CLIENTS_KEY    = "titovstroy-clients";
-const CONTRAGENTS_KEY= "titovstroy-contragents";
 // ── ФИНАНСЫ (независимый учёт: ДДС + P&L) ──
-const AUDIT_KEY               = "titovstroy-audit";             // ЛЕГАСИ-журнал (архив, только чтение)
-const AUDIT_INDEX_KEY         = "titovstroy-audit-index";       // список месяцев ["2026-07", ...] (какие помесячные ключи есть)
-const AUDIT_MONTH_KEY         = (ym) => "titovstroy-audit-" + ym; // помесячный журнал (без лимита записей)
 const _auditYM = (ts = Date.now()) => { const d = new Date(ts); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); };
-const FINANCE_TX_KEY          = "titovstroy-finance-tx";        // массив транзакций
-const FINANCE_TX_BACKUPS_KEY  = "titovstroy-finance-tx-backups";
-const FINANCE_META_KEY        = "titovstroy-finance-meta";      // {accounts, income, expense}
-const FINANCE_META_BACKUPS_KEY= "titovstroy-finance-meta-backups";
-const FINANCE_PROJECTS_KEY         = "titovstroy-finance-projects";   // массив проектов
-const FINANCE_PROJECTS_BACKUPS_KEY = "titovstroy-finance-projects-backups";
 // Справочник финансов по умолчанию (из исходной таблицы)
 // DEFAULT_FIN_META импортирован из ./utils.js
 // Категории, которые НЕ являются P&L (не выручка / не расход) — финансовая и инвестиционная деятельность
@@ -1468,7 +1434,6 @@ function passwordTooWeak(pw) {
   return null;
 }
 // ── Блокировка входа после серии неверных попыток (защита от простого перебора) ──
-const LOGIN_ATTEMPTS_KEY = "titovstroy-login-attempts";
 const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_LOCKOUT_MS = 5 * 60 * 1000;
 function _readLoginAttempts() {
