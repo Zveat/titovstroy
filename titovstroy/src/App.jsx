@@ -27,6 +27,7 @@ import { requestServerLogin, lockoutMessage } from "./auth/loginClient.js";
 import { backupIndexKey, backupItemKey, normalizeIndex, pushIndex, mergeBackupViews, makeSnapshot, loadSnapshotData } from "./backups.js";
 import { ClientPhotoReport, ClientTabs, PhotoLightbox, stagesWithPhotos } from "./stage-reports/ClientPhotos.jsx";
 import { normCN, contractNetTotal, clientUnitPrice, basePriceFromClient, lineTotal, CATALOG_DEFAULTS, withCatalogOverrides, groupData, tengeInWords, DEFAULT_FIN_META, mergeFinMeta, computeIssues, estimatesForObject, financeProjectMatchesSearch, applyWorkPricingOverride, createEstimatePricingSnapshot, resolveEstimateRowWork, sealLegacyEstimateRows, resolveEstimateRows, existingEstimateRowKey, buildCalendarStages, foremanLoad, classifyCloudArr, classifyCloudObj, preBackupDecision, mergeAuditEntries, validateBackupSchema, isBackupRestorable, makeDirtyMarker, listOwnedDirty, adoptUserDirty, discardOwnedDirty, listFlushableDirty, visibleDirtyKeys, isLegacyDirtyMarker, mayClearDirtyOnSuccess, mayUseLocalCopy, clearSyncedLocalMirror, compactLocalStorageMirrors, resolveVerifiedCloudRead, isStaleApprovalObject, isPermissionDenied, buildEstimatorDashboard, buildFinanceProjectView, financeStatusMeta, isActiveFinanceStatus, buildAuthorizedObjectPatch, matchesFinanceOperationsPreset, summarizeFinanceOperations, sortProductionStages, sumPaidProductionStages, resolveProgressBudget, startPublicProgressAutoRefresh, resolveEstimateSuggestionRules, buildEstimateSuggestions, resolveFinanceProjectBudget, splitAuditMonths, ROLE_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, permissionsForRole, accessAllows, docTypeAllows, EDIT_LEASE_KEY, LEASE_HEARTBEAT_MS, makeLease, parseLease, ownsActiveLease, claimFallbackLease, SAVE_FAIL_REASONS, saveFailReasonText, saveFailLabel, mergeSaveFail, clearSaveFailsFor, saveFailIdsFor, warrantyState, summarizeWarrantyClaims, WARRANTY_CLAIM_STATUSES, WARRANTY_DEFAULT_MONTHS } from "./utils.js";
+import { WORKS_DATA } from "./catalog/worksData.js";
 
 const DocumentTemplateAdminRoute = lazy(() => import("./documents/DocumentTemplateAdminRoute.jsx"));
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
@@ -395,7 +396,9 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
     setCfgBusy(false);
   };
   const runPending = (Number(config?.runNow) || 0) > (Number(config?.lastRunNow) || 0);
-  const [city, setCity] = useState("");
+  // Города — МНОЖЕСТВЕННЫЙ выбор: база теперь по нескольким регионам, и «Астана + Алматы»
+  // одним списком нужнее, чем по одному городу за раз. Пустой массив = все города.
+  const [city, setCity] = useState([]);
   const [service, setService] = useState("");
   const [minRating, setMinRating] = useState(0);
   const [onlyVerified, setOnlyVerified] = useState(false);
@@ -421,8 +424,11 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
 
   const filtered = useMemo(() => {
     const qn = q.trim().toLowerCase();
+    // null = фильтр по городам не задан. Иначе Set — сравнение за одну операцию на мастера,
+    // а их тут тысячи.
+    const citySet = city.length ? new Set(city) : null;
     const list = masters.filter(m => {
-      if (city && m.city !== city) return false;
+      if (citySet && !citySet.has(m.city)) return false;
       if (service && !(m.services || []).includes(service)) return false;
       if (minRating && (Number(m.rating) || 0) < minRating) return false;
       if (onlyVerified && !m.verified) return false;
@@ -528,7 +534,7 @@ function MastersSection({ masters = [], meta = null, loaded = true, config = nul
       {/* Фильтры */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Поиск по имени…" style={{ ...selStyle, flex: "1 1 200px", maxWidth: 280 }} />
-        <MasterSearchSelect value={city} onChange={setCity} options={cities.map(c => ({ id: c, name: c }))} emptyLabel="Все города" width={190} />
+        <SearchMultiSelect values={city} onChange={setCity} options={cities.map(c => ({ id: c, name: c }))} label="Все города" width={190} />
         <MasterSearchSelect value={service} onChange={setService} options={services.map(s => ({ id: s, name: s }))} emptyLabel="Все виды работ" width={250} />
         <select value={sort} onChange={e => setSort(e.target.value)} style={selStyle}>
           <option value="rating">По рейтингу</option>
@@ -655,7 +661,9 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
     setCfgBusy(false);
   };
   const runPending = (Number(config?.runNow) || 0) > (Number(config?.lastRunNow) || 0);
-  const [city, setCity] = useState("");
+  // Города — МНОЖЕСТВЕННЫЙ выбор: база теперь по нескольким регионам, и «Астана + Алматы»
+  // одним списком нужнее, чем по одному городу за раз. Пустой массив = все города.
+  const [city, setCity] = useState([]);
   const [service, setService] = useState("");
   const [who, setWho] = useState("");        // "" | "company" | "private"
   const [onlyPhone, setOnlyPhone] = useState(false);
@@ -677,8 +685,11 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
 
   const filtered = useMemo(() => {
     const qn = q.trim().toLowerCase();
+    // null = фильтр по городам не задан. Иначе Set — сравнение за одну операцию на мастера,
+    // а их тут тысячи.
+    const citySet = city.length ? new Set(city) : null;
     const list = masters.filter(m => {
-      if (city && m.city !== city) return false;
+      if (citySet && !citySet.has(m.city)) return false;
       if (service && !(m.services || []).includes(service)) return false;
       if (who === "company" && !m.business) return false;
       if (who === "private" && m.business) return false;
@@ -761,7 +772,7 @@ function MastersOlxView({ masters = [], meta = null, loaded = true, config = nul
       {/* Фильтры OLX */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Поиск по имени/объявлению…" style={{ ...selStyle, flex: "1 1 200px", maxWidth: 300 }} />
-        <MasterSearchSelect value={city} onChange={setCity} options={cities.map(c => ({ id: c, name: c }))} emptyLabel="Все города" width={190} />
+        <SearchMultiSelect values={city} onChange={setCity} options={cities.map(c => ({ id: c, name: c }))} label="Все города" width={190} />
         <MasterSearchSelect value={service} onChange={setService} options={services.map(s => ({ id: s, name: s }))} emptyLabel="Все специальности" width={250} />
         <select value={sort} onChange={e => setSort(e.target.value)} style={selStyle}>
           <option value="score">По баллу серьёзности</option>
@@ -1112,156 +1123,6 @@ const signOutStaff = async () => {
   } catch (e) { console.warn("staff sign-out failed", e); }
 };
 
-const WORKS_DATA = [
-  { code:"DEM-001", cat:"Черновые", sub:"Демонтаж", name:"Снятие обоев (не до основания)", unit:"м²", tiers:[], cost:200, margin:0.4, fixedPrice:333 },
-  { code:"DEM-002", cat:"Черновые", sub:"Демонтаж", name:"Снятие краски (водоэмульсия / старая побелка)", unit:"м²", tiers:[], cost:700, margin:0.4, fixedPrice:1167 },
-  { code:"DEM-003", cat:"Черновые", sub:"Демонтаж", name:"Снятие краски (советская / старая)", unit:"м²", tiers:[], cost:1900, margin:0.4, fixedPrice:3167 },
-  { code:"DEM-004", cat:"Черновые", sub:"Демонтаж", name:"Снятие краски (сложный демонтаж)", unit:"м²", tiers:[], cost:4000, margin:0.4, fixedPrice:6667 },
-  { code:"DEM-005", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж плитки, керамогранит", unit:"м²", tiers:[], cost:2000, margin:0.4, fixedPrice:3333 },
-  { code:"DEM-006", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж декоративных покрытий", unit:"м²", tiers:[], cost:1100, margin:0.4, fixedPrice:1833 },
-  { code:"DEM-007", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж гипсокартонных конструкций", unit:"м²", tiers:[], cost:1400, margin:0.4, fixedPrice:2333 },
-  { code:"DEM-008", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж натяжных потолков", unit:"м²", tiers:[], cost:300, margin:0.4, fixedPrice:500 },
-  { code:"DEM-009", cat:"Черновые", sub:"Демонтаж", name:"Удаление штукатурки", unit:"м²", tiers:[], cost:1900, margin:0.4, fixedPrice:3167 },
-  { code:"DEM-010", cat:"Черновые", sub:"Демонтаж", name:"Снятие старой стяжки (пол до основания)", unit:"м²", tiers:[], cost:4500, margin:0.4, fixedPrice:7500 },
-  { code:"DEM-011", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж линолеума", unit:"м²", tiers:[], cost:500, margin:0.4, fixedPrice:833 },
-  { code:"DEM-012", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж ламината", unit:"м²", tiers:[], cost:450, margin:0.4, fixedPrice:750 },
-  { code:"DEM-013", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж паркета", unit:"м²", tiers:[], cost:900, margin:0.4, fixedPrice:1500 },
-  { code:"DEM-014", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж плинтусов", unit:"м.п.", tiers:[], cost:200, margin:0.4, fixedPrice:333 },
-  { code:"DEM-015", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж галтели", unit:"м.п.", tiers:[], cost:100, margin:0.4, fixedPrice:167 },
-  { code:"DEM-016", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж межкомнатных дверей (старые)", unit:"шт", tiers:[], cost:4000, margin:0.4, fixedPrice:6667 },
-  { code:"DEM-017", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж межкомнатных дверей (новые)", unit:"шт", tiers:[], cost:3000, margin:0.4, fixedPrice:5000 },
-  { code:"DEM-018", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж дверей (железные)", unit:"шт", tiers:[], cost:6000, margin:0.4, fixedPrice:10000 },
-  { code:"DEM-019", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж дверей с сохранением для повторной установки", unit:"шт", tiers:[], cost:8000, margin:0.4, fixedPrice:13333 },
-  { code:"DEM-020", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж сантехприборов", unit:"шт", tiers:[], cost:2000, margin:0.4, fixedPrice:3333 },
-  { code:"DEM-021", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж розеток, выключателей", unit:"шт", tiers:[], cost:300, margin:0.4, fixedPrice:500 },
-  { code:"DEM-022", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж перегородок (ГКЛ)", unit:"м²", tiers:[], cost:1400, margin:0.4, fixedPrice:2333 },
-  { code:"DEM-023", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж перегородок (монолит)", unit:"м²", tiers:[], cost:12000, margin:0.4, fixedPrice:20000 },
-  { code:"DEM-024", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж перегородок (кирпич)", unit:"м²", tiers:[], cost:4000, margin:0.4, fixedPrice:6667 },
-  { code:"DEM-025", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж перегородок (газоблок)", unit:"м²", tiers:[], cost:3000, margin:0.4, fixedPrice:5000 },
-  { code:"DEM-026", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж радиатора отопления", unit:"шт", tiers:[], cost:5000, margin:0.4, fixedPrice:8333 },
-  { code:"DEM-027", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж маяков (стены)", unit:"м²", tiers:[], cost:180, margin:0.4, fixedPrice:300 },
-  { code:"DEM-028", cat:"Черновые", sub:"Демонтаж", name:"Демонтаж маяков (пол)", unit:"м²", tiers:[], cost:150, margin:0.4, fixedPrice:250 },
-  { code:"MUS-001", cat:"Черновые", sub:"Вынос/мусор", name:"Вынос строительного мусора", unit:"усл.", tiers:[], cost:20000, margin:0.4, fixedPrice:33333 },
-  { code:"MUS-002", cat:"Черновые", sub:"Вынос/мусор", name:"Вывоз строительного мусора", unit:"усл.", tiers:[], cost:20000, margin:0.4, fixedPrice:33333 },
-  { code:"WALL-001", cat:"Черновые", sub:"Выравнивание стен", name:"Грунтовка основания стен", unit:"м²", tiers:[], cost:200, margin:0.4, fixedPrice:333 },
-  { code:"WALL-002", cat:"Черновые", sub:"Выравнивание стен", name:"Монтаж маяков", unit:"м²", tiers:[], cost:450, margin:0.4, fixedPrice:750 },
-  { code:"WALL-003", cat:"Черновые", sub:"Выравнивание стен", name:"Штукатурка стен (1–3 см)", unit:"м²", tiers:[], cost:1700, margin:0.4, fixedPrice:2833 },
-  { code:"WALL-004", cat:"Черновые", sub:"Выравнивание стен", name:"Штукатурка стен (4–8 см)", unit:"м²", tiers:[], cost:3000, margin:0.4, fixedPrice:5000 },
-  { code:"WALL-005", cat:"Черновые", sub:"Выравнивание стен", name:"Армирование сеткой (стены)", unit:"м²", tiers:[], cost:500, margin:0.4, fixedPrice:833 },
-  { code:"WALL-006", cat:"Черновые", sub:"Выравнивание стен", name:"Шпаклёвка стен", unit:"м²", tiers:[], cost:1200, margin:0.4, fixedPrice:2000 },
-  { code:"WALL-007", cat:"Черновые", sub:"Выравнивание стен", name:"Ошкуривание стен", unit:"м²", tiers:[], cost:400, margin:0.4, fixedPrice:667 },
-  { code:"WALL-008", cat:"Черновые", sub:"Выравнивание стен", name:"Восстановление углов", unit:"м.п.", tiers:[], cost:800, margin:0.4, fixedPrice:1333 },
-  { code:"WALL-009", cat:"Черновые", sub:"Выравнивание стен", name:"Откосы под окна/двери", unit:"м.п.", tiers:[], cost:1800, margin:0.4, fixedPrice:3000 },
-  { code:"FLOOR-001", cat:"Черновые", sub:"Выравнивание пола", name:"Гидроизоляция пола", unit:"м²", tiers:[], cost:500, margin:0.4, fixedPrice:833 },
-  { code:"FLOOR-002", cat:"Черновые", sub:"Выравнивание пола", name:"Армирование сеткой (пол)", unit:"м²", tiers:[], cost:600, margin:0.4, fixedPrice:1000 },
-  { code:"FLOOR-003", cat:"Черновые", sub:"Выравнивание пола", name:"Монтаж маяков (пол)", unit:"м.п.", tiers:[], cost:450, margin:0.4, fixedPrice:750 },
-  { code:"FLOOR-004", cat:"Черновые", sub:"Выравнивание пола", name:"Стяжка ц/п до 80 мм (под керамзит)", unit:"м²", tiers:[], cost:2000, margin:0.4, fixedPrice:3333 },
-  { code:"FLOOR-005", cat:"Черновые", sub:"Выравнивание пола", name:"Стяжка ц/п 5–8 см", unit:"м²", tiers:[], cost:3000, margin:0.4, fixedPrice:5000 },
-  { code:"FLOOR-006", cat:"Черновые", sub:"Выравнивание пола", name:"Стяжка ц/п 9–12 см", unit:"м²", tiers:[], cost:3900, margin:0.4, fixedPrice:6500 },
-  { code:"FLOOR-007", cat:"Черновые", sub:"Выравнивание пола", name:"Засыпка керамзита до 100 мм", unit:"м²", tiers:[], cost:1000, margin:0.4, fixedPrice:1667 },
-  { code:"FLOOR-008", cat:"Черновые", sub:"Выравнивание пола", name:"Наливной пол (выравнивание под покрытия)", unit:"м²", tiers:[], cost:1800, margin:0.4, fixedPrice:3000 },
-  { code:"EL-001", cat:"Черновые", sub:"Электромонтаж", name:"Составление схемы электрики", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"EL-002", cat:"Черновые", sub:"Электромонтаж", name:"Штробление стен и потолков", unit:"м.п.", tiers:[], cost:null, margin:0.4 },
-  { code:"EL-003", cat:"Черновые", sub:"Электромонтаж", name:"Прокладка кабелей", unit:"м.п.", tiers:[], cost:null, margin:0.4 },
-  { code:"EL-004", cat:"Черновые", sub:"Электромонтаж", name:"Установка подрозетников", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"EL-005", cat:"Черновые", sub:"Электромонтаж", name:"Прокладка линий под кондиционер", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"EL-006", cat:"Черновые", sub:"Электромонтаж", name:"Монтаж кабеля под интернет/тв", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"ELSH-001", cat:"Черновые", sub:"Электрощит", name:"Сборка электрощита", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"ELSH-002", cat:"Черновые", sub:"Электрощит", name:"Автоматы, УЗО, дифавтоматы", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"ELSH-003", cat:"Черновые", sub:"Электрощит", name:"Распределение групп нагрузки", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"OUT-001", cat:"Черновые", sub:"Выводы", name:"Розетки (вывод)", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"OUT-002", cat:"Черновые", sub:"Выводы", name:"Выключатели (вывод)", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"OUT-003", cat:"Черновые", sub:"Выводы", name:"Выводы под светильники", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"SAN-001", cat:"Черновые", sub:"Водоснабжение", name:"Разводка труб холодной и горячей воды", unit:"м.п.", tiers:[], cost:null, margin:0.4 },
-  { code:"SAN-002", cat:"Черновые", sub:"Водоснабжение", name:"Коллекторная система", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"SAN-003", cat:"Черновые", sub:"Водоснабжение", name:"Замена стояков", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"KAN-001", cat:"Черновые", sub:"Канализация", name:"Прокладка канализационных труб", unit:"м.п.", tiers:[], cost:null, margin:0.4 },
-  { code:"KAN-002", cat:"Черновые", sub:"Канализация", name:"Выводы под сантехнику", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"SU-001", cat:"Черновые", sub:"Подготовка санузла", name:"Ниши под инсталляцию", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"SU-002", cat:"Черновые", sub:"Подготовка санузла", name:"Перенос точек", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"SU-003", cat:"Черновые", sub:"Подготовка санузла", name:"Выводы под стиральную/посудомоечную машину", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"GID-001", cat:"Черновые", sub:"Гидроизоляция", name:"Поднятие гидроизоляции на стены 20–30 см", unit:"м²", tiers:[], cost:1300, margin:0.4, fixedPrice:2167 },
-  { code:"GID-002", cat:"Черновые", sub:"Гидроизоляция", name:"Обработка углов и примыканий", unit:"м.п.", tiers:[], cost:500, margin:0.4, fixedPrice:833 },
-  { code:"GID-003", cat:"Черновые", sub:"Гидроизоляция", name:"Гидроизоляция под ванной и душем", unit:"м²", tiers:[], cost:500, margin:0.4, fixedPrice:833 },
-  { code:"GID-004", cat:"Черновые", sub:"Гидроизоляция", name:"Герметизация трубных выводов", unit:"шт", tiers:[], cost:600, margin:0.4, fixedPrice:1000 },
-  { code:"PREP-001", cat:"Черновые", sub:"Подготовка оснований", name:"Идеальная плоскость под покраску", unit:"м²", tiers:[], cost:2000, margin:0.4, fixedPrice:3333 },
-  { code:"PREP-002", cat:"Черновые", sub:"Подготовка оснований", name:"Подготовка под поклейку обоев", unit:"м²", tiers:[], cost:900, margin:0.4, fixedPrice:1500 },
-  { code:"PREP-003", cat:"Черновые", sub:"Подготовка оснований", name:"Шпаклёвка потолка", unit:"м²", tiers:[], cost:1300, margin:0.4, fixedPrice:2167 },
-  { code:"PREP-004", cat:"Черновые", sub:"Подготовка оснований", name:"Подготовка под натяжной потолок", unit:"м²", tiers:[], cost:500, margin:0.4, fixedPrice:833 },
-  { code:"PREP-005", cat:"Черновые", sub:"Подготовка оснований", name:"Выравнивание перепадов пола", unit:"м²", tiers:[], cost:1000, margin:0.4, fixedPrice:1667 },
-  { code:"PREP-006", cat:"Черновые", sub:"Подготовка оснований", name:"Ошкуривание потолка", unit:"м²", tiers:[], cost:400, margin:0.4, fixedPrice:667 },
-  { code:"PREP-007", cat:"Черновые", sub:"Подготовка оснований", name:"Грунтовка пола", unit:"м²", tiers:[], cost:250, margin:0.4, fixedPrice:417 },
-  { code:"PREP-008", cat:"Черновые", sub:"Подготовка оснований", name:"Грунтовка потолка", unit:"м²", tiers:[], cost:250, margin:0.4, fixedPrice:417 },
-  { code:"ADD-001", cat:"Черновые", sub:"Дополнительно", name:"Перегородки из ГКЛ (монтаж/перенос)", unit:"м²", tiers:[], cost:4000, margin:0.4, fixedPrice:6667 },
-  { code:"ADD-002", cat:"Черновые", sub:"Дополнительно", name:"Перегородки из кирпича (монтаж/перенос)", unit:"м²", tiers:[], cost:5500, margin:0.4, fixedPrice:9167 },
-  { code:"ADD-003", cat:"Черновые", sub:"Дополнительно", name:"Перегородки из газоблока (монтаж/перенос)", unit:"м²", tiers:[], cost:3500, margin:0.4, fixedPrice:5833 },
-  { code:"ADD-004", cat:"Черновые", sub:"Дополнительно", name:"Шумоизоляция стен и потолков", unit:"м²", tiers:[], cost:1800, margin:0.4, fixedPrice:3000 },
-  { code:"ADD-005", cat:"Черновые", sub:"Дополнительно", name:"Утепление лоджий", unit:"м²", tiers:[], cost:1600, margin:0.4, fixedPrice:2667 },
-  { code:"ADD-006", cat:"Черновые", sub:"Дополнительно", name:"Подготовка ниш под освещение", unit:"шт", tiers:[], cost:2500, margin:0.4, fixedPrice:4167 },
-  { code:"ADD-007", cat:"Черновые", sub:"Дополнительно", name:"Короба и конструкции из ГКЛ", unit:"м.п.", tiers:[], cost:4800, margin:0.4, fixedPrice:8000 },
-  { code:"OB-001", cat:"Чистовые", sub:"Стены — Обои", name:"Поклейка обоев", unit:"м²", tiers:[], cost:1200, margin:0.4, fixedPrice:2000 },
-  { code:"PA-001", cat:"Чистовые", sub:"Стены — Покраска", name:"Нанесение грунтовки", unit:"м²", tiers:[], cost:300, margin:0.4, fixedPrice:500 },
-  { code:"PA-002", cat:"Чистовые", sub:"Стены — Покраска", name:"Покраска в 1 слой", unit:"м²", tiers:[], cost:400, margin:0.4, fixedPrice:667 },
-  { code:"PA-003", cat:"Чистовые", sub:"Стены — Покраска", name:"Покраска в 2–3 слоя", unit:"м²", tiers:[], cost:1000, margin:0.4, fixedPrice:1667 },
-  { code:"PA-004", cat:"Чистовые", sub:"Стены — Покраска", name:"Окраска откосов и ниш", unit:"м.п.", tiers:[], cost:650, margin:0.4, fixedPrice:1083 },
-  { code:"DEC-001", cat:"Чистовые", sub:"Стены — Декоративные", name:"Декоративная штукатурка", unit:"м²", tiers:[], cost:2500, margin:0.4, fixedPrice:4167 },
-  { code:"DEC-002", cat:"Чистовые", sub:"Стены — Декоративные", name:"Микробетон", unit:"м²", tiers:[], cost:5000, margin:0.4, fixedPrice:8333 },
-  { code:"DEC-003", cat:"Чистовые", sub:"Стены — Декоративные", name:"Венецианка", unit:"м²", tiers:[], cost:6000, margin:0.4, fixedPrice:10000 },
-  { code:"DEC-004", cat:"Чистовые", sub:"Стены — Декоративные", name:"Акцентные стены", unit:"м²", tiers:[], cost:2000, margin:0.4, fixedPrice:3333 },
-  { code:"PAN-001", cat:"Чистовые", sub:"Стены — Панели", name:"МДФ/ПВХ панели", unit:"м²", tiers:[], cost:1400, margin:0.4, fixedPrice:2333 },
-  { code:"PAN-002", cat:"Чистовые", sub:"Стены — Панели", name:"Рейки", unit:"м²", tiers:[], cost:2500, margin:0.4, fixedPrice:4167 },
-  { code:"PAN-003", cat:"Чистовые", sub:"Стены — Панели", name:"3D панели", unit:"м²", tiers:[], cost:2000, margin:0.4, fixedPrice:3333 },
-  { code:"CEIL-001", cat:"Чистовые", sub:"Потолки", name:"Покраска потолка", unit:"м²", tiers:[], cost:1100, margin:0.4, fixedPrice:1833 },
-  { code:"CEIL-002", cat:"Чистовые", sub:"Потолки", name:"Монтаж трековых систем", unit:"м.п.", tiers:[], cost:2500, margin:0.4, fixedPrice:4167 },
-  { code:"CEIL-003", cat:"Чистовые", sub:"Потолки", name:"Монтаж световых линий", unit:"м.п.", tiers:[], cost:3500, margin:0.4, fixedPrice:5833 },
-  { code:"CEIL-004", cat:"Чистовые", sub:"Потолки", name:"Установка потолочных плинтусов (галтель)", unit:"м.п.", tiers:[], cost:700, margin:0.4, fixedPrice:1167 },
-  { code:"CEIL-005", cat:"Чистовые", sub:"Потолки", name:"Монтаж гипсокартонных коробов и ниш", unit:"м²", tiers:[], cost:4800, margin:0.4, fixedPrice:8000 },
-  { code:"FLR-001", cat:"Чистовые", sub:"Полы — Покрытия", name:"Укладка линолеума", unit:"м²", tiers:[], cost:1350, margin:0.4, fixedPrice:2250 },
-  { code:"FLR-002", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж ламината", unit:"м²", tiers:[], cost:1400, margin:0.4, fixedPrice:2333 },
-  { code:"FLR-003", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж кварц-винила", unit:"м²", tiers:[], cost:1700, margin:0.4, fixedPrice:2833 },
-  { code:"FLR-004", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж паркетной доски", unit:"м²", tiers:[], cost:2500, margin:0.4, fixedPrice:4167 },
-  { code:"FLR-005", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж инженерной доски", unit:"м²", tiers:[], cost:3500, margin:0.4, fixedPrice:5833 },
-  { code:"FLR-006", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж керамогранита", unit:"м²", tiers:[], cost:4000, margin:0.4, fixedPrice:6667 },
-  { code:"FLR-007", cat:"Чистовые", sub:"Полы — Покрытия", name:"Монтаж плитки (пол)", unit:"м²", tiers:[], cost:3500, margin:0.4, fixedPrice:5833 },
-  { code:"FLRA-001", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Подложка", unit:"м²", tiers:[], cost:180, margin:0.4, fixedPrice:300 },
-  { code:"FLRA-002", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Порожки", unit:"шт", tiers:[], cost:1400, margin:0.4, fixedPrice:2333 },
-  { code:"FLRA-003", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Монтаж плинтусов ПВХ", unit:"м.п.", tiers:[], cost:600, margin:0.4, fixedPrice:1000 },
-  { code:"FLRA-004", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Монтаж плинтусов МДФ", unit:"м.п.", tiers:[], cost:850, margin:0.4, fixedPrice:1417 },
-  { code:"FLRA-005", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Монтаж плинтусов полиуретановых/декор", unit:"м.п.", tiers:[], cost:1000, margin:0.4, fixedPrice:1667 },
-  { code:"FLRA-006", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Монтаж плинтусов деревянных", unit:"м.п.", tiers:[], cost:1200, margin:0.4, fixedPrice:2000 },
-  { code:"FLRA-007", cat:"Чистовые", sub:"Полы — Сопутствующие", name:"Герметизация примыканий", unit:"м.п.", tiers:[], cost:500, margin:0.4, fixedPrice:833 },
-  { code:"SN-001", cat:"Чистовые", sub:"Сантехника — Установка", name:"Унитаз (вкл. инсталляцию)", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"SN-002", cat:"Чистовые", sub:"Сантехника — Установка", name:"Ванна", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"SN-003", cat:"Чистовые", sub:"Сантехника — Установка", name:"Раковина", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"SN-004", cat:"Чистовые", sub:"Сантехника — Установка", name:"Смесители", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"SN-005", cat:"Чистовые", sub:"Сантехника — Установка", name:"Душевые системы", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"SN-006", cat:"Чистовые", sub:"Сантехника — Установка", name:"Трапы", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"SN-007", cat:"Чистовые", sub:"Сантехника — Установка", name:"Полотенцесушитель", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"SN-008", cat:"Чистовые", sub:"Сантехника — Установка", name:"Монтаж радиатора отопления", unit:"шт", tiers:[], cost:15000, margin:0.4, fixedPrice:25000 },
-  { code:"SN-009", cat:"Чистовые", sub:"Сантехника — Установка", name:"Монтаж радиатора (с заменой труб/подводки)", unit:"шт", tiers:[], cost:25000, margin:0.4, fixedPrice:41667 },
-  { code:"SNA-001", cat:"Чистовые", sub:"Сантехника — Дополнительно", name:"Монтаж экранов", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"SNA-002", cat:"Чистовые", sub:"Сантехника — Дополнительно", name:"Подключение стиралки/посудомойки", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"ELC-001", cat:"Чистовые", sub:"Электрика чистовая", name:"Установка розеток", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"ELC-002", cat:"Чистовые", sub:"Электрика чистовая", name:"Установка выключателей", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"ELC-003", cat:"Чистовые", sub:"Электрика чистовая", name:"Подключение светильников", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"ELC-004", cat:"Чистовые", sub:"Электрика чистовая", name:"Люстры, бра, треки", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"ELC-005", cat:"Чистовые", sub:"Электрика чистовая", name:"Монтаж точечных светильников", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"ELC-006", cat:"Чистовые", sub:"Электрика чистовая", name:"Подключение вытяжки", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"ELC-007", cat:"Чистовые", sub:"Электрика чистовая", name:"Установка терморегуляторов тёплого пола", unit:"шт", tiers:[], cost:null, margin:0.4 },
-  { code:"DR-001", cat:"Чистовые", sub:"Двери и проёмы", name:"Установка межкомнатных дверей (базовые)", unit:"шт", tiers:[], cost:15000, margin:0.4, fixedPrice:25000 },
-  { code:"DR-002", cat:"Чистовые", sub:"Двери и проёмы", name:"Установка межкомнатных дверей (скрытый монтаж)", unit:"шт", tiers:[], cost:25000, margin:0.4, fixedPrice:41667 },
-  { code:"DR-003", cat:"Чистовые", sub:"Двери и проёмы", name:"Доборы", unit:"шт", tiers:[], cost:2000, margin:0.4, fixedPrice:3333 },
-  { code:"DR-004", cat:"Чистовые", sub:"Двери и проёмы", name:"Наличники", unit:"шт", tiers:[], cost:2500, margin:0.4, fixedPrice:4167 },
-  { code:"DR-005", cat:"Чистовые", sub:"Двери и проёмы", name:"Установка входной двери", unit:"шт", tiers:[], cost:25000, margin:0.4, fixedPrice:41667 },
-  { code:"DR-006", cat:"Чистовые", sub:"Двери и проёмы", name:"Оформление проёмов и порталов", unit:"шт", tiers:[], cost:9000, margin:0.4, fixedPrice:15000 },
-  { code:"TL-001", cat:"Чистовые", sub:"Плиточные работы", name:"Укладка плитки на стены", unit:"м²", tiers:[], cost:3200, margin:0.4, fixedPrice:5333 },
-  { code:"TL-002", cat:"Чистовые", sub:"Плиточные работы", name:"Укладка плитки на пол", unit:"м²", tiers:[], cost:3200, margin:0.4, fixedPrice:5333 },
-  { code:"TL-003", cat:"Чистовые", sub:"Плиточные работы", name:"Раскладка под 45° (запил, диагональ)", unit:"м²", tiers:[], cost:4500, margin:0.4, fixedPrice:7500 },
-  { code:"TL-004", cat:"Чистовые", sub:"Плиточные работы", name:"Декоративные вставки", unit:"шт", tiers:[], cost:1000, margin:0.4, fixedPrice:1667 },
-  { code:"TL-005", cat:"Чистовые", sub:"Плиточные работы", name:"Затирка швов", unit:"м²", tiers:[], cost:500, margin:0.4, fixedPrice:833 },
-  { code:"TL-006", cat:"Чистовые", sub:"Плиточные работы", name:"Монтаж фартука на кухне", unit:"м²", tiers:[], cost:3500, margin:0.4, fixedPrice:5833 },
-  { code:"TL-007", cat:"Чистовые", sub:"Плиточные работы", name:"Монтаж декоративных бордюров", unit:"м.п.", tiers:[], cost:1200, margin:0.4, fixedPrice:2000 },
-];
 
 // Метки сложности точно как в Google Script
 const COMPLEXITY = [
