@@ -4363,13 +4363,20 @@ function SearchSelect({ value, options, onChange, placeholder = "🔍 Поиск
 
 // Числовое поле с ЛОКАЛЬНЫМ вводом: пока печатаешь — меняется только само поле,
 // в стейт (и пересчёт всей сметы) значение уходит на blur/Enter. Убирает тормоза при вводе цен/объёмов.
-function NumInput({ value, onCommit, style, min = "0", placeholder, className, disabled }) {
+// Число, которое применяется ТОЛЬКО по завершении ввода (blur или Enter), а не на каждой
+// нажатой клавише. Это принципиально там, где введённое значение пересчитывается перед
+// сохранением: посимвольный пересчёт ломал бы набор прямо под пальцами.
+// autoFocus/onBlur/onKeyDown — необязательные, добавлены для инлайн-редактора цены в смете;
+// без них поведение ровно прежнее.
+function NumInput({ value, onCommit, style, min = "0", placeholder, className, disabled, autoFocus, onBlur, onKeyDown }) {
   const [local, setLocal] = useState(null);
   const shown = local !== null ? local : ((value === undefined || value === null) ? "" : String(value));
   const commit = () => { if (local === null) return; onCommit(local); setLocal(null); };
   return <input type="number" min={min} placeholder={placeholder} className={className} disabled={disabled} value={shown}
-    onChange={e => setLocal(e.target.value)} onBlur={commit}
-    onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
+    autoFocus={autoFocus}
+    onChange={e => setLocal(e.target.value)}
+    onBlur={e => { commit(); onBlur?.(e); }}
+    onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); onKeyDown?.(e); }}
     style={style} />;
 }
 
@@ -12917,12 +12924,18 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       ? (displayPrice - costPerUnit) * qty : null;
                     const priceCell = isEditingThisPrice ? (
                       <div style={{display:"flex",alignItems:"center",gap:4}}>
-                        <input className="num" style={{width:90}} type="number" min="0" placeholder="Цена"
+                        {/* Вводим и показываем КЛИЕНТСКУЮ цену, а храним прайсовую: manualPrice
+                            лежит без повышения и скидки, иначе менять их процент было бы уже нечем.
+                            Раньше здесь введённое число сохранялось как есть, а на экран выводилось
+                            уже с повышением — набрал 2000 при повышении 10%, получил 2200. Соседние
+                            два поля (мобильная вёрстка и режим правки цен) считали правильно,
+                            расходилось только это. */}
+                        <NumInput className="num" style={{width:90}} placeholder="Цена"
                           autoFocus={editingPriceRow===work.name}
-                          value={r.manualPrice!==undefined ? r.manualPrice : (price||"")}
-                          onChange={e=>setRow(work.code || work.name,"manualPrice",e.target.value===""?undefined:Number(e.target.value))}
+                          value={price||""}
+                          onCommit={v=>setRow(work.code || work.name,"manualPrice",v===""?undefined:basePriceFromClient(Number(v), _pricing))}
                           onBlur={()=>{ if(!editPrices) setEditingPriceRow(null); }}
-                          onKeyDown={e=>{ if(e.key==="Enter"||e.key==="Escape"){ if(!editPrices) setEditingPriceRow(null); } }}/>
+                          onKeyDown={e=>{ if(e.key==="Escape"){ if(!editPrices) setEditingPriceRow(null); } }}/>
                         {r.manualPrice!==undefined && <span onClick={()=>setRow(work.code || work.name,"manualPrice",undefined)} title="Сбросить" style={{cursor:"pointer",fontSize:10,color:"#ef4444",marginLeft:2}}>✕</span>}
                       </div>
                     ) : displayPrice != null ? (
