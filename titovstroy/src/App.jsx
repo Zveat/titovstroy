@@ -11610,8 +11610,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   saveWorkers(next,{replace:false}).catch(e=>console.warn("bg worker save err", e));
                   return rec.id; // id известен сразу (сгенерирован здесь) — await не нужен
                 }}
-                importObjects={objects.filter(o=>!o.deletedAt).map(o=>({id:o.id,label:o.clientName||o.address||o.id,address:o.address||""}))}
-                getObjectWorks={(objId)=>{ const ests=estimates.filter(e=>e.objectId===objId); const main=ests.find(e=>!e.parentId||e.parentId===e.id)||ests[0]; return main?estimateToWorks(main):[]; }}
+                // Объекты для импорта — ТОЛЬКО доступные текущей роли (liveObjects уже сужен
+                // правом «Просмотр объектов»). Раньше сюда уходил ПОЛНЫЙ список: в выпадашке
+                // «импорт объекта» замерщик с objects:"own" видел клиентов и адреса всей
+                // компании, а по клику затягивал в договор работы и клиентские цены из чужой
+                // сметы. Проверка по id обязательна и в getObjectWorks: список можно сузить,
+                // но вызов приходит с id и должен отказывать сам по себе.
+                importObjects={liveObjects.map(o=>({id:o.id,label:o.clientName||o.address||o.id,address:o.address||""}))}
+                getObjectWorks={(objId)=>{ if(!liveObjects.some(o=>o.id===objId)) return []; const ests=estimates.filter(e=>e.objectId===objId); const main=ests.find(e=>!e.parentId||e.parentId===e.id)||ests[0]; return main?estimateToWorks(main):[]; }}
                 currentUserRole={currentUser.role}
                 fmt={fmt}
               />
