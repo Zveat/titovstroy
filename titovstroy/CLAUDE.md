@@ -9,10 +9,27 @@ TitovStroy — память проекта (для Claude)
 Что за проект
 
 CRM для ремонтно-отделочной компании «TitovStroy» (Казахстан). React + Vite + Firebase Realtime Database.
-Логика — в titovstroy/src/App.jsx (~13 000 строк) + titovstroy/src/production/ProductionModule.jsx
-(модуль производства, встраивается в «Объекты» через <ProductionModule embedObjectId embedTab clientInfoCard/>).
+В titovstroy/src/App.jsx (~11 900 строк) остался практически только MainApp — один
+компонент с общим состоянием; всё, что от него отделялось, уже вынесено:
+  cloud/storage.js  ЯДРО: Firebase, вход сотрудника, editor-lock, dirty-очередь, REST-фолбэк
+  cloud/audit.js    журнал изменений и обёртки логирования
+  appConfig.js constants.js format.js pricing.js storageKeys.js catalog/worksData.js
+  admin/ (AdminPageContent, AuditTab, RolePermissions), screens/LoginScreen,
+  public/PublicProgress, kp/, contracts/, deals/, finance/, dashboard/, ui/,
+  masters/MastersSection, production/ProductionCalendar, auth/loginGuard, estimate/rowKeys
+Правишь что-то из этого списка — правь модуль, а не App.jsx. Модуль ESM — один экземпляр,
+поэтому module-scope состояние (editor-lock, _mem, _priceOverrides) ведёт себя как раньше;
+присвоить импортированной привязке нельзя — для этого есть сеттеры (setOnCatalogChange,
+nextEditorGate). Производство — titovstroy/src/production/ProductionModule.jsx, встраивается
+в «Объекты» через <ProductionModule embedObjectId embedTab clientInfoCard/>.
 Хранилище — обёртка storage (Firebase RTDB + localStorage-резерв), ключи titovstroy-*.
 Firebase-ключи санитизируются: всё кроме [a-zA-Z0-9_] → _ (вложенные пути через / не работают).
+
+ПРАВА НА ЭКРАНАХ: срез данных обязан идти по тому же праву, по которому экран открыт.
+accessibleObjects ← permissions.objects, analyticsObjects ← permissions.analytics,
+dashboardObjects ← permissions.dashboard. Ловили: «Главная» считалась по ПОЛНОМУ списку
+объектов, и замерщик (dashboard/objects = own, список объектов пуст) читал с неё оборот
+всей компании. Добавляешь показатель на экран — бери уже суженный список, не сырой.
 
 Окружения — ВАЖНО
 
@@ -205,6 +222,18 @@ mutateTransaction: первый прогон runTransaction на холодно�
 не перезапустится, если его данные догрузились позже. Новые синки — тоже с loadedTick в deps.
 
 
+
+Вход сотрудника: пароль проверяет СЕРВЕР — POST /api/login (Vercel, api/login.js) читает
+titovstroy_users сервисным ключом, сверяет sha256:соль:хэш и выдаёт кастомный токен Firebase
+с claims {staff:true, role}; браузер входит им (signInWithCustomToken). Анонимный вход остаётся
+для публичных страниц (кабинет, КП). До этого приложение входило в Firebase АНОНИМНО, поэтому
+правила не могли отличить сотрудника от прохожего — с ключом из бандла читались клиенты,
+договоры, финансы, и запись была открыта (проверено на боевой). Правила лежат в firebase/,
+порядок выкатки — в firebase/README.md и он ЖЁСТКИЙ: код → ключи в Vercel (FIREBASE_SA_*) →
+все входят по разу → и только потом публиковать правила. Раньше третьего шага правила закроют
+вход ВСЕМ, включая владельца. Пока ключи не проставлены, /api/login отвечает
+«login_not_configured», и вход идёт по-старому (запасной путь в handleLogin) — он отомрёт сам,
+когда правила закрутят. Роль зашита в токен: смена роли применяется со следующего входа.
 
 App Check: инициализируется ТОЛЬКО при VITE_RECAPTCHA_SITE_KEY И VITE_APPCHECK_ON="1".
 Ключ на проде задан, но домен не зарегистрирован → был 403 + 24ч блок reCAPTCHA (Enforce на RTDB
