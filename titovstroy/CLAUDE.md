@@ -14,6 +14,12 @@ CRM для ремонтно-отделочной компании «TitovStroy»
   cloud/storage.js  ЯДРО: Firebase, вход сотрудника, editor-lock, dirty-очередь, REST-фолбэк
   cloud/audit.js    журнал изменений и обёртки логирования
   appConfig.js constants.js format.js pricing.js storageKeys.js catalog/worksData.js
+  documents/legacyDocs.js  ГЕНЕРАТОРЫ ДОКУМЕНТОВ (договор, подряд, АВР, DOCX, GDoc)
+                           — там же весь юридический текст; менять его нельзя, и
+                           это стережёт legacyDocs.test.js: отпечаток по одним
+                           буквам (цифры/даты не влияют). Эти же функции движок
+                           «Шаблонов документов» получает как legacyRenderers/
+                           legacyExports — сигнатуры менять нельзя.
   admin/ (AdminPageContent, AuditTab, RolePermissions), screens/LoginScreen,
   public/PublicProgress, kp/, contracts/, deals/, finance/, dashboard/, ui/,
   masters/MastersSection, production/ProductionCalendar, auth/loginGuard, estimate/rowKeys
