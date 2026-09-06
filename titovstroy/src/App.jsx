@@ -280,6 +280,20 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [dirtyCount, setDirtyCount] = useState(0); // СВОИ незасинканные dirty-записи storage (этот пользователь+вкладка) — участвует в баннере
   const [legacyDirtyN, setLegacyDirtyN] = useState(0); // legacy-маркеры без владельца (карантин — не авто-отправляются)
   const [deniedN, setDeniedN] = useState(0); // записи, отбитые ПРАВАМИ базы (не сетью) — в баннере отдельной строкой
+  // Отказ базы по правам — это НЕ обязательно «роль без прав». Интерфейс держит вход в
+  // localStorage 30 дней, а сессия Firebase к этому моменту может стать анонимной: тогда
+  // база отбивает ЛЮБУЮ запись, хотя с ролью всё в порядке, а данные на экране приходят
+  // из локального кеша и выглядят живыми. Ловили на боевой: телефон показывал дашборд с
+  // настоящими цифрами и одновременно «у вашей роли нет прав» на журнал.
+  // Признак сотрудника проверяется один раз при запуске, поэтому перепроверяем его после
+  // первого же отказа — иначе человека отправляет к администратору за правами тот, у кого
+  // с правами всё хорошо и нужно просто войти заново.
+  useEffect(() => {
+    if (!deniedN) return;
+    let alive = true;
+    (async () => { const ok = await hasStaffClaim(); if (alive) setNeedsReauth(!ok); })();
+    return () => { alive = false; };
+  }, [deniedN]);
   const [cloudError, setCloudError] = useState(false); // последнее сохранение не ушло в облако (только локально)
   // ── РЕЕСТР НЕСОХРАНЁННОГО ───────────────────────────────────────────────────
   // Отказ записи внутри saveListProtected/saveEstimates возвращал undefined, и почти
@@ -437,6 +451,16 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     return () => { stopped = true; clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
   }, [currentUser?.id]);
   // Админ периодически подтягивает чужие отметки для отображения
+  // Состав списка сотрудников строкой. Пока список не догрузился из базы, allUsersRef
+  // держит ВСТРОЕННЫЕ значения по умолчанию (id «1» и «2») — таких людей в базе нет,
+  // и первый pull спрашивает отметки несуществующих ключей. Без этой зависимости эффект
+  // больше не перезапускался, отметки подтягивались только следующим тиком таймера, и
+  // первую минуту после открытия админка показывала «ещё не заходил» тем, кто был онлайн
+  // только что. Проверено на боевой: сразу — «ещё не заходил», через 75 с — «3 мин назад».
+  const presenceUserIds = useMemo(
+    () => (allUsers || []).map(u => u.id).filter(Boolean).join(","),
+    [allUsers],
+  );
   useEffect(() => {
     if (currentUser?.role !== "admin") return;
     let stopped = false;
@@ -460,7 +484,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     pull();
     const iv = setInterval(pull, 60 * 1000);
     return () => { stopped = true; clearInterval(iv); };
-  }, [currentUser?.role]);
+  }, [currentUser?.role, presenceUserIds]);
 
   // Список смет { id, proj, rows, discount, note, updatedAt, total }
   const [estimates, setEstimates] = useState([]);
@@ -6170,9 +6194,13 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#f8fafc",minHeight:"100vh",color:"#0f172a",display:"flex",flexDirection:"column"}}>
       {/* Сессия браузера ещё анонимная: база уже закрыта правилами, читать нечего.
           Показываем это отдельно от «облако недоступно» — причина другая и лечится входом. */}
-      {needsReauth && loadError && (
+      {/* Раньше эта подсказка показывалась ТОЛЬКО вместе с ошибкой загрузки. Но при
+          устаревшем входе данные спокойно приходят из локального кеша, loadError
+          false — и человек видел вместо неё «у вашей роли нет прав» и шёл к
+          администратору. Показываем всегда, когда база не признаёт сотрудника. */}
+      {needsReauth && (
         <div style={{position:"fixed",top:0,left:0,right:0,zIndex:501,background:"#b45309",color:"#fff",padding:"10px 16px",paddingTop:"calc(10px + env(safe-area-inset-top,0px))",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,flexWrap:"wrap",boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
-          🔑 Нужно войти заново — в этом браузере старый вход, база его больше не пускает. Данные целы.
+          🔑 Нужно войти заново — в этом браузере старый вход, база его больше не пускает. Дело НЕ в правах роли и НЕ в интернете. Всё несохранённое осталось на устройстве и уйдёт в базу после входа.
           <button onClick={()=>doLogout()} style={{background:"#fff",color:"#b45309",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Выйти и войти</button>
         </div>
       )}
@@ -6213,7 +6241,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           Раньше баннер был один на оба случая и всегда говорил «облако недоступно»: человек с
           отобранным правом чинил интернет и отключал блокировщик, хотя сеть была в порядке, а
           приложение в это время молотило повторами, которые правила отбивали снова и снова. */}
-      {!loadError && !syncBannerHidden && (cloudError || prodUnsyncedN > 0 || dirtyCount > 0 || legacyDirtyN > 0 || deniedN > 0) && (
+      {!loadError && !needsReauth && !syncBannerHidden && (cloudError || prodUnsyncedN > 0 || dirtyCount > 0 || legacyDirtyN > 0 || deniedN > 0) && (
         <div style={{position:"fixed",top:0,left:0,right:0,zIndex:500,background:deniedN>0?"#b91c1c":"#d97706",color:"#fff",padding:"10px 16px",paddingTop:"calc(10px + env(safe-area-inset-top,0px))",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)",flexWrap:"wrap"}}>
           {deniedN > 0
             ? <>🚫 База отклонила сохранение: у вашей роли нет прав на эти разделы ({deniedN}). Дело НЕ в интернете — повторять бесполезно, пока право не выдадут. Данные остались на этом устройстве и не потеряны: попросите администратора открыть доступ в «Права ролей», затем выйдите и войдите заново и нажмите «Повторить сейчас». Разделы: {storage.deniedKeys().map(k => saveFailLabel(k)).join(", ")}.</>
