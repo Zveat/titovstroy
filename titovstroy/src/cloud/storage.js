@@ -101,6 +101,24 @@ export const hasStaffClaim = async () => {
     return res?.claims?.staff === true;
   } catch { return false; }
 };
+// Точный ответ о том, кем нас считает база:
+//   "staff"   — токен сотрудника, всё в порядке;
+//   "anon"    — вошли анонимно: интерфейс помнит человека, а база сотрудником не считает
+//               (сессия протухла) — тогда не проходит НИ ОДНА запись;
+//   "unknown" — проверить не удалось (SDK не поднялся, сеть моргнула).
+// Гейт входа обязан реагировать ТОЛЬКО на "anon". Если отвечать на "unknown", первый же
+// сетевой сбой запер бы человека снаружи — а данные при этом целы и всё работает.
+export const staffSessionState = async () => {
+  try {
+    if (!_fbAuth) return "unknown";
+    await _fbAuthReady;
+    const user = _fbAuth.currentUser;
+    if (!user) return "unknown";
+    const res = await user.getIdTokenResult();
+    if (res?.claims?.staff === true) return "staff";
+    return user.isAnonymous ? "anon" : "unknown";
+  } catch { return "unknown"; }
+};
 export const signOutStaff = async () => {
   if (!_fbAuth) return;
   try {

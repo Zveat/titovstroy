@@ -8,7 +8,7 @@ import { DEFAULT_USERS } from "../constants.js";
 import { SESSION_KEY, USERS_KEY } from "../storageKeys.js";
 
 // ─── ЭКРАН ВХОДА ─────────────────────────────────────────────────────────────
-export function LoginScreen({ onLogin }) {
+export function LoginScreen({ onLogin, notice = "" }) {
   const [login, setLogin]   = useState("");
   const [password, setPassword] = useState("");
   const [error, setError]   = useState("");
@@ -157,6 +157,13 @@ export function LoginScreen({ onLogin }) {
             </div>
           </div>
 
+          {/* notice — объяснение, почему человека вернуло на вход (устаревшая сессия).
+              Это не ошибка ввода, поэтому и выглядит иначе: спокойно, без красного. */}
+          {notice && !error && (
+            <div style={{background:"rgba(180,83,9,.1)",border:"1px solid rgba(180,83,9,.25)",borderRadius:7,padding:"9px 12px",fontSize:12,color:"#b45309",marginBottom:16,textAlign:"center"}}>
+              {notice}
+            </div>
+          )}
           {error && (
             <div style={{background:"rgba(220,38,38,.1)",border:"1px solid rgba(200,60,60,.25)",borderRadius:7,padding:"9px 12px",fontSize:12,color:"#dc2626",marginBottom:16,textAlign:"center"}}>
               {error}

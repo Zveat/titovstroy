@@ -48,7 +48,8 @@ import { RolePermissionsEditor } from "./admin/RolePermissions.jsx";
 import { IS_DEV_ENV, _env, confirmDangerous, firebaseConfig } from "./appConfig.js";
 import { clearLoginAttempts, getLoginLockout, hashPassword, passwordTooWeak, registerFailedLogin, verifyPassword } from "./auth/loginGuard.js";
 import { _finTypeLbl, _objLabel, _tng, logChange, logContractSave, logObjChange, writeAudit } from "./cloud/audit.js";
-import { _dirtyOwnerUid, _editorGateN, _fbAuthReady, _mem, _restToken, hasStaffClaim, nextEditorGate, signOutStaff, storage } from "./cloud/storage.js";
+import { _dirtyOwnerUid, _editorGateN, _fbAuthReady, _mem, _restToken, hasStaffClaim, nextEditorGate,
+  signOutStaff, staffSessionState, storage } from "./cloud/storage.js";
 import { ASSET_INC_KEYS, ASSET_OUT_KEYS, AUDIT_SECTION_META, AUDIT_SOURCE_META, COMPANY_WA, CONTRACT_STATUSES, C_ASSET_INC, C_ASSET_OUT, C_FINACT, C_FINANCING_INC, C_INVEST, DEAL_STATUSES, DEAL_TO_PROD, DEFAULT_USERS, DOCS_NODE, EMPTY_PROJ, EXTRA_CAT, FA_SUB_MAP, KP_NODE, OBJ_TYPES, PRICE_SEAL_REASONS, PROD_TO_DEAL, PROGRESS_NODE, STATUSES, _PROG_ST, _auditActionMeta, _auditVal } from "./constants.js";
 import { ContractEditor } from "./contracts/ContractEditor.jsx";
 import { IssuePanel } from "./dashboard/IssuePanel.jsx";
@@ -114,6 +115,24 @@ export default function App() {
     document.body.appendChild(b);
     return () => { try { document.body.removeChild(b); } catch {} };
   }, []);
+  // ГЕЙТ УСТАРЕВШЕГО ВХОДА. Интерфейс помнит человека в localStorage 30 дней, а сессия
+  // базы живёт меньше и может стать анонимной. Раньше приложение в этом случае всё равно
+  // открывалось: рисовало данные из локального кеша и выглядело рабочим, а правда вылезала
+  // только при первом сохранении — «база отклонила запись». Поймали на боевой с телефона.
+  // Теперь при ТОЧНО анонимной сессии сразу возвращаем на экран входа: работать всё равно
+  // нельзя, а полчаса «работы в никуда» так не случится.
+  // Реагируем ТОЛЬКО на "anon". На "unknown" (сеть моргнула, SDK не поднялся) не реагируем —
+  // иначе первый же сетевой сбой запер бы человека снаружи при полностью живой сессии.
+  const [staleLogin, setStaleLogin] = useState(false);
+  useEffect(() => {
+    if (!currentUser?.id) { setStaleLogin(false); return; }
+    let alive = true;
+    (async () => {
+      const state = await staffSessionState();
+      if (alive) setStaleLogin(state === "anon");
+    })();
+    return () => { alive = false; };
+  }, [currentUser?.id]);
   // Публичная страница КП по ссылке #/kp/<id> — открывается без входа
   const _kpId = (() => { const m = (typeof window !== "undefined" ? (window.location.hash || "") : "").match(/^#\/kp\/(.+)$/); return m ? decodeURIComponent(m[1]) : null; })();
   if (_kpId) return <PublicKP id={_kpId} />;
@@ -121,6 +140,14 @@ export default function App() {
   const _progToken = (() => { const m = (typeof window !== "undefined" ? (window.location.hash || "") : "").match(/^#\/progress\/(.+)$/); return m ? decodeURIComponent(m[1]) : null; })();
   if (_progToken) return <PublicProgress token={_progToken} />;
   if (!currentUser) return <LoginScreen onLogin={setCurrentUser} />;
+  // Вход устарел — в приложение не пускаем, но и сессию из localStorage не стираем:
+  // несохранённое на устройстве остаётся и уйдёт в базу сразу после входа.
+  if (staleLogin) return (
+    <LoginScreen
+      onLogin={u => { setStaleLogin(false); setCurrentUser(u); }}
+      notice="Вход в этом браузере устарел — база больше не признаёт его. Дело не в правах и не в интернете. Всё несохранённое осталось на устройстве, войдите заново."
+    />
+  );
   return <EditorSessionGate key={currentUser.id} currentUser={currentUser} setCurrentUser={setCurrentUser} />;
 }
 
