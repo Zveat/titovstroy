@@ -990,3 +990,46 @@ describe("качество данных — контакты клиента", ()
     expect(cnt(mk({ status:"archive" }, { prodStatus:"active" }), "clientPhone")).toBe(1);
   });
 });
+
+// «Главная» у роли с правом dashboard:"own" считается той же моделью, но по СВОИМ
+// объектам. Проверяем, что сузить достаточно один список — objects: сметы, договоры
+// и производство привязаны к объекту, и всё, что висит на чужом, обязано отвалиться.
+// Раньше на главную уходил полный список, и замерщик с пустым списком объектов читал
+// оттуда оборот всей компании.
+describe("срез «только свои» — деньги чужих объектов не просачиваются", () => {
+  const own = (ids) => {
+    const f = fixture();
+    const keep = new Set(ids);
+    return buildAnalytics({ ...f, objects: f.objects.filter(o => keep.has(o.id)) }, { period: "all", now: NOW });
+  };
+
+  it("суммы считаются только по переданным объектам", () => {
+    const full = all();
+    const mine = own(["o2"]); // объект в согласовании, без договора
+    expect(full.sales.estimatedSum).toBeGreaterThan(mine.sales.estimatedSum);
+    expect(mine.sales.signedCount).toBe(0);
+    expect(mine.sales.signedSum).toBe(0);
+  });
+
+  it("пустой список объектов даёт нули, а не цифры компании", () => {
+    const nobody = own([]);
+    expect(nobody.sales.newObjects).toBe(0);
+    expect(nobody.sales.estimatedSum).toBe(0);
+    expect(nobody.sales.signedCount).toBe(0);
+    expect(nobody.sales.signedSum).toBe(0);
+    expect(nobody.backlog.activeObjects).toBe(0);
+  });
+
+  it("договор чужого объекта не попадает в «подписано», даже если он в списке договоров", () => {
+    // c1 привязан к o1 — его в срезе нет, но сам договор модели передан
+    expect(own(["o2", "o4"]).sales.signedSum).toBe(0);
+    // а со своим объектом тот же договор считается
+    expect(own(["o1"]).sales.signedSum).toBeGreaterThan(0);
+  });
+
+  it("доп.смета через parentId следует за своим объектом, а не за срезом", () => {
+    // e1 + e1b + e1c висят на o1 (1 000 000 + 200 000 + 100 000)
+    expect(own(["o1"]).sales.estimatedSum).toBe(1300000);
+    expect(own(["o2"]).sales.estimatedSum).toBe(800000);
+  });
+});

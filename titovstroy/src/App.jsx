@@ -4258,13 +4258,27 @@ ${reqBlock}`;
   }, [analyticsObjects, analyticsEstimates, contracts, productions, statsPeriod, statsDateFrom, statsDateTo, statsManager, allUsers, catalogVersion]);
 
   // Показатели «Главной» считаются той же моделью, но всегда за текущий месяц и
-  // без фильтра по менеджеру — главная показывает состояние компании, а не срез,
-  // выбранный на экране аналитики.
+  // без фильтра по менеджеру — период на экране аналитики главную не двигает.
+  //
+  // СРЕЗ — ПО ПРАВУ «ГЛАВНАЯ» ИЗ МАТРИЦЫ РОЛЕЙ. Значение own в матрице было, но код
+  // его не применял: сюда уходил ПОЛНЫЙ список объектов, и замерщик, у которого список
+  // объектов пуст, всё равно читал с главной оборот всей компании — портфель, суммы
+  // подписанного, сдачу месяца и график динамики по месяцам. Проверено на боевой.
+  // Достаточно сузить objects/estimates: buildAnalytics сшивает сметы, договоры и
+  // производство через objectId и всё, что не привязано к видимым объектам, отбрасывает.
+  const dashboardObjects = useMemo(
+    () => currentPermissions.dashboard === "own" ? estimatorDashboard.ownObjects : objects,
+    [objects, currentPermissions.dashboard, estimatorDashboard],
+  );
+  const dashboardEstimates = useMemo(
+    () => currentPermissions.dashboard === "own" ? estimatorDashboard.ownEstimates : estimates,
+    [estimates, currentPermissions.dashboard, estimatorDashboard],
+  );
   const dashboardStats = useMemo(() => buildAnalytics(
-    { objects, estimates, contracts, productions, financeTx,
+    { objects: dashboardObjects, estimates: dashboardEstimates, contracts, productions, financeTx,
       accounts: financeMeta?.accounts || [], estimateCost: analyticsData.estCost },
     { period: "month", users: allUsers },
-  ), [objects, estimates, contracts, productions, financeTx, financeMeta, analyticsData, allUsers]);
+  ), [dashboardObjects, dashboardEstimates, contracts, productions, financeTx, financeMeta, analyticsData, allUsers]);
 
   // Блоки аналитики (продажи / портфель / производство / финансы / качество).
   // Считает чистая функция buildAnalytics — те же числа доступны и для «Главной».
