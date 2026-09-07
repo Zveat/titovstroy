@@ -3,7 +3,7 @@ import {
   NOTIFY_TOPIC_KEYS, auditMessage, buildEventMessages, groupMessages, renderEvent,
   buildReminderMessages, routeMessages, inQuietHours, localDayKey, daysWord, esc,
   makeLinkCode, linkUrl, findUserByCode, assertWritable, pruneSent, tenge, userScope,
-  NOTIFY_EVENTS, eventEnabled, objectAllowed, reminderOn, reminderNum, OBJECT_MODES,
+  NOTIFY_EVENTS, objectAllowed, reminderOn, reminderNum, OBJECT_MODES,
   NOTIFY_CATALOG, NOTIFY_BY_KEY, buildDateReminders, buildDigestMessage, daysUntil,
   makeEventContext, isSubscribed, groupSubscribed, DATE_REMINDERS, DIGESTS,
 } from "./notifyModel.js";
@@ -283,38 +283,51 @@ describe("маршрутизация", () => {
   });
 });
 
-describe("выключатели по каждому правилу", () => {
-  it("выключенное правило не даёт сообщения", () => {
-    expect(auditMessage(REAL.status, { events: { object_status: false } })).toBeNull();
-    expect(auditMessage(REAL.status, { events: { object_status: true } })).not.toBeNull();
+// Первая версия давала 29 строк — по строке на каждое правило. Владелец
+// открыл экран и сказал «дохера всяких». Близкое по смыслу теперь делит один
+// выключатель: ловим по-прежнему всё, а решений у человека меньше.
+describe("список уведомлений укрупнён", () => {
+  const keyOf = (entity, action = "изменил", extra = {}) =>
+    auditMessage({ ts: 1, by: "x", entity, label: "что-то", action, ...extra })?.key;
+
+  it("строк стало заметно меньше, чем правил", () => {
+    expect(NOTIFY_EVENTS.length).toBeLessThanOrEqual(8);
+    expect(NOTIFY_CATALOG.length).toBeLessThanOrEqual(16);
   });
 
-  it("выключение одного правила не глушит остальные", () => {
-    const s = { events: { object_status: false } };
-    expect(auditMessage(REAL.money, s)).not.toBeNull();
-    expect(auditMessage(REAL.badLogin, s)).not.toBeNull();
-  });
-
-  it("без настроек работают умолчания: шумные правила выключены", () => {
-    expect(eventEnabled("object_status", {})).toBe(true);
-    expect(eventEnabled("money", {})).toBe(true);
-    expect(eventEnabled("client", {})).toBe(false);
-    expect(eventEnabled("stage", {})).toBe(false);
-    expect(eventEnabled("price", {})).toBe(false);
-  });
-
-  it("явное включение сильнее умолчания и наоборот", () => {
-    expect(eventEnabled("client", { events: { client: true } })).toBe(true);
-    expect(eventEnabled("money", { events: { money: false } })).toBe(false);
-  });
-
-  it("у каждого правила есть ключ, подпись и своё направление", () => {
-    for (const e of NOTIFY_EVENTS) {
-      expect(e.key).toBeTruthy();
-      expect(e.label.length).toBeGreaterThan(3);
-      expect(NOTIFY_TOPIC_KEYS).toContain(e.topic);
+  it("все четыре вида удалений — одна строка «Удаления»", () => {
+    for (const e of ["object", "estimate", "report", "finance_tx"]) {
+      expect(keyOf(e, "удалил", { field: "запись" })).toBe("deletions");
     }
-    expect(new Set(NOTIFY_EVENTS.map(e => e.key)).size).toBe(NOTIFY_EVENTS.length);
+  });
+
+  it("права, сотрудники, бэкапы, прайс и входы — одна строка «Админка»", () => {
+    expect(keyOf("role", "изменил право")).toBe("admin");
+    expect(keyOf("user", "создал пользователя")).toBe("admin");
+    expect(keyOf("backup", "восстановил")).toBe("admin");
+    expect(keyOf("price", "изменил")).toBe("admin");
+    expect(keyOf("session", "неудачная попытка входа")).toBe("admin");
+  });
+
+  it("акты, этапы и подряд — одна строка «Работы по объекту»", () => {
+    for (const e of ["report", "stage", "podryad"]) expect(keyOf(e)).toBe("prod_work");
+  });
+
+  it("сметы, договоры, клиенты и КП — одна строка «Сметы, договоры, КП»", () => {
+    for (const e of ["estimate", "contract", "client", "publish"]) expect(keyOf(e)).toBe("docs");
+  });
+
+  it("укрупнение НИЧЕГО не потеряло: что ловилось, то и ловится", () => {
+    expect(auditMessage(REAL.login)).toBeNull();
+    expect(auditMessage(REAL.photo)).toBeNull();
+    for (const e of [REAL.status, REAL.money, REAL.badLogin, REAL.reportDel]) {
+      expect(auditMessage(e)).not.toBeNull();
+    }
+  });
+
+  it("у каждой строки каталога свой ключ и живое направление", () => {
+    for (const n of NOTIFY_EVENTS) expect(NOTIFY_TOPIC_KEYS).toContain(n.topic);
+    expect(new Set(NOTIFY_EVENTS.map(n => n.key)).size).toBe(NOTIFY_EVENTS.length);
   });
 });
 
@@ -602,13 +615,13 @@ describe("подписка по каждому уведомлению отдел
     expect(to("digest_week")).toEqual(["111"]);
     expect(to("start_soon")).toEqual(["222"]);
     expect(to("money")).toEqual(["111"]);
-    expect(to("object_status")).toEqual([]);
+    expect(to("object")).toEqual([]);
   });
 
   it("общий чат подписывается отдельно от людей", () => {
     const users = [{ id: "1", name: "Директор", tg: { subs: { money: true } } }];
-    const settings = { groupChatId: "-100", groupSubs: { object_status: true, money: false } };
-    expect(routeMessages([msg("object_status")], { users, links, settings }).map(s => s.chatId))
+    const settings = { groupChatId: "-100", groupSubs: { object: true, money: false } };
+    expect(routeMessages([msg("object")], { users, links, settings }).map(s => s.chatId))
       .toEqual(["-100"]);
     // деньги — только директору в личку, в общий чат не идут
     expect(routeMessages([msg("money")], { users, links, settings }).map(s => s.chatId))
@@ -626,19 +639,19 @@ describe("подписка по каждому уведомлению отдел
   // не должен остаться без уведомлений после перехода на поштучный выбор.
   it("старая настройка направлениями продолжает работать", () => {
     const users = [{ id: "1", name: "Старый", tg: { topics: ["sales"] } }];
-    expect(routeMessages([msg("object_status")], { users, links, settings: {} })
+    expect(routeMessages([msg("object")], { users, links, settings: {} })
       .map(s => s.chatId)).toEqual(["111"]);
     // но выключенное по умолчанию внутри направления не приходит
-    expect(routeMessages([msg("client")], { users, links, settings: {} })).toEqual([]);
+    expect(routeMessages([msg("prod_work")], { users, links, settings: {} })).toEqual([]);
   });
 
   it("поштучная настройка сильнее старых направлений", () => {
-    const users = [{ id: "1", name: "Оба", tg: { topics: ["sales"], subs: { object_status: false } } }];
-    expect(routeMessages([msg("object_status")], { users, links, settings: {} })).toEqual([]);
+    const users = [{ id: "1", name: "Оба", tg: { topics: ["sales"], subs: { object: false } } }];
+    expect(routeMessages([msg("object")], { users, links, settings: {} })).toEqual([]);
   });
 
   it("в каталоге у всего есть ключ, подпись и направление, ключи не повторяются", () => {
-    expect(NOTIFY_CATALOG.length).toBeGreaterThan(20);
+    expect(NOTIFY_CATALOG.length).toBeGreaterThan(10);
     for (const n of NOTIFY_CATALOG) {
       expect(n.key).toBeTruthy();
       expect(n.label.length).toBeGreaterThan(3);

@@ -103,90 +103,69 @@ export function inQuietHours(ts, settings = {}) {
 // значок и как назвать по-русски. Порядок важен: берётся первое подошедшее.
 const RULES = [
   // ── Сделки и производство по объекту ──
-  { key: "object_status", label: "Смена статуса объекта", def: true,
-    entity: "object", field: /статус/, topic: "sales", icon: "🏗",
+  { key: "object", entity: "object", field: /статус/, topic: "sales", icon: "🏗",
     title: (e) => `Объект «${nameOf(e)}»`,
     body: (e) => `${esc(e.old) || "—"} → <b>${esc(e.new) || "—"}</b>` },
-  { key: "object_new", label: "Новый объект", def: true,
-    entity: "object", action: /созда/, topic: "sales", icon: "➕",
+  { key: "object_new", entity: "object", action: /созда/, topic: "sales", icon: "➕",
     title: () => "Новый объект",
     body: (e) => `<b>${nameOf(e)}</b>` },
-  { key: "object_delete", label: "Удалён объект", def: true,
-    entity: "object", action: /удали/, topic: "sales", icon: "🗑",
+  { key: "deletions", entity: "object", action: /удали/, topic: "sales", icon: "🗑",
     title: () => "Удалён объект",
     body: (e) => `<b>${nameOf(e)}</b>` },
-  { key: "object_field", label: "Правка полей объекта (даты, прораб)", def: false,
-    entity: "object", topic: "production", icon: "📅",
+  { key: "object", entity: "object", topic: "production", icon: "📅",
     title: (e) => `Объект «${nameOf(e)}»`,
     body: (e) => `${esc(e.field) || "поле"}: ${esc(e.old) || "—"} → <b>${esc(e.new) || "—"}</b>` },
 
   // ── Сметы ──
-  { key: "estimate_delete", label: "Удалена смета", def: true,
-    entity: "estimate", action: /удали/, topic: "sales", icon: "🗑",
+  { key: "deletions", entity: "estimate", action: /удали/, topic: "sales", icon: "🗑",
     title: () => "Удалена смета",
     body: (e) => `<b>${nameOf(e)}</b>` },
-  { key: "estimate", label: "Правки смет и смена их статуса", def: true,
-    entity: "estimate", topic: "sales", icon: "🧮",
+  { key: "docs", entity: "estimate", topic: "sales", icon: "🧮",
     title: (e) => `Смета «${nameOf(e)}»`,
     body: (e) => (e.old || e.new) ? `${esc(e.old) || "—"} → <b>${esc(e.new) || "—"}</b>` : esc(e.action) },
 
   // ── Договоры, клиенты, подряд, кабинет клиента ──
-  { key: "contract", label: "Договоры", def: true,
-    entity: "contract", topic: "sales", icon: "📋",
+  { key: "docs", entity: "contract", topic: "sales", icon: "📋",
     title: (e) => `Договор «${nameOf(e)}»`, body: (e) => bodyOfChange(e) },
-  { key: "client", label: "Карточки клиентов", def: false,
-    entity: "client", topic: "sales", icon: "🧑",
+  { key: "docs", entity: "client", topic: "sales", icon: "🧑",
     title: (e) => `Клиент «${nameOf(e)}»`, body: (e) => bodyOfChange(e) },
-  { key: "podryad", label: "Договоры подряда", def: true,
-    entity: "podryad", topic: "production", icon: "🔨",
+  { key: "prod_work", entity: "podryad", topic: "production", icon: "🔨",
     title: (e) => `Подряд «${nameOf(e)}»`, body: (e) => bodyOfChange(e) },
-  { key: "publish", label: "Кабинет клиента и КП", def: true,
-    entity: "publish", topic: "sales", icon: "🌐",
+  { key: "docs", entity: "publish", topic: "sales", icon: "🌐",
     title: (e) => `Кабинет клиента «${nameOf(e)}»`, body: (e) => bodyOfChange(e) },
 
   // ── Акты и этапы ──
-  { key: "report_delete", label: "Удалена запись акта", def: true,
-    entity: "report", action: /удали/, topic: "production", icon: "🗑",
+  { key: "deletions", entity: "report", action: /удали/, topic: "production", icon: "🗑",
     title: () => "Удалена запись акта", body: (e) => nameOf(e) },
-  { key: "report", label: "Акты и АВР", def: false,
-    entity: "report", topic: "production", icon: "🧾",
+  { key: "prod_work", entity: "report", topic: "production", icon: "🧾",
     title: (e) => `Акт «${nameOf(e)}»`, body: (e) => bodyOfChange(e) },
   // Фотоотчёты и галочки чек-листа идут десятками за смену и сообщением не
   // являются — их видно в карточке объекта. Держим их вне рассылки намеренно.
-  { key: "stage", label: "Этапы (без фото и чек-листов)", def: false,
-    entity: "stage", skip: /(фото|чек-лист)/i, topic: "production", icon: "🛠",
+  { key: "prod_work", entity: "stage", skip: /(фото|чек-лист)/i, topic: "production", icon: "🛠",
     title: (e) => `Этап «${nameOf(e)}»`, body: (e) => bodyOfChange(e) },
 
   // ── Деньги ──
-  { key: "money_delete", label: "Удалена операция по деньгам", def: true,
-    entity: "finance_tx", action: /удали/, topic: "finance", icon: "🗑",
+  { key: "deletions", entity: "finance_tx", action: /удали/, topic: "finance", icon: "🗑",
     title: () => "Удалена операция", body: (e) => `${nameOf(e)}${e.old ? ` — <b>${esc(e.old)}</b>` : ""}` },
-  { key: "money", label: "Новые операции по деньгам", def: true,
-    entity: "finance_tx", topic: "finance", icon: "💰",
+  { key: "money", entity: "finance_tx", topic: "finance", icon: "💰",
     title: () => "Операция по деньгам",
     body: (e) => `${nameOf(e)}${e.new ? `\n<b>${esc(e.new)}</b>` : ""}` },
-  { key: "price", label: "Правки прайс-листа", def: false,
-    entity: "price", topic: "finance", icon: "💲",
+  { key: "admin", entity: "price", topic: "finance", icon: "💲",
     title: () => "Прайс-лист", body: (e) => bodyOfChange(e) },
 
   // ── Безопасность ──
   // Обычный вход — самая частая запись в журнале и ничего не значит.
   // Неудачная попытка значит ровно наоборот, поэтому разделены.
-  { key: "login_fail", label: "Неудачная попытка входа", def: true,
-    entity: "session", action: /неудач/, topic: "security", icon: "⚠️",
+  { key: "admin", entity: "session", action: /неудач/, topic: "security", icon: "⚠️",
     title: () => "Неудачная попытка входа", body: (e) => esc(e.label || e.detail) },
   { entity: "session", drop: true },
-  { key: "role", label: "Смена прав ролей", def: true,
-    entity: "role", topic: "security", icon: "🔐",
+  { key: "admin", entity: "role", topic: "security", icon: "🔐",
     title: (e) => `Права роли «${nameOf(e)}»`, body: (e) => bodyOfChange(e) },
-  { key: "user", label: "Сотрудники: создание, удаление, пароли", def: true,
-    entity: "user", topic: "security", icon: "👤",
+  { key: "admin", entity: "user", topic: "security", icon: "👤",
     title: (e) => `Учётная запись «${nameOf(e)}»`, body: (e) => bodyOfChange(e) },
-  { key: "backup", label: "Бэкапы и восстановление базы", def: true,
-    entity: "backup", topic: "security", icon: "💾",
+  { key: "admin", entity: "backup", topic: "security", icon: "💾",
     title: () => "Бэкап базы", body: (e) => bodyOfChange(e) },
-  { key: "templates", label: "Шаблоны документов", def: false,
-    entity: "document_template", topic: "security", icon: "📑",
+  { key: "admin", entity: "document_template", topic: "security", icon: "📑",
     title: () => "Шаблоны документов", body: (e) => bodyOfChange(e) },
 ];
 
@@ -199,20 +178,33 @@ function bodyOfChange(e) {
   return act || nameOf(e);
 }
 
-// Список для админки: каждое правило можно включить и выключить отдельно.
-export const NOTIFY_EVENTS = Object.freeze(RULES.filter(r => r.key).map(r => Object.freeze({
-  key: r.key, label: r.label, topic: r.topic, icon: r.icon, def: !!r.def,
-})));
-export const NOTIFY_EVENT_DEFAULTS = Object.freeze(
-  Object.fromEntries(NOTIFY_EVENTS.map(e => [e.key, e.def]))
-);
-// Правило включено, если про него ничего не сказано и оно включено по умолчанию,
-// либо если его явно включили. Явное выключение всегда сильнее умолчания.
-export function eventEnabled(key, settings) {
-  const map = settings?.events;
-  if (map && Object.prototype.hasOwnProperty.call(map, key)) return !!map[key];
-  return !!NOTIFY_EVENT_DEFAULTS[key];
-}
+// СПИСОК ДЛЯ АДМИНКИ. Задан ЯВНО, а не собран из правил, и это важно.
+//
+// Первая версия собирала его из правил один-в-один — получилось 29 строк, и
+// владелец сказал прямо: «дохера всяких». Он был прав: «удалён объект»,
+// «удалена смета», «удалена запись акта» и «удалена операция» — это ЧЕТЫРЕ
+// строки про одно человеческое беспокойство «у меня что-то пропало». Ровно так
+// же «права ролей», «сотрудники», «бэкапы», «прайс», «шаблоны» и «неудачный
+// вход» — одно беспокойство «кто-то лезет в админку».
+//
+// Поэтому несколько правил делят один ключ: ловим по-прежнему всё, но
+// выключателей теперь столько, сколько у человека реальных забот.
+export const NOTIFY_EVENTS = Object.freeze([
+  { key: "object_new", icon: "➕", topic: "sales", def: true,
+    label: "Новый объект", hint: "завели новый объект в базе" },
+  { key: "object", icon: "🏗", topic: "sales", def: true,
+    label: "Объект: статус и даты", hint: "смена статуса, сдвиг старта и сдачи" },
+  { key: "docs", icon: "📋", topic: "sales", def: true,
+    label: "Сметы, договоры, КП", hint: "правки смет, договоры, кабинет клиента" },
+  { key: "prod_work", icon: "🔨", topic: "production", def: false,
+    label: "Работы по объекту", hint: "этапы, акты и АВР, договоры подряда" },
+  { key: "money", icon: "💰", topic: "finance", def: true,
+    label: "Операции по деньгам", hint: "приходы и расходы, с суммами" },
+  { key: "deletions", icon: "🗑", topic: "security", def: true,
+    label: "Удаления", hint: "объект, смета, акт, операция — всё в одну строку" },
+  { key: "admin", icon: "🔐", topic: "security", def: true,
+    label: "Админка и безопасность", hint: "права, сотрудники, бэкапы, прайс, входы" },
+]);
 
 // ─── ФИЛЬТР ПО ОБЪЕКТАМ ───────────────────────────────────────────────────────
 // Зачем: половина объектов в базе через производство ещё не ведётся — их не
@@ -250,7 +242,6 @@ export function auditMessage(entry, settings = {}) {
     if (rule.field && !rule.field.test(low(entry.field))) continue;
     if (rule.skip && rule.skip.test(`${entry.field} ${entry.action}`)) return null;
     if (rule.drop) return null;
-    if (rule.key && !eventEnabled(rule.key, settings)) return null;
     if (!objectAllowed(entry.objectId, settings)) return null;
     return {
       id: auditDedupId(entry),
@@ -332,7 +323,7 @@ function eventExtras(msg, entry, ctx) {
   const prod = ctx.prodBy?.get(msg.objectId);
   if (!prod) return "";
   const rows = [];
-  if (msg.key === "object_status" && SIGNED_RE.test(S(entry?.new))) {
+  if (msg.key === "object" && SIGNED_RE.test(S(entry?.new))) {
     if (prod.startDate) rows.push(`старт работ: <b>${esc(dateRu(prod.startDate))}</b>`);
     if (prod.planEndDate) rows.push(`сдача по плану: <b>${esc(dateRu(prod.planEndDate))}</b>`);
     if (!rows.length) rows.push("<i>даты старта и сдачи не заполнены</i>");
@@ -722,6 +713,50 @@ export const NOTIFY_CATALOG = Object.freeze([
   })),
 ]);
 export const NOTIFY_BY_KEY = Object.freeze(Object.fromEntries(NOTIFY_CATALOG.map(n => [n.key, n])));
+
+// ─── ГОТОВЫЕ НАБОРЫ ───────────────────────────────────────────────────────────
+// Первая версия экрана давала таблицу 29 строк на 6 человек — 174 галочки.
+// Технически это полный контроль, практически — анкета, которую никто не
+// заполнит: владелец открыл и сказал «дохера всего и непонятно». Он был прав.
+//
+// Поэтому обычный путь теперь такой: выбрать человеку набор одним щелчком.
+// Поштучные галочки никуда не делись, они под кнопкой «показать что именно» —
+// но начинать с них не надо.
+export const NOTIFY_PRESETS = Object.freeze([
+  { key: "boss", label: "Руководителю", forGroup: false,
+    hint: "сводки, деньги, договоры, удаления, админка",
+    keys: ["digest_week", "digest_month", "object_new", "object", "docs",
+      "money", "debt", "closing", "deletions", "admin"] },
+  { key: "foreman", label: "Прорабу", forGroup: false,
+    hint: "стройка: старт, сдача, просрочки, работы",
+    keys: ["start_soon", "handover_soon", "stages", "stale", "object", "prod_work"] },
+  { key: "sales", label: "Менеджеру продаж", forGroup: false,
+    hint: "лиды, сметы, договоры, кабинет клиента",
+    keys: ["object_new", "object", "docs"] },
+  { key: "urgent", label: "Только срочное", forGroup: true,
+    hint: "то, что горит: старт, сдача, просрочки, долги",
+    keys: ["start_soon", "handover_soon", "stages", "debt"] },
+  { key: "team", label: "Командное (для чата)", forGroup: true,
+    hint: "без денег и без админки — их видят все в группе",
+    keys: ["object_new", "object", "docs", "start_soon", "handover_soon", "closing"] },
+  { key: "none", label: "Ничего", forGroup: true, hint: "снять все галочки", keys: [] },
+]);
+
+// Набор → готовая карта подписок. Всё, чего нет в наборе, выключается явно:
+// иначе снятая галочка молча вернулась бы из умолчаний.
+export function presetSubs(presetKey) {
+  const preset = NOTIFY_PRESETS.find(p => p.key === presetKey);
+  if (!preset) return null;
+  return Object.fromEntries(NOTIFY_CATALOG.map(n => [n.key, preset.keys.includes(n.key)]));
+}
+// Какой набор сейчас стоит (для подсветки кнопки). «Своё» — если ни один не совпал.
+export function matchPreset(isOn) {
+  for (const preset of NOTIFY_PRESETS) {
+    const same = NOTIFY_CATALOG.every(n => isOn(n.key) === preset.keys.includes(n.key));
+    if (same) return preset.key;
+  }
+  return "custom";
+}
 
 // ─── КОМУ ОТПРАВЛЯТЬ ──────────────────────────────────────────────────────────
 // Подписка сотрудника лежит в его карточке: u.tg = { topics: [...], scope, code }.
