@@ -16,14 +16,10 @@
 
 // ─── НАПРАВЛЕНИЯ ──────────────────────────────────────────────────────────────
 export const NOTIFY_TOPICS = Object.freeze([
-  { key: "production", icon: "🛠", label: "Производство и этапы",
-    hint: "просроченные этапы, объекты без движения, сдача в этом месяце, сдвиг дат" },
-  { key: "sales", icon: "📋", label: "Сделки, сметы и договоры",
-    hint: "новые объекты, смена статуса, согласование сметы, договоры, удаления" },
-  { key: "finance", icon: "💰", label: "Финансы и оплаты",
-    hint: "операции по деньгам, просроченная дебиторка. Суммы уйдут в Telegram" },
-  { key: "security", icon: "🔐", label: "Безопасность и админка",
-    hint: "смена прав, пользователи, бэкапы, неудачные попытки входа" },
+  { key: "objects", icon: "🏗", label: "Объекты и сроки",
+    hint: "подписание, приближение старта и сдачи, просрочки" },
+  { key: "digest", icon: "📈", label: "Сводки руководителю",
+    hint: "итоги недели и месяца одним сообщением" },
 ]);
 export const NOTIFY_TOPIC_KEYS = Object.freeze(NOTIFY_TOPICS.map(t => t.key));
 export const NOTIFY_TOPIC_BY_KEY = Object.freeze(
@@ -102,108 +98,31 @@ export function inQuietHours(ts, settings = {}) {
 // Каждое правило: на что смотрим (entity + что в action/field) → направление,
 // значок и как назвать по-русски. Порядок важен: берётся первое подошедшее.
 const RULES = [
-  // ── Сделки и производство по объекту ──
-  { key: "object", entity: "object", field: /статус/, topic: "sales", icon: "🏗",
-    title: (e) => `Объект «${nameOf(e)}»`,
-    body: (e) => `${esc(e.old) || "—"} → <b>${esc(e.new) || "—"}</b>` },
-  { key: "object_new", entity: "object", action: /созда/, topic: "sales", icon: "➕",
-    title: () => "Новый объект",
-    body: (e) => `<b>${nameOf(e)}</b>` },
-  { key: "deletions", entity: "object", action: /удали/, topic: "sales", icon: "🗑",
-    title: () => "Удалён объект",
-    body: (e) => `<b>${nameOf(e)}</b>` },
-  { key: "object", entity: "object", topic: "production", icon: "📅",
-    title: (e) => `Объект «${nameOf(e)}»`,
-    body: (e) => `${esc(e.field) || "поле"}: ${esc(e.old) || "—"} → <b>${esc(e.new) || "—"}</b>` },
-
-  // ── Сметы ──
-  { key: "deletions", entity: "estimate", action: /удали/, topic: "sales", icon: "🗑",
-    title: () => "Удалена смета",
-    body: (e) => `<b>${nameOf(e)}</b>` },
-  { key: "docs", entity: "estimate", topic: "sales", icon: "🧮",
-    title: (e) => `Смета «${nameOf(e)}»`,
-    body: (e) => (e.old || e.new) ? `${esc(e.old) || "—"} → <b>${esc(e.new) || "—"}</b>` : esc(e.action) },
-
-  // ── Договоры, клиенты, подряд, кабинет клиента ──
-  { key: "docs", entity: "contract", topic: "sales", icon: "📋",
-    title: (e) => `Договор «${nameOf(e)}»`, body: (e) => bodyOfChange(e) },
-  { key: "docs", entity: "client", topic: "sales", icon: "🧑",
-    title: (e) => `Клиент «${nameOf(e)}»`, body: (e) => bodyOfChange(e) },
-  { key: "prod_work", entity: "podryad", topic: "production", icon: "🔨",
-    title: (e) => `Подряд «${nameOf(e)}»`, body: (e) => bodyOfChange(e) },
-  { key: "docs", entity: "publish", topic: "sales", icon: "🌐",
-    title: (e) => `Кабинет клиента «${nameOf(e)}»`, body: (e) => bodyOfChange(e) },
-
-  // ── Акты и этапы ──
-  { key: "deletions", entity: "report", action: /удали/, topic: "production", icon: "🗑",
-    title: () => "Удалена запись акта", body: (e) => nameOf(e) },
-  { key: "prod_work", entity: "report", topic: "production", icon: "🧾",
-    title: (e) => `Акт «${nameOf(e)}»`, body: (e) => bodyOfChange(e) },
-  // Фотоотчёты и галочки чек-листа идут десятками за смену и сообщением не
-  // являются — их видно в карточке объекта. Держим их вне рассылки намеренно.
-  { key: "prod_work", entity: "stage", skip: /(фото|чек-лист)/i, topic: "production", icon: "🛠",
-    title: (e) => `Этап «${nameOf(e)}»`, body: (e) => bodyOfChange(e) },
-
-  // ── Деньги ──
-  { key: "deletions", entity: "finance_tx", action: /удали/, topic: "finance", icon: "🗑",
-    title: () => "Удалена операция", body: (e) => `${nameOf(e)}${e.old ? ` — <b>${esc(e.old)}</b>` : ""}` },
-  { key: "money", entity: "finance_tx", topic: "finance", icon: "💰",
-    title: () => "Операция по деньгам",
-    body: (e) => `${nameOf(e)}${e.new ? `\n<b>${esc(e.new)}</b>` : ""}` },
-  { key: "admin", entity: "price", topic: "finance", icon: "💲",
-    title: () => "Прайс-лист", body: (e) => bodyOfChange(e) },
-
-  // ── Безопасность ──
-  // Обычный вход — самая частая запись в журнале и ничего не значит.
-  // Неудачная попытка значит ровно наоборот, поэтому разделены.
-  { key: "admin", entity: "session", action: /неудач/, topic: "security", icon: "⚠️",
-    title: () => "Неудачная попытка входа", body: (e) => esc(e.label || e.detail) },
-  { entity: "session", drop: true },
-  { key: "admin", entity: "role", topic: "security", icon: "🔐",
-    title: (e) => `Права роли «${nameOf(e)}»`, body: (e) => bodyOfChange(e) },
-  { key: "admin", entity: "user", topic: "security", icon: "👤",
-    title: (e) => `Учётная запись «${nameOf(e)}»`, body: (e) => bodyOfChange(e) },
-  { key: "admin", entity: "backup", topic: "security", icon: "💾",
-    title: () => "Бэкап базы", body: (e) => bodyOfChange(e) },
-  { key: "admin", entity: "document_template", topic: "security", icon: "📑",
-    title: () => "Шаблоны документов", body: (e) => bodyOfChange(e) },
+  // ЕДИНСТВЕННОЕ событие из журнала — подписание договора. Владелец назвал его
+  // прямо, остальные (смена любого статуса, правки смет, удаления, админка,
+  // деньги, акты, этапы) убраны по его же просьбе: «убери лишние, оставь что
+  // я просил». Механика ловли их всех сохранена в истории — вернуть любое
+  // означает добавить сюда строку и строку в каталог ниже, не больше.
+  { key: "contract_signed", entity: "object", field: /статус/, topic: "objects", icon: "📝",
+    when: (e) => /подписан/i.test(S(e?.new)),
+    title: (e) => `Договор подписан — ${nameOf(e)}`,
+    body: (e) => `${esc(e.old) || "—"} → <b>${esc(e.new)}</b>` },
 ];
 
-function bodyOfChange(e) {
-  const what = trim(e.field);
-  const change = (e.old || e.new) ? `${esc(e.old) || "—"} → <b>${esc(e.new) || "—"}</b>` : "";
-  const act = esc(trim(e.action));
-  if (what && change) return `${esc(what)}: ${change}`;
-  if (change) return `${act ? act + ": " : ""}${change}`;
-  return act || nameOf(e);
-}
-
-// СПИСОК ДЛЯ АДМИНКИ. Задан ЯВНО, а не собран из правил, и это важно.
+// СПИСОК ДЛЯ АДМИНКИ. Ровно то, что владелец просил, и ни строкой больше.
 //
-// Первая версия собирала его из правил один-в-один — получилось 29 строк, и
-// владелец сказал прямо: «дохера всяких». Он был прав: «удалён объект»,
-// «удалена смета», «удалена запись акта» и «удалена операция» — это ЧЕТЫРЕ
-// строки про одно человеческое беспокойство «у меня что-то пропало». Ровно так
-// же «права ролей», «сотрудники», «бэкапы», «прайс», «шаблоны» и «неудачный
-// вход» — одно беспокойство «кто-то лезет в админку».
-//
-// Поэтому несколько правил делят один ключ: ловим по-прежнему всё, но
-// выключателей теперь столько, сколько у человека реальных забот.
+// Путь сюда был такой. Сначала список собирался из правил один-в-один — вышло
+// 29 строк, и владелец сказал: «дохера всяких». Тогда близкое слили в общие
+// строки вроде «Админка и безопасность» — и он ответил точнее: «ты всё равно
+// сильно обобщаешь, как я должен понять какое конкретно и почему придёт».
+// Оба раза он прав, и вывод один: строк должно быть мало И каждая должна
+// объяснять себя сама. Поэтому у каждой есть what (что придёт) и when (когда
+// сработает) — экран показывает их прямо под названием.
 export const NOTIFY_EVENTS = Object.freeze([
-  { key: "object_new", icon: "➕", topic: "sales", def: true,
-    label: "Новый объект", hint: "завели новый объект в базе" },
-  { key: "object", icon: "🏗", topic: "sales", def: true,
-    label: "Объект: статус и даты", hint: "смена статуса, сдвиг старта и сдачи" },
-  { key: "docs", icon: "📋", topic: "sales", def: true,
-    label: "Сметы, договоры, КП", hint: "правки смет, договоры, кабинет клиента" },
-  { key: "prod_work", icon: "🔨", topic: "production", def: false,
-    label: "Работы по объекту", hint: "этапы, акты и АВР, договоры подряда" },
-  { key: "money", icon: "💰", topic: "finance", def: true,
-    label: "Операции по деньгам", hint: "приходы и расходы, с суммами" },
-  { key: "deletions", icon: "🗑", topic: "security", def: true,
-    label: "Удаления", hint: "объект, смета, акт, операция — всё в одну строку" },
-  { key: "admin", icon: "🔐", topic: "security", def: true,
-    label: "Админка и безопасность", hint: "права, сотрудники, бэкапы, прайс, входы" },
+  { key: "contract_signed", icon: "📝", topic: "objects", kind: "event",
+    label: "Договор подписан",
+    when: "как только статус объекта сменили на «Договор подписан»",
+    what: "клиент, кто перевёл, плановые даты старта и сдачи, ответственный прораб" },
 ]);
 
 // ─── ФИЛЬТР ПО ОБЪЕКТАМ ───────────────────────────────────────────────────────
@@ -240,7 +159,7 @@ export function auditMessage(entry, settings = {}) {
     if (rule.entity !== entity) continue;
     if (rule.action && !rule.action.test(low(entry.action))) continue;
     if (rule.field && !rule.field.test(low(entry.field))) continue;
-    if (rule.skip && rule.skip.test(`${entry.field} ${entry.action}`)) return null;
+    if (rule.when && !rule.when(entry)) return null;
     if (rule.drop) return null;
     if (!objectAllowed(entry.objectId, settings)) return null;
     return {
@@ -317,13 +236,12 @@ export function groupMessages(messages) {
 // это половина новости: следом сразу возникает вопрос «а когда выходить». Даты
 // уже лежат в карточке производства, дотянуть их сюда стоит одну строку, а
 // человеку не надо лезть в сервис, чтобы понять, что делать дальше.
-const SIGNED_RE = /подписан/i;
 function eventExtras(msg, entry, ctx) {
   if (!ctx || !msg.objectId) return "";
   const prod = ctx.prodBy?.get(msg.objectId);
   if (!prod) return "";
   const rows = [];
-  if (msg.key === "object" && SIGNED_RE.test(S(entry?.new))) {
+  if (msg.key === "contract_signed") {
     if (prod.startDate) rows.push(`старт работ: <b>${esc(dateRu(prod.startDate))}</b>`);
     if (prod.planEndDate) rows.push(`сдача по плану: <b>${esc(dateRu(prod.planEndDate))}</b>`);
     if (!rows.length) rows.push("<i>даты старта и сдачи не заполнены</i>");
@@ -395,18 +313,18 @@ const idsOf = (items) => items.map(x => S(x.id || x.objectId || x.name));
 // важнее выключателей: «молчит больше 14 дней» и «больше 45» — это разговор
 // про разные объекты, а не про громкость.
 export const NOTIFY_REMINDERS = Object.freeze([
-  { key: "stages", icon: "🛠", topic: "production", label: "Просроченные этапы", def: true,
+  { key: "stages", icon: "⏰", topic: "objects", kind: "reminder", def: true,
+    label: "Просроченные этапы",
+    when: "раз в сутки, если плановая дата этапа прошла, а этап не закрыт",
+    what: "список: этап, объект, сколько дней горит, ответственный",
     threshold: { field: "minDays", label: "просрочка от", unit: "дн.", def: 0, max: 180 } },
-  { key: "stale", icon: "🔇", topic: "production", label: "Объекты без движения", def: true,
+  { key: "stale", icon: "🔇", topic: "objects", kind: "reminder", def: true,
+    label: "Объекты без движения",
+    when: "раз в сутки, если в карточке производства ничего не меняли дольше порога",
+    what: "список: объект, сколько дней тишина, ответственный",
     threshold: { field: "minDays", label: "тишина от", unit: "дн.", def: 14, max: 365 } },
-  { key: "closing", icon: "📦", topic: "production", label: "Сдаётся в этом месяце", def: true },
-  { key: "debt", icon: "💸", topic: "finance", label: "Просроченная оплата", def: true,
-    threshold: { field: "minSum", label: "от суммы", unit: "₸", def: 0, max: 100000000 } },
 ]);
-// Умолчание ищем во ВСЕХ списках напоминаний, а не только в этом. Напоминания
-// по датам (старт, сдача) лежат ниже отдельным списком, и без этого они молча
-// считались бы выключенными — функция вернула бы undefined, никто бы не упал,
-// а сообщения просто не приходили. Ловили ровно так.
+
 export function reminderOn(key, settings) {
   const cfg = settings?.reminders?.[key];
   if (cfg && Object.prototype.hasOwnProperty.call(cfg, "on")) return !!cfg.on;
@@ -472,47 +390,6 @@ export function buildReminderMessages(analytics = {}, { now = Date.now(), settin
     }
   }
 
-  // «Сдаётся в этом месяце» — единственное напоминание-счётчик, и оно чуть не
-  // прошло мимо глушения объектов: остальные фильтруются построчно, а тут число.
-  // Поймали на боевых данных — при полностью пустом белом списке сводка всё
-  // равно сообщала «сдаётся 2 объекта». Считаем по списку id, а не по счётчику.
-  const closingAll = Array.isArray(backlog.closingThisMonthIds) ? backlog.closingThisMonthIds : null;
-  const closingIds = closingAll ? closingAll.filter(id => objectAllowed(id, settings)) : null;
-  const closingCount = closingIds ? closingIds.length : (backlog.closingThisMonthCount || 0);
-  // Сумму показываем, только когда ничего не отфильтровано: пересчитать её здесь
-  // не из чего, а «2 объекта на 5 610 989 ₸» при одном показанном — враньё.
-  const closingSum = (closingIds && closingIds.length !== closingAll.length)
-    ? 0 : (backlog.closingThisMonthSum || 0);
-  if (reminderOn("closing", settings) && closingCount) {
-    out.push({
-      id: `rem~closing~${fingerprint(closingIds || [String(closingCount)])}`,
-      key: "closing", topic: "production", kind: "reminder", person: null,
-      text: `📦 <b>Сдаётся в этом месяце</b> · ${day}\n`
-        + `Объектов: <b>${closingCount}</b>`
-        + (closingSum ? ` на <b>${tenge(closingSum)}</b>` : ""),
-    });
-  }
-
-  const debts = reminderOn("debt", settings)
-    ? keep(finance.receivableList).filter(r => r.overdue
-        && (Number(r.value) || 0) >= reminderNum("debt", "minSum", settings))
-    : [];
-  if (debts.length) {
-    out.push({
-      id: `rem~debt~${fingerprint(idsOf(debts))}`,
-      key: "debt", topic: "finance", kind: "reminder", person: null,
-      text: block(`💸 <b>Просроченная оплата</b> · ${day}`, debts.map(x =>
-        `• ${esc(x.name)} — <b>${tenge(x.value)}</b>${x.manager ? ` · ${esc(x.manager)}` : ""}`)),
-    });
-    for (const [person, items] of byPerson(debts)) {
-      out.push({
-        id: `rem~debt~${fingerprint([person, ...idsOf(items)])}`,
-        key: "debt", topic: "finance", kind: "reminder", person,
-        text: block(`💸 <b>Ваша просроченная оплата</b> · ${day}`, items.map(x =>
-          `• ${esc(x.name)} — <b>${tenge(x.value)}</b>`)),
-      });
-    }
-  }
   return out;
 }
 
@@ -546,13 +423,18 @@ export function tenge(v) {
 // «за 10, 5 и 2» это разные разговоры: первый про «собрать бригаду», второй про
 // «успеть закрыть хвосты».
 export const DATE_REMINDERS = Object.freeze([
-  { key: "start_soon", icon: "🚀", topic: "production", label: "Скоро старт работ",
-    field: "startDate", def: true, defDays: [3, 1],
-    head: "Старт работ", verb: "выходим" },
-  { key: "handover_soon", icon: "🏁", topic: "production", label: "Скоро сдача объекта",
-    field: "planEndDate", def: true, defDays: [10, 5, 2],
-    head: "Сдача объекта", verb: "сдаём" },
+  { key: "start_soon", icon: "🚀", topic: "objects", kind: "dates", def: true,
+    label: "Скоро старт работ", field: "startDate", defDays: [3, 2, 1],
+    when: "за 3, 2 и 1 день до плановой даты начала работ (дни настраиваются)",
+    what: "список объектов: у кого когда старт, ответственный",
+    head: "Старт работ" },
+  { key: "handover_soon", icon: "🏁", topic: "objects", kind: "dates", def: true,
+    label: "Скоро сдача объекта", field: "planEndDate", defDays: [10, 5, 4, 2],
+    when: "за 10, 5, 4 и 2 дня до плановой даты сдачи (дни настраиваются)",
+    what: "список объектов: у кого когда сдача, ответственный",
+    head: "Сдача объекта" },
 ]);
+
 // Статусы, при которых напоминать не о чем: сделка не состоялась или всё закрыто.
 const DEAD_STATUS = new Set(["refuse", "done", "cancel", "archive"]);
 
@@ -631,12 +513,15 @@ export function buildDateReminders({ objects = [], productions = [] } = {}, { no
 // Все числа — из той же buildAnalytics, что рисует «Аналитику», поэтому сводка
 // в Telegram и экран не могут разойтись.
 export const DIGESTS = Object.freeze([
-  { key: "digest_week", icon: "📈", topic: "sales", label: "Сводка за неделю",
-    hint: "по понедельникам утром: продажи, конверсия, деньги", def: true,
-    period: "week", title: "Итоги недели" },
-  { key: "digest_month", icon: "📊", topic: "sales", label: "Сводка за месяц",
-    hint: "1-го числа: то же самое за прошедший месяц", def: true,
-    period: "month", title: "Итоги месяца" },
+  { key: "digest_week", icon: "📈", topic: "digest", kind: "digest", def: true,
+    label: "Сводка за неделю", period: "week", title: "Итоги недели",
+    when: "по понедельникам, в час сводки (по умолчанию 9:00)",
+    what: "зашло новых, посчитано смет, подписано договоров и на сколько, средний чек, "
+      + "конверсия по шагам, потеряно и почему, выручка, валовая и чистая прибыль" },
+  { key: "digest_month", icon: "📊", topic: "digest", kind: "digest", def: true,
+    label: "Сводка за месяц", period: "month", title: "Итоги месяца",
+    when: "1-го числа, в час сводки",
+    what: "то же самое за прошедший месяц" },
 ]);
 
 const pctText = (v) => (v === null || v === undefined ? "—" : `${v}%`);
@@ -699,64 +584,9 @@ export function buildDigestMessage(analytics = {}, { key, now = Date.now(), reas
 // отдельно для общего чата. Направление осталось только группировкой в админке:
 // «включить всё производство» одной кнопкой.
 export const NOTIFY_CATALOG = Object.freeze([
-  ...NOTIFY_EVENTS.map(e => Object.freeze({ ...e, kind: "event" })),
-  ...NOTIFY_REMINDERS.map(r => Object.freeze({
-    key: r.key, icon: r.icon, topic: r.topic, label: r.label, def: r.def, kind: "reminder",
-    hint: r.threshold ? `порог: ${r.threshold.label} ${r.threshold.def} ${r.threshold.unit}` : "раз в сутки",
-  })),
-  ...DATE_REMINDERS.map(r => Object.freeze({
-    key: r.key, icon: r.icon, topic: r.topic, label: r.label, def: r.def, kind: "dates",
-    hint: `предупреждать за ${r.defDays.join(", ")} дн.`,
-  })),
-  ...DIGESTS.map(d => Object.freeze({
-    key: d.key, icon: d.icon, topic: d.topic, label: d.label, def: d.def, kind: "digest", hint: d.hint,
-  })),
-]);
+  ...NOTIFY_EVENTS, ...NOTIFY_REMINDERS, ...DATE_REMINDERS, ...DIGESTS,
+].map(n => Object.freeze({ ...n, def: n.def !== false })));
 export const NOTIFY_BY_KEY = Object.freeze(Object.fromEntries(NOTIFY_CATALOG.map(n => [n.key, n])));
-
-// ─── ГОТОВЫЕ НАБОРЫ ───────────────────────────────────────────────────────────
-// Первая версия экрана давала таблицу 29 строк на 6 человек — 174 галочки.
-// Технически это полный контроль, практически — анкета, которую никто не
-// заполнит: владелец открыл и сказал «дохера всего и непонятно». Он был прав.
-//
-// Поэтому обычный путь теперь такой: выбрать человеку набор одним щелчком.
-// Поштучные галочки никуда не делись, они под кнопкой «показать что именно» —
-// но начинать с них не надо.
-export const NOTIFY_PRESETS = Object.freeze([
-  { key: "boss", label: "Руководителю", forGroup: false,
-    hint: "сводки, деньги, договоры, удаления, админка",
-    keys: ["digest_week", "digest_month", "object_new", "object", "docs",
-      "money", "debt", "closing", "deletions", "admin"] },
-  { key: "foreman", label: "Прорабу", forGroup: false,
-    hint: "стройка: старт, сдача, просрочки, работы",
-    keys: ["start_soon", "handover_soon", "stages", "stale", "object", "prod_work"] },
-  { key: "sales", label: "Менеджеру продаж", forGroup: false,
-    hint: "лиды, сметы, договоры, кабинет клиента",
-    keys: ["object_new", "object", "docs"] },
-  { key: "urgent", label: "Только срочное", forGroup: true,
-    hint: "то, что горит: старт, сдача, просрочки, долги",
-    keys: ["start_soon", "handover_soon", "stages", "debt"] },
-  { key: "team", label: "Командное (для чата)", forGroup: true,
-    hint: "без денег и без админки — их видят все в группе",
-    keys: ["object_new", "object", "docs", "start_soon", "handover_soon", "closing"] },
-  { key: "none", label: "Ничего", forGroup: true, hint: "снять все галочки", keys: [] },
-]);
-
-// Набор → готовая карта подписок. Всё, чего нет в наборе, выключается явно:
-// иначе снятая галочка молча вернулась бы из умолчаний.
-export function presetSubs(presetKey) {
-  const preset = NOTIFY_PRESETS.find(p => p.key === presetKey);
-  if (!preset) return null;
-  return Object.fromEntries(NOTIFY_CATALOG.map(n => [n.key, preset.keys.includes(n.key)]));
-}
-// Какой набор сейчас стоит (для подсветки кнопки). «Своё» — если ни один не совпал.
-export function matchPreset(isOn) {
-  for (const preset of NOTIFY_PRESETS) {
-    const same = NOTIFY_CATALOG.every(n => isOn(n.key) === preset.keys.includes(n.key));
-    if (same) return preset.key;
-  }
-  return "custom";
-}
 
 // ─── КОМУ ОТПРАВЛЯТЬ ──────────────────────────────────────────────────────────
 // Подписка сотрудника лежит в его карточке: u.tg = { topics: [...], scope, code }.

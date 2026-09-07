@@ -25,14 +25,13 @@ import {
   NOTIFY_TOPICS, NOTIFY_CATALOG, NOTIFY_REMINDERS, DATE_REMINDERS, OBJECT_MODES,
   reminderOn, reminderNum, reminderDays, objectAllowed,
   isSubscribed, groupSubscribed, subsOf,
-  NOTIFY_PRESETS, presetSubs, matchPreset,
   linkUrl, makeLinkCode, userScope,
 } from "../notify/notifyModel.js";
 
 const card = { background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 const h = { fontSize: 15, fontWeight: 800, color: "#0f172a", marginBottom: 4 };
 const sub = { fontSize: 12, color: "#64748b", lineHeight: 1.55, marginBottom: 14 };
-const KIND_LABEL = { event: "событие", reminder: "напоминание", dates: "по датам", digest: "сводка" };
+
 const DEFAULTS = {
   on: false, botName: "", groupChatId: "", groupSubs: null,
   quietFrom: 22, quietTo: 8, digestHour: 9, repeatAfterDays: 7,
@@ -173,11 +172,11 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
         <div style={card}>
           <div style={h}>Кому что слать</div>
           <div style={sub}>
-            Быстрый путь: в шапке столбца выбрать <b>готовый набор</b> — «Прорабу»,
-            «Руководителю», «Менеджеру продаж». Он расставит галочки за вас, дальше
-            можно поправить руками, тогда в шапке появится «своё».
-            <br />Каждое уведомление настраивается отдельно: в общий чат, лично конкретным
-            людям, или и то и другое.
+            Здесь ровно семь уведомлений — только то, что вы просили. У каждого написано,
+            когда оно сработает и что будет в сообщении. Отметьте, кому оно нужно: в общий
+            чат, лично конкретным людям, или и туда и туда.
+            <br />Адресные напоминания («ваши просроченные этапы») в общий чат не уходят
+            никогда, даже если галочка стоит: они по определению личные.
             <br />Адресные напоминания («ваши просроченные этапы») в общий чат не уходят
             никогда, даже если галочка стоит: они по определению личные.
           </div>
@@ -186,7 +185,7 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
             <table style={{ borderCollapse: "collapse", fontSize: 12.5, width: "100%", minWidth: 640 }}>
               <thead>
                 <tr style={{ background: "#f8fafc" }}>
-                  <th style={{ ...thBase, textAlign: "left", minWidth: 240, position: "sticky", left: 0, background: "#f8fafc", zIndex: 2 }}>
+                  <th style={{ ...thBase, textAlign: "left", minWidth: 380, position: "sticky", left: 0, background: "#f8fafc", zIndex: 2 }}>
                     Уведомление
                   </th>
                   <th style={{ ...thBase, minWidth: 118 }}>
@@ -194,9 +193,7 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
                     <div style={{ fontSize: 10, fontWeight: 500, color: "#94a3b8", textTransform: "none" }}>
                       {settings.groupChatId ? "подключён" : "номер не задан"}
                     </div>
-                    {editable && <PresetPick presets={NOTIFY_PRESETS.filter(p => p.forGroup)}
-                      current={matchPreset(k => groupSubscribed(settings, k))}
-                      onPick={(pk) => patch({ groupSubs: presetSubs(pk) })} />}
+                    {editable && <BulkCol onAll={(v) => setGroupAll(NOTIFY_CATALOG.map(n => n.key), v)} />}
                   </th>
                   {users.map(u => (
                     <th key={u.id} style={{ ...thBase, minWidth: 118 }}>
@@ -205,10 +202,7 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
                         color: links[u.id]?.chatId ? "#059669" : "#cbd5e1" }}>
                         {links[u.id]?.chatId ? "подключён" : "не подключён"}
                       </div>
-                      {editable && <PresetPick presets={NOTIFY_PRESETS}
-                        current={matchPreset(k => isSubscribed(u, k))}
-                        onPick={(pk) => patchUser(u.id, { subs: presetSubs(pk) },
-                          `набор «${NOTIFY_PRESETS.find(x => x.key === pk)?.label || pk}»`)} />}
+                      {editable && <BulkCol onAll={(v) => setUserAll(u, NOTIFY_CATALOG.map(n => n.key), v)} />}
                     </th>
                   ))}
                 </tr>
@@ -237,10 +231,16 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
                       </tr>,
                       ...rows.map(n => (
                         <tr key={n.key} style={{ borderTop: "1px solid #f1f5f9" }}>
-                          <td style={{ padding: "8px 12px", position: "sticky", left: 0, background: "#fff" }}>
-                            <div style={{ fontWeight: 600, color: "#0f172a" }}>{n.icon} {n.label}</div>
-                            <div style={{ fontSize: 10.5, color: "#94a3b8" }}>
-                              {KIND_LABEL[n.kind]}{n.hint ? ` · ${n.hint}` : ""}
+                          <td style={{ padding: "10px 12px", position: "sticky", left: 0, background: "#fff",
+                            maxWidth: 460 }}>
+                            <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 13 }}>
+                              {n.icon} {n.label}
+                            </div>
+                            <div style={{ fontSize: 11.5, color: "#64748b", lineHeight: 1.45, marginTop: 3 }}>
+                              <b style={{ color: "#94a3b8", fontWeight: 700 }}>Когда:</b> {n.when}
+                            </div>
+                            <div style={{ fontSize: 11.5, color: "#64748b", lineHeight: 1.45 }}>
+                              <b style={{ color: "#94a3b8", fontWeight: 700 }}>В сообщении:</b> {n.what}
                             </div>
                           </td>
                           <td style={cellStyle}>
@@ -506,18 +506,12 @@ const cellStyle = { padding: "8px 6px", textAlign: "center" };
 const box = { width: 16, height: 16 };
 const bulkBtn = { fontSize: 10.5, padding: "2px 7px" };
 
-// Готовый набор одним выбором на весь столбец. Расставлять полтора десятка
-// галочек каждому вручную никто не станет — а «Прорабу» это один щелчок.
-// «своё» показывается, когда после набора что-то поправили руками.
-function PresetPick({ presets, current, onPick }) {
+function BulkCol({ onAll }) {
   return (
-    <select className="fi" value={current === "custom" ? "" : current}
-      onChange={e => e.target.value && onPick(e.target.value)}
-      style={{ marginTop: 4, width: "100%", fontSize: 10.5, padding: "3px 4px",
-        fontWeight: 500, textTransform: "none", color: "#334155" }}>
-      <option value="">{current === "custom" ? "своё" : "набор…"}</option>
-      {presets.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
-    </select>
+    <div style={{ marginTop: 3 }}>
+      <button className="sub-btn" style={bulkBtn} onClick={() => onAll(true)}>все</button>
+      <button className="sub-btn" style={bulkBtn} onClick={() => onAll(false)}>снять</button>
+    </div>
   );
 }
 function Field({ label, hint, children }) {
