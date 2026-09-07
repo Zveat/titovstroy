@@ -90,7 +90,10 @@ async function send(chatId, text) {
 // Сотрудник открывает ссылку из Админки и жмёт «Запустить» — Telegram сам
 // отправляет боту «/start КОД». Здесь мы этот код узнаём и запоминаем чат.
 async function processUpdates(state, users, links) {
-  if (DRY || !BOT) return { links, changed: false, lastUpdateId: state.lastUpdateId };
+  if (!BOT) { console.warn("Нет секрета TELEGRAM_BOT_TOKEN — привязки не обрабатываются."); 
+    return { links, changed: false, lastUpdateId: state.lastUpdateId }; }
+  if (DRY) { console.log("Сухой прогон: команды бота не читаем."); 
+    return { links, changed: false, lastUpdateId: state.lastUpdateId }; }
   let updates = [];
   try {
     updates = await tg("getUpdates", {
@@ -139,8 +142,9 @@ async function processUpdates(state, users, links) {
     if (/^\/(chatid|id)\b/.test(text)) {
       // Для общего чата: бота добавляют в группу, он подсказывает её номер,
       // который админ вставляет в Админке. Иначе номер группы взять негде.
-      await send(chatId, `Номер этого чата: <code>${chatId}</code>\n`
-        + "Вставьте его в Админке → Уведомления → «Общий чат».");
+      await send(chatId, `Номер этого чата:\n<code>${chatId}</code>\n\n`
+        + "Скопируйте его целиком, вместе с минусом, и вставьте в TitovStroy → "
+        + "Админка → Уведомления → Основное → «Номер общего чата».");
       continue;
     }
   }
@@ -156,14 +160,21 @@ async function main() {
   const users = (await readJson(K.users, [])) || [];
   const now = Date.now();
 
-  if (!settings.on) {
-    console.log("Уведомления выключены в Админке — выходим, ничего не отправлено.");
-    return;
-  }
-
-  // 1. Привязки (всегда, даже в тихие часы: человек ждёт ответа прямо сейчас)
+  // ПРИВЯЗКИ ОБРАБАТЫВАЕМ ДО ПРОВЕРКИ «ВКЛЮЧЕНО». Настраивают уведомления именно
+  // тогда, когда рассылка ещё выключена: сотрудник жмёт «Запустить» в боте, в
+  // группе отправляют /id, чтобы узнать её номер. Если выйти раньше, ни то ни
+  // другое не сработает — и включить будет нечего.
   const upd = await processUpdates(state, users, links);
   if (upd.changed) await writeJson(K.links, upd.links);
+  if (upd.lastUpdateId !== state.lastUpdateId) {
+    await writeJson(K.state, { ...state, lastUpdateId: upd.lastUpdateId, lastRun: now });
+  }
+
+  if (!settings.on) {
+    console.log("Рассылка выключена в Админке. Привязки и команды бота обработаны, "
+      + "сообщения не отправляются.");
+    return;
+  }
 
   const quiet = inQuietHours(now, settings);
   if (quiet) console.log("Тихие часы — сообщения подождут до утра, ничего не теряется.");
@@ -262,4 +273,14 @@ async function main() {
   console.log("Готово.");
 }
 
-main().catch((e) => { console.error("СБОЙ:", e.message); process.exit(1); });
+// ЗАКРЫТЬ СОЕДИНЕНИЕ ОБЯЗАТЕЛЬНО. Firebase Admin держит открытый сокет к базе,
+// и без явного закрытия node не завершается: работа сделана, а прогон висит до
+// таймаута GitHub и падает как «Cancelled» — ровно это и случилось на первом
+// запуске (10 минут, отменён). Парсер мастеров делает то же самое в каждой
+// точке выхода, я это упустил.
+async function shutdown() {
+  try { await admin.app().delete(); } catch (e) { /* приложение не поднялось — нечего закрывать */ }
+}
+main()
+  .then(async () => { await shutdown(); process.exit(0); })
+  .catch(async (e) => { console.error("СБОЙ:", e.message); await shutdown(); process.exit(1); });
