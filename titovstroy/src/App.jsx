@@ -4944,7 +4944,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
   useLayoutEffect(() => {
     const el = topBannerRef.current;
     if (!el || !anyTopBanner) { setTopBannerH(0); return; }
-    const measure = () => setTopBannerH(Math.round(el.getBoundingClientRect().height) || 0);
+    /* offsetHeight, а не getBoundingClientRect: при масштабе интерфейса rect
+       возвращает высоту НА ЭКРАНЕ (36 → 32 при 90%), а число уходит обратно в
+       CSS, где его снова умножат на масштаб — и полоса накрывала бы меню на
+       пару пикселей. offsetHeight отдаёт высоту в тех же единицах, в которых
+       её потом читает CSS, поэтому при любом масштабе сходится. */
+    const measure = () => setTopBannerH(el.offsetHeight || 0);
     measure();
     if (typeof ResizeObserver === "undefined") {
       window.addEventListener("resize", measure);
@@ -4955,8 +4960,29 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     return () => ro.disconnect();
   }, [anyTopBanner, showReauthBanner, showLoadErrorBanner, showEditLockBanner, showSaveFailBanner, showSyncBanner]);
 
+  /* ── МАСШТАБ ИНТЕРФЕЙСА ─────────────────────────────────────────────────
+     Сервис рисовался под 100% и на большом мониторе выглядит крупно. Раньше
+     это лечили зумом самого браузера — но его приходится ставить заново в
+     каждом браузере и на каждом устройстве. Теперь масштаб живёт внутри
+     сервиса: 90% по умолчанию, выбор запоминается в этом браузере.
+     Ключ намеренно НЕ начинается с titovstroy_ — это личная настройка вида,
+     ей нечего делать в базе рядом с данными, и синхронизация её не подберёт.
+     На телефоне не применяется: там своя вёрстка, ей уменьшение только вредит. */
+  const UI_SCALE_KEY = "ts_ui_scale", UI_SCALE_DEFAULT = 90;
+  const [uiScale, setUiScale] = useState(() => {
+    try {
+      const n = Number(localStorage.getItem(UI_SCALE_KEY));
+      return Number.isFinite(n) && n >= 70 && n <= 130 ? n : UI_SCALE_DEFAULT;
+    } catch (e) { return UI_SCALE_DEFAULT; }
+  });
+  useEffect(() => {
+    try { document.documentElement.style.setProperty("--ui-scale", String(uiScale / 100)); } catch (e) {}
+    try { localStorage.setItem(UI_SCALE_KEY, String(uiScale)); } catch (e) {}
+  }, [uiScale]);
+  const bumpUiScale = (d) => setUiScale(v => Math.min(130, Math.max(70, v + d)));
+
   return (
-    <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#f8fafc",minHeight:"100vh",color:"#0f172a",display:"flex",flexDirection:"column","--topbar":`${topBannerH}px`}}>
+    <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#f8fafc",minHeight:"var(--vh100,100vh)",color:"#0f172a",display:"flex",flexDirection:"column","--topbar":`${topBannerH}px`}}>
       {/* pointerEvents:none на полосе и auto на баннерах: пустая полоса (когда
           показывать нечего) не должна перехватывать клики по странице. */}
       <div ref={topBannerRef} style={{position:"fixed",top:0,left:0,right:0,zIndex:502,display:"flex",flexDirection:"column",paddingTop:anyTopBanner?"env(safe-area-inset-top,0px)":0,pointerEvents:"none"}}>
@@ -5026,6 +5052,29 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@600;700;800;900&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
         html,body{background:#f8fafc;overflow-x:hidden;width:100%;font-family:'Inter','Segoe UI',sans-serif;color:#0f172a}
+        /* Масштаб интерфейса. Именно zoom, а не transform: страница честно
+           переверстывается, как при зуме браузера — ничего не косит, лишней
+           прокрутки не появляется. Только на широких экранах: на телефоне
+           вёрстка своя и уменьшать её нечего.
+           --vh100 — «высота экрана» с поправкой на масштаб. Единица vh про
+           масштаб не знает: 100vh под 90% рисуется на 90% экрана, и снизу
+           вылезала бы полоса чужого цвета. Ниже везде, где нужна полная
+           высота, стоит var(--vh100). */
+        :root{--vh100:100vh}
+        @media(min-width:900px){
+          html{zoom:var(--ui-scale,.9)}
+          :root{--vh100:calc(100vh / var(--ui-scale,.9))}
+        }
+        /* Печать идёт в 100%: масштаб экрана не должен утаскивать за собой
+           лист бумаги (КП печатается прямо со страницы). */
+        @media print{html{zoom:1!important}:root{--vh100:100vh}}
+        .ui-scale-row{display:flex;align-items:center;gap:6px;margin:2px 10px 6px;padding:5px 9px;border-radius:9px;background:rgba(148,163,184,.08)}
+        .sidebar.collapsed .ui-scale-row{display:none}
+        .ui-scale-cap{font-size:11px;color:#64748b;flex:1;white-space:nowrap;overflow:hidden}
+        .ui-scale-btn{width:22px;height:22px;border:none;border-radius:6px;background:rgba(148,163,184,.18);color:#cbd5e1;font-family:inherit;font-size:14px;font-weight:700;line-height:1;cursor:pointer;flex-shrink:0}
+        .ui-scale-btn:hover{background:rgba(148,163,184,.32);color:#f1f5f9}
+        .ui-scale-val{border:none;background:none;color:#94a3b8;font-family:inherit;font-size:11.5px;font-weight:600;cursor:pointer;padding:0;min-width:36px;text-align:center}
+        .ui-scale-val:hover{color:#f1f5f9}
         h1,h2,h3{font-family:'Poppins','Inter',sans-serif;letter-spacing:-.02em;color:#0f172a}
         input,select,textarea{outline:none}
         ::-webkit-scrollbar{width:5px}
@@ -5101,7 +5150,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         .nav-item:hover .nav-label{color:#e2e8f0}
         .nav-item.active .nav-label{color:#f1f5f9;font-weight:600}
         .sidebar.collapsed .nav-label{opacity:0;width:0;pointer-events:none}
-        .sidebar-content{margin-left:248px;transition:margin-left .22s cubic-bezier(.4,0,.2,1);min-height:100vh;padding-top:var(--topbar,0px);background:#f8fafc}
+        .sidebar-content{margin-left:248px;transition:margin-left .22s cubic-bezier(.4,0,.2,1);min-height:var(--vh100,100vh);padding-top:var(--topbar,0px);background:#f8fafc}
         .sidebar-content.collapsed{margin-left:64px}
         /* Строка работы на телефоне: название сверху во всю ширину, под ним
            одна строка «цена за единицу — поле объёма — итог». Пятиколоночная
@@ -5272,7 +5321,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         .fin-row:hover{background:#f8fafc}
         .fin-row:hover{box-shadow:0 8px 24px rgba(15,23,42,.10)!important;transform:translateY(-2px)}
         /* ── rep-table: ДДС и ОПУ ─────────────────────────────── */
-        .rep-wrap{width:100%;overflow:auto;max-height:calc(100vh - 200px);border:1px solid #e2e8f0;border-radius:12px;background:#fff}
+        .rep-wrap{width:100%;overflow:auto;max-height:calc(var(--vh100,100vh) - 200px);border:1px solid #e2e8f0;border-radius:12px;background:#fff}
         .rep-table{border-collapse:collapse;font-size:13px;width:100%;min-width:700px;background:#fff}
         /* Заголовок */
         .rep-table thead th{
@@ -5332,8 +5381,17 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             );
           })}
         </nav>
-        {/* Collapse + Выйти */}
+        {/* Масштаб + Collapse + Выйти */}
         <div style={{borderTop:"1px solid rgba(148,163,184,.12)",padding:"10px 0"}}>
+          {/* Масштаб интерфейса. Сохраняется в этом браузере, в базу не уходит.
+              По числу — возврат к 90%. На телефоне бокового меню нет, но там
+              масштаб и не применяется. */}
+          <div className="ui-scale-row">
+            <span className="ui-scale-cap">Масштаб</span>
+            <button type="button" className="ui-scale-btn" title="Мельче" onClick={()=>bumpUiScale(-5)}>−</button>
+            <button type="button" className="ui-scale-val" title="Вернуть 90%" onClick={()=>setUiScale(UI_SCALE_DEFAULT)}>{uiScale}%</button>
+            <button type="button" className="ui-scale-btn" title="Крупнее" onClick={()=>bumpUiScale(5)}>+</button>
+          </div>
           <div className="nav-item" onClick={()=>{ setLogoutConfirm(true); }}>
             <span className="nav-ico" style={{fontSize:16,flexShrink:0}}>🚪</span>
             <span className="nav-label" style={{fontSize:13}}>Выйти</span>
@@ -5402,7 +5460,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       {/* ── КАЛЕНДАРЬ ПРОИЗВОДСТВА (admin/manager/foreman) ── */}
         {effScreen === "calendar" && currentPermissions.calendar === "none" && restrictedSection("Календарь", "сотрудникам с соответствующим правом")}
         {effScreen === "calendar" && currentPermissions.calendar !== "none" && (
-          <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40,maxWidth:1600}}>
+          <div className="page" style={{background:"#f1f5f9",minHeight:"var(--vh100,100vh)",paddingBottom:40,maxWidth:1600}}>
           <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"22px 26px",marginBottom:20,boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
             <div style={{fontSize:21,fontWeight:900,color:"#fff",marginBottom:3}}>📅 Календарь производства</div>
             <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>Загрузка объектов, этапов и прорабов во времени · пересечения и просрочки</div>
@@ -5414,7 +5472,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       {/* Главная прораба: только производственные задачи, без финансовых KPI. */}
       {effScreen === "dashboard" && currentPermissions.dashboard === "none" && restrictedSection("Главная", "сотрудникам с соответствующим правом")}
       {effScreen === "dashboard" && currentPermissions.dashboard !== "none" && _isForeman && (
-        <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40}}>
+        <div className="page" style={{background:"#f1f5f9",minHeight:"var(--vh100,100vh)",paddingBottom:40}}>
           <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"24px 28px",marginBottom:24,boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
             <div style={{fontSize:20,fontWeight:900,color:"#fff",marginBottom:4}}>Мои задачи</div>
             <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>{new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"})} · <span style={{color:"#bfdbfe",fontWeight:600}}>{currentUser.name}</span></div>
@@ -5486,7 +5544,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           return {inWork,overdue,doneMonth,defects};
         })() : null;
         return (
-        <div className="page" style={{background:"#f1f5f9",minHeight:"100vh",paddingBottom:40,maxWidth:1600}}>
+        <div className="page" style={{background:"#f1f5f9",minHeight:"var(--vh100,100vh)",paddingBottom:40,maxWidth:1600}}>
 
           {/* Заголовок — Hero Banner */}
           <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"28px 32px",marginBottom:24,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
@@ -5584,7 +5642,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       ═══════════════════════════════════════════════════════════════════ */}
         {effScreen === "list" && currentPermissions.estimates === "none" && restrictedSection("Сметы и КП", "сотрудникам с соответствующим правом")}
         {effScreen === "list" && currentPermissions.estimates !== "none" && (
-          <div style={{maxWidth:1600,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
+          <div style={{maxWidth:1600,margin:"0 auto",padding:"0 0 40px",minHeight:"var(--vh100,100vh)"}}>
           {/* Шапка */}
           <div className="list-header" style={{background:"linear-gradient(135deg,#0f172a,#1e293b)",borderBottom:"1px solid #0f172a",padding:"14px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:"var(--topbar,0px)",zIndex:10,boxShadow:"0 2px 12px rgba(15,23,42,.2)"}}>
             <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
@@ -8961,7 +9019,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         };
 
         return (
-        <div style={{padding:"20px 16px 90px",minHeight:"100vh"}}>
+        <div style={{padding:"20px 16px 90px",minHeight:"var(--vh100,100vh)"}}>
           {/* Шапка */}
           <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"22px 26px",marginBottom:20,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
             <div style={{position:"absolute",top:-30,right:-30,width:160,height:160,borderRadius:"50%",background:"rgba(59,130,246,.08)"}}/>
@@ -10082,7 +10140,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 
         {effScreen === "contracts" && currentPermissions.documents === "none" && restrictedSection("Прочие документы", "сотрудникам с соответствующим правом")}
         {effScreen === "contracts" && currentPermissions.documents !== "none" && (
-          <div className="page" style={{maxWidth:1600,minHeight:"100vh"}}>
+          <div className="page" style={{maxWidth:1600,minHeight:"var(--vh100,100vh)"}}>
           {/* Шапка + табы — скрываем в режиме редактора договора (у него своя шапка) */}
           {contractTab !== "editor" && (<>
           <div className="hero" style={{background:"linear-gradient(135deg,#0f172a 0%,#1e293b 70%,#283549 100%)",borderRadius:16,padding:"22px 26px",marginBottom:20,position:"relative",overflow:"hidden",boxShadow:"0 4px 20px rgba(15,23,42,.3)"}}>
