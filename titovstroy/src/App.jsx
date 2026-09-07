@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef, Fragment, lazy, Suspense } from "react";
+import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef, Fragment, lazy, Suspense } from "react";
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, get, set, runTransaction, onValue } from "firebase/database";
 import ProductionModule, { flushPendingProduction, stopProductionSession, hasPendingProduction, productionDraftsAreDurable, startProductionSession, setProductionCommandHandler } from "./production/ProductionModule.jsx";
@@ -4921,30 +4921,67 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     </div>
   );
 
+  /* ── ВЕРХНЯЯ ПОЛОСА ПРЕДУПРЕЖДЕНИЙ ──────────────────────────────────────
+     Раньше каждый баннер висел сам по себе: position:fixed, top:0. Пока они
+     показывались редко и на секунду, это сходило с рук. Но «Режим просмотра»
+     у наблюдателя горит ПОСТОЯННО — и он наглухо закрывал верх страницы:
+     имя пользователя в боковом меню, шапку раздела, верхний ряд карточек.
+     Двое одновременно (например «не сохранено» и «нет связи») вообще
+     ложились друг на друга и один текст закрывал другой.
+     Теперь все они лежат в одной полосе, встают друг под другом, а высоту
+     полосы страница знает как --topbar и на неё отступает. */
+  const showReauthBanner = needsReauth;
+  const showLoadErrorBanner = loadError && !needsReauth;
+  const showEditLockBanner = !editorTab;
+  const showSaveFailBanner = saveFails.length > 0;
+  const showSyncBanner = !loadError && !needsReauth && !syncBannerHidden && (cloudError || prodUnsyncedN > 0 || dirtyCount > 0 || legacyDirtyN > 0 || deniedN > 0);
+  const anyTopBanner = showReauthBanner || showLoadErrorBanner || showEditLockBanner || showSaveFailBanner || showSyncBanner;
+  const topBannerRef = useRef(null);
+  const [topBannerH, setTopBannerH] = useState(0);
+  /* Высоту меряем, а не считаем: текст переносится на узком экране, и полоса
+     из одной строки становится тремя. useLayoutEffect — чтобы отступ появился
+     в том же кадре, что и баннер, иначе видно рывок. */
+  useLayoutEffect(() => {
+    const el = topBannerRef.current;
+    if (!el || !anyTopBanner) { setTopBannerH(0); return; }
+    const measure = () => setTopBannerH(Math.round(el.getBoundingClientRect().height) || 0);
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [anyTopBanner, showReauthBanner, showLoadErrorBanner, showEditLockBanner, showSaveFailBanner, showSyncBanner]);
+
   return (
-    <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#f8fafc",minHeight:"100vh",color:"#0f172a",display:"flex",flexDirection:"column"}}>
+    <div style={{fontFamily:"'Inter','Segoe UI',sans-serif",background:"#f8fafc",minHeight:"100vh",color:"#0f172a",display:"flex",flexDirection:"column","--topbar":`${topBannerH}px`}}>
+      {/* pointerEvents:none на полосе и auto на баннерах: пустая полоса (когда
+          показывать нечего) не должна перехватывать клики по странице. */}
+      <div ref={topBannerRef} style={{position:"fixed",top:0,left:0,right:0,zIndex:502,display:"flex",flexDirection:"column",paddingTop:anyTopBanner?"env(safe-area-inset-top,0px)":0,pointerEvents:"none"}}>
       {/* Сессия браузера ещё анонимная: база уже закрыта правилами, читать нечего.
           Показываем это отдельно от «облако недоступно» — причина другая и лечится входом. */}
       {/* Раньше эта подсказка показывалась ТОЛЬКО вместе с ошибкой загрузки. Но при
           устаревшем входе данные спокойно приходят из локального кеша, loadError
           false — и человек видел вместо неё «у вашей роли нет прав» и шёл к
           администратору. Показываем всегда, когда база не признаёт сотрудника. */}
-      {needsReauth && (
-        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:501,background:"#b45309",color:"#fff",padding:"10px 16px",paddingTop:"calc(10px + env(safe-area-inset-top,0px))",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,flexWrap:"wrap",boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
+      {showReauthBanner && (
+        <div style={{pointerEvents:"auto",background:"#b45309",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,flexWrap:"wrap",boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
           🔑 Нужно войти заново — в этом браузере старый вход, база его больше не пускает. Дело НЕ в правах роли и НЕ в интернете. Всё несохранённое осталось на устройстве и уйдёт в базу после входа.
           <button onClick={()=>doLogout()} style={{background:"#fff",color:"#b45309",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Выйти и войти</button>
         </div>
       )}
       {/* Баннер: данные не загрузились — редактирование опасно */}
-      {loadError && !needsReauth && (
-        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:500,background:"#dc2626",color:"#fff",padding:"10px 16px",paddingTop:"calc(10px + env(safe-area-inset-top,0px))",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
+      {showLoadErrorBanner && (
+        <div style={{pointerEvents:"auto",background:"#dc2626",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
           ⚠️ Не удалось загрузить данные из базы. НЕ редактируйте сметы — сохранение отключено для защиты данных.
           <button onClick={()=>window.location.reload()} style={{background:"#fff",color:"#dc2626",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Обновить</button>
         </div>
       )}
       {/* Плашка read-only вкладки: lease редактирования у другой вкладки */}
-      {!editorTab && (
-        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:501,background:"#475569",color:"#fff",padding:"10px 16px",paddingTop:"calc(10px + env(safe-area-inset-top,0px))",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)",flexWrap:"wrap"}}>
+      {showEditLockBanner && (
+        <div style={{pointerEvents:"auto",background:"#475569",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)",flexWrap:"wrap"}}>
           {_isViewer
             ? "Режим просмотра — изменения недоступны для этой учётной записи."
             : "Сервис открыт для редактирования в другой вкладке — здесь только просмотр (изменения не сохраняются)."}
@@ -4953,8 +4990,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       )}
       {/* НЕ СОХРАНЕНО. Оранжевый баннер ниже — про «ушло локально, дожмём»; этот про «не ушло
           вообще». Красный, не прячется сам и держит payload: «Повторить» шлёт те же данные. */}
-      {saveFails.length > 0 && (
-        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:502,background:"#b91c1c",color:"#fff",padding:"10px 16px",paddingTop:"calc(10px + env(safe-area-inset-top,0px))",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.25)",flexWrap:"wrap"}}>
+      {showSaveFailBanner && (
+        <div style={{pointerEvents:"auto",background:"#b91c1c",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.25)",flexWrap:"wrap"}}>
           <span>⛔ НЕ СОХРАНЕНО:{" "}
             {saveFails.map((f,i)=>(
               <span key={f.id}>{i>0?" · ":" "}<b>{f.label}</b> — {saveFailReasonText(f.reason)}{f.count>1?` (×${f.count})`:""}</span>
@@ -4972,8 +5009,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           Раньше баннер был один на оба случая и всегда говорил «облако недоступно»: человек с
           отобранным правом чинил интернет и отключал блокировщик, хотя сеть была в порядке, а
           приложение в это время молотило повторами, которые правила отбивали снова и снова. */}
-      {!loadError && !needsReauth && !syncBannerHidden && (cloudError || prodUnsyncedN > 0 || dirtyCount > 0 || legacyDirtyN > 0 || deniedN > 0) && (
-        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:500,background:deniedN>0?"#b91c1c":"#d97706",color:"#fff",padding:"10px 16px",paddingTop:"calc(10px + env(safe-area-inset-top,0px))",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)",flexWrap:"wrap"}}>
+      {showSyncBanner && (
+        <div style={{pointerEvents:"auto",background:deniedN>0?"#b91c1c":"#d97706",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)",flexWrap:"wrap"}}>
           {deniedN > 0
             ? <>🚫 База отклонила сохранение: у вашей роли нет прав на эти разделы ({deniedN}). Дело НЕ в интернете — повторять бесполезно, пока право не выдадут. Данные остались на этом устройстве и не потеряны: попросите администратора открыть доступ в «Права ролей», затем выйдите и войдите заново и нажмите «Повторить сейчас». Разделы: {storage.deniedKeys().map(k => saveFailLabel(k)).join(", ")}.</>
             : <>⚠️ {prodUnsyncedN > 0 ? `Изменения производства ожидают синхронизации (${prodUnsyncedN}) — ` : ""}Данные могут быть сохранены ТОЛЬКО на этом устройстве — облако недоступно{dirtyCount>0?` (несинхронизировано: ${dirtyCount})`:""}. Приложение само дожмёт синхронизацию, когда облако ответит. Если баннер не гаснет — проверьте интернет и отключите блокировщик рекламы для этого сайта.{legacyDirtyN>0?` Есть старые несинхронизированные правки без владельца (${legacyDirtyN}) — они НЕ отправляются автоматически, обратитесь к администратору.`:""}</>}
@@ -4982,6 +5019,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           <button onClick={()=>setSyncBannerHidden(true)} style={{background:"rgba(255,255,255,.25)",color:"#fff",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Скрыть</button>
         </div>
       )}
+      </div>
       {/* Панель администратора */}
 
       <style>{`
@@ -5028,7 +5066,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         .page{max-width:1600px;margin:0 auto;padding:32px 36px 80px}
         @media(min-width:900px){.main-grid{grid-template-columns:minmax(0,1fr) 295px!important}}
         @media(max-width:700px){
-          .editor-header{gap:6px!important;padding:8px 12px!important;top:env(safe-area-inset-top,0px)!important;flex-wrap:wrap!important;row-gap:6px!important}
+          .editor-header{gap:6px!important;padding:8px 12px!important;top:max(var(--topbar,0px),env(safe-area-inset-top,0px))!important;flex-wrap:wrap!important;row-gap:6px!important}
           .editor-header-right .proj-name{display:none}
           .tab-btn{padding:5px 10px;font-size:12px}
           .sub-btn{padding:4px 8px;font-size:11px}
@@ -5047,7 +5085,11 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         .est-card{background:#ffffff;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(15,23,42,.06);border-radius:12px;padding:16px 18px;cursor:pointer;transition:all .15s;position:relative}
         .est-card:hover{border-color:#93c5fd;background:#ffffff;box-shadow:0 6px 20px rgba(37,99,235,.1);transform:translateY(-2px)}
         .est-card:active{transform:scale(.99);box-shadow:0 1px 3px rgba(15,23,42,.06)}
-        .sidebar{width:248px;background:#1e293b;border-right:1px solid #0f172a;display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:50;transition:width .2s ease}
+        /* --topbar — высота верхней полосы предупреждений, её ставит React
+           замером. Боковое меню и содержимое начинаются под ней, а не под ней
+           же спрятанные: раньше «Режим просмотра» закрывал имя пользователя и
+           шапку раздела. Когда полосы нет, --topbar = 0 и всё как было. */
+        .sidebar{width:248px;background:#1e293b;border-right:1px solid #0f172a;display:flex;flex-direction:column;position:fixed;top:var(--topbar,0px);left:0;bottom:0;z-index:50;transition:width .2s ease}
         .sidebar.collapsed{width:64px}
         .nav-item{display:flex;align-items:center;gap:11px;padding:9px 13px;border-radius:9px;cursor:pointer;margin:2px 10px;transition:all .15s;position:relative}
         .nav-item:hover{background:rgba(148,163,184,.12)}
@@ -5059,7 +5101,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         .nav-item:hover .nav-label{color:#e2e8f0}
         .nav-item.active .nav-label{color:#f1f5f9;font-weight:600}
         .sidebar.collapsed .nav-label{opacity:0;width:0;pointer-events:none}
-        .sidebar-content{margin-left:248px;transition:margin-left .22s cubic-bezier(.4,0,.2,1);min-height:100vh;background:#f8fafc}
+        .sidebar-content{margin-left:248px;transition:margin-left .22s cubic-bezier(.4,0,.2,1);min-height:100vh;padding-top:var(--topbar,0px);background:#f8fafc}
         .sidebar-content.collapsed{margin-left:64px}
         /* Строка работы на телефоне: название сверху во всю ширину, под ним
            одна строка «цена за единицу — поле объёма — итог». Пятиколоночная
@@ -5147,7 +5189,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         }
         @media(max-width:700px){
           .sidebar{display:none!important}
-          .sidebar-content{margin-left:0!important;padding-top:env(safe-area-inset-top,0px)!important;padding-bottom:calc(68px + env(safe-area-inset-bottom,0px))!important}
+          /* max(): полоса предупреждений сама уже включает вырез сверху, поэтому
+             складывать одно с другим нельзя — берём большее из двух. */
+          .sidebar-content{margin-left:0!important;padding-top:max(var(--topbar,0px),env(safe-area-inset-top,0px))!important;padding-bottom:calc(68px + env(safe-area-inset-bottom,0px))!important}
           .mob-nav-wrap{display:block!important}
           /* Полоска под часами и вырезом. Приложение открыто как отдельное
              (apple-mobile-web-app-capable), строка состояния прозрачная, поэтому
@@ -5542,7 +5586,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         {effScreen === "list" && currentPermissions.estimates !== "none" && (
           <div style={{maxWidth:1600,margin:"0 auto",padding:"0 0 40px",minHeight:"100vh"}}>
           {/* Шапка */}
-          <div className="list-header" style={{background:"linear-gradient(135deg,#0f172a,#1e293b)",borderBottom:"1px solid #0f172a",padding:"14px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10,boxShadow:"0 2px 12px rgba(15,23,42,.2)"}}>
+          <div className="list-header" style={{background:"linear-gradient(135deg,#0f172a,#1e293b)",borderBottom:"1px solid #0f172a",padding:"14px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:"var(--topbar,0px)",zIndex:10,boxShadow:"0 2px 12px rgba(15,23,42,.2)"}}>
             <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
               <div style={{width:28,height:28,borderRadius:8,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,color:"#ffffff",flexShrink:0,boxShadow:"0 2px 8px rgba(37,99,235,.45)"}}>T</div>
               <div style={{minWidth:0}}>
@@ -5822,7 +5866,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       {screen === "editor" && canEditCurrentEstimate && (
         <div>
           {/* HEADER */}
-          <div className="editor-header" style={{background:"#ffffff",borderBottom:"1px solid #e2e8f0",padding:"11px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10,gap:8}}>
+          <div className="editor-header" style={{background:"#ffffff",borderBottom:"1px solid #e2e8f0",padding:"11px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:"var(--topbar,0px)",zIndex:10,gap:8}}>
             <div className="editor-header-left" style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
               <button className="btn btn-o" style={{padding:"7px 11px",fontSize:12,flexShrink:0}} onClick={saveAndBack}>
                 ← Сметы
