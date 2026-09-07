@@ -21,20 +21,27 @@ export const DocumentTemplateAdminRoute = lazy(() => import("../documents/Docume
 // ─── СТРАНИЦА АДМИНИСТРАТОРА (встроена в основной layout) ────────────────────
 export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = null, permissions=DEFAULT_ROLE_PERMISSIONS.admin, onUsersChanged, rolePermissions=DEFAULT_ROLE_PERMISSIONS, onSaveRolePermissions=async()=>false, clients=[], saveClients=()=>{}, clientsRef={current:[]}, contragents=[], saveContragents=()=>{}, contragentsRef={current:[]}, workers=[], saveWorkers=()=>{}, workersRef={current:[]}, contracts=[], documentTemplateEnabled=false, documentTemplateService=null, documentTemplateData={}, fmt=(n)=>Math.round(Number(n)||0).toLocaleString("ru-RU"), onBeforePriceChange=async()=>true, onBackupWorkspace=()=>{}, onExportAll=()=>{}, onImportAll=()=>{}, onExportEstimatesXls=()=>{}, checkIssues=[], onNavIssue=()=>{} }) {
   const [tab, setTab] = useState("users");
-  const hasAdminPermission = (key) => accessAllows(permissions[key], true);
+  // Наблюдателю Админка открыта целиком, но кнопок действий у него быть не должно.
+  // Поэтому видимость вкладки и право нажимать считаются РАЗНЫМИ функциями:
+  // canSeeAdminTab — «пустить на вкладку», hasAdminPermission — «дать что-то сделать».
+  // Все кнопки и поля в этом файле идут через hasAdminPermission, поэтому одного
+  // условия хватает на весь раздел; данные при этом остаются видимыми.
+  const readOnlyRole = currentUser?.role === "viewer";
+  const canSeeAdminTab = (key) => accessAllows(permissions[key], true);
+  const hasAdminPermission = (key) => !readOnlyRole && canSeeAdminTab(key);
   const adminTabs = [
     ["users","👥 Сотрудники","adminUsers"],
     ["permissions","🔐 Права ролей","adminRoles"],
     ["clients","👥 Клиенты","adminClients"],
     ["contragents","🏢 Реквизиты","adminClients"],
     ["workers","🔨 Подрядчики","adminContractors"],
-    ["prices","💰 Прайс-лист", hasAdminPermission("adminCatalog") || hasAdminPermission("adminPrices") ? null : "__none"],
+    ["prices","💰 Прайс-лист", canSeeAdminTab("adminCatalog") || canSeeAdminTab("adminPrices") ? null : "__none"],
     ...(documentTemplateEnabled ? [["documentTemplates","📑 Шаблоны документов","templateView"]] : []),
-    ["backups","🗄 Бэкапы", hasAdminPermission("adminBackups") || hasAdminPermission("adminRestore") ? null : "__none"],
+    ["backups","🗄 Бэкапы", canSeeAdminTab("adminBackups") || canSeeAdminTab("adminRestore") ? null : "__none"],
     ["audit","📋 Журнал","adminAudit"],
     ["check","🔍 Проверка базы","adminDbCheck"],
   ];
-  const allowedAdminTabs = adminTabs.filter(([, , key]) => key === null || (key !== "__none" && hasAdminPermission(key)));
+  const allowedAdminTabs = adminTabs.filter(([, , key]) => key === null || (key !== "__none" && canSeeAdminTab(key)));
   useEffect(() => {
     if (!allowedAdminTabs.some(([key]) => key === tab)) setTab(allowedAdminTabs[0]?.[0] || "");
   }, [tab, permissions]);
@@ -358,6 +365,7 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
         </div>
       ) : tab === "permissions" ? (
         <RolePermissionsEditor
+          readOnly={readOnlyRole}
           rolePermissions={rolePermissions}
           onSaveRolePermissions={onSaveRolePermissions}
         />

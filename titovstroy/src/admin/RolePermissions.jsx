@@ -154,7 +154,7 @@ export function PermissionSelect({ value, onChange, disabled, label, children })
 // Держим черновик матрицы в отдельном компоненте. Иначе каждый выбор в select
 // перерисовывает всю тяжёлую Админку (прайс, справочники, сотрудники) и кажется,
 // что кнопка срабатывает с задержкой.
-export function RolePermissionsEditor({ rolePermissions, onSaveRolePermissions }) {
+export function RolePermissionsEditor({ rolePermissions, onSaveRolePermissions, readOnly = false }) {
   const [permissionRole, setPermissionRole] = useState("sales_head");
   const [permissionDraft, setPermissionDraft] = useState(() => normalizeRolePermissions(rolePermissions));
   const [permissionMsg, setPermissionMsg] = useState("");
@@ -166,7 +166,10 @@ export function RolePermissionsEditor({ rolePermissions, onSaveRolePermissions }
   }, [rolePermissions]);
 
   const p = permissionDraft[permissionRole] || DEFAULT_ROLE_PERMISSIONS[permissionRole];
-  const locked = permissionRole === "admin";
+  // locked — «эту роль здесь не поменять». Раньше это был только администратор
+  // (его нельзя заблокировать), теперь сюда же попадает наблюдатель: он матрицу видит,
+  // но не правит. Одно условие гасит и переключатели, и кнопки пресетов, и сохранение.
+  const locked = permissionRole === "admin" || readOnly;
   const role = ROLE_DEFINITIONS.find(x => x.key === permissionRole);
   const roleLabel = role ? `${role.icon} ${role.label}` : "👤 Замерщик";
   const searchNorm = permissionSearch.trim().toLowerCase();

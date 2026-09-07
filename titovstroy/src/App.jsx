@@ -5342,7 +5342,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       {mobMoreOpen && mobMore.length>0 && <div className="mob-more-bd" onClick={()=>setMobMoreOpen(false)}/>}
 
       {/* ── КОНТЕНТ ── */}
-      <div className={"sidebar-content"+(sideCollapsed?" collapsed":"")} inert={!editorTab ? "" : undefined} aria-disabled={!editorTab}>
+      {/* inert рубит ЛЮБЫЕ клики, включая переключение вкладок, фильтров и открытие
+          карточки. Для вкладки, у которой редактирование перехвачено другой вкладкой,
+          это правильно: там защита от правки в «мёртвой» копии. А наблюдателю это
+          ломало сервис — он видел только то, что нарисовалось при заходе, и не мог
+          ни в объект зайти, ни период в финансах выбрать. Ему ходить НУЖНО, а писать
+          он всё равно не может: нет editor-lock (_writeGateFail), кнопки действий
+          скрыты правами, и база отбивает запись по флагу ro в токене. */}
+      <div className={"sidebar-content"+(sideCollapsed?" collapsed":"")} inert={(!editorTab && !_isViewer) ? "" : undefined} aria-disabled={!editorTab}>
 
       {/* ═══════════════════════════════════════════════════════════════════
           ЭКРАН 0: ДАШБОРД
