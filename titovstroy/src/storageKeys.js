@@ -56,3 +56,10 @@ export const FINANCE_META_BACKUPS_KEY= "titovstroy-finance-meta-backups";
 export const FINANCE_PROJECTS_KEY         = "titovstroy-finance-projects";   // массив проектов
 export const FINANCE_PROJECTS_BACKUPS_KEY = "titovstroy-finance-projects-backups";
 export const LOGIN_ATTEMPTS_KEY = "titovstroy-login-attempts";
+// ── УВЕДОМЛЕНИЯ В TELEGRAM ───────────────────────────────────────────────────
+// Три узла, все новые. Настройки пишет Админка; привязки и состояние рассылки —
+// ТОЛЬКО служба уведомлений (GitHub Actions). Приложение их лишь читает, чтобы
+// показать «подключён / не подключён».
+export const TG_SETTINGS_KEY = "titovstroy-tg-settings"; // общий чат, часы тишины, включение
+export const TG_LINKS_KEY    = "titovstroy-tg-links";    // { [userId]: {chatId, tgName, ts} }
+export const TG_STATE_KEY    = "titovstroy-tg-state";    // курсор журнала и защита от повторов

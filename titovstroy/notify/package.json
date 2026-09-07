@@ -1,0 +1,14 @@
+{
+  "name": "titovstroy-notify",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Уведомления TitovStroy в Telegram (GitHub Actions). Логика — в src/notify/notifyModel.js, здесь только отправка.",
+  "scripts": {
+    "send": "node send.mjs",
+    "dry": "DRY_RUN=1 node send.mjs"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.7.0"
+  }
+}

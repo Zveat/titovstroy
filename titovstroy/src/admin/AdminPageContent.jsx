@@ -14,6 +14,7 @@ import { CATALOG_BACKUPS_KEY, CATALOG_KEY, PRICES_KEY, USERS_KEY } from "../stor
 import { confirmTyped } from "../ui/DangerConfirm.jsx";
 import { DEFAULT_ROLE_PERMISSIONS, ROLE_DEFINITIONS, accessAllows, contractNetTotal, resolveEstimateSuggestionRules, withCatalogOverrides } from "../utils.js";
 import { AuditTab } from "./AuditTab.jsx";
+import { NotifyTab } from "./NotifyTab.jsx";
 import { RolePermissionsEditor } from "./RolePermissions.jsx";
 
 export const DocumentTemplateAdminRoute = lazy(() => import("../documents/DocumentTemplateAdminRoute.jsx"));
@@ -38,6 +39,7 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
     ["prices","💰 Прайс-лист", canSeeAdminTab("adminCatalog") || canSeeAdminTab("adminPrices") ? null : "__none"],
     ...(documentTemplateEnabled ? [["documentTemplates","📑 Шаблоны документов","templateView"]] : []),
     ["backups","🗄 Бэкапы", canSeeAdminTab("adminBackups") || canSeeAdminTab("adminRestore") ? null : "__none"],
+    ["notify","🔔 Уведомления","adminUsers"],
     ["audit","📋 Журнал","adminAudit"],
     ["check","🔍 Проверка базы","adminDbCheck"],
   ];
@@ -1118,6 +1120,11 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
           </div>
           </>)}
         </div>
+      )}
+
+      {tab === "notify" && (
+        <NotifyTab users={users} saveUsers={saveUsers} currentUser={currentUser}
+          readOnly={readOnlyRole} canEdit={hasAdminPermission("adminUsers")} />
       )}
 
       {tab === "audit" && <AuditTab />}

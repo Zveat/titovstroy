@@ -20,7 +20,17 @@ CRM для ремонтно-отделочной компании «TitovStroy»
                            буквам (цифры/даты не влияют). Эти же функции движок
                            «Шаблонов документов» получает как legacyRenderers/
                            legacyExports — сигнатуры менять нельзя.
-  admin/ (AdminPageContent, AuditTab, RolePermissions), screens/LoginScreen,
+  notify/notifyModel.js  УВЕДОМЛЕНИЯ В TELEGRAM: что считать событием, как назвать,
+                         кому отправить. Чистая логика без сети — под тестами (46 шт.,
+                         часть на настоящих записях боевого журнала). Отправляет НЕ
+                         приложение, а GitHub Actions (titovstroy/notify/send.mjs), иначе
+                         уведомления зависели бы от открытой вкладки. Служба работает
+                         сервисным ключом (он обходит правила базы), поэтому вся запись
+                         идёт через assertWritable — разрешены ТОЛЬКО titovstroy-tg-links
+                         и titovstroy-tg-state, попытка тронуть боевые данные роняет
+                         прогон. Настройка — Админка → 🔔 Уведомления. Подробности и
+                         разовая настройка бота — titovstroy/notify/README.md.
+  admin/ (AdminPageContent, AuditTab, NotifyTab, RolePermissions), screens/LoginScreen,
   public/PublicProgress, kp/, contracts/, deals/, finance/, dashboard/, ui/,
   masters/MastersSection, production/ProductionCalendar, auth/loginGuard, estimate/rowKeys
 Правишь что-то из этого списка — правь модуль, а не App.jsx. Модуль ESM — один экземпляр,
@@ -57,8 +67,8 @@ firebaseConfig = IS_DEV_ENV ? _FB_ENV : _FB_PROD. Боевую базу и main 
 
 Доставка изменений
 
-git push в этом окружении заблокирован (403) — и обычный git, и GitHub API (create_branch/push_files
-через MCP тоже 403 «Resource not accessible by integration»). Единственный рабочий путь:
+git push РАБОТАЕТ (владелец подключил GitHub App). Пушим ТОЛЬКО в main: пуш в рабочую ветку
+плодит второй Vercel Preview на тот же коммит. Удалять ветки на GitHub прав нет — просит владельца.
 0. ЖЁСТКО (правило владельца): ПЕРЕД ЛЮБОЙ ПРАВКОЙ — брать АКТУАЛЬНЫЙ код из GitHub, не свою
    локальную копию. git fetch origin main → нужные файлы git checkout origin/main -- <file> →
    правки ПОВЕРХ них. Владелец постоянно заливает свои фиксы в main между заходами; на старой
@@ -70,15 +80,7 @@ git push в этом окружении заблокирован (403) — и о
 
 
 
-Правим код, собираем (npx vite build должен проходить), гоняем npx vitest run.
-
-
-
-Отдаём изменённые файлы владельцу через SendUserFile — он сам заливает на GitHub
-
-(Add file → Upload files, перетащить файлы по тем же путям — заменяет, не дублирует).
-
-Коммиты локально делаем для истории; «Unverified» на GitHub — норм, не подписать и не запушить всё равно.
+Правим код, собираем (npx vite build должен проходить), гоняем npx vitest run, коммитим и пушим в main.
 
 ЖЁСТКИЕ ПРАВИЛА (нарушать нельзя)
 
@@ -272,7 +274,8 @@ user (замерщик) видит главную, объекты и анали�
 
 
 
-Идеи: внешний авто-бэкап, уведомления, фотоотчёты по этапам, онлайн-подпись, оплата Kaspi, корзина для смет.
+Идеи: внешний авто-бэкап, фотоотчёты по этапам, онлайн-подпись, оплата Kaspi, корзина для смет.
+  (уведомления в Telegram — сделано, см. notify/)
 
 
 

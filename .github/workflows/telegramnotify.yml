@@ -1,0 +1,53 @@
+name: Уведомления в Telegram
+
+# Смотрит журнал изменений и считает просрочки, шлёт сотрудникам в Telegram.
+# Ничего не пишет в боевые данные: только два своих узла (titovstroy-tg-links и
+# titovstroy-tg-state), это проверяется в коде и падает с ошибкой при попытке
+# записать куда-то ещё.
+#
+# Каждые 15 минут. События приходят с задержкой до четверти часа — для стройки
+# это мгновенно, а лишних запусков не жжём. Ежедневная сводка по просрочкам
+# уходит один раз, после часа, заданного в Админке (по умолчанию 9 утра).
+# Минуты смещены от круглых: на них GitHub чаще задерживает cron.
+on:
+  schedule:
+    - cron: "3,18,33,48 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Сухой прогон: посчитать и показать в логе, НИЧЕГО не отправлять"
+        type: boolean
+        default: false
+      force_digest:
+        description: "Собрать сводку по просрочкам прямо сейчас, не дожидаясь утра"
+        type: boolean
+        default: false
+
+concurrency:
+  group: telegram-notify
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: titovstroy/notify
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Установка зависимостей
+        run: npm install --no-audit --no-fund
+
+      - name: Отправка
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          FB_DB_URL: ${{ vars.FB_DB_URL }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
+          FORCE_DIGEST: ${{ inputs.force_digest && '1' || '' }}
+        run: node send.mjs
