@@ -404,7 +404,9 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
                     </div>
                     <div style={{fontSize:12,color:"#94a3b8",marginTop:1}}>@{u.login}</div>
                   </div>
-                  <div className="user-row-btns" style={{display:"flex",gap:6,flexShrink:0}}>
+                  {/* Кнопки правки не гейтились: раньше вкладку видел только тот, кто может
+                      править. Наблюдателю вкладка открыта на просмотр, поэтому теперь явно. */}
+                  {hasAdminPermission("adminUsers") && <div className="user-row-btns" style={{display:"flex",gap:6,flexShrink:0}}>
                     <button onClick={()=>{setEditingUser(editingUser?.id===u.id?null:{id:u.id,name:u.name,login:u.login,role:u.role||"user"});setEditingPass(null);}}
                       style={{background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:7,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
                       ✏ Изменить
@@ -417,7 +419,7 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
                       <button onClick={()=>removeUser(u.id)}
                         style={{background:"rgba(220,38,38,.1)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:7,padding:"6px 10px",fontSize:12,cursor:"pointer"}}>✕</button>
                     )}
-                  </div>
+                  </div>}
                 </div>
                 {editingUser?.id === u.id && (
                   <div style={{marginTop:14,paddingTop:14,borderTop:"1px solid #e2e8f0",display:"flex",flexDirection:"column",gap:10}}>
@@ -457,7 +459,7 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
           </div>
 
           {/* Добавить нового */}
-          <div style={{background:"#f8fafc",border:"1px dashed #eff6ff",borderRadius:8,padding:"20px"}}>
+          {hasAdminPermission("adminUsers") && <div style={{background:"#f8fafc",border:"1px dashed #eff6ff",borderRadius:8,padding:"20px"}}>
             <div style={{fontSize:12,fontWeight:700,color:"#334155",marginBottom:14,display:"flex",alignItems:"center",gap:6}}>
               <span>＋</span> Новый сотрудник
             </div>
@@ -479,7 +481,7 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
             <button onClick={addUser} className="btn btn-g" style={{width:"100%"}}>
               + Добавить сотрудника
             </button>
-          </div>
+          </div>}
 
           {msg && <div style={{marginTop:14,textAlign:"center",fontSize:13,fontWeight:600,color: msg.startsWith("✓") ? "#059669" : "#dc2626",padding:"10px",background:msg.startsWith("✓")?"rgba(76,175,125,.08)":"rgba(220,38,38,.08)",borderRadius:8}}>{msg}</div>}
           {saving && <div style={{textAlign:"center",fontSize:11,color:"#94a3b8",marginTop:8}}>💾 Сохранение...</div>}

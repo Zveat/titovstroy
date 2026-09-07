@@ -5349,7 +5349,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           ни в объект зайти, ни период в финансах выбрать. Ему ходить НУЖНО, а писать
           он всё равно не может: нет editor-lock (_writeGateFail), кнопки действий
           скрыты правами, и база отбивает запись по флагу ro в токене. */}
-      <div className={"sidebar-content"+(sideCollapsed?" collapsed":"")} inert={(!editorTab && !_isViewer) ? "" : undefined} aria-disabled={!editorTab}>
+      <div className={"sidebar-content"+(sideCollapsed?" collapsed":"")} inert={(!editorTab && !_isViewer) ? "" : undefined} aria-disabled={!editorTab && !_isViewer}>
 
       {/* ═══════════════════════════════════════════════════════════════════
           ЭКРАН 0: ДАШБОРД
