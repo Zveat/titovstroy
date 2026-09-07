@@ -3,6 +3,9 @@ import {
   NOTIFY_TOPIC_KEYS, auditMessage, buildEventMessages, groupMessages, renderEvent,
   buildReminderMessages, routeMessages, inQuietHours, localDayKey, daysWord, esc,
   makeLinkCode, linkUrl, findUserByCode, assertWritable, pruneSent, tenge, userScope,
+  NOTIFY_EVENTS, eventEnabled, objectAllowed, reminderOn, reminderNum, OBJECT_MODES,
+  NOTIFY_CATALOG, NOTIFY_BY_KEY, buildDateReminders, buildDigestMessage, daysUntil,
+  makeEventContext, isSubscribed, groupSubscribed, DATE_REMINDERS, DIGESTS,
 } from "./notifyModel.js";
 
 // Записи ниже — НЕ выдуманные: это настоящие строки из боевого журнала, снятые
@@ -251,14 +254,14 @@ describe("маршрутизация", () => {
   });
 
   it("адресное напоминание уходит только своему и не в общий чат", () => {
-    const msg = { id: "r1", topic: "production", kind: "reminder", person: "Сергей Штанько", text: "твоё" };
+    const msg = { id: "r1", key: "stale", topic: "production", kind: "reminder", person: "Сергей Штанько", text: "твоё" };
     const sent = routeMessages([msg], { users, links, settings });
     expect(sent).toHaveLength(1);
     expect(sent[0].chatId).toBe("222");
   });
 
   it("общую сводку получает только тот, кому видна вся компания", () => {
-    const msg = { id: "r2", topic: "production", kind: "reminder", person: null, text: "всё" };
+    const msg = { id: "r2", key: "stale", topic: "production", kind: "reminder", person: null, text: "всё" };
     const sent = routeMessages([msg], { users, links, settings });
     // Сергей — scope "own", ему общая сводка не нужна: он получил свою часть
     expect(sent.map(s => s.chatId).sort()).toEqual(["-100999"]);
@@ -277,6 +280,404 @@ describe("маршрутизация", () => {
   it("scope по умолчанию — только свои объекты", () => {
     expect(userScope({ tg: {} })).toBe("own");
     expect(userScope({ tg: { scope: "all" } })).toBe("all");
+  });
+});
+
+describe("выключатели по каждому правилу", () => {
+  it("выключенное правило не даёт сообщения", () => {
+    expect(auditMessage(REAL.status, { events: { object_status: false } })).toBeNull();
+    expect(auditMessage(REAL.status, { events: { object_status: true } })).not.toBeNull();
+  });
+
+  it("выключение одного правила не глушит остальные", () => {
+    const s = { events: { object_status: false } };
+    expect(auditMessage(REAL.money, s)).not.toBeNull();
+    expect(auditMessage(REAL.badLogin, s)).not.toBeNull();
+  });
+
+  it("без настроек работают умолчания: шумные правила выключены", () => {
+    expect(eventEnabled("object_status", {})).toBe(true);
+    expect(eventEnabled("money", {})).toBe(true);
+    expect(eventEnabled("client", {})).toBe(false);
+    expect(eventEnabled("stage", {})).toBe(false);
+    expect(eventEnabled("price", {})).toBe(false);
+  });
+
+  it("явное включение сильнее умолчания и наоборот", () => {
+    expect(eventEnabled("client", { events: { client: true } })).toBe(true);
+    expect(eventEnabled("money", { events: { money: false } })).toBe(false);
+  });
+
+  it("у каждого правила есть ключ, подпись и своё направление", () => {
+    for (const e of NOTIFY_EVENTS) {
+      expect(e.key).toBeTruthy();
+      expect(e.label.length).toBeGreaterThan(3);
+      expect(NOTIFY_TOPIC_KEYS).toContain(e.topic);
+    }
+    expect(new Set(NOTIFY_EVENTS.map(e => e.key)).size).toBe(NOTIFY_EVENTS.length);
+  });
+});
+
+describe("включение и выключение по конкретному объекту", () => {
+  const other = { ...REAL.status, objectId: "чужой", entityId: "чужой" };
+
+  it("режим «только по отмеченным»: пришло по отмеченному, молчок по остальным", () => {
+    const s = { objectMode: "only", objectList: ["mryt8t21fln1"] };
+    expect(auditMessage(REAL.status, s)).not.toBeNull();
+    expect(auditMessage(other, s)).toBeNull();
+  });
+
+  it("пустой белый список — полная тишина по объектам", () => {
+    const s = { objectMode: "only", objectList: [] };
+    expect(auditMessage(REAL.status, s)).toBeNull();
+  });
+
+  it("режим «кроме отмеченных» глушит точечно", () => {
+    const s = { objectMode: "except", objectList: ["mryt8t21fln1"] };
+    expect(auditMessage(REAL.status, s)).toBeNull();
+    expect(auditMessage(other, s)).not.toBeNull();
+  });
+
+  // Иначе, отметив один объект, владелец случайно выключил бы себе всю
+  // безопасность: у прав и пользователей объекта нет вообще.
+  it("права, пользователи и бэкапы фильтром по объектам НЕ глушатся", () => {
+    const s = { objectMode: "only", objectList: [] };
+    expect(auditMessage(REAL.badLogin, s)).not.toBeNull();
+    expect(auditMessage(rolePerm(0), s)).not.toBeNull();
+  });
+
+  it("режим по умолчанию — по всем", () => {
+    expect(objectAllowed("что угодно", {})).toBe(true);
+    expect(objectAllowed("", { objectMode: "only", objectList: [] })).toBe(true);
+  });
+});
+
+describe("пороги напоминаний", () => {
+  const analytics = {
+    production: {
+      overdueStageList: [
+        { objectId: "o1", name: "Свежий", manager: "A", days: 2 },
+        { objectId: "o2", name: "Давний", manager: "A", days: 30 },
+      ],
+      staleObjects: [
+        { id: "o3", name: "Молчит немного", manager: "A", days: 15 },
+        { id: "o4", name: "Молчит давно", manager: "A", days: 70 },
+      ],
+    },
+    finance: { receivableList: [
+      { id: "o5", name: "Мелочь", manager: "A", value: 5000, overdue: true },
+      { id: "o6", name: "Крупный", manager: "A", value: 3000000, overdue: true },
+    ] },
+    backlog: {},
+  };
+  const now = Date.UTC(2026, 8, 8, 4, 0, 0);
+  const common = (out, word) => out.find(m => !m.person && m.text.includes(word));
+
+  it("порог по дням просрочки отсекает свежие этапы", () => {
+    const out = buildReminderMessages(analytics, { now, settings: { reminders: { stages: { minDays: 10 } } } });
+    const t = common(out, "Просроченные этапы").text;
+    expect(t).toContain("Давний");
+    expect(t).not.toContain("Свежий");
+  });
+
+  it("порог тишины поднимается — остаётся только давнее", () => {
+    const out = buildReminderMessages(analytics, { now, settings: { reminders: { stale: { minDays: 45 } } } });
+    const t = common(out, "без движения").text;
+    expect(t).toContain("Молчит давно");
+    expect(t).not.toContain("Молчит немного");
+  });
+
+  it("порог суммы отсекает копеечные долги", () => {
+    const out = buildReminderMessages(analytics, { now, settings: { reminders: { debt: { minSum: 1000000 } } } });
+    const t = common(out, "Просроченная оплата").text;
+    expect(t).toContain("Крупный");
+    expect(t).not.toContain("Мелочь");
+  });
+
+  it("выключенное напоминание не приходит вообще", () => {
+    const out = buildReminderMessages(analytics, { now, settings: {
+      reminders: { stages: { on: false }, stale: { on: false }, debt: { on: false } } } });
+    expect(out).toEqual([]);
+  });
+
+  // Поймали на боевых данных: остальные напоминания фильтруются построчно, а
+  // «сдаётся в этом месяце» — счётчик, и он проскакивал мимо глушения объектов.
+  it("«сдаётся в этом месяце» тоже слушается фильтра объектов", () => {
+    const withClosing = { ...analytics, backlog: { closingThisMonthCount: 2,
+      closingThisMonthSum: 5610989, closingThisMonthIds: ["c1", "c2"] } };
+    const none = buildReminderMessages(withClosing, { now,
+      settings: { objectMode: "only", objectList: [] } });
+    expect(none.some(m => m.text.includes("Сдаётся"))).toBe(false);
+
+    const one = buildReminderMessages(withClosing, { now,
+      settings: { objectMode: "only", objectList: ["c1"] } });
+    const t = one.find(m => m.text.includes("Сдаётся")).text;
+    expect(t).toContain("Объектов: <b>1</b>");
+    // сумму пересчитать не из чего — «1 объект на 5 610 989 ₸» было бы враньём
+    expect(t).not.toContain("5 610 989");
+  });
+
+  it("без фильтра сумма по сдаче остаётся на месте", () => {
+    const withClosing = { ...analytics, backlog: { closingThisMonthCount: 2,
+      closingThisMonthSum: 5610989, closingThisMonthIds: ["c1", "c2"] } };
+    const t = buildReminderMessages(withClosing, { now }).find(m => m.text.includes("Сдаётся")).text;
+    expect(t).toContain("5 610 989");
+  });
+
+  // Ровно случай владельца: объектов в базе много, а через производство ведут
+  // единицы — по остальным «тишина 47 дней» это не проблема, а неначатая работа.
+  it("белый список объектов: сводка только по тем, что реально ведут", () => {
+    const out = buildReminderMessages(analytics, { now,
+      settings: { objectMode: "only", objectList: ["o4"] } });
+    const t = common(out, "без движения").text;
+    expect(t).toContain("Молчит давно");
+    expect(t).not.toContain("Молчит немного");
+    expect(out.some(m => m.text.includes("Просроченные этапы"))).toBe(false);
+  });
+});
+
+describe("напоминания о будущем: старт работ и сдача", () => {
+  const now = Date.UTC(2026, 8, 8, 6, 0, 0);          // 8 сентября, 11:00 в Караганде
+  const day = (n) => new Date(now + n * 86400000).toISOString().slice(0, 10);
+  const data = {
+    objects: [
+      { id: "o1", clientName: "Николай", status: "signed" },
+      { id: "o2", clientName: "Аида", status: "work" },
+      { id: "o3", clientName: "Отказник", status: "refuse" },
+      { id: "o4", clientName: "Сданный", status: "work" },
+    ],
+    productions: [
+      { objectId: "o1", startDate: day(3), responsible: "Сергей Штанько" },
+      { objectId: "o2", planEndDate: day(5), responsible: "P.Zveat" },
+      { objectId: "o3", startDate: day(3) },
+      { objectId: "o4", planEndDate: day(5), factEndDate: day(-1) },
+    ],
+  };
+
+  it("предупреждает ровно за столько дней, сколько задано", () => {
+    const out = buildDateReminders(data, { now });
+    const start = out.find(m => !m.person && m.key === "start_soon");
+    expect(start.text).toContain("Николай");
+    expect(start.text).toContain("3 дня");
+  });
+
+  it("сдача — свой список дней, свой текст", () => {
+    const out = buildDateReminders(data, { now });
+    const end = out.find(m => !m.person && m.key === "handover_soon");
+    expect(end.text).toContain("Аида");
+    expect(end.text).toContain("5 дней");
+  });
+
+  it("«завтра» и «сегодня» пишутся словами, а не «через 1 день»", () => {
+    const soon = { objects: [{ id: "x", clientName: "Завтра" }, { id: "y", clientName: "Сегодня" }],
+      productions: [{ objectId: "x", startDate: day(1) }, { objectId: "y", startDate: day(0) }] };
+    const out = buildDateReminders(soon, { now, settings: { reminders: { start_soon: { days: [1, 0] } } } });
+    const t = out.find(m => !m.person).text;
+    expect(t).toContain("завтра");
+    expect(t).toContain("сегодня");
+  });
+
+  it("день не по списку — молчим (не «за 4 дня», если просили за 3 и 1)", () => {
+    const off = { objects: [{ id: "z", clientName: "Через четыре" }],
+      productions: [{ objectId: "z", startDate: day(4) }] };
+    expect(buildDateReminders(off, { now })).toEqual([]);
+  });
+
+  it("отказ и уже сданный объект не напоминают", () => {
+    const out = buildDateReminders(data, { now });
+    const all = out.map(m => m.text).join("\n");
+    expect(all).not.toContain("Отказник");
+    expect(all).not.toContain("Сданный");
+  });
+
+  it("каждому — свои объекты отдельным сообщением", () => {
+    const out = buildDateReminders(data, { now });
+    const mine = out.find(m => m.person === "Сергей Штанько");
+    expect(mine.text).toContain("Николай");
+    expect(mine.text).not.toContain("Аида");
+  });
+
+  it("глушение объекта действует и здесь", () => {
+    const out = buildDateReminders(data, { now, settings: { objectMode: "only", objectList: ["o2"] } });
+    const all = out.map(m => m.text).join("\n");
+    expect(all).toContain("Аида");
+    expect(all).not.toContain("Николай");
+  });
+
+  it("выключенное напоминание не приходит", () => {
+    const out = buildDateReminders(data, { now, settings: {
+      reminders: { start_soon: { on: false }, handover_soon: { on: false } } } });
+    expect(out).toEqual([]);
+  });
+
+  it("дни считаются по календарю, а не по 24 часам", () => {
+    // поздний вечер: «завтра» обязано остаться «через 1 день», а не стать нулём
+    const late = Date.UTC(2026, 8, 8, 18, 0, 0);
+    expect(daysUntil("2026-09-09", late)).toBe(1);
+    expect(daysUntil("2026-09-08", late)).toBe(0);
+    expect(daysUntil("", late)).toBeNull();
+    expect(daysUntil("не дата", late)).toBeNull();
+  });
+
+  it("пустые данные не роняют", () => {
+    expect(buildDateReminders({}, { now })).toEqual([]);
+    expect(buildDateReminders({ objects: [{ id: "a" }], productions: [] }, { now })).toEqual([]);
+  });
+});
+
+describe("сводка руководителю", () => {
+  const now = Date.UTC(2026, 8, 8, 4, 0, 0);
+  const analytics = {
+    sales: {
+      newObjects: 12, estimatedCount: 8, estimatedSum: 9000000,
+      signedCount: 3, signedSum: 5400000, avgCheck: 1800000,
+      convToEstimate: 67, convToSigned: 38, convTotal: 25,
+      lostCount: 4, lostSum: 3100000,
+      lostByReason: { price: { count: 2, sum: 2000000 }, competitor: { count: 1, sum: 800000 },
+        unknown: { count: 1, sum: 300000 } },
+    },
+    finance: { income: 7200000, gross: 2600000, grossMarginPct: 36,
+      net: 1400000, marginPct: 19, receivablesOverdue: 4115000 },
+  };
+
+  it("в сводке есть всё, что просили: продажи, конверсия, потери, деньги", () => {
+    const m = buildDigestMessage(analytics, { key: "digest_week", now,
+      reasonLabel: (k) => ({ price: "Дорого", competitor: "Выбрали других" }[k] || k) });
+    const t = m.text;
+    expect(t).toContain("Итоги недели");
+    expect(t).toContain("Зашло новых");
+    expect(t).toContain("Посчитано смет");
+    expect(t).toContain("Подписано договоров");
+    expect(t).toContain("Конверсия");
+    expect(t).toContain("Дорого");
+    expect(t).toContain("Выбрали других");
+    expect(t).toContain("Причина не указана");
+    expect(t).toContain("Выручка");
+    expect(t).toContain("Валовая прибыль");
+    expect(t).toContain("Чистая прибыль");
+    expect(t).toContain("7 200 000 ₸");
+  });
+
+  it("месячная сводка — та же форма, другой заголовок и свой ключ", () => {
+    const m = buildDigestMessage(analytics, { key: "digest_month", now });
+    expect(m.text).toContain("Итоги месяца");
+    expect(m.key).toBe("digest_month");
+  });
+
+  // «Выручка 0 ₸ · маржа —» читается как поломка, а не как факт «денег не было».
+  it("без движения денег блок про деньги не рисуется вовсе", () => {
+    const m = buildDigestMessage({ sales: analytics.sales, finance: { income: 0, expense: 0 } },
+      { key: "digest_week", now });
+    expect(m.text).not.toContain("Выручка");
+    expect(m.text).toContain("Подписано договоров");
+  });
+
+  it("пустая аналитика не роняет и не врёт нулями", () => {
+    const m = buildDigestMessage({}, { key: "digest_week", now });
+    expect(m.text).toContain("Итоги недели");
+    expect(m.text).toContain("—");
+  });
+
+  it("неизвестный ключ сводки — null, а не пустое сообщение", () => {
+    expect(buildDigestMessage(analytics, { key: "digest_век", now })).toBeNull();
+  });
+
+  it("за день сводка уходит один раз", () => {
+    const a = buildDigestMessage(analytics, { key: "digest_week", now });
+    const b = buildDigestMessage(analytics, { key: "digest_week", now: now + 3600e3 });
+    expect(a.id).toBe(b.id);
+  });
+});
+
+describe("подписка по каждому уведомлению отдельно", () => {
+  const links = { 1: { chatId: "111" }, 2: { chatId: "222" } };
+  const msg = (key, extra = {}) => ({ id: key + "~1", key, topic: NOTIFY_BY_KEY[key].topic, text: "т", ...extra });
+
+  it("человек получает ровно те уведомления, что отмечены ему", () => {
+    const users = [
+      { id: "1", name: "Директор", tg: { subs: { digest_week: true, money: true } } },
+      { id: "2", name: "Прораб", tg: { subs: { start_soon: true, handover_soon: true } } },
+    ];
+    const to = (k) => routeMessages([msg(k)], { users, links, settings: {} }).map(s => s.chatId).sort();
+    expect(to("digest_week")).toEqual(["111"]);
+    expect(to("start_soon")).toEqual(["222"]);
+    expect(to("money")).toEqual(["111"]);
+    expect(to("object_status")).toEqual([]);
+  });
+
+  it("общий чат подписывается отдельно от людей", () => {
+    const users = [{ id: "1", name: "Директор", tg: { subs: { money: true } } }];
+    const settings = { groupChatId: "-100", groupSubs: { object_status: true, money: false } };
+    expect(routeMessages([msg("object_status")], { users, links, settings }).map(s => s.chatId))
+      .toEqual(["-100"]);
+    // деньги — только директору в личку, в общий чат не идут
+    expect(routeMessages([msg("money")], { users, links, settings }).map(s => s.chatId))
+      .toEqual(["111"]);
+  });
+
+  it("одно уведомление можно отправить и в чат, и лично", () => {
+    const users = [{ id: "1", name: "Директор", tg: { subs: { digest_month: true } } }];
+    const settings = { groupChatId: "-100", groupSubs: { digest_month: true } };
+    expect(routeMessages([msg("digest_month")], { users, links, settings })
+      .map(s => s.chatId).sort()).toEqual(["-100", "111"]);
+  });
+
+  // Первая версия настраивалась направлениями. Кто уже успел их расставить,
+  // не должен остаться без уведомлений после перехода на поштучный выбор.
+  it("старая настройка направлениями продолжает работать", () => {
+    const users = [{ id: "1", name: "Старый", tg: { topics: ["sales"] } }];
+    expect(routeMessages([msg("object_status")], { users, links, settings: {} })
+      .map(s => s.chatId)).toEqual(["111"]);
+    // но выключенное по умолчанию внутри направления не приходит
+    expect(routeMessages([msg("client")], { users, links, settings: {} })).toEqual([]);
+  });
+
+  it("поштучная настройка сильнее старых направлений", () => {
+    const users = [{ id: "1", name: "Оба", tg: { topics: ["sales"], subs: { object_status: false } } }];
+    expect(routeMessages([msg("object_status")], { users, links, settings: {} })).toEqual([]);
+  });
+
+  it("в каталоге у всего есть ключ, подпись и направление, ключи не повторяются", () => {
+    expect(NOTIFY_CATALOG.length).toBeGreaterThan(20);
+    for (const n of NOTIFY_CATALOG) {
+      expect(n.key).toBeTruthy();
+      expect(n.label.length).toBeGreaterThan(3);
+      expect(NOTIFY_TOPIC_KEYS).toContain(n.topic);
+      expect(["event", "reminder", "dates", "digest"]).toContain(n.kind);
+    }
+    expect(new Set(NOTIFY_CATALOG.map(n => n.key)).size).toBe(NOTIFY_CATALOG.length);
+  });
+});
+
+describe("подписание договора дополняется датами", () => {
+  const signed = { ts: 1784968832394, by: "Сергей Штанько", entity: "object", entityId: "o1",
+    label: "Николай", objectId: "o1", field: "статус", action: "изменил",
+    old: "Согласование сметы", new: "Договор подписан" };
+
+  it("к «договор подписан» подтягиваются старт и плановая сдача", () => {
+    const ctx = makeEventContext({ productions: [{ objectId: "o1",
+      startDate: "2026-09-15", planEndDate: "2026-11-20", responsible: "Сергей Штанько" }] });
+    const [m] = buildEventMessages([signed], { sinceTs: 0, context: ctx });
+    expect(m.body).toContain("15 сентября");
+    expect(m.body).toContain("20 ноября");
+    expect(m.body).toContain("Сергей Штанько");
+  });
+
+  it("дат нет — так и написано, а не пустая строка", () => {
+    const ctx = makeEventContext({ productions: [{ objectId: "o1" }] });
+    const [m] = buildEventMessages([signed], { sinceTs: 0, context: ctx });
+    expect(m.body).toContain("не заполнены");
+  });
+
+  it("другие смены статуса датами не обрастают", () => {
+    const ctx = makeEventContext({ productions: [{ objectId: "mryt8t21fln1", startDate: "2026-09-15" }] });
+    const [m] = buildEventMessages([REAL.status], { sinceTs: 0, context: ctx });
+    expect(m.body).not.toContain("сентября");
+  });
+
+  it("без карточки производства ничего не ломается", () => {
+    const [m] = buildEventMessages([signed], { sinceTs: 0, context: makeEventContext({}) });
+    expect(m.body).toContain("Договор подписан");
   });
 });
 

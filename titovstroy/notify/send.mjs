@@ -10,10 +10,12 @@
 // данные роняет прогон с ошибкой, а не портит базу молча.
 import admin from "firebase-admin";
 import { buildAnalytics } from "../src/analytics/analyticsModel.js";
+import { refuseReasonLabel } from "../src/analytics/analyticsModel.js";
 import {
-  buildEventMessages, buildReminderMessages, routeMessages, renderEvent,
+  buildEventMessages, buildReminderMessages, buildDateReminders, buildDigestMessage,
+  makeEventContext, routeMessages, renderEvent, DIGESTS,
   inQuietHours, localDayKey, localParts, assertWritable, pruneSent,
-  findUserByCode, NOTIFY_TOPIC_BY_KEY, userTopics, esc,
+  findUserByCode, NOTIFY_CATALOG, isSubscribed, esc,
 } from "../src/notify/notifyModel.js";
 
 const FB_DB_URL = process.env.FB_DB_URL || "https://titovstroy-da1cf-default-rtdb.firebaseio.com";
@@ -117,10 +119,12 @@ async function processUpdates(state, users, links) {
       links[user.id] = { chatId, tgName: [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(" ")
         || msg.from?.username || "", ts: Date.now() };
       changed = true;
-      const topics = userTopics(user).map(t => NOTIFY_TOPIC_BY_KEY[t]?.label).filter(Boolean);
+      const mine = NOTIFY_CATALOG.filter(n => isSubscribed(user, n.key));
       await send(chatId, `Готово, ${esc(user.name || user.login)}. Уведомления TitovStroy подключены.\n\n`
-        + (topics.length ? `Буду присылать:\n${topics.map(t => "• " + esc(t)).join("\n")}`
-                         : "Направления пока не выбраны — попросите администратора отметить их в Админке.")
+        + (mine.length ? `Буду присылать (${mine.length}):\n`
+            + mine.slice(0, 20).map(n => `• ${n.icon} ${esc(n.label)}`).join("\n")
+            + (mine.length > 20 ? `\n<i>…и ещё ${mine.length - 20}</i>` : "")
+          : "Пока ничего не отмечено — попросите администратора выбрать уведомления в Админке.")
         + "\n\nОтключить — команда /stop");
       continue;
     }
@@ -178,7 +182,12 @@ async function main() {
   if (firstRun) console.log("Первый запуск: старые записи журнала не рассылаем, начинаем с текущего момента.");
 
   const sentIds = pruneSent(state.sent || {}, { now });
-  const events = quiet ? [] : buildEventMessages(entries, { sinceTs, sentIds });
+  // Карточки производства нужны и событиям (дополнить «договор подписан» датами),
+  // и напоминаниям о будущем — читаем один раз.
+  const productions = (await readJson(K.productions, [])) || [];
+  const events = quiet ? [] : buildEventMessages(entries, {
+    sinceTs, sentIds, settings, context: makeEventContext({ productions }),
+  });
   console.log(`Журнал: записей ${entries.length}, к отправке событий ${events.length}`);
 
   // 3. Напоминания — раз в сутки, после часа сводки
@@ -188,24 +197,43 @@ async function main() {
     || (!quiet && localParts(now).hh >= digestHour && state.lastDigest !== today);
   let reminders = [];
   if (digestDue) {
-    const [objects, estimates, contracts, productions, financeTx, financeMeta] = await Promise.all([
+    const [objects, estimates, contracts, financeTx, financeMeta] = await Promise.all([
       readJson(K.objects, []), readJson(K.estimates, []), readJson(K.contracts, []),
-      readJson(K.productions, []), readJson(K.financeTx, []), readJson(K.financeMeta, {}),
+      readJson(K.financeTx, []), readJson(K.financeMeta, {}),
     ]);
-    const analytics = buildAnalytics(
-      { objects: objects || [], estimates: estimates || [], contracts: contracts || [],
-        productions: productions || [], financeTx: financeTx || [],
-        accounts: financeMeta?.accounts || [] },
-      { period: "month", users, now },
-    );
+    const data = { objects: objects || [], estimates: estimates || [], contracts: contracts || [],
+      productions, financeTx: financeTx || [], accounts: financeMeta?.accounts || [] };
+    const analytics = buildAnalytics(data, { period: "month", users, now });
+
     // Ключ напоминания считается по СОСТАВУ списка, не по дате: пока горит одно
     // и то же, второй раз не пишем. Но раз в неделю повторяем — иначе давняя
     // проблема, о которой сказали один раз, тихо выпадет из виду.
     const repeatMs = (Number(settings.repeatAfterDays) || 7) * 24 * 3600e3;
-    const all = buildReminderMessages(analytics, { now });
+    const all = [
+      ...buildReminderMessages(analytics, { now, settings }),
+      // Про будущее: «через три дня выходим», «через пять сдаём». Считается по
+      // карточкам производства, а не по журналу — в журнале будущего нет.
+      ...buildDateReminders({ objects: data.objects, productions }, { now, settings }),
+    ];
     reminders = all.filter(m => !(sentIds[m.id] && now - sentIds[m.id] < repeatMs));
     console.log(`Сводка дня: напоминаний ${all.length}, к отправке ${reminders.length}`
       + `${all.length !== reminders.length ? " (остальное уже отправляли, состав не менялся)" : ""}`);
+
+    // СВОДКИ ЗА ПЕРИОД. Неделя — по понедельникам, месяц — 1-го числа: сводка
+    // «за неделю» в среду отвечает на вопрос, которого никто не задавал.
+    // Считаем ОТДЕЛЬНОЙ buildAnalytics со своим периодом, иначе в «итогах
+    // недели» стояли бы месячные числа.
+    const localNow = localParts(now);
+    const weekday = new Date(Date.UTC(localNow.y, localNow.m - 1, localNow.d)).getUTCDay();
+    for (const d of DIGESTS) {
+      const due = FORCE_DIGEST
+        || (d.key === "digest_week" && weekday === 1)      // понедельник
+        || (d.key === "digest_month" && localNow.d === 1); // первое число
+      if (!due) continue;
+      const periodAnalytics = buildAnalytics(data, { period: d.period, users, now });
+      const msg = buildDigestMessage(periodAnalytics, { key: d.key, now, reasonLabel: refuseReasonLabel });
+      if (msg && !sentIds[msg.id]) reminders.push(msg);
+    }
   }
 
   // 4. Кому что
