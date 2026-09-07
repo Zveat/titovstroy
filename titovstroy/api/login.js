@@ -73,7 +73,15 @@ const fbKey = (key) => String(key).replace(/[^a-zA-Z0-9_]/g, "_");
 // Право редактировать всегда включает право видеть, поэтому edit поднимает и флаг чтения.
 function writeScopeForRole(role, rawMatrix) {
   const isAdmin = String(role) === "admin";
-  const base = { fin: isAdmin, pay: isAdmin, cat: isAdmin, usr: isAdmin, finR: isAdmin, payR: isAdmin };
+  // ro — «этой роли писать нельзя вообще». Наблюдатель видит весь сервис, но не меняет
+  // ничего. В интерфейсе это уже так (роль не берёт editor-lock и монтируется в строгом
+  // read-only), НО одного интерфейса мало: токен наблюдателя содержит staff:true, а правила
+  // базы пускают на запись любого сотрудника. Без этого флага человек с таким доступом не
+  // нажал бы ничего на экране, зато переписал бы данные обычным HTTP-запросом мимо сайта.
+  // Правила смотрят на ro и отказывают в записи везде, кроме журнала и отметки присутствия:
+  // вход наблюдателя должен оставаться в журнале, а heartbeat не должен зажигать баннер.
+  const ro = String(role) === "viewer";
+  const base = { fin: isAdmin, pay: isAdmin, cat: isAdmin, usr: isAdmin, finR: isAdmin, payR: isAdmin, ro };
   const matrix = parseNode(rawMatrix);
   const perms = matrix && typeof matrix === "object" && !Array.isArray(matrix) ? matrix[role] : null;
   if (!perms || typeof perms !== "object") return base;
@@ -84,9 +92,10 @@ function writeScopeForRole(role, rawMatrix) {
   const fin = isAdmin || perms.finance === "edit";
   const pay = isAdmin || perms.payroll === "edit";
   return {
-    fin, pay,
-    cat: isAdmin || has("adminCatalog") || has("adminPrices"),
-    usr: isAdmin || has("adminUsers") || has("adminRoles"),
+    fin: fin && !ro, pay: pay && !ro, ro,
+    cat: (isAdmin || has("adminCatalog") || has("adminPrices")) && !ro,
+    usr: (isAdmin || has("adminUsers") || has("adminRoles")) && !ro,
+    // Флаги ЧТЕНИЯ у наблюдателя не гасим: ему как раз нужно видеть деньги и зарплаты.
     finR: fin || has("finance") || perms.financialDetails === true || perms.objectFinanceSummary === true,
     payR: pay || has("payroll") || has("finance"),
   };

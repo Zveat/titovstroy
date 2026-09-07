@@ -71,6 +71,13 @@
     // (данные из снимка тот же человек и так правит напрямую), зато снимешь страховку
     // «ничего не теряется» у всех, кроме владельца.
     //
+    // ro — РОЛЬ «ТОЛЬКО ЧТЕНИЕ» (наблюдатель). Видит весь сервис, не меняет ничего.
+    // В интерфейсе он и так строго read-only, но в токене у него staff:true, а эта ветка
+    // пускает на запись любого сотрудника — то есть без флага человек ничего не нажал бы
+    // на экране, зато переписал бы данные обычным HTTP-запросом мимо сайта.
+    // Исключения — журнал и отметка присутствия: вход наблюдателя должен оставаться
+    // в журнале, а heartbeat присутствия не должен зажигать ему аварийный баннер.
+    // Флаг ставит сервер входа по роли (api/login.js), матрица прав на него не влияет.
     // data.exists() В ДВУХ ПУБЛИЧНЫХ ВЕТКАХ — ЭТО ЗАПРЕТ СОЗДАВАТЬ УЗЛЫ.
     // Без него посторонний без учётки мог завести в базе любой titovstroy_kp_* или
     // titovstroy_progress_* и лить туда что угодно, раздувая платное хранилище.
@@ -81,7 +88,7 @@
     // существующего, поэтому запрет на создание им ничего не ломает.
     "$key": {
       ".read": "auth != null && ($key.matches(/^titovstroy_kp_/) || $key.matches(/^titovstroy_progress_/) || (auth.token.staff === true && (!$key.matches(/^titovstroy_finance_(tx|meta)/) || auth.token.finR === true || auth.token.fin === true) && (!$key.matches(/^titovstroy_(staff|payroll_)/) || auth.token.payR === true || auth.token.pay === true)))",
-      ".write": "auth != null && (($key.matches(/^titovstroy_kp_/) && data.exists()) || ($key.matches(/^titovstroy_progress_/) && !$key.matches(/_docs$/) && data.exists()) || (auth.token.staff === true && (!$key.matches(/^titovstroy_finance_(tx|meta)/) || auth.token.fin === true) && (!$key.matches(/^titovstroy_(staff|payroll_)/) || auth.token.pay === true) && (!$key.matches(/^titovstroy_(catalog|prices)/) || auth.token.cat === true)))"
+      ".write": "auth != null && (($key.matches(/^titovstroy_kp_/) && data.exists()) || ($key.matches(/^titovstroy_progress_/) && !$key.matches(/_docs$/) && data.exists()) || (auth.token.staff === true && (auth.token.ro !== true || $key.matches(/^titovstroy_(audit|presence)/)) && (!$key.matches(/^titovstroy_finance_(tx|meta)/) || auth.token.fin === true) && (!$key.matches(/^titovstroy_(staff|payroll_)/) || auth.token.pay === true) && (!$key.matches(/^titovstroy_(catalog|prices)/) || auth.token.cat === true)))"
     }
   }
 }

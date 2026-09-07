@@ -109,3 +109,41 @@ describe("writeScopeForRole — права ЧТЕНИЯ денег и зарпл
     expect(writeScopeForRole("foreman", null)).toMatchObject({ finR: false, payR: false });
   });
 });
+
+// НАБЛЮДАТЕЛЬ. В интерфейсе он и так строго read-only, но в токене у него staff:true,
+// а правила базы пускают на запись любого сотрудника. Флаг ro — то, чем правила отличают
+// «смотрящего» от «работающего»: без него человек ничего не нажал бы на экране, зато
+// переписал бы данные обычным HTTP-запросом мимо сайта.
+describe("наблюдатель — только чтение", () => {
+  it("роль viewer получает ro:true даже без матрицы", () => {
+    expect(writeScopeForRole("viewer", null).ro).toBe(true);
+  });
+
+  it("остальные роли ro не получают", () => {
+    for (const role of ["admin", "manager", "sales_head", "foreman", "user"]) {
+      expect(writeScopeForRole(role, null).ro).toBe(false);
+    }
+  });
+
+  it("наблюдателю не выдаются права записи, даже если матрица их разрешила", () => {
+    const wide = matrix({ viewer: {
+      finance: "edit", payroll: "edit", adminCatalog: "all", adminPrices: "all",
+      adminUsers: "all", adminRoles: "all", financialDetails: true,
+    } });
+    const scope = writeScopeForRole("viewer", wide);
+    expect(scope).toMatchObject({ ro: true, fin: false, pay: false, cat: false, usr: false });
+  });
+
+  it("но ЧИТАТЬ деньги и зарплаты наблюдателю можно — ему это и нужно", () => {
+    const wide = matrix({ viewer: { finance: "view", payroll: "view", financialDetails: true } });
+    const scope = writeScopeForRole("viewer", wide);
+    expect(scope.finR).toBe(true);
+    expect(scope.payR).toBe(true);
+    expect(scope.ro).toBe(true);
+  });
+
+  it("та же матрица у обычной роли права записи не теряет", () => {
+    const wide = matrix({ manager: { finance: "edit", payroll: "edit", adminCatalog: "all" } });
+    expect(writeScopeForRole("manager", wide)).toMatchObject({ ro: false, fin: true, pay: true, cat: true });
+  });
+});

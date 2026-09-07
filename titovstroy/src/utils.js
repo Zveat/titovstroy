@@ -426,27 +426,39 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     analyticsSales:true, analyticsBacklog:false, analyticsProduction:true, analyticsFinance:false, analyticsQuality:true,
     showLocked:true,
   },
+  // НАБЛЮДАТЕЛЬ — «вижу всё, не трогаю ничего».
+  // Все права ПРОСМОТРА открыты полностью, как у администратора: разделы, финансы
+  // с себестоимостью, ФОТ, админка, журнал, прайс, шаблоны. Все права ДЕЙСТВИЯ
+  // (создать / изменить / удалить / опубликовать / восстановить) — none.
+  // Выгрузки (Excel, PDF, JSON) оставлены: они ничего не меняют, это то же чтение.
+  // ВАЖНО: одних этих значений мало. Интерфейс наблюдателя дополнительно держится
+  // в строгом read-only (роль не захватывает editor-lock, см. EditorSessionGate), а
+  // база отказывает ему в записи по флагу ro в токене (api/login.js + правила).
+  // Три уровня, потому что права в матрице — это про кнопки, а не про базу.
   viewer: {
-    ...NO_TEMPLATE_ACCESS,
-    dashboard:"none", objects:"all", calendar:"none", estimates:"none", production:"none",
-    documents:"none", analytics:"none", masters:"all", mastersManage:"none",
-    finance:"none", payroll:"none", admin:"none", financialDetails:false, objectFinanceSummary:false,
+    dashboard:"all", objects:"all", calendar:"all", estimates:"all", production:"all",
+    documents:"all", analytics:"all", masters:"all", mastersManage:"none",
+    finance:"view", payroll:"view", admin:"full",
+    financialDetails:true, objectFinanceSummary:true,
     objectCreate:"none", objectEdit:"none", objectDelete:"none", objectStatus:"none",
-    objectAssign:"none", objectExport:"none", calendarEdit:"none",
+    objectAssign:"none", objectExport:"all", calendarEdit:"none",
     estimateCreate:"none", estimateEdit:"none", estimateDelete:"none", estimateStatus:"none",
-    estimatePublish:"none", estimateExport:"none",
+    estimatePublish:"none", estimateExport:"all",
     productionEdit:"none", productionStages:"none", productionQuality:"none", productionClientAccess:"none",
-    productionToday:"none", productionControl:"none",
-    documentCreate:"none", documentEdit:"none", documentDelete:"none", documentExport:"none",
-    analyticsExport:"none",
-    financeCreate:"none", financeEdit:"none", financeDelete:"none", financeExport:"none",
+    productionToday:"all", productionControl:"all",
+    documentCreate:"none", documentEdit:"none", documentDelete:"none", documentExport:"all",
+    templateView:"all", templateEdit:"none", templatePublish:"none", templateRollback:"none",
+    templateArchive:"none", documentInstanceEdit:"none",
+    analyticsExport:"all",
+    financeCreate:"none", financeEdit:"none", financeDelete:"none", financeExport:"all",
     financeDirectories:"none",
-    adminUsers:"none", adminRoles:"none", adminClients:"none", adminContractors:"none",
-    adminCatalog:"none", adminPrices:"none", adminBackups:"none", adminRestore:"none",
-    adminAudit:"none", adminDbCheck:"none",
-    analyticsSales:true, analyticsBacklog:false, analyticsProduction:false, analyticsFinance:false, analyticsQuality:false,
+    adminUsers:"all", adminRoles:"all", adminClients:"all", adminContractors:"all",
+    adminCatalog:"all", adminPrices:"all", adminBackups:"none", adminRestore:"none",
+    adminAudit:"all", adminDbCheck:"all",
+    analyticsSales:true, analyticsBacklog:true, analyticsProduction:true, analyticsFinance:true, analyticsQuality:true,
     showLocked:false,
   },
+
 });
 
 const SCOPE_VALUES = new Set(["none", "own", "all"]);

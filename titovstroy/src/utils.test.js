@@ -136,6 +136,13 @@ describe("матрица прав ролей", () => {
     expect(p.analyticsExport).toBe("own");
   });
 
+  it("наблюдатель шаблоны видит, но не меняет", () => {
+    expect(permissionsForRole({}, "viewer")).toMatchObject({
+      templateView: "all", templateEdit: "none", templatePublish: "none",
+      templateRollback: "none", templateArchive: "none", documentInstanceEdit: "none",
+    });
+  });
+
   it("шаблоны по умолчанию доступны только администратору", () => {
     const admin = permissionsForRole({}, "admin");
     expect(admin).toMatchObject({
@@ -146,7 +153,8 @@ describe("матрица прав ролей", () => {
       templateArchive: "all",
       documentInstanceEdit: "all",
     });
-    for (const role of ["manager", "sales_head", "foreman", "user", "viewer"]) {
+    // Наблюдатель шаблоны ВИДИТ (он видит весь сервис), но не правит — проверка отдельным тестом.
+    for (const role of ["manager", "sales_head", "foreman", "user"]) {
       expect(permissionsForRole({}, role)).toMatchObject({
         templateView: "none",
         templateEdit: "none",
@@ -1856,9 +1864,12 @@ describe("право на раздел ФОТ", () => {
     // Зарплаты всех сотрудников — не то, что видит каждый, кому открыты финансы.
     const m = normalizeRolePermissions();
     expect(m.admin.payroll).toBe("edit");
-    for (const role of ["manager", "sales_head", "user", "viewer"]) {
+    for (const role of ["manager", "sales_head", "user"]) {
       expect(m[role].payroll).toBe("none");
     }
+    // Наблюдатель — исключение: он видит весь сервис, включая ФОТ, но только на просмотр.
+    // Запись ему закрыта не матрицей, а флагом ro в токене и правилами базы.
+    expect(m.viewer.payroll).toBe("view");
   });
 
   it("из права «Финансы» НЕ наследуется", () => {
