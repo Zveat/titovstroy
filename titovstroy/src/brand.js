@@ -34,7 +34,17 @@ export const BRAND_DEFAULT = Object.freeze({
   whatsapp: "77079824915",                             // только цифры, для wa.me
   stamp: "/stamp.jpg",                                 // печать в КП и актах
   kpContragentId: "",                                  // от какого юрлица выходит КП; пусто — первое
+  // Оформление самого документа КП — бумага, плашки, акцент, шрифт.
+  // Значения и то, как из них считается остальная палитра, — в kp/kpTheme.js.
+  kpPaper: "#f5f2ec",
+  kpBar: "#1a1a28",
+  kpAccent: "",                                        // пусто — берём фирменный цвет компании
+  kpFont: "golos",
 });
+
+// Поля, которые обязаны быть настоящим цветом: кривое значение молча ломает
+// вёрстку документа, который уходит клиенту.
+const COLOR_KEYS = ["accent", "kpPaper", "kpBar", "kpAccent"];
 
 const S = (v) => (v == null ? "" : String(v));
 
@@ -45,9 +55,11 @@ export function normalizeBrand(raw) {
     const v = S(b[k]).trim();
     if (v) out[k] = v;                     // пустое поле = «оставить как по умолчанию»
   }
-  // Цвет попадает в style и в разметку favicon — пускаем только настоящий hex,
-  // иначе кривое значение молча ломает вёрстку страницы клиента.
-  if (!/^#[0-9a-fA-F]{3,8}$/.test(out.accent)) out.accent = BRAND_DEFAULT.accent;
+  // Цвет попадает в style и в разметку favicon — пускаем только настоящий hex.
+  for (const k of COLOR_KEYS) {
+    if (out[k] && !/^#[0-9a-fA-F]{3,8}$/.test(out[k])) out[k] = BRAND_DEFAULT[k];
+  }
+  if (!out.accent) out.accent = BRAND_DEFAULT.accent;
   out.whatsapp = out.whatsapp.replace(/\D/g, "");
   return out;
 }

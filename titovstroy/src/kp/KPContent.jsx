@@ -1,6 +1,7 @@
 // Тело коммерческого предложения (модалка и печать). Перенос из App.jsx.
 // ВНИМАНИЕ: текст условий КП — клиентский документ, править нельзя.
-import { brandInk, useBrand } from "../brand.js";
+import { useBrand } from "../brand.js";
+import { kpTheme } from "./kpTheme.js";
 import { fmt, today, validUntil } from "../format.js";
 
 // ─── КОМПОНЕНТ КП (используется в модале и при печати) ───────────────────────
@@ -9,11 +10,11 @@ import { fmt, today, validUntil } from "../format.js";
 // стоял бы чужой номер.
 export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note, contragent }) {
   const brand = useBrand();
-  // Фирменный цвет как ТЕКСТ: на светлой бумаге КП он темнеет, на тёмных плашках
-  // светлеет — иначе выбранный светлый цвет делает надписи невидимыми (так
-  // пропали название компании и телефон в шапке). См. brandInk в brand.js.
-  const ink = brandInk(brand, "#f5f2ec");
-  const inkOnDark = brandInk(brand, "#1a1a28");
+  // Палитра документа целиком — из настроек (Админка → Оформление → блок «КП»).
+  // Задаются бумага, плашки и акцент, остальное считается; контраст текста
+  // доводится до нормы, поэтому испортить документ выбором цвета нельзя.
+  const t = kpTheme(brand);
+  const ink = t.accent, inkOnDark = t.accentOnBar;
   const ca = contragent || null;
   const CONDITIONS = [
     "Стоимость рассчитана исходя из указанных объемов работ без учета НДС.",
@@ -26,24 +27,24 @@ export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, 
     "Срок действия настоящего предложения — 12 рабочих дней с даты составления.",
   ];
   return (
-    <div style={{fontFamily:"'Golos Text','Segoe UI',sans-serif",color:"#1a1a28",background:"#f5f2ec"}}>
+    <div style={{fontFamily:t.font,color:t.text,background:t.paper}}>
       {/* Шапка */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18}}>
         <div>
           <div style={{fontWeight:900,fontSize:22,letterSpacing:-.3}}>Ценовое предложение</div>
-          <div style={{fontSize:12,color:"#888",marginTop:3}}>на услуги ремонта и отделки недвижимости</div>
+          <div style={{fontSize:12,color:t.muted,marginTop:3}}>на услуги ремонта и отделки недвижимости</div>
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontWeight:900,fontSize:16,color:ink}}>{brand.name}</div>
-          {ca?.bin && <div style={{fontSize:11,color:"#555",marginTop:2}}>БИН {ca.bin}</div>}
-          {brand.whatsapp && <div style={{fontSize:11,color:"#555"}}>WA: <span style={{color:ink}}>{brand.whatsapp}</span></div>}
+          {ca?.bin && <div style={{fontSize:11,color:t.muted,marginTop:2}}>БИН {ca.bin}</div>}
+          {brand.whatsapp && <div style={{fontSize:11,color:t.muted}}>WA: <span style={{color:ink}}>{brand.whatsapp}</span></div>}
         </div>
       </div>
 
       {/* Блок клиента */}
-      <div style={{background:"#e8e4da",borderRadius:10,padding:"13px 16px",marginBottom:16,display:"grid",gridTemplateColumns:"1fr 1fr",gap:"5px 20px",fontSize:13}}>
+      <div style={{background:t.panel,borderRadius:10,padding:"13px 16px",marginBottom:16,display:"grid",gridTemplateColumns:"1fr 1fr",gap:"5px 20px",fontSize:13}}>
         {[["Заказчик",proj.name||"—"],["Телефон",proj.phone||"—"],["Объект",proj.type||"—"],["Адрес",proj.address||"—"],["Дата расчёта",today()],["Действует до",validUntil()],["Менеджер",proj.manager||"—"]].map(([k,v])=>(
-          <div key={k}><span style={{color:"#888"}}>{k}: </span><strong>{v}</strong></div>
+          <div key={k}><span style={{color:t.muted}}>{k}: </span><strong>{v}</strong></div>
         ))}
       </div>
 
@@ -64,14 +65,14 @@ export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, 
               return (
                 <div key={cat} style={{marginBottom:12}}>
                   {/* Заголовок категории */}
-                  <div style={{background:"#1a1a28",color:"#f5f2ec",padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center",borderRadius:"6px 6px 0 0"}}>
+                  <div style={{background:t.bar,color:t.barText,padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center",borderRadius:"6px 6px 0 0"}}>
                     <span style={{fontWeight:700,fontSize:13,letterSpacing:.5,textTransform:"uppercase"}}>{cat}</span>
                     <span style={{fontWeight:700,fontSize:13,color:inkOnDark}}>{fmt(catTotal)} ₸</span>
                   </div>
                   {/* Строки работ */}
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
                     <thead>
-                      <tr style={{background:"#2a2a3a",color:"#aaa"}}>
+                      <tr style={{background:t.bar,color:t.muted}}>
                         {["№","Раздел","Наименование","Ед.","Объём","Цена","Сумма"].map(h=>(
                           <th key={h} style={{padding:"6px 8px",textAlign:["№","Ед.","Объём"].includes(h)?"center":"left",fontSize:10,fontWeight:600,letterSpacing:.3}}>{h}</th>
                         ))}
@@ -81,21 +82,21 @@ export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, 
                       {items.map((item,i) => {
                         rowNum++;
                         return (
-                          <tr key={i} style={{background:i%2===0?"#f5f2ec":"#ede9e0",borderBottom:"1px solid #ddd9d0"}}>
-                            <td style={{padding:"6px 8px",textAlign:"center",color:"#999",fontSize:11}}>{rowNum}</td>
-                            <td style={{padding:"6px 8px",color:"#8855aa",fontSize:11,fontWeight:500}}>{item.sub}</td>
+                          <tr key={i} style={{background:i%2===0?t.paper:t.paperAlt,borderBottom:"1px solid "+t.border}}>
+                            <td style={{padding:"6px 8px",textAlign:"center",color:t.muted,fontSize:11}}>{rowNum}</td>
+                            <td style={{padding:"6px 8px",color:t.subtle,fontSize:11,fontWeight:500}}>{item.sub}</td>
                             <td style={{padding:"6px 8px",fontWeight:600,fontSize:12}}>{item.name}</td>
-                            <td style={{padding:"6px 8px",textAlign:"center",color:"#888",fontSize:11}}>{item.unit}</td>
+                            <td style={{padding:"6px 8px",textAlign:"center",color:t.muted,fontSize:11}}>{item.unit}</td>
                             <td style={{padding:"6px 8px",textAlign:"center",fontWeight:500}}>{item.qty}</td>
-                            <td style={{padding:"6px 8px",textAlign:"right",color:"#555"}}>{item.qty > 0 ? (item.total / item.qty).toLocaleString("ru-RU",{minimumFractionDigits:2,maximumFractionDigits:2}) : fmt(item.price)} ₸</td>
+                            <td style={{padding:"6px 8px",textAlign:"right",color:t.muted}}>{item.qty > 0 ? (item.total / item.qty).toLocaleString("ru-RU",{minimumFractionDigits:2,maximumFractionDigits:2}) : fmt(item.price)} ₸</td>
                             <td style={{padding:"6px 8px",textAlign:"right",fontWeight:700,fontSize:12}}>{fmt(item.total)} ₸</td>
                           </tr>
                         );
                       })}
                     </tbody>
                     <tfoot>
-                      <tr style={{background:"#e8e4da",borderTop:"2px solid #ccc"}}>
-                        <td colSpan={6} style={{padding:"7px 8px",fontSize:12,fontWeight:700,color:"#444",textAlign:"right"}}>Итого по разделу «{cat}»:</td>
+                      <tr style={{background:t.panel,borderTop:"2px solid "+t.border}}>
+                        <td colSpan={6} style={{padding:"7px 8px",fontSize:12,fontWeight:700,color:t.muted,textAlign:"right"}}>Итого по разделу «{cat}»:</td>
                         <td style={{padding:"7px 8px",textAlign:"right",fontWeight:800,fontSize:13,color:ink}}>{fmt(catTotal)} ₸</td>
                       </tr>
                     </tfoot>
@@ -105,11 +106,11 @@ export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, 
             })}
 
             {/* Итоговая сводка */}
-            <div style={{background:"#e8e4da",borderRadius:8,padding:"12px 16px",marginTop:8,marginBottom:4}}>
-              <div style={{fontWeight:700,fontSize:12,color:"#444",marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>Сводка по разделам</div>
+            <div style={{background:t.panel,borderRadius:8,padding:"12px 16px",marginTop:8,marginBottom:4}}>
+              <div style={{fontWeight:700,fontSize:12,color:t.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>Сводка по разделам</div>
               {catOrder.map(cat => (
-                <div key={cat} style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:5,paddingBottom:5,borderBottom:"1px solid #d0ccc0"}}>
-                  <span style={{color:"#555"}}>{cat}</span>
+                <div key={cat} style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:5,paddingBottom:5,borderBottom:"1px solid "+t.border}}>
+                  <span style={{color:t.muted}}>{cat}</span>
                   <span style={{fontWeight:700}}>{fmt(catMap[cat].reduce((s,x)=>s+x.total,0))} ₸</span>
                 </div>
               ))}
@@ -118,17 +119,17 @@ export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, 
             {/* Позиции "от" — не входят в итог */}
             {fromItems&&fromItems.length>0&&(
               <div style={{marginTop:12,marginBottom:4}}>
-                <div style={{background:"#f0ece0",borderRadius:"6px 6px 0 0",padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{fontWeight:700,fontSize:12,color:"#888",letterSpacing:.5,textTransform:"uppercase"}}>Уточняется по факту</span>
-                  <span style={{fontSize:11,color:"#aaa"}}>не включено в итог</span>
+                <div style={{background:t.paperAlt,borderRadius:"6px 6px 0 0",padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontWeight:700,fontSize:12,color:t.muted,letterSpacing:.5,textTransform:"uppercase"}}>Уточняется по факту</span>
+                  <span style={{fontSize:11,color:t.muted}}>не включено в итог</span>
                 </div>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
                   <tbody>
                     {fromItems.map((item,i)=>(
-                      <tr key={i} style={{background:i%2===0?"#f5f2ec":"#ede9e0",borderBottom:"1px solid #ddd9d0"}}>
-                        <td style={{padding:"6px 8px",color:"#8855aa",fontSize:11,fontWeight:500,width:"18%"}}>{item.sub}</td>
+                      <tr key={i} style={{background:i%2===0?t.paper:t.paperAlt,borderBottom:"1px solid "+t.border}}>
+                        <td style={{padding:"6px 8px",color:t.subtle,fontSize:11,fontWeight:500,width:"18%"}}>{item.sub}</td>
                         <td style={{padding:"6px 8px",fontWeight:600,fontSize:12}}>{item.name}</td>
-                        <td style={{padding:"6px 8px",textAlign:"center",color:"#888",fontSize:11,width:"6%"}}>{item.unit}</td>
+                        <td style={{padding:"6px 8px",textAlign:"center",color:t.muted,fontSize:11,width:"6%"}}>{item.unit}</td>
                         <td style={{padding:"6px 8px",textAlign:"center",fontWeight:500,width:"8%"}}>{item.qty}</td>
                         <td style={{padding:"6px 8px",textAlign:"right",color:ink,fontWeight:700,whiteSpace:"nowrap",width:"20%"}}>от {fmt(item.priceFrom)} ₸</td>
                       </tr>
@@ -139,16 +140,16 @@ export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, 
             )}
 
             {/* Итог */}
-            <div style={{background:"#1a1a28",borderRadius:10,padding:"13px 18px",color:"#f5f2ec",marginTop:8}}>
-              {discount>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#e07070",marginBottom:6}}><span>Скидка {discount}% <span style={{opacity:.75}}>· учтена в ценах</span></span><span>− {fmt(discAmt)} ₸</span></div>}
+            <div style={{background:t.bar,borderRadius:10,padding:"13px 18px",color:t.barText,marginTop:8}}>
+              {discount>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:t.warnOnBar,marginBottom:6}}><span>Скидка {discount}% <span style={{opacity:.75}}>· учтена в ценах</span></span><span>− {fmt(discAmt)} ₸</span></div>}
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <span style={{fontSize:14,fontWeight:600,letterSpacing:.5}}>ИТОГО:</span>
                 <span style={{fontSize:28,fontWeight:900,color:inkOnDark,letterSpacing:-.5}}>{fmt(final)} ₸</span>
               </div>
               {proj.area&&Number(proj.area)>0&&(
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,paddingTop:8,borderTop:"1px solid rgba(255,255,255,.08)"}}>
-                  <span style={{fontSize:12,color:"#888"}}>Цена за м² ({proj.area} м²)</span>
-                  <span style={{fontSize:14,fontWeight:700,color:"#d4a85a"}}>≈ {fmt(final/Number(proj.area))} ₸/м²</span>
+                  <span style={{fontSize:12,color:t.muted}}>Цена за м² ({proj.area} м²)</span>
+                  <span style={{fontSize:14,fontWeight:700,color:t.accentOnBar}}>≈ {fmt(final/Number(proj.area))} ₸/м²</span>
                 </div>
               )}
             </div>
@@ -157,11 +158,11 @@ export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, 
       })()}
 
       {/* Примечание */}
-      {note&&<div style={{background:"#e8e4da",borderRadius:8,padding:"10px 14px",fontSize:12,color:"#555",marginBottom:14}}>{note}</div>}
+      {note&&<div style={{background:t.panel,borderRadius:8,padding:"10px 14px",fontSize:12,color:t.muted,marginBottom:14}}>{note}</div>}
 
       {/* Условия */}
-      <div style={{background:"#ece8da",borderRadius:10,padding:"14px 18px",fontSize:12,color:"#444",lineHeight:1.75,marginBottom:20}}>
-        <div style={{fontWeight:700,color:"#1a1a28",marginBottom:10,fontSize:13}}>Условия:</div>
+      <div style={{background:t.paperAlt,borderRadius:10,padding:"14px 18px",fontSize:12,color:t.muted,lineHeight:1.75,marginBottom:20}}>
+        <div style={{fontWeight:700,color:t.text,marginBottom:10,fontSize:13}}>Условия:</div>
         {CONDITIONS.map((text, i) => (
           <div key={i} style={{display:"flex",gap:10,marginBottom:5}}>
             <span style={{color:ink,fontWeight:700,minWidth:18,flexShrink:0}}>{i+1}.</span>
@@ -183,10 +184,10 @@ export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, 
       {/* Подписи */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24,marginTop:16}}>
         <div>
-          <div style={{fontSize:11,color:"#888",marginBottom:4}}>Заказчик</div>
-          <div style={{borderTop:"1px solid #bbb",paddingTop:8,marginTop:32}}/>
-          <div style={{fontSize:11,color:"#666"}}>{proj.name||"________________________________"}</div>
-          <div style={{fontSize:10,color:"#aaa",marginTop:2}}>М.П.</div>
+          <div style={{fontSize:11,color:t.muted,marginBottom:4}}>Заказчик</div>
+          <div style={{borderTop:"1px solid "+t.border,paddingTop:8,marginTop:32}}/>
+          <div style={{fontSize:11,color:t.muted}}>{proj.name||"________________________________"}</div>
+          <div style={{fontSize:10,color:t.muted,marginTop:2}}>М.П.</div>
         </div>
         <div style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
           <img src={brand.stamp} alt={"Печать " + brand.name} style={{width:200,height:200,objectFit:"contain",opacity:.85,mixBlendMode:"multiply",marginBottom:4}}/>

@@ -9,6 +9,7 @@ import { storage } from "../cloud/storage.js";
 import { logChange } from "../cloud/audit.js";
 import { BRAND_KEY } from "../storageKeys.js";
 import { BRAND_DEFAULT, brandLetter, fileToLogo, getBrand, normalizeBrand, setBrandLocal } from "../brand.js";
+import { KP_FONTS, KP_PRESETS, kpTheme } from "../kp/kpTheme.js";
 
 const card = { background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 const h = { fontSize: 15, fontWeight: 800, color: "#0f172a", marginBottom: 4 };
@@ -160,8 +161,60 @@ export function BrandTab({ currentUser, contragents = [], readOnly = false, canE
           </div>
         </div>
 
+      </div>
+
+      {/* ══ ОФОРМЛЕНИЕ КП ══ */}
+      <div style={card}>
+        <div style={h}>Коммерческое предложение</div>
+        <div style={sub}>
+          Настраиваются три вещи — бумага, плашки и акцент, — а полосы таблицы, рамки и цвет
+          текста считаются из них. Так сделано намеренно: десяток отдельных пипеток
+          гарантированно даёт нечитаемый документ у клиента. Контраст текста доводится до
+          нормы автоматически, поэтому испортить КП выбором цвета нельзя.
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+          {KP_PRESETS.map(pr => {
+            const on = preview.kpPaper === pr.kpPaper && preview.kpBar === pr.kpBar;
+            return (
+              <button key={pr.key} className="btn btn-o" disabled={!editable}
+                onClick={() => setForm(f => ({ ...f, kpPaper: pr.kpPaper, kpBar: pr.kpBar, kpAccent: pr.kpAccent }))}
+                style={{ padding: "5px 12px", fontSize: 11.5, display: "flex", alignItems: "center", gap: 7,
+                  borderColor: on ? "#1d4ed8" : undefined, color: on ? "#1d4ed8" : undefined, fontWeight: on ? 700 : 400 }}>
+                <span style={{ display: "flex", borderRadius: 4, overflow: "hidden", border: "1px solid #cbd5e1" }}>
+                  <span style={{ width: 12, height: 12, background: pr.kpPaper }} />
+                  <span style={{ width: 12, height: 12, background: pr.kpBar }} />
+                  <span style={{ width: 12, height: 12, background: pr.kpAccent }} />
+                </span>
+                {pr.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 14, marginBottom: 18 }}>
+          <Color label="Бумага документа" v={form.kpPaper} d={BRAND_DEFAULT.kpPaper}
+            on={v => set("kpPaper", v)} editable={editable} />
+          <Color label="Плашки заголовков и итога" v={form.kpBar} d={BRAND_DEFAULT.kpBar}
+            on={v => set("kpBar", v)} editable={editable} />
+          <Color label="Акцент документа" v={form.kpAccent} d={preview.accent}
+            on={v => set("kpAccent", v)} editable={editable}
+            hint="пусто — берётся фирменный цвет компании" />
+          <div>
+            <label style={lbl}>Шрифт документа</label>
+            <select className="fi" style={{ width: "100%" }} disabled={!editable}
+              value={form.kpFont || "golos"} onChange={e => set("kpFont", e.target.value)}>
+              {KP_FONTS.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <KpPreview t={kpTheme(preview)} brand={preview} />
+      </div>
+
+      <div style={card}>
         {editable && (
-          <div style={{ marginTop: 18 }}>
+          <div>
             <button className="btn" disabled={busy} onClick={save}>
               {busy ? "Сохраняю…" : "Сохранить"}
             </button>
@@ -172,6 +225,77 @@ export function BrandTab({ currentUser, contragents = [], readOnly = false, canE
             Менять оформление может администратор.
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Поле цвета: пипетка и текстовое поле рядом. Пустое значение допустимо и
+// означает «взять по умолчанию» — поэтому пипетка показывает подставленный
+// цвет, а очистить можно только текстом.
+function Color({ label, v, d, on, editable, hint }) {
+  return (
+    <div>
+      <label style={lbl}>{label}</label>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input type="color" disabled={!editable} value={/^#[0-9a-fA-F]{6}$/.test(v || "") ? v : d}
+          onChange={e => on(e.target.value)}
+          style={{ width: 44, height: 32, padding: 0, border: "1px solid #cbd5e1", borderRadius: 6 }} />
+        <input className="fi" style={{ flex: 1, minWidth: 0 }} disabled={!editable}
+          value={v || ""} onChange={e => on(e.target.value)} placeholder={d} />
+      </div>
+      {hint && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>{hint}</div>}
+    </div>
+  );
+}
+
+// Живой кусок настоящего КП: шапка, заголовок раздела, две строки таблицы и
+// блок итога. Подбирать три цвета вслепую невозможно — надо видеть результат
+// сразу, а не открывать смету и печатать её ради проверки.
+function KpPreview({ t, brand }) {
+  const row = { padding: "5px 8px", fontSize: 11 };
+  return (
+    <div>
+      <div style={{ ...lbl, marginBottom: 6 }}>Как будет выглядеть</div>
+      <div style={{ fontFamily: t.font, background: t.paper, color: t.text,
+        borderRadius: 10, padding: 14, border: "1px solid #e2e8f0" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 14 }}>Ценовое предложение</div>
+            <div style={{ fontSize: 10, color: t.muted }}>на услуги ремонта и отделки</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontWeight: 900, fontSize: 12, color: t.accent }}>{brand.name}</div>
+            <div style={{ fontSize: 10, color: t.muted }}>WA: <span style={{ color: t.accent }}>{brand.whatsapp}</span></div>
+          </div>
+        </div>
+        <div style={{ background: t.panel, borderRadius: 7, padding: "8px 10px", fontSize: 11, marginBottom: 10 }}>
+          <span style={{ color: t.muted }}>Заказчик: </span><b>Иван Петров</b>
+        </div>
+        <div style={{ background: t.bar, color: t.barText, padding: "6px 10px", borderRadius: "6px 6px 0 0",
+          display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 700 }}>
+          <span>ЧЕРНОВЫЕ РАБОТЫ</span><span style={{ color: t.accentOnBar }}>196 870 ₸</span>
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <tbody>
+            {[["Грунтовка перед обоями", "45 820 ₸"], ["Наливной пол", "151 050 ₸"]].map(([n, v], i) => (
+              <tr key={n} style={{ background: i % 2 === 0 ? t.paper : t.paperAlt, borderBottom: "1px solid " + t.border }}>
+                <td style={{ ...row, color: t.subtle, width: "34%" }}>Выравнивание</td>
+                <td style={row}>{n}</td>
+                <td style={{ ...row, textAlign: "right", fontWeight: 700 }}>{v}</td>
+              </tr>
+            ))}
+            <tr style={{ background: t.panel }}>
+              <td colSpan={2} style={{ ...row, textAlign: "right", fontWeight: 700 }}>Итого по разделу:</td>
+              <td style={{ ...row, textAlign: "right", fontWeight: 800, color: t.accent }}>196 870 ₸</td>
+            </tr>
+          </tbody>
+        </table>
+        <div style={{ background: t.bar, borderRadius: 9, padding: "10px 14px", marginTop: 8,
+          display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ color: t.barText, fontSize: 11, fontWeight: 700 }}>ИТОГО</span>
+          <span style={{ color: t.accentOnBar, fontSize: 20, fontWeight: 900 }}>2 106 683 ₸</span>
+        </div>
       </div>
     </div>
   );
