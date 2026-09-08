@@ -30,6 +30,14 @@ CRM для ремонтно-отделочной компании «TitovStroy»
                          и titovstroy-tg-state, попытка тронуть боевые данные роняет
                          прогон. Настройка — Админка → 🔔 Уведомления. Подробности и
                          разовая настройка бота — titovstroy/notify/README.md.
+                         КОМАНДЫ БОТА (/start, /stop, /id) разбирает handleBotCommand —
+                         одна функция на два входа: опрос из прогона и webhook на Vercel
+                         (api/tghook.mjs, мгновенный ответ). Разводить их по двум файлам
+                         нельзя: ответ бота начнёт зависеть от пути сообщения, а снаружи
+                         это неразличимо. Webhook закрыт секретом Telegram и БЕЗ него не
+                         работает вообще (fail-closed): адрес публичный, а /start меняет,
+                         чей это чат — то есть кто получает сводки с прибылью. Пока
+                         webhook включён, getUpdates отвечает 409 — это норма, не ошибка.
   admin/ (AdminPageContent, AuditTab, NotifyTab, RolePermissions), screens/LoginScreen,
   public/PublicProgress, kp/, contracts/, deals/, finance/, dashboard/, ui/,
   masters/MastersSection, production/ProductionCalendar, auth/loginGuard, estimate/rowKeys

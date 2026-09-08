@@ -13,9 +13,9 @@ import { buildAnalytics } from "../src/analytics/analyticsModel.js";
 import { refuseReasonLabel } from "../src/analytics/analyticsModel.js";
 import {
   buildEventMessages, buildReminderMessages, buildDateReminders, buildDigestMessage,
-  makeEventContext, routeMessages, renderEvent, DIGESTS,
+  makeEventContext, routeMessages, DIGESTS,
   inQuietHours, localDayKey, localParts, assertWritable, pruneSent, nextCursor,
-  findUserByCode, NOTIFY_CATALOG, isSubscribed, esc,
+  handleBotCommand,
 } from "../src/notify/notifyModel.js";
 
 const FB_DB_URL = process.env.FB_DB_URL || "https://titovstroy-da1cf-default-rtdb.firebaseio.com";
@@ -90,9 +90,9 @@ async function send(chatId, text) {
 // Сотрудник открывает ссылку из Админки и жмёт «Запустить» — Telegram сам
 // отправляет боту «/start КОД». Здесь мы этот код узнаём и запоминаем чат.
 async function processUpdates(state, users, links) {
-  if (!BOT) { console.warn("Нет секрета TELEGRAM_BOT_TOKEN — привязки не обрабатываются."); 
+  if (!BOT) { console.warn("Нет секрета TELEGRAM_BOT_TOKEN — привязки не обрабатываются.");
     return { links, changed: false, lastUpdateId: state.lastUpdateId }; }
-  if (DRY) { console.log("Сухой прогон: команды бота не читаем."); 
+  if (DRY) { console.log("Сухой прогон: команды бота не читаем.");
     return { links, changed: false, lastUpdateId: state.lastUpdateId }; }
   let updates = [];
   try {
@@ -100,65 +100,41 @@ async function processUpdates(state, users, links) {
       offset: (Number(state.lastUpdateId) || 0) + 1, timeout: 0, limit: 100,
       allowed_updates: ["message"],
     });
-  } catch (e) { console.warn("getUpdates:", e.message); return { links, changed: false, lastUpdateId: state.lastUpdateId }; }
+  } catch (e) {
+    // Telegram отдаёт сообщения ЛИБО опросом, ЛИБО в webhook — одновременно нельзя.
+    // Когда webhook включён (api/tghook.mjs на Vercel), getUpdates отвечает 409, и
+    // это не поломка: команды бота в этот момент обрабатываются мгновенно, а прогону
+    // остаётся только рассылка. Ругаться на это не надо, иначе в логе каждые
+    // 15 минут висит «ошибка», за которой перестают следить.
+    if (/can't use getUpdates|409/i.test(e.message)) {
+      console.log("Бот работает через webhook — опрос не нужен, команды уже обработаны.");
+    } else {
+      console.warn("getUpdates:", e.message);
+    }
+    return { links, changed: false, lastUpdateId: state.lastUpdateId };
+  }
 
   // Что бот увидел — обязательно в лог. Без этого «бот не отвечает» невозможно
   // разобрать: в логе стояло только «к отправке событий 0», и пришлось ли
   // сообщение вообще, приходилось выяснять по метке привязки в базе.
   console.log(`Бот: новых сообщений ${updates.length}`);
   let changed = false;
+  let current = links;
   let lastUpdateId = Number(state.lastUpdateId) || 0;
   for (const u of updates) {
     lastUpdateId = Math.max(lastUpdateId, Number(u.update_id) || 0);
     const msg = u.message;
     if (!msg || !msg.chat) continue;
-    const chatId = String(msg.chat.id);
-    const text = String(msg.text || "").trim();
-
-    if (/^\/start\b/.test(text)) {
-      const code = text.replace(/^\/start\b/, "").trim();
-      const user = findUserByCode(users, code);
-      if (!user) {
-        console.log(`  /start от ${chatId}: код «${code || "пустой"}» не узнан`);
-        await send(chatId, "Не узнал код. Откройте ссылку из Админки TitovStroy: "
-          + "«Уведомления» → напротив вашей фамилии кнопка «Подключить».");
-        continue;
-      }
-      const was = links[user.id]?.chatId ? String(links[user.id].chatId) : "";
-      links[user.id] = { chatId, tgName: [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(" ")
-        || msg.from?.username || "", ts: Date.now() };
-      changed = true;
-      console.log(`  /start: ${user.name || user.login} ← чат ${chatId}`
-        + (was && was !== chatId ? ` (был ${was} — привязка переехала)` : ""));
-      const mine = NOTIFY_CATALOG.filter(n => isSubscribed(user, n.key));
-      await send(chatId, `Готово, ${esc(user.name || user.login)}. Уведомления TitovStroy подключены.\n\n`
-        + (mine.length ? `Буду присылать (${mine.length}):\n`
-            + mine.slice(0, 20).map(n => `• ${n.icon} ${esc(n.label)}`).join("\n")
-            + (mine.length > 20 ? `\n<i>…и ещё ${mine.length - 20}</i>` : "")
-          : "Пока ничего не отмечено — попросите администратора выбрать уведомления в Админке.")
-        + "\n\nОтключить — команда /stop");
-      continue;
-    }
-
-    if (/^\/stop\b/.test(text)) {
-      const id = Object.keys(links).find(k => String(links[k]?.chatId) === chatId);
-      if (id) { delete links[id]; changed = true; }
-      console.log(`  /stop от ${chatId}${id ? "" : " (привязки не было)"}`);
-      await send(chatId, "Отключено. Чтобы вернуть — снова откройте ссылку из Админки.");
-      continue;
-    }
-
-    if (/^\/(chatid|id)\b/.test(text)) {
-      // Для общего чата: бота добавляют в группу, он подсказывает её номер,
-      // который админ вставляет в Админке. Иначе номер группы взять негде.
-      console.log(`  /id от ${chatId}`);
-      await send(chatId, `Номер этого чата:\n<code>${chatId}</code>\n\n`
-        + "Скопируйте его целиком, вместе с минусом, и вставьте в TitovStroy → "
-        + "Админка → Уведомления → Основное → «Номер общего чата».");
-      continue;
-    }
+    // Разбор команд — общий с webhook (handleBotCommand), чтобы ответы бота не
+    // зависели от того, каким путём пришло сообщение.
+    const out = handleBotCommand({ text: msg.text, chatId: msg.chat.id, from: msg.from,
+      users, links: current });
+    if (!out) continue;
+    console.log(`  ${out.log}`);
+    if (out.links) { current = out.links; changed = true; }
+    await send(String(msg.chat.id), out.reply);
   }
-  return { links, changed, lastUpdateId };
+  return { links: current, changed, lastUpdateId };
 }
 
 // ── Основной прогон ──────────────────────────────────────────────────────────

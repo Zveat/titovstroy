@@ -726,6 +726,68 @@ export function findUserByCode(users = [], code) {
   return users.find(u => trim(u?.tg?.code).toLowerCase() === c) || null;
 }
 
+// ─── КОМАНДЫ БОТА ─────────────────────────────────────────────────────────────
+// Одна функция на два входа: раз в 15 минут её зовёт служба в GitHub Actions
+// (опросом), и она же срабатывает мгновенно, когда Telegram стучится в webhook
+// на Vercel. Логика ОБЯЗАНА быть общей: если развести её по двум файлам, ответы
+// бота начнут зависеть от того, каким путём пришло сообщение, — а различить это
+// снаружи нельзя, и такой разлад ловится только жалобой «у меня по-другому».
+//
+// Чистая: ничего не читает и не пишет. На входе — текст и кто прислал, на выходе
+// — что ответить и какими стали привязки. Всё общение с сетью и базой снаружи.
+export function handleBotCommand({ text = "", chatId = "", from = null,
+  users = [], links = {}, now = Date.now() } = {}) {
+  const body = trim(text);
+  const chat = S(chatId);
+  if (!chat || !body.startsWith("/")) return null;
+
+  if (/^\/start\b/.test(body)) {
+    const code = trim(body.replace(/^\/start\b/, ""));
+    const user = findUserByCode(users, code);
+    if (!user) {
+      return { kind: "start_unknown", links: null,
+        log: `/start от ${chat}: код «${code || "пустой"}» не узнан`,
+        reply: "Не узнал код. Откройте ссылку из Админки TitovStroy: "
+          + "«Уведомления» → напротив вашей фамилии кнопка «Подключить»." };
+    }
+    const was = links[user.id]?.chatId ? S(links[user.id].chatId) : "";
+    const tgName = [from?.first_name, from?.last_name].filter(Boolean).join(" ")
+      || S(from?.username) || "";
+    const mine = NOTIFY_CATALOG.filter(n => isSubscribed(user, n.key));
+    return {
+      kind: "start", links: { ...links, [user.id]: { chatId: chat, tgName, ts: now } },
+      log: `/start: ${user.name || user.login} ← чат ${chat}`
+        + (was && was !== chat ? ` (был ${was} — привязка переехала)` : ""),
+      reply: `Готово, ${esc(user.name || user.login)}. Уведомления TitovStroy подключены.\n\n`
+        + (mine.length ? `Буду присылать (${mine.length}):\n`
+            + mine.slice(0, 20).map(n => `• ${n.icon} ${esc(n.label)}`).join("\n")
+            + (mine.length > 20 ? `\n<i>…и ещё ${mine.length - 20}</i>` : "")
+          : "Пока ничего не отмечено — попросите администратора выбрать уведомления в Админке.")
+        + "\n\nОтключить — команда /stop",
+    };
+  }
+
+  if (/^\/stop\b/.test(body)) {
+    const id = Object.keys(links).find(k => S(links[k]?.chatId) === chat);
+    const next = { ...links };
+    if (id) delete next[id];
+    return { kind: "stop", links: id ? next : null,
+      log: `/stop от ${chat}${id ? "" : " (привязки не было)"}`,
+      reply: "Отключено. Чтобы вернуть — снова откройте ссылку из Админки." };
+  }
+
+  // Для общего чата: бота добавляют в группу, он подсказывает её номер, который
+  // админ вставляет в Админке. Иначе номер группы взять негде.
+  if (/^\/(chatid|id)\b/.test(body)) {
+    return { kind: "chatid", links: null, log: `/id от ${chat}`,
+      reply: `Номер этого чата:\n<code>${esc(chat)}</code>\n\n`
+        + "Скопируйте его целиком, вместе с минусом, и вставьте в TitovStroy → "
+        + "Админка → Уведомления → Основное → «Номер общего чата»." };
+  }
+
+  return null;
+}
+
 // ─── ЗАЩИТА БОЕВЫХ ДАННЫХ ─────────────────────────────────────────────────────
 // Отправщик работает служебным ключом, а он обходит правила базы — то есть может
 // записать куда угодно. Единственное, что стоит между ним и боевыми данными, —

@@ -6,7 +6,7 @@ import {
   routeMessages, isSubscribed, groupSubscribed, userScope,
   objectAllowed, reminderOn, reminderNum, reminderDays, daysUntil,
   inQuietHours, localDayKey, daysWord, esc, tenge, pruneSent, nextCursor,
-  makeLinkCode, linkUrl, findUserByCode, assertWritable,
+  makeLinkCode, linkUrl, findUserByCode, assertWritable, handleBotCommand,
 } from "./notifyModel.js";
 
 // Записи ниже — НЕ выдуманные: настоящие строки из боевого журнала, снятые
@@ -525,5 +525,63 @@ describe("мелочи, на которых легко обжечься", () => 
     expect(reminderOn("start_soon", {})).toBe(true);
     expect(reminderNum("stale", "minDays", {})).toBe(14);
     expect(reminderNum("stale", "minDays", { reminders: { stale: { minDays: 45 } } })).toBe(45);
+  });
+});
+
+// ─── КОМАНДЫ БОТА ────────────────────────────────────────────────────────────
+// Эта функция — единственное место, где решается, кому принадлежит чат. Ошибка
+// здесь означает, что человек получает чужие сводки с выручкой и прибылью,
+// поэтому проверяется поштучно.
+describe("команды бота", () => {
+  const USERS = [
+    { id: "1", name: "Пётр", login: "p", tg: { code: "abc123", subs: { contract_signed: true, stages: true } } },
+    { id: "2", name: "Сергей", login: "s", tg: { code: "zzz999", subs: {} } },
+  ];
+
+  it("/start с верным кодом привязывает чат и перечисляет, что придёт", () => {
+    const out = handleBotCommand({ text: "/start abc123", chatId: 555, from: { first_name: "Пётр" },
+      users: USERS, links: {}, now: 1000 });
+    expect(out.kind).toBe("start");
+    expect(out.links["1"]).toEqual({ chatId: "555", tgName: "Пётр", ts: 1000 });
+    expect(out.reply).toContain("Готово, Пётр");
+    expect(out.reply).toContain("Буду присылать (2)");
+  });
+
+  it("/start с чужим кодом ничего не привязывает", () => {
+    const out = handleBotCommand({ text: "/start нетакого", chatId: 666, users: USERS, links: {} });
+    expect(out.kind).toBe("start_unknown");
+    expect(out.links).toBe(null);
+    expect(out.reply).toContain("Не узнал код");
+  });
+
+  it("/start из другого Telegram переносит привязку и говорит об этом в логе", () => {
+    const links = { "1": { chatId: "555", tgName: "Пётр", ts: 1 } };
+    const out = handleBotCommand({ text: "/start abc123", chatId: 777, users: USERS, links, now: 2000 });
+    expect(out.links["1"].chatId).toBe("777");
+    expect(out.log).toContain("переехала");
+    expect(links["1"].chatId).toBe("555");        // исходный объект не портим
+  });
+
+  it("/stop снимает привязку именно того чата, откуда пришёл", () => {
+    const links = { "1": { chatId: "555" }, "2": { chatId: "777" } };
+    const out = handleBotCommand({ text: "/stop", chatId: 777, users: USERS, links });
+    expect(out.links["1"]).toBeDefined();
+    expect(out.links["2"]).toBeUndefined();
+  });
+
+  it("/stop без привязки всё равно отвечает, но ничего не меняет", () => {
+    const out = handleBotCommand({ text: "/stop", chatId: 999, users: USERS, links: {} });
+    expect(out.links).toBe(null);
+    expect(out.reply).toContain("Отключено");
+  });
+
+  it("/id подсказывает номер чата целиком, вместе с минусом", () => {
+    const out = handleBotCommand({ text: "/id", chatId: -1003954788183, users: USERS, links: {} });
+    expect(out.reply).toContain("-1003954788183");
+  });
+
+  it("обычный текст командой не считается", () => {
+    expect(handleBotCommand({ text: "привет", chatId: 5, users: USERS, links: {} })).toBe(null);
+    expect(handleBotCommand({ text: "/start abc123", chatId: "", users: USERS, links: {} })).toBe(null);
   });
 });
