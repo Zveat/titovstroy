@@ -235,7 +235,14 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
             Отметьте, кому какое уведомление нужно: в общий чат, лично, или и туда и туда.
           </div>
 
-          <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: 10 }}>
+          {/* НА ТЕЛЕФОНЕ МАТРИЦЫ НЕТ. Она требует 640 px в минимуме, а на экране
+              412 px галочки уезжают за правый край: видно описания, но не видно
+              ни одной галочки, а заголовки разделов при горизонтальной прокрутке
+              обрезаются слева («КТИ И СРОКИ»). Тыкать вслепую в такую таблицу
+              нельзя, поэтому там она заменяется списком карточек: уведомление и
+              под ним получатели кнопками. Данные и порядок те же самые —
+              меняется только способ показать их на узком экране. */}
+          <div className="ntfWide" style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: 10 }}>
             <table style={{ borderCollapse: "collapse", fontSize: 12.5, width: "100%", minWidth: 640 }}>
               <thead>
                 <tr style={{ background: "#f8fafc" }}>
@@ -315,6 +322,60 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
             </table>
           </div>
 
+          <div className="ntfN">
+            {NOTIFY_TOPICS.map(topic => {
+              const rows = NOTIFY_CATALOG.filter(n => n.topic === topic.key);
+              if (!rows.length) return null;
+              const keys = rows.map(n => n.key);
+              return (
+                <div key={topic.key}>
+                  <div className="ntfNg">
+                    {topic.icon} {topic.label.toUpperCase()}
+                    {editable && (
+                      <span style={{ marginLeft: 8, fontWeight: 500 }}>
+                        <button className="sub-btn" style={bulkBtn}
+                          onClick={() => setGroupAll(keys, true)}>всё в чат</button>
+                        <button className="sub-btn" style={bulkBtn}
+                          onClick={() => setGroupAll(keys, false)}>снять с чата</button>
+                      </span>
+                    )}
+                  </div>
+                  {rows.map(n => (
+                    <div className="ntfNi" key={n.key}>
+                      <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 13 }}>
+                        {n.icon} {n.label}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "#64748b", lineHeight: 1.45, marginTop: 3 }}>
+                        <b style={{ color: "#94a3b8", fontWeight: 700 }}>Когда:</b> {n.when}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "#64748b", lineHeight: 1.45 }}>
+                        <b style={{ color: "#94a3b8", fontWeight: 700 }}>В сообщении:</b> {n.what}
+                      </div>
+                      <div className="ntfC">
+                        <button className={"ntfCh" + (groupSubscribed(settings, n.key) ? " on" : "")}
+                          disabled={!editable} onClick={() => toggleGroupKey(n.key)}>
+                          💬 общий чат
+                        </button>
+                        {users.map(u => (
+                          <button key={u.id} disabled={!editable}
+                            className={"ntfCh" + (isSubscribed(u, n.key) ? " on" : "")
+                              + (links[u.id]?.chatId ? "" : " off")}
+                            onClick={() => toggleUserKey(u, n.key)}>
+                            {u.name || u.login}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+          <div className="ntfNhint" style={{ ...sub, marginTop: 8, marginBottom: 0 }}>
+            Синим — отмеченное. Пунктиром — кто ещё не подключён к боту: отметить можно,
+            но сообщения пойдут после того, как он откроет ссылку.
+          </div>
+
           {/* Раньше это были карточки «по содержимому», и они скакали по строкам
               разной ширины — ни имена, ни кнопки, ни «охват» не стояли в одну
               линию. Теперь колонки выровнены, а кнопки перестали быть пёстрыми:
@@ -346,11 +407,30 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
                охват и кнопки. Обёртка .ntfW в широком виде «прозрачная»
                (display:contents), поэтому там колонки остаются раздельными. */
             .ntfW { display:contents }
+            /* Карточки вместо матрицы — только на узком экране. */
+            .ntfN { display:none; border:1px solid #e2e8f0; border-radius:10px; overflow:hidden }
+            .ntfNhint { display:none }
+            .ntfNg { background:#f1f5f9; padding:7px 12px; font-size:11.5px; font-weight:800; color:#334155 }
+            .ntfNi { padding:11px 12px; border-top:1px solid #f1f5f9 }
+            .ntfC { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px }
+            .ntfCh { border:1px solid #cbd5e1; background:#fff; color:#475569; border-radius:999px;
+                     padding:6px 12px; font:inherit; font-size:11.5px; cursor:pointer; white-space:nowrap }
+            .ntfCh.on { background:#1d4ed8; border-color:#1d4ed8; color:#fff; font-weight:600 }
+            /* Пунктир — человек ещё не подключён к боту: отметить его можно, но
+               сообщения пойдут только после того, как он откроет ссылку. */
+            .ntfCh.off { border-style:dashed }
+            /* Отмечен, но не подключён — самое важное состояние: галочка стоит,
+               а сообщения не идут. На синей кнопке пунктир иначе не виден. */
+            .ntfCh.on.off { border-color:#93c5fd }
+            .ntfCh:disabled { opacity:.55; cursor:default }
             @media(max-width:820px){
               .ntfH { display:none }
               .ntfR { grid-template-columns:1fr auto; gap:8px }
               .ntfW { display:flex; grid-column:1/-1; align-items:center; gap:10px;
                       justify-content:space-between }
+              .ntfWide { display:none }
+              .ntfN { display:block }
+              .ntfNhint { display:block }
             }
           `}</style>
           <div className="ntfL">
