@@ -31,26 +31,19 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
   const readOnlyRole = currentUser?.role === "viewer";
   const canSeeAdminTab = (key) => accessAllows(permissions[key], true);
   const hasAdminPermission = (key) => !readOnlyRole && canSeeAdminTab(key);
-  // Вкладок стало двенадцать, и одной строкой они уже не помещались — уезжали за
-  // край с горизонтальной прокруткой. Поэтому у каждой есть группа: смотреть по
-  // четырём коротким спискам глазу проще, чем по длинной ленте, и прокрутки нет.
   const adminTabs = [
-    ["users","👥 Сотрудники","adminUsers","people"],
-    ["permissions","🔐 Права ролей","adminRoles","people"],
-    ["clients","🤝 Клиенты","adminClients","refs"],
-    ["workers","🔨 Подрядчики","adminContractors","refs"],
-    ["contragents","🏢 Реквизиты","adminClients","refs"],
-    ["prices","💰 Прайс-лист", canSeeAdminTab("adminCatalog") || canSeeAdminTab("adminPrices") ? null : "__none","refs"],
-    ["brand","🎨 Оформление","adminUsers","company"],
-    ...(documentTemplateEnabled ? [["documentTemplates","📑 Шаблоны документов","templateView","company"]] : []),
-    ["notify","🔔 Уведомления","adminUsers","company"],
-    ["backups","🗄 Бэкапы", canSeeAdminTab("adminBackups") || canSeeAdminTab("adminRestore") ? null : "__none","ops"],
-    ["audit","📋 Журнал","adminAudit","ops"],
-    ["check","🔍 Проверка базы","adminDbCheck","ops"],
-  ];
-  const ADMIN_GROUPS = [
-    ["people", "Люди"], ["refs", "Справочники"],
-    ["company", "Компания"], ["ops", "Обслуживание"],
+    ["users","👥 Сотрудники","adminUsers"],
+    ["permissions","🔐 Права ролей","adminRoles"],
+    ["clients","🤝 Клиенты","adminClients"],
+    ["workers","🔨 Подрядчики","adminContractors"],
+    ["contragents","🏢 Реквизиты","adminClients"],
+    ["prices","💰 Прайс-лист", canSeeAdminTab("adminCatalog") || canSeeAdminTab("adminPrices") ? null : "__none"],
+    ["brand","🎨 Оформление","adminUsers"],
+    ...(documentTemplateEnabled ? [["documentTemplates","📑 Шаблоны документов","templateView"]] : []),
+    ["notify","🔔 Уведомления","adminUsers"],
+    ["backups","🗄 Бэкапы", canSeeAdminTab("adminBackups") || canSeeAdminTab("adminRestore") ? null : "__none"],
+    ["audit","📋 Журнал","adminAudit"],
+    ["check","🔍 Проверка базы","adminDbCheck"],
   ];
   const allowedAdminTabs = adminTabs.filter(([, , key]) => key === null || (key !== "__none" && canSeeAdminTab(key)));
   useEffect(() => {
@@ -364,43 +357,25 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
         </div>
       </div>
 
-      {/* Табы — по группам, строками. Раньше все двенадцать шли одной лентой с
-          горизонтальной прокруткой: половина вкладок была за краем экрана, и
-          какие именно — заранее не видно. */}
+      {/* Табы. Одной компактной строкой — так и было, и так правильно: панель
+          не должна занимать четверть экрана. Ушли только два изъяна: flex:1
+          растягивал кнопки на всю ширину независимо от длины подписи, а
+          overflow-x давал полосу прокрутки. Теперь ширина по содержимому и
+          перенос на вторую строку, если не помещается. */}
       <style>{`
-        .admg { display:grid; grid-template-columns:104px 1fr; align-items:start;
-                gap:10px 12px; padding:10px 12px; border-top:1px solid #eef2f7 }
-        .admg:first-of-type { border-top:0 }
-        .admgL { font-size:10.5px; font-weight:700; letter-spacing:.04em;
-                 text-transform:uppercase; color:#94a3b8; padding-top:7px }
-        .admgB { display:flex; flex-wrap:wrap; gap:5px }
-        .admt { border:1px solid transparent; background:transparent; color:#475569;
-                border-radius:8px; padding:7px 12px; font:inherit; font-size:12px;
-                font-weight:600; cursor:pointer; white-space:nowrap }
-        .admt:hover { background:#e9eef5; color:#0f172a }
-        .admt.on { background:#fff; color:#0f172a; font-weight:700;
-                   border-color:#dbe3ec; box-shadow:0 1px 3px rgba(15,23,42,.08) }
-        @media(max-width:820px){
-          .admg { grid-template-columns:1fr; gap:6px; padding:9px 10px }
-          .admgL { padding-top:0 }
-        }
+        .admt { border:1px solid transparent; background:transparent; color:#64748b;
+                border-radius:8px; padding:9px 13px; font:inherit; font-size:12px;
+                font-weight:700; cursor:pointer; white-space:nowrap; transition:all .12s }
+        .admt:hover { background:#eef2f7; color:#0f172a }
+        .admt.on { background:#fff; color:#0f172a; border-color:#e2e8f0;
+                   box-shadow:0 1px 3px rgba(15,23,42,.09) }
       `}</style>
-      <div className="admin-tabs" style={{marginBottom:24,background:"#f8fafc",borderRadius:10,padding:"2px 0"}}>
-        {ADMIN_GROUPS.map(([g,title])=>{
-          const items = allowedAdminTabs.filter(([,,,grp])=>grp===g);
-          if (!items.length) return null;      // группа целиком закрыта правами
-          return (
-            <div className="admg" key={g}>
-              <div className="admgL">{title}</div>
-              <div className="admgB">
-                {items.map(([t,label])=>(
-                  <button key={t} className={"admt" + (tab===t ? " on" : "")}
-                    onClick={()=>{ setTab(t); setAdminSubTab("list"); }}>{label}</button>
-                ))}
-              </div>
-            </div>
-          );
-        })}
+      <div className="admin-tabs" style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:24,
+        background:"#f8fafc",borderRadius:10,padding:4}}>
+        {allowedAdminTabs.map(([t,label])=>(
+          <button key={t} className={"admt" + (tab===t ? " on" : "")}
+            onClick={()=>{ setTab(t); setAdminSubTab("list"); }}>{label}</button>
+        ))}
       </div>
 
       {loading ? (
