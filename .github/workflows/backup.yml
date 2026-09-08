@@ -1,0 +1,59 @@
+name: Копия базы
+
+# Раз в сутки выгружает базу целиком и кладёт её ЗА ПРЕДЕЛЫ Firebase.
+#
+# Зачем: все 17 узлов *-backups в сервисе — это снимки внутри той же базы,
+# которую они защищают. Удалили проект, кончилась оплата, утёк служебный ключ,
+# запустили кривой restore — и они уедут вместе с данными.
+#
+# Копия ложится двумя путями. Артефакт прогона работает сразу и настройки не
+# требует. Google Диск включается, когда заданы секреты GDRIVE_* (см.
+# titovstroy/backup/README.md); без них шаг просто скажет об этом в логе.
+#
+# ТОЛЬКО ЧТЕНИЕ. Скрипт ничего не пишет в базу — восстановление остаётся ручным
+# и осознанным действием владельца.
+on:
+  schedule:
+    - cron: "17 21 * * *"          # 02:17 по местному времени
+  workflow_dispatch:
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: titovstroy/backup
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Установка зависимостей
+        run: npm install --no-audit --no-fund
+
+      - name: Выгрузка базы
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FB_DB_URL: ${{ vars.FB_DB_URL }}
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+          GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
+          GDRIVE_FOLDER_ID: ${{ vars.GDRIVE_FOLDER_ID }}
+          KEEP_DAYS: ${{ vars.BACKUP_KEEP_DAYS }}
+        run: node dump.mjs
+
+      # Второй, независимый экземпляр копии. Хранится 90 дней — этого хватает,
+      # чтобы заметить потерю и откатиться, даже если её обнаружили не сразу.
+      - name: Сохранить копию в артефактах
+        uses: actions/upload-artifact@v4
+        with:
+          name: baza-${{ github.run_number }}
+          path: titovstroy/backup/titovstroy_backup_*.json.gz
+          retention-days: 90
+          if-no-files-found: error
