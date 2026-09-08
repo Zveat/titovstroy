@@ -4,6 +4,7 @@ import { getDatabase, ref, get, set, runTransaction, onValue } from "firebase/da
 import ProductionModule, { flushPendingProduction, stopProductionSession, hasPendingProduction, productionDraftsAreDurable, startProductionSession, setProductionCommandHandler } from "./production/ProductionModule.jsx";
 import { emptyProduction } from "./production/constants.js";
 import { useBrand, loadBrand } from "./brand.js";
+import { kpThemeSettings } from "./kp/kpTheme.js";
 import { BrandMark } from "./ui/BrandMark.jsx";
 import { applyProductionCommand, runVerifiedProductionTransaction, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, isRegenerableProductionCommand, productionCommandObjectIds, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
@@ -6779,7 +6780,11 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     // acceptedAt/viewCount более свежими, чем то, что мы прочитали в prev.
                     try { const pr2 = await storage.getResult("titovstroy-kp-"+currentId); if (pr2.status==="found" && pr2.value) { const fresh = JSON.parse(pr2.value); if ((fresh.viewCount||0) > (prev.viewCount||0) || fresh.acceptedAt) prev = fresh; } } catch {}
                     const snap = { proj, kpItems, fromItems:kpFromItems, discount, discAmt, final, note, publishedAt:Date.now(), viewedAt:prev.viewedAt, viewCount:prev.viewCount, acceptedAt:prev.acceptedAt,
-                      contragent: kpContragent ? { name:kpContragent.name||"", bin:kpContragent.bin||"" } : null };
+                      contragent: kpContragent ? { name:kpContragent.name||"", bin:kpContragent.bin||"" } : null,
+                      // Оформление впечатывается в снимок: отправленное клиенту
+                      // предложение не должно менять вид, когда позже поменяют
+                      // цвета в настройках. Новый вид получат только новые КП.
+                      theme: kpThemeSettings(brand) };
                     const res = await storage.set("titovstroy-kp-"+currentId, JSON.stringify(snap));
                     const link = window.location.origin + window.location.pathname + "#/kp/" + currentId;
                     setKpLink(link);

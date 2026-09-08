@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { storage } from "../cloud/storage.js";
 import { KP_NODE } from "../constants.js";
 import { KPContent } from "./KPContent.jsx";
+import { LEGACY_KP_THEME } from "./kpTheme.js";
 import { ref } from "firebase/database";
 
 export function PublicKP({ id }) {
@@ -82,7 +83,7 @@ export function PublicKP({ id }) {
       <div ref={outerRef} style={{width:"100%",overflow:"hidden",height:fit.h||undefined}}>
         <div ref={innerRef} style={{width:DESIGN_W,transform:`scale(${fit.scale})`,transformOrigin:"top left"}}>
           <div style={{background:"#f5f2ec",borderRadius:14,padding:"22px 20px",boxShadow:"0 8px 30px rgba(26,26,40,.14)"}}>
-            <KPContent proj={snap.proj||{}} kpItems={snap.kpItems||[]} fromItems={snap.fromItems||[]} discount={snap.discount||0} discAmt={snap.discAmt||0} final={snap.final||0} note={snap.note||""} contragent={snap.contragent||null}/>
+            <KPContent proj={snap.proj||{}} kpItems={snap.kpItems||[]} fromItems={snap.fromItems||[]} discount={snap.discount||0} discAmt={snap.discAmt||0} final={snap.final||0} note={snap.note||""} contragent={snap.contragent||null} theme={snap.theme||LEGACY_KP_THEME}/>
           </div>
         </div>
       </div>

@@ -32,6 +32,14 @@ export const KP_PRESETS = Object.freeze([
   { key: "dark", label: "Тёмная", kpPaper: "#1e2230", kpBar: "#0b0e17", kpAccent: "#e0b357" },
 ]);
 
+// Как КП выглядел ДО того, как оформление стало настраиваемым: кремовая бумага,
+// почти чёрные плашки, золото. Этим рисуются снимки, опубликованные раньше, —
+// у них своего оформления в снимке нет, а показать их надо ровно такими, какими
+// их получил клиент. Значения зафиксированы намеренно и меняться не должны.
+export const LEGACY_KP_THEME = Object.freeze({
+  kpPaper: "#f5f2ec", kpBar: "#1a1a28", kpAccent: "#b8904a", kpFont: "golos",
+});
+
 const S = (v) => (v == null ? "" : String(v));
 const hex2rgb = (h) => {
   let s = S(h).replace("#", "");
@@ -76,6 +84,21 @@ function readable(src, bg, min) {
   const tuned = brandInk({ accent: src }, bg, min);
   if (contrast(tuned, bg) >= min) return tuned;
   return contrast("#ffffff", bg) >= contrast("#000000", bg) ? "#ffffff" : "#000000";
+}
+
+// Что впечатывается в снимок при публикации КП: РАЗРЕШЁННЫЕ значения, а не
+// ссылка на настройки. Иначе смена оформления завтра переписала бы вид всех
+// отправленных вчера предложений — документ, который клиент уже держит в руках,
+// менять задним числом нельзя. Пустой акцент раскрывается в фирменный цвет
+// прямо здесь, по той же причине.
+export function kpThemeSettings(brand = {}) {
+  const b = normalizeBrand(brand);
+  return {
+    kpPaper: isHex(b.kpPaper) ? b.kpPaper : KP_THEME_DEFAULT.kpPaper,
+    kpBar: isHex(b.kpBar) ? b.kpBar : KP_THEME_DEFAULT.kpBar,
+    kpAccent: isHex(b.kpAccent) ? b.kpAccent : b.accent,
+    kpFont: (KP_FONTS.find(f => f.key === b.kpFont) || KP_FONTS[0]).key,
+  };
 }
 
 // Готовая палитра документа из настроек. Одна функция на все места, где КП

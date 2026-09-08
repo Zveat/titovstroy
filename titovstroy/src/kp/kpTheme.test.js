@@ -1,7 +1,7 @@
 // Палитра коммерческого предложения. Документ уходит клиенту, поэтому главное
 // здесь не «красиво», а «читается при любых настройках».
 import { describe, it, expect } from "vitest";
-import { KP_PRESETS, KP_THEME_DEFAULT, kpTheme } from "./kpTheme.js";
+import { KP_PRESETS, KP_THEME_DEFAULT, LEGACY_KP_THEME, kpTheme, kpThemeSettings } from "./kpTheme.js";
 
 const rgb = (h) => {
   let s = h.replace("#", "");
@@ -90,5 +90,36 @@ describe("оформление КП", () => {
     expect(t.paper).toBe(KP_THEME_DEFAULT.kpPaper);
     expect(t.bar).toBe(KP_THEME_DEFAULT.kpBar);
     expect(t.font).toContain("Golos");
+  });
+
+  // ГЛАВНОЕ ТРЕБОВАНИЕ ВЛАДЕЛЬЦА: отправленное клиенту предложение не меняет вид
+  // от того, что позже поменяли настройки. Меняются только новые.
+  describe("вид отправленного КП зафиксирован", () => {
+    it("в снимок кладутся разрешённые цвета, а не ссылка на настройки", () => {
+      const saved = kpThemeSettings({ accent: "#2563eb", kpAccent: "", kpPaper: "#ffffff" });
+      expect(saved.kpAccent).toBe("#2563eb");        // фирменный цвет раскрыт здесь и сейчас
+      expect(saved.kpPaper).toBe("#ffffff");
+      // Настройки поменяли — снимок этого не замечает.
+      expect(kpTheme(saved).accent).toBe(kpTheme({ ...saved }).accent);
+      expect(kpTheme(saved).paper).toBe("#ffffff");
+    });
+
+    it("снимок рисуется своим оформлением, а не текущим", () => {
+      const snapshot = kpThemeSettings({ kpPaper: "#ffffff", kpBar: "#0f172a", kpAccent: "#2563eb" });
+      const now = { kpPaper: "#1e2230", kpBar: "#0b0e17", kpAccent: "#e0b357" };
+      expect(kpTheme(snapshot).paper).toBe("#ffffff");
+      expect(kpTheme(now).paper).toBe("#1e2230");
+    });
+
+    // У КП, опубликованных до появления настроек, оформления в снимке нет.
+    // Показывать их надо ровно такими, какими их получил клиент, — то есть
+    // историческим кремово-золотым, а не тем, что сейчас в настройках.
+    it("старые снимки без оформления показываются историческим видом", () => {
+      const t = kpTheme(LEGACY_KP_THEME);
+      expect(t.paper).toBe("#f5f2ec");
+      expect(t.bar).toBe("#1a1a28");
+      expect(t.accent).toBe("#a27f41");             // то самое золото, доведённое до нормы
+      expect(t.accentOnBar).toBe("#b8904a");
+    });
   });
 });

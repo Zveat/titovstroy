@@ -8,12 +8,15 @@ import { fmt, today, validUntil } from "../format.js";
 // Реквизиты (БИН) берём из карточки контрагента — того же источника, что и
 // договоры. Раньше БИН был вписан в разметку, и у второй компании в её же КП
 // стоял бы чужой номер.
-export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note, contragent }) {
+export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note, contragent, theme = null }) {
   const brand = useBrand();
   // Палитра документа целиком — из настроек (Админка → Оформление → блок «КП»).
   // Задаются бумага, плашки и акцент, остальное считается; контраст текста
   // доводится до нормы, поэтому испортить документ выбором цвета нельзя.
-  const t = kpTheme(brand);
+  // theme приходит из снимка опубликованного КП: у отправленного документа вид
+  // свой и не должен меняться от того, что в настройках поменяли цвет. Внутри
+  // приложения theme нет — там КП составляется прямо сейчас и берёт текущее.
+  const t = kpTheme(theme || brand);
   const ink = t.accent, inkOnDark = t.accentOnBar;
   const ca = contragent || null;
   const CONDITIONS = [
