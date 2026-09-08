@@ -14,7 +14,7 @@ import { refuseReasonLabel } from "../src/analytics/analyticsModel.js";
 import {
   buildEventMessages, buildReminderMessages, buildDateReminders, buildDigestMessage,
   makeEventContext, routeMessages, renderEvent, DIGESTS,
-  inQuietHours, localDayKey, localParts, assertWritable, pruneSent,
+  inQuietHours, localDayKey, localParts, assertWritable, pruneSent, nextCursor,
   findUserByCode, NOTIFY_CATALOG, isSubscribed, esc,
 } from "../src/notify/notifyModel.js";
 
@@ -276,13 +276,13 @@ async function main() {
   }
   console.log(`Отправлено ${ok} из ${letters.length}`);
 
-  // 5. Состояние. Курсор двигаем по МАКСИМАЛЬНОЙ метке журнала, а не по «сейчас»:
-  // запись, добавленная во время прогона, иначе была бы пропущена навсегда.
+  // 5. Состояние. Как двигается курсор — в nextCursor (там же про тихие часы,
+  // ночью он обязан стоять на месте, иначе ночные события пропадают).
   const maxTs = entries.reduce((s, e) => Math.max(s, Number(e?.ts) || 0), 0);
   const nextSent = { ...sentIds };
   for (const m of [...events, ...reminders]) nextSent[m.id] = now;
   await writeJson(K.state, {
-    lastTs: Math.max(Number(state.lastTs) || 0, firstRun ? now : Math.min(maxTs || sinceTs, now)),
+    lastTs: nextCursor({ prev: state.lastTs, maxTs, sinceTs, now, firstRun, quiet }),
     lastUpdateId: upd.lastUpdateId || 0,
     lastDigest: (digestDue && reminders.length >= 0) ? today : (state.lastDigest || ""),
     sent: pruneSent(nextSent, { now }),

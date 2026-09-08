@@ -5,7 +5,7 @@ import {
   buildReminderMessages, buildDateReminders, buildDigestMessage,
   routeMessages, isSubscribed, groupSubscribed, userScope,
   objectAllowed, reminderOn, reminderNum, reminderDays, daysUntil,
-  inQuietHours, localDayKey, daysWord, esc, tenge, pruneSent,
+  inQuietHours, localDayKey, daysWord, esc, tenge, pruneSent, nextCursor,
   makeLinkCode, linkUrl, findUserByCode, assertWritable,
 } from "./notifyModel.js";
 
@@ -502,6 +502,24 @@ describe("мелочи, на которых легко обжечься", () => 
     expect(out.fresh).toBeDefined();
     expect(out.old).toBeUndefined();
   });
+  // Курсор — единственное место, где событие может пропасть насовсем: если он
+  // уехал вперёд, запись под ним больше никогда не будет прочитана. Поэтому
+  // тихие часы проверяются именно здесь, а не только на «не отправили ночью».
+  it("в тихие часы курсор журнала стоит на месте — ночное уходит утром", () => {
+    const prev = 1000, maxTs = 9000, now = 9500;
+    expect(nextCursor({ prev, maxTs, now, quiet: true })).toBe(prev);
+    expect(nextCursor({ prev, maxTs, now, quiet: false })).toBe(maxTs);
+  });
+  it("курсор идёт по метке записи, а не по «сейчас»", () => {
+    expect(nextCursor({ prev: 0, maxTs: 5000, now: 9000 })).toBe(5000);
+    expect(nextCursor({ prev: 7000, maxTs: 5000, now: 9000 })).toBe(7000);  // назад не ходит
+    expect(nextCursor({ prev: 0, maxTs: 99000, now: 9000 })).toBe(9000);    // и не в будущее
+  });
+  it("первый запуск начинается с текущего момента, а ночью — не начинается вовсе", () => {
+    expect(nextCursor({ prev: 0, maxTs: 5000, now: 9000, firstRun: true })).toBe(9000);
+    expect(nextCursor({ prev: 0, maxTs: 5000, now: 9000, firstRun: true, quiet: true })).toBe(0);
+  });
+
   it("пороги и выключатели напоминаний читаются с умолчаниями", () => {
     expect(reminderOn("stages", {})).toBe(true);
     expect(reminderOn("start_soon", {})).toBe(true);
