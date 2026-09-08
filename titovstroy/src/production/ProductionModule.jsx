@@ -629,22 +629,44 @@ export default function ProductionModule({
     if (!openObj) return null;
     const objectContracts = (contracts || []).filter(c => c && !c.deletedAt && c.objectId === openObj.id
       && c.type !== "podryad" && c.type !== "podryad_annex");
+    // СЧИТАЕМ ВЕСЬ ОБЪЕКТ, А НЕ ОДИН ДОГОВОР ИЗ НЕСКОЛЬКИХ.
+    //
+    // Раньше в бюджет брался ТОЛЬКО тот договор, по которому заведён финпроект,
+    // плюс его допсоглашения. Пока договор один — незаметно. Но на объекте
+    // «Таисия» их два самостоятельных (№1039 на 3 101 192 и №1043 на 440 640 со
+    // своим допсоглашением на 797 367), и карточка показывала «договор
+    // 3 101 192» против «все сметы 4 339 199»: два числа с разной базой рядом,
+    // и долг считался с недостающей половины. Это карточка ОБЪЕКТА — значит и
+    // деньги по объекту целиком. Договоры подряда сюда по-прежнему не входят:
+    // это себестоимость, она живёт отдельно (отфильтрованы выше).
     const projectNo = normCN(finProj?.contractNo);
     const mainContracts = objectContracts.filter(c => c.type !== "annex" && c.type !== "design_add");
     const main = mainContracts.find(c => projectNo && normCN(c.number) === projectNo)
       || mainContracts.find(c => c.type === "repair_fiz" || c.type === "repair_yur")
       || mainContracts[0]
       || null;
-    const mainNo = normCN(main?.number);
-    const annexes = mainNo
-      ? objectContracts.filter(c => (c.type === "annex" || c.type === "design_add") && normCN(c.mainNumber) === mainNo)
-      : [];
+    // ДУБЛИ НЕ СКЛАДЫВАЕМ. На боевой нашёлся объект с договорами №1040 и №1041 —
+    // одинаковая сумма, одинаковая дата, смета одна: договор просто создали
+    // дважды. Сложить их в лоб — удвоить бюджет и долг. Полным дублем считаем
+    // совпадение типа, суммы и даты; настоящие два документа так не совпадают.
+    const seenSig = new Set();
+    const counted = [];
+    const dupes = [];
+    for (const c of objectContracts) {
+      const money = Math.round(contractNetTotal(c));
+      const sig = `${c.type}|${money}|${String(c.date || "")}`;
+      if (money > 0 && seenSig.has(sig)) { dupes.push(c); continue; }
+      seenSig.add(sig);
+      counted.push(c);
+    }
     // Каждый документ — со своей скидкой (contract.discount), как в печатной форме.
-    const contractBudget = main ? contractNetTotal(main) + annexes.reduce((sum, c) => sum + contractNetTotal(c), 0) : 0;
+    const contractBudget = counted.reduce((sum, c) => sum + contractNetTotal(c), 0);
     const estimatePlan = estimatesForObject(estimates, openObj.id).reduce((sum, estimate) => sum + (Number(estimate.total) || 0), 0);
 
     if (!finProj && !main && estimatePlan <= 0) return null;
-    const txNumbers = new Set([finProj?.contractNo, main?.number, ...annexes.map(c => c.number)].map(normCN).filter(Boolean));
+    // Оплаты и расходы — по номерам ВСЕХ договоров объекта, иначе платёж по
+    // второму договору не попал бы ни в «оплачено», ни в долг.
+    const txNumbers = new Set([finProj?.contractNo, ...objectContracts.map(c => c.number)].map(normCN).filter(Boolean));
     const txList = (financeTx||[]).filter(t => !t.deletedAt && t.included !== false && txNumbers.has(normCN(t.contractNo)));
     const income = txList.filter(t => t.type === "income").reduce((s,t) => s+(Number(t.amount)||0), 0);
     const expense = txList.filter(t => t.type === "expense").reduce((s,t) => s+(Number(t.amount)||0), 0);
@@ -654,32 +676,20 @@ export default function ProductionModule({
     const debt = Math.max(0, budget - income);
     const margin = income > 0 ? Math.round((income - expense) / income * 100) : null;
 
-    // ДРУГИЕ ДОГОВОРЫ ЭТОГО ЖЕ ОБЪЕКТА. Бюджет выше — это ОДИН договор (тот, по
-    // которому заведён финпроект) и его допсоглашения. А «Все сметы» — это весь
-    // объект целиком. Пока договор один, числа совпадают и разницы не видно. Но
-    // если на объекте завели второй самостоятельный договор (а не допсоглашение
-    // к первому), плитки начинают расходиться — и раньше экран показывал две
-    // разные цифры молча, без объяснения. Ловили на объекте с договорами №1039
-    // и №1043: «договор 3 101 192» против «все сметы 4 339 199», и понять,
-    // почему, было нельзя. Считаем недостающее и называем поимённо.
-    const others = mainContracts
-      .filter(c => c !== main)
-      .map(c => {
-        const no = normCN(c.number);
-        const own = objectContracts.filter(a => (a.type === "annex" || a.type === "design_add")
-          && no && normCN(a.mainNumber) === no);
-        return {
-          number: c.number,
-          total: contractNetTotal(c) + own.reduce((sum, a) => sum + contractNetTotal(a), 0),
-          annexCount: own.length,
-        };
-      })
-      .filter(x => x.total > 0);
-    const othersTotal = others.reduce((sum, x) => sum + x.total, 0);
+    // Что вошло в бюджет — списком, чтобы не гадать по числу.
+    const countedMains = counted.filter(c => c.type !== "annex" && c.type !== "design_add");
+    const includedNos = countedMains.map(c => String(c.number || "").replace(/^№+/, "").trim()).filter(Boolean);
+    const annexCount = counted.length - countedMains.length;
+    const dupeNos = dupes.map(c => String(c.number || "").replace(/^№+/, "").trim()).filter(Boolean);
+    // Несколько основных договоров — норма только когда они бьются со сметами.
+    // Не бьются — значит один устарел или лишний. Молча завышенный бюджет хуже,
+    // чем вопрос на экране.
+    const suspectMains = countedMains.length > 1
+      && Math.round(contractBudget) !== Math.round(estimatePlan);
 
     return {
       budget, estimatePlan, income, expense, debt, margin,
-      others, othersTotal,
+      includedNos, annexCount, dupeNos, suspectMains,
       contractNo: main?.number || finProj?.contractNo,
       status: finProj?.rawStatus || finProj?.status,
       hasProject: !!finProj,
@@ -1983,7 +1993,18 @@ function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser, a
           иначе — по плану из сметы/этапов (объект ещё не в производстве/финансах). */}
       {finSummary ? (
         <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>💰 Финансы объекта{finSummary.contractNo ? ` · договор №${String(finSummary.contractNo).replace(/^№+/, "")}` : ""}</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>
+            💰 Финансы объекта
+            {(finSummary.includedNos || []).length > 1
+              ? ` · договоры ${finSummary.includedNos.map(n => "№" + n).join(", ")}`
+              : finSummary.contractNo ? ` · договор №${String(finSummary.contractNo).replace(/^№+/, "")}` : ""}
+            {finSummary.annexCount > 0 && (
+              <span style={{ fontWeight: 500, color: "#64748b" }}>
+                {" "}+ {finSummary.annexCount} {finSummary.annexCount === 1 ? "допсоглашение"
+                  : finSummary.annexCount < 5 ? "допсоглашения" : "допсоглашений"}
+              </span>
+            )}
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8 }}>
             {[
               ["Договор + допсоглашения", finSummary.budget > 0 ? fmt(finSummary.budget) + " ₸" : "—", "#0f172a", "#f8fafc"],
@@ -2001,17 +2022,17 @@ function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser, a
               </div>
             ))}
           </div>
-          {finSummary.othersTotal > 0 && (
+          {(finSummary.dupeNos?.length > 0 || finSummary.suspectMains) && (
             <div style={{ marginTop: 10, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10,
-              padding: "9px 12px", fontSize: 11.5, color: "#92400e", lineHeight: 1.55 }}>
-              Здесь считается только договор №{String(finSummary.contractNo || "").replace(/^№+/, "")} и его
-              допсоглашения. На объекте есть ещё {finSummary.others.length === 1 ? "договор" : "договоры"}, и
-              {finSummary.others.length === 1 ? " он" : " они"} в этот расчёт <b>не входят</b>:
-              {" "}{finSummary.others.map(x => `№${String(x.number).replace(/^№+/, "")} — ${fmt(x.total)} ₸`
-                + (x.annexCount ? ` (с ${x.annexCount} доп.)` : "")).join(", ")}.
-              <br />Поэтому «Все сметы (план)» больше: сметы считаются по объекту целиком, а договор — по одному.
-              Если это доп. работы к основному договору, их правильнее оформить допсоглашением к
-              №{String(finSummary.contractNo || "").replace(/^№+/, "")} — тогда цифры сойдутся.
+              padding: "9px 12px", fontSize: 11.5, color: "#92400e", lineHeight: 1.5 }}>
+              {finSummary.dupeNos?.length > 0 && (
+                <div>Не в расчёте: {finSummary.dupeNos.map(n => "№" + n).join(", ")} — полный дубль
+                  (та же сумма и та же дата). Лишний договор лучше удалить.</div>
+              )}
+              {finSummary.suspectMains && (
+                <div>На объекте несколько основных договоров, и вместе они не сходятся со сметами.
+                  Проверьте, не устарел ли один из них.</div>
+              )}
             </div>
           )}
         </div>
