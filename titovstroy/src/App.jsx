@@ -3,7 +3,7 @@ import { initializeApp } from "firebase/app";
 import { getDatabase, ref, get, set, runTransaction, onValue } from "firebase/database";
 import ProductionModule, { flushPendingProduction, stopProductionSession, hasPendingProduction, productionDraftsAreDurable, startProductionSession, setProductionCommandHandler } from "./production/ProductionModule.jsx";
 import { emptyProduction } from "./production/constants.js";
-import { useBrand } from "./brand.js";
+import { useBrand, loadBrand } from "./brand.js";
 import { BrandMark } from "./ui/BrandMark.jsx";
 import { applyProductionCommand, runVerifiedProductionTransaction, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, isRegenerableProductionCommand, productionCommandObjectIds, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
@@ -258,7 +258,10 @@ function EditorSessionGate({ currentUser, setCurrentUser }) {
 
 function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) {
   // Оформление компании (название, логотип, цвет) — из настроек, см. brand.js.
+  // Перечитываем принудительно: на экране входа чтение могло не пройти (человек
+  // тогда ещё не вошёл), а здесь права уже есть.
   const brand = useBrand();
+  useEffect(() => { loadBrand({ force: true }); }, []);
   const [catalogVersion, setCatalogVersion] = useState(0);
   useEffect(() => {
     setOnCatalogChange(() => setCatalogVersion(v => v + 1));
