@@ -87,11 +87,10 @@ export const FA_SUB_MAP = { "Покупка: Техника":"faTechnika","По�
 export const ASSET_OUT_KEYS = { "Выдан займ (до 1 года)":"loansGivenShort","Выдан займ (от 1 года)":"loansGivenLong","Залоговый платёж":"collateral","Закуп запасов / материалов":"inventory","Финансовые вложения (долг.)":"financialInvest","НМА (нематериальные активы)":"intangibles" };
 export const ASSET_INC_KEYS = { "Возврат займа выданного (кратк.)":"loansGivenShort","Возврат займа выданного (долг.)":"loansGivenLong","Возврат залогового платежа":"collateral","Продажа / реализация запасов":"inventory","Возврат фин. вложений":"financialInvest" };
 
-// Дефолтные пользователи
-export const DEFAULT_USERS = [
-  { id:"1", login:"admin",    password:"titov2024", name:"Василий Титов",   role:"admin"  },
-  { id:"2", login:"zamer1",   password:"zamer1",    name:"Замерщик 1",      role:"user"   },
-];
+// Вшитых учёток больше нет. Здесь лежали admin/titov2024 и zamer1/zamer1 —
+// пароли в открытом репозитории, которыми на пустой базе можно было войти.
+// Первого администратора теперь заводит мастер первого запуска
+// (screens/SetupWizard.jsx), паролем, который придумали при установке.
 
 // Метаданные журнала (используются и общим журналом, и срезом по объекту)
 export const AUDIT_SECTION_META = {

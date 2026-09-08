@@ -4,7 +4,6 @@ import { lockoutMessage, requestServerLogin } from "../auth/loginClient.js";
 import { clearLoginAttempts, getLoginLockout, registerFailedLogin, verifyPassword } from "../auth/loginGuard.js";
 import { logChange } from "../cloud/audit.js";
 import { signInAsStaff, storage } from "../cloud/storage.js";
-import { DEFAULT_USERS } from "../constants.js";
 import { SESSION_KEY, USERS_KEY } from "../storageKeys.js";
 import { useBrand } from "../brand.js";
 import { BrandMark } from "../ui/BrandMark.jsx";
@@ -98,7 +97,13 @@ export function LoginScreen({ onLogin, notice = "" }) {
         return;
       }
     } else if (res.status === "empty") {
-      users = DEFAULT_USERS;
+      // Пустая база — это первый запуск, и им занимается мастер установки
+      // (screens/SetupWizard.jsx), а не вход. Раньше здесь подставлялись вшитые
+      // в код admin/titov2024: на новой установке любой, кто знал адрес, входил
+      // паролем из открытого репозитория.
+      setError("Система ещё не настроена. Обновите страницу — откроется первый запуск.");
+      setLoading(false);
+      return;
     } else {
       setError("Не удалось подключиться к базе. Проверьте интернет и попробуйте снова.");
       setLoading(false);

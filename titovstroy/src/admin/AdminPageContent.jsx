@@ -5,7 +5,7 @@ import { confirmDangerous } from "../appConfig.js";
 import { hashPassword, passwordTooWeak } from "../auth/loginGuard.js";
 import { logChange, writeAudit } from "../cloud/audit.js";
 import { storage } from "../cloud/storage.js";
-import { DEFAULT_USERS, PRICE_SEAL_REASONS } from "../constants.js";
+import { PRICE_SEAL_REASONS } from "../constants.js";
 import { BrandTab } from "./BrandTab.jsx";
 import { IssuePanel } from "../dashboard/IssuePanel.jsx";
 import { EstimateSuggestionRulesEditor } from "../estimate/EstimateSuggestions.jsx";
@@ -108,7 +108,7 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
           storage.get(CATALOG_KEY),
           storage.get(PRICES_KEY),
         ]);
-        try { setUsers(res ? JSON.parse(res.value) : DEFAULT_USERS); } catch { setUsers(DEFAULT_USERS); }
+        try { setUsers(res ? JSON.parse(res.value) : []); } catch { setUsers([]); }
         try {
           if (cat) { const parsed = JSON.parse(cat.value); setCatalogOverrides(parsed); setLocalCatalog(parsed); }
           else setLocalCatalog({ renames:{}, custom:[], hiddenCodes:[] });

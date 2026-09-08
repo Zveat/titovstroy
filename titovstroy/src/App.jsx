@@ -53,7 +53,7 @@ import { clearLoginAttempts, getLoginLockout, hashPassword, passwordTooWeak, reg
 import { _finTypeLbl, _objLabel, _tng, logChange, logContractSave, logObjChange, writeAudit } from "./cloud/audit.js";
 import { _dirtyOwnerUid, _editorGateN, _fbAuthReady, _mem, _restToken, hasStaffClaim, nextEditorGate,
   signOutStaff, staffSessionState, storage } from "./cloud/storage.js";
-import { ASSET_INC_KEYS, ASSET_OUT_KEYS, AUDIT_SECTION_META, AUDIT_SOURCE_META, CONTRACT_STATUSES, C_ASSET_INC, C_ASSET_OUT, C_FINACT, C_FINANCING_INC, C_INVEST, DEAL_STATUSES, DEAL_TO_PROD, DEFAULT_USERS, DOCS_NODE, EMPTY_PROJ, EXTRA_CAT, FA_SUB_MAP, KP_NODE, OBJ_TYPES, PRICE_SEAL_REASONS, PROD_TO_DEAL, PROGRESS_NODE, STATUSES, _PROG_ST, _auditActionMeta, _auditVal } from "./constants.js";
+import { ASSET_INC_KEYS, ASSET_OUT_KEYS, AUDIT_SECTION_META, AUDIT_SOURCE_META, CONTRACT_STATUSES, C_ASSET_INC, C_ASSET_OUT, C_FINACT, C_FINANCING_INC, C_INVEST, DEAL_STATUSES, DEAL_TO_PROD, DOCS_NODE, EMPTY_PROJ, EXTRA_CAT, FA_SUB_MAP, KP_NODE, OBJ_TYPES, PRICE_SEAL_REASONS, PROD_TO_DEAL, PROGRESS_NODE, STATUSES, _PROG_ST, _auditActionMeta, _auditVal } from "./constants.js";
 import { ContractEditor } from "./contracts/ContractEditor.jsx";
 import { IssuePanel } from "./dashboard/IssuePanel.jsx";
 import { OperationsPanel } from "./dashboard/OperationsPanel.jsx";
@@ -71,6 +71,7 @@ import { _catalogOverrides, getBasePrice, getEffectiveCatalog, getEffectiveWork,
 import { ProductionCalendar } from "./production/ProductionCalendar.jsx";
 import { PublicProgress } from "./public/PublicProgress.jsx";
 import { LoginScreen } from "./screens/LoginScreen.jsx";
+import { SetupWizard } from "./screens/SetupWizard.jsx";
 import { DangerConfirmModal, confirmTyped } from "./ui/DangerConfirm.jsx";
 import { NumInput, SearchSelect } from "./ui/Inputs.jsx";
 
@@ -127,6 +128,7 @@ export default function App() {
   // Реагируем ТОЛЬКО на "anon". На "unknown" (сеть моргнула, SDK не поднялся) не реагируем —
   // иначе первый же сетевой сбой запер бы человека снаружи при полностью живой сессии.
   const [staleLogin, setStaleLogin] = useState(false);
+  const [setupDone, setSetupDone] = useState("");
   useEffect(() => {
     if (!currentUser?.id) { setStaleLogin(false); return; }
     let alive = true;
@@ -136,13 +138,35 @@ export default function App() {
     })();
     return () => { alive = false; };
   }, [currentUser?.id]);
+  // ПЕРВЫЙ ЗАПУСК. Пока в базе нет ни одного сотрудника, входить некому и нечем:
+  // показываем мастер установки. Раньше на этом месте работал вход по вшитым в
+  // код admin/titov2024 — на новой установке это открытая дверь ровно в тот
+  // момент, когда за ней ещё никто не следит.
+  const [freshInstall, setFreshInstall] = useState(null);   // null — ещё проверяем
+  useEffect(() => {
+    if (/^#\/(kp|progress)\//.test(typeof window !== "undefined" ? (window.location.hash || "") : "")) return;
+    let alive = true;
+    (async () => {
+      const res = await storage.getResult(USERS_KEY);
+      // ТОЛЬКО подтверждённо пустая база. «Не смогли прочитать» мастером не
+      // считаем: иначе сетевой сбой на боевой базе предложил бы постороннему
+      // завести себе администратора.
+      if (alive) setFreshInstall(res.status === "empty");
+    })();
+    return () => { alive = false; };
+  }, []);
+
   // Публичная страница КП по ссылке #/kp/<id> — открывается без входа
   const _kpId = (() => { const m = (typeof window !== "undefined" ? (window.location.hash || "") : "").match(/^#\/kp\/(.+)$/); return m ? decodeURIComponent(m[1]) : null; })();
   if (_kpId) return <PublicKP id={_kpId} />;
   // Публичная страница прогресса объекта по ссылке #/progress/<токен> — без входа
   const _progToken = (() => { const m = (typeof window !== "undefined" ? (window.location.hash || "") : "").match(/^#\/progress\/(.+)$/); return m ? decodeURIComponent(m[1]) : null; })();
   if (_progToken) return <PublicProgress token={_progToken} />;
-  if (!currentUser) return <LoginScreen onLogin={setCurrentUser} />;
+  if (freshInstall) {
+    return <SetupWizard onDone={(login) => { setFreshInstall(false); setSetupDone(login); }} />;
+  }
+  if (!currentUser) return <LoginScreen onLogin={setCurrentUser}
+    notice={setupDone ? `Готово. Войдите под логином «${setupDone}».` : ""} />;
   // Вход устарел — в приложение не пускаем, но и сессию из localStorage не стираем:
   // несохранённое на устройстве остаётся и уйдёт в базу сразу после входа.
   if (staleLogin) return (
@@ -424,8 +448,10 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   }, []);
 
   // Пользователи для выпадающего списка менеджеров
-  const [allUsers, setAllUsers] = useState(DEFAULT_USERS);
-  const allUsersRef = useRef(DEFAULT_USERS);
+  // Пустой список до загрузки из базы. Раньше здесь стояли вшитые в код
+  // учётки с паролями — их больше нет вовсе.
+  const [allUsers, setAllUsers] = useState([]);
+  const allUsersRef = useRef([]);
   useEffect(() => { allUsersRef.current = allUsers; }, [allUsers]);
   const [rolePermissions, setRolePermissions] = useState(() => normalizeRolePermissions());
   // Ref, чтобы в saveRolePermissions сравнить «было → стало» без устаревшего замыкания.

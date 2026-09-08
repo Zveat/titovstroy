@@ -38,6 +38,25 @@ CRM для ремонтно-отделочной компании «TitovStroy»
                          работает вообще (fail-closed): адрес публичный, а /start меняет,
                          чей это чат — то есть кто получает сводки с прибылью. Пока
                          webhook включён, getUpdates отвечает 409 — это норма, не ошибка.
+  brand.js + admin/BrandTab.jsx  ОФОРМЛЕНИЕ КОМПАНИИ: название, логотип, цвет,
+                         WhatsApp, печать; kp/kpTheme.js — оформление КП (бумага,
+                         плашки, акцент; остальное считается, контраст текста
+                         доводится до нормы — испортить читаемость выбором цвета
+                         нельзя). Реквизитов тут НЕТ, они в контрагентах. Вид КП
+                         впечатывается в снимок при публикации: отправленный
+                         клиенту документ не меняется от смены настроек, у старых
+                         снимков — LEGACY_KP_THEME.
+  screens/SetupWizard.jsx + auth/setup.js  ПЕРВЫЙ ЗАПУСК. Пока titovstroy_users
+                         пуст, вместо входа показывается мастер: компания +
+                         первый администратор. ВШИТЫХ УЧЁТОК БОЛЬШЕ НЕТ — были
+                         admin/titov2024 и zamer1/zamer1 в constants.js, и на
+                         пустой базе ими входили. НЕ ВОЗВРАЩАТЬ. Мастер
+                         открывается ТОЛЬКО при status==="empty" (база ответила),
+                         но не при "unavailable": иначе сетевой сбой на боевой
+                         базе предложил бы постороннему завести админа. Правила
+                         пускают анонима в titovstroy_users и titovstroy_brand,
+                         пока !data.exists() — иначе новую установку некому
+                         настроить; после создания дверь закрыта навсегда.
   admin/ (AdminPageContent, AuditTab, NotifyTab, RolePermissions), screens/LoginScreen,
   public/PublicProgress, kp/, contracts/, deals/, finance/, dashboard/, ui/,
   masters/MastersSection, production/ProductionCalendar, auth/loginGuard, estimate/rowKeys

@@ -18,9 +18,15 @@
     // Хэши паролей сотрудников. Читают вошедшие сотрудники (экраны показывают имена
     // авторов и ловят смену пароля). Пишет только тот, у кого есть «Пользователи» или
     // «Права ролей» — иначе любой сотрудник переписал бы список и выдал себе права.
+    // ПЕРВЫЙ ЗАПУСК. Пока узла нет, его может прочитать и создать любой вошедший
+    // (публичные страницы входят анонимно) — иначе новую установку некому
+    // настроить: сотрудников ещё нет, значит нет и токена с правами. Как только
+    // список создан, дверь закрывается навсегда: ниже снова только staff/usr.
+    // Отсюда правило установки — настраивать сразу после развёртывания, пока
+    // адрес никому не известен.
     "titovstroy_users": {
-      ".read": "auth != null && auth.token.staff === true",
-      ".write": "auth != null && auth.token.usr === true"
+      ".read": "auth != null && (auth.token.staff === true || !data.exists())",
+      ".write": "auth != null && (auth.token.usr === true || !data.exists())"
     },
     "titovstroy_users_backups": {
       ".read": "auth != null && auth.token.staff === true",
@@ -62,7 +68,7 @@
     // Пишет только тот, кому доверено управление пользователями.
     "titovstroy_brand": {
       ".read": "auth != null",
-      ".write": "auth != null && auth.token.usr === true"
+      ".write": "auth != null && (auth.token.usr === true || !data.exists())"
     },
     "titovstroy_tg_settings": {
       ".read": "auth != null && auth.token.staff === true",
