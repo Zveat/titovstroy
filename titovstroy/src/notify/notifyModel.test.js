@@ -7,6 +7,7 @@ import {
   objectAllowed, reminderOn, reminderNum, reminderDays, daysUntil,
   inQuietHours, localDayKey, daysWord, esc, tenge, pruneSent, nextCursor,
   makeLinkCode, linkUrl, findUserByCode, assertWritable, handleBotCommand,
+  subsList, subsFingerprint, buildSubsChangeMessages,
 } from "./notifyModel.js";
 
 // Записи ниже — НЕ выдуманные: настоящие строки из боевого журнала, снятые
@@ -583,5 +584,75 @@ describe("команды бота", () => {
   it("обычный текст командой не считается", () => {
     expect(handleBotCommand({ text: "привет", chatId: 5, users: USERS, links: {} })).toBe(null);
     expect(handleBotCommand({ text: "/start abc123", chatId: "", users: USERS, links: {} })).toBe(null);
+  });
+});
+
+// ─── «ЧТО МНЕ ПРИХОДИТ» ──────────────────────────────────────────────────────
+// Бот сам просит сходить к администратору, тот отмечает — и человеку об этом
+// никто не говорит. Тут закрывается именно этот разрыв.
+describe("список подписок и его изменения", () => {
+  const withSubs = (subs) => ({ id: "1", name: "Пётр", login: "p", tg: { code: "abc123", subs } });
+
+  it("пустой список честно говорит, что делать", () => {
+    expect(subsList(withSubs({}))).toContain("попросите администратора");
+  });
+
+  it("/menu показывает текущий список подключённому чату", () => {
+    const users = [withSubs({ contract_signed: true, stages: true })];
+    const out = handleBotCommand({ text: "/menu", chatId: 555, users,
+      links: { "1": { chatId: "555" } } });
+    expect(out.kind).toBe("menu");
+    expect(out.reply).toContain("Буду присылать (2)");
+    expect(out.links).toBe(null);              // читающая команда ничего не меняет
+  });
+
+  it("/menu из чужого чата не выдаёт ничей список", () => {
+    const users = [withSubs({ contract_signed: true })];
+    const out = handleBotCommand({ text: "/menu", chatId: 999, users,
+      links: { "1": { chatId: "555" } } });
+    expect(out.kind).toBe("menu_unlinked");
+    expect(out.reply).not.toContain("Буду присылать");
+  });
+
+  it("первый прогон только запоминает набор и молчит", () => {
+    const users = [withSubs({ contract_signed: true })];
+    const links = { "1": { chatId: "555" } };
+    const out = buildSubsChangeMessages({ users, links, sent: {} });
+    expect(out.messages).toHaveLength(0);
+    expect(out.fingerprints["1"]).toBe("contract_signed");
+  });
+
+  it("администратор изменил набор — человеку уходит новый список", () => {
+    const links = { "1": { chatId: "555" } };
+    const before = buildSubsChangeMessages({ users: [withSubs({})], links, sent: {} });
+    const after = buildSubsChangeMessages({
+      users: [withSubs({ contract_signed: true, digest_week: true })], links,
+      sent: before.fingerprints });
+    expect(after.messages).toHaveLength(1);
+    expect(after.messages[0].chatId).toBe("555");
+    expect(after.messages[0].text).toContain("изменились");
+    expect(after.messages[0].text).toContain("Буду присылать (2)");
+  });
+
+  it("набор не менялся — второй раз не пишем", () => {
+    const users = [withSubs({ contract_signed: true })];
+    const links = { "1": { chatId: "555" } };
+    const first = buildSubsChangeMessages({ users, links, sent: {} });
+    const again = buildSubsChangeMessages({ users, links, sent: first.fingerprints });
+    expect(again.messages).toHaveLength(0);
+  });
+
+  it("неподключённому не пишем вообще", () => {
+    const out = buildSubsChangeMessages({ users: [withSubs({ stages: true })], links: {}, sent: {} });
+    expect(out.messages).toHaveLength(0);
+    expect(out.fingerprints).toEqual({});
+  });
+
+  // Порядок ключей в базе не гарантирован: без сортировки перестановка
+  // выглядела бы как изменение, и человек получал бы письмо на ровном месте.
+  it("порядок галочек в базе изменением не считается", () => {
+    const a = { id: "1", tg: { subs: { stages: true, contract_signed: true } } };
+    const b = { id: "1", tg: { subs: { contract_signed: true, stages: true } } };
+    expect(subsFingerprint(a)).toBe(subsFingerprint(b));
   });
 });

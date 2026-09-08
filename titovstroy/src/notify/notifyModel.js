@@ -727,6 +727,53 @@ export function findUserByCode(users = [], code) {
 }
 
 // ─── КОМАНДЫ БОТА ─────────────────────────────────────────────────────────────
+// Список «что вам приходит» собирается в ОДНОМ месте: он показывается при
+// подключении, по команде /menu и в сообщении об изменении подписок. Три копии
+// разошлись бы — и человек видел бы разные ответы на один и тот же вопрос.
+const HINT = "Показать список — /menu, отключиться — /stop";
+
+export function subsList(user) {
+  const mine = NOTIFY_CATALOG.filter(n => isSubscribed(user, n.key));
+  if (!mine.length) {
+    return "Пока ничего не отмечено — попросите администратора выбрать уведомления в Админке.";
+  }
+  return `Буду присылать (${mine.length}):\n`
+    + mine.slice(0, 20).map(n => `• ${n.icon} ${esc(n.label)}`).join("\n")
+    + (mine.length > 20 ? `\n<i>…и ещё ${mine.length - 20}</i>` : "");
+}
+
+// Отпечаток набора подписок. По нему видно, что администратор что-то изменил, —
+// сравнивать сами списки не нужно, а порядок ключей в базе не гарантирован,
+// поэтому сортируем: иначе перестановка выглядела бы как изменение.
+export function subsFingerprint(user) {
+  return NOTIFY_CATALOG.filter(n => isSubscribed(user, n.key)).map(n => n.key).sort().join(",");
+}
+
+// Кому сказать, что его подписки изменились.
+//
+// ЗАЧЕМ. Бот сам просит «попросите администратора отметить», администратор
+// отмечает — и человеку об этом никто не сообщает. Владелец это и заметил:
+// «я выбрал их, но бот ничего не прислал… он в целом не будет мне ничего писать».
+//
+// ПЕРВЫЙ РАЗ — МОЛЧА. Если отпечатка ещё нет, он просто запоминается: иначе при
+// первом же прогоне после выкатки всем подключённым прилетело бы «ваши
+// уведомления изменились», хотя никто ничего не менял.
+export function buildSubsChangeMessages({ users = [], links = {}, sent = {} } = {}) {
+  const messages = [];
+  const next = {};
+  for (const user of users) {
+    const chatId = links[user?.id]?.chatId;
+    if (!chatId) continue;                       // не подключён — нечего и сообщать
+    const fp = subsFingerprint(user);
+    next[user.id] = fp;
+    const was = sent[user.id];
+    if (was === undefined || was === fp) continue;
+    messages.push({ userId: user.id, chatId: S(chatId), fingerprint: fp,
+      text: "🔔 Ваши уведомления изменились.\n\n" + subsList(user) + "\n\n" + HINT });
+  }
+  return { messages, fingerprints: next };
+}
+
 // Одна функция на два входа: раз в 15 минут её зовёт служба в GitHub Actions
 // (опросом), и она же срабатывает мгновенно, когда Telegram стучится в webhook
 // на Vercel. Логика ОБЯЗАНА быть общей: если развести её по двум файлам, ответы
@@ -753,18 +800,30 @@ export function handleBotCommand({ text = "", chatId = "", from = null,
     const was = links[user.id]?.chatId ? S(links[user.id].chatId) : "";
     const tgName = [from?.first_name, from?.last_name].filter(Boolean).join(" ")
       || S(from?.username) || "";
-    const mine = NOTIFY_CATALOG.filter(n => isSubscribed(user, n.key));
     return {
       kind: "start", links: { ...links, [user.id]: { chatId: chat, tgName, ts: now } },
       log: `/start: ${user.name || user.login} ← чат ${chat}`
         + (was && was !== chat ? ` (был ${was} — привязка переехала)` : ""),
       reply: `Готово, ${esc(user.name || user.login)}. Уведомления TitovStroy подключены.\n\n`
-        + (mine.length ? `Буду присылать (${mine.length}):\n`
-            + mine.slice(0, 20).map(n => `• ${n.icon} ${esc(n.label)}`).join("\n")
-            + (mine.length > 20 ? `\n<i>…и ещё ${mine.length - 20}</i>` : "")
-          : "Пока ничего не отмечено — попросите администратора выбрать уведомления в Админке.")
-        + "\n\nОтключить — команда /stop",
+        + subsList(user) + "\n\n" + HINT,
     };
+  }
+
+  // «Что мне вообще приходит?» Раньше ответить на это было нечем: список
+  // показывался один раз при подключении и больше нигде. Человек, которому
+  // бот сам сказал «попросите администратора отметить», после того как
+  // администратор отметил, не получал ничего — круг не замыкался.
+  if (/^\/(menu|me|help|status)\b/.test(body)) {
+    const id = Object.keys(links).find(k => S(links[k]?.chatId) === chat);
+    const user = id ? users.find(u => S(u?.id) === S(id)) : null;
+    if (!user) {
+      return { kind: "menu_unlinked", links: null, log: `/menu от ${chat}: чат не подключён`,
+        reply: "Этот чат не подключён. Откройте ссылку из Админки TitovStroy: "
+          + "«Уведомления» → напротив вашей фамилии кнопка «Ссылка для подключения»." };
+    }
+    return { kind: "menu", links: null, log: `/menu: ${user.name || user.login}`,
+      reply: `${esc(user.name || user.login)}, вот что вам сейчас приходит.\n\n`
+        + subsList(user) + "\n\n" + HINT };
   }
 
   if (/^\/stop\b/.test(body)) {

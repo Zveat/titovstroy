@@ -15,7 +15,7 @@ import {
   buildEventMessages, buildReminderMessages, buildDateReminders, buildDigestMessage,
   makeEventContext, routeMessages, DIGESTS,
   inQuietHours, localDayKey, localParts, assertWritable, pruneSent, nextCursor,
-  handleBotCommand,
+  handleBotCommand, buildSubsChangeMessages,
 } from "../src/notify/notifyModel.js";
 
 const FB_DB_URL = process.env.FB_DB_URL || "https://titovstroy-da1cf-default-rtdb.firebaseio.com";
@@ -183,10 +183,20 @@ async function main() {
   const quiet = inQuietHours(now, settings);
   if (quiet) console.log("Тихие часы — сообщения подождут до утра, ничего не теряется.");
 
-  // 2. События из журнала (текущий и прошлый месяц — на случай прогона в ночь на 1-е)
+  // 2. События из журнала.
+  //
+  // Прошлый месяц нужен ТОЛЬКО на стыке: прогон в ночь на 1-е должен добрать
+  // вчерашние записи. Раньше он читался каждый прогон — а это самый тяжёлый
+  // кусок трафика: журнал за месяц измерен на боевой в 54 КБ на 8-е число и к
+  // концу месяца вырастает в разы. Читать его 96 раз в сутки 30 дней подряд
+  // ради двух дней в месяц незачем. Берём первые двое суток месяца — с запасом
+  // на то, что прогоны GitHub пропускает.
   const ym = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
   const nowD = new Date(now);
-  const months = [ym(nowD), ym(new Date(Date.UTC(nowD.getUTCFullYear(), nowD.getUTCMonth() - 1, 1)))];
+  const months = [ym(nowD)];
+  if (localParts(now).d <= 2) {
+    months.push(ym(new Date(Date.UTC(nowD.getUTCFullYear(), nowD.getUTCMonth() - 1, 1))));
+  }
   let entries = [];
   for (const m of months) entries = entries.concat((await readJson(K.auditMonth(m), [])) || []);
 
@@ -255,12 +265,24 @@ async function main() {
   const letters = routeMessages([...events, ...reminders], { users, links: upd.links, settings });
   console.log(`К отправке писем: ${letters.length}`);
 
+  // 4б. «Администратор изменил, что вам приходит». Бот сам просит сходить к
+  // администратору, тот отмечает — и человеку об этом никто не говорит. В тихие
+  // часы не шлём и отпечаток НЕ запоминаем: иначе изменение, сделанное вечером,
+  // считалось бы объявленным, а человек о нём так и не узнал бы.
+  const subsChange = quiet
+    ? { messages: [], fingerprints: state.subsSent || {} }
+    : buildSubsChangeMessages({ users, links: upd.links, sent: state.subsSent || {} });
+  if (subsChange.messages.length) {
+    console.log(`Изменились подписки у: ${subsChange.messages.length}`);
+  }
+
+  const outbox = [...letters, ...subsChange.messages];
   let ok = 0;
-  for (const letter of letters) {
+  for (const letter of outbox) {
     if (await send(letter.chatId, letter.text)) ok += 1;
     await sleep(120);                       // мягко к лимитам Telegram
   }
-  console.log(`Отправлено ${ok} из ${letters.length}`);
+  console.log(`Отправлено ${ok} из ${outbox.length}`);
 
   // 5. Состояние. Как двигается курсор — в nextCursor (там же про тихие часы,
   // ночью он обязан стоять на месте, иначе ночные события пропадают).
@@ -271,6 +293,7 @@ async function main() {
     lastTs: nextCursor({ prev: state.lastTs, maxTs, sinceTs, now, firstRun, quiet }),
     lastUpdateId: upd.lastUpdateId || 0,
     lastDigest: (digestDue && reminders.length >= 0) ? today : (state.lastDigest || ""),
+    subsSent: subsChange.fingerprints,
     sent: pruneSent(nextSent, { now }),
     lastRun: now,
   });
