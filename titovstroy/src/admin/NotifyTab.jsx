@@ -45,6 +45,9 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
   const [msg, setMsg] = useState("");
   const [objQuery, setObjQuery] = useState("");
   const [section, setSection] = useState("matrix");
+  // Показанная ссылка подключения: {id, url}. Держим в состоянии, а не в буфере
+  // обмена — см. комментарий у connect().
+  const [shownLink, setShownLink] = useState(null);
   const editable = canEdit && !readOnly;
 
   useEffect(() => {
@@ -158,17 +161,24 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
     flash(`«${u.name || u.login}» отключён — рассылка ему прекращена`);
   };
 
+  // ССЫЛКА ПОДКЛЮЧЕНИЯ. Раньше кнопка молча писала её в буфер обмена и
+  // показывала зелёную плашку — а плашка живёт вверху вкладки, над таблицей на
+  // весь экран, тогда как кнопки стоят под ней. Нажимаешь внизу, подтверждение
+  // мигает за пределами экрана и гаснет: «нажимаю — ничего не происходит».
+  // Второй раз на одни и те же грабли, поэтому теперь НИЧЕГО невидимого:
+  // ссылка появляется прямо в строке и остаётся там, пока её не закроют.
+  // Буфер обмена по-прежнему пробуем, но уже как удобство, а не как результат.
   const connect = async (u) => {
     const code = u.tg?.code || makeLinkCode();
     if (!u.tg?.code) await patchUser(u.id, { code });
     const url = linkUrl(settings?.botName, code);
     if (!url) { flash("Сначала впишите имя бота в разделе «Основное»"); return; }
-    try {
-      await navigator.clipboard.writeText(url);
-      flash(`Ссылка для «${u.name || u.login}» скопирована — отправьте её в Telegram`);
-    } catch (e) {
-      window.prompt("Скопируйте ссылку и отправьте сотруднику:", url);
-    }
+    setShownLink({ id: u.id, url });
+    try { await navigator.clipboard.writeText(url); } catch (e) { /* покажем руками */ }
+  };
+  const copyShown = async (url) => {
+    try { await navigator.clipboard.writeText(url); flash("Ссылка скопирована"); }
+    catch (e) { flash("Браузер не дал скопировать — выделите ссылку и нажмите Ctrl+C"); }
   };
 
   const passing = useMemo(
@@ -193,8 +203,11 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
 
   return (
     <div>
+      {/* Липкая: кнопки стоят под таблицей на весь экран, и обычная плашка
+          мигала за пределами видимой области — нажал и «ничего не произошло». */}
       {msg && <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", color: "#065f46",
-        borderRadius: 9, padding: "9px 14px", fontSize: 13, marginBottom: 14 }}>{msg}</div>}
+        borderRadius: 9, padding: "9px 14px", fontSize: 13, marginBottom: 14,
+        position: "sticky", top: 8, zIndex: 5, boxShadow: "0 2px 8px rgba(15,23,42,.08)" }}>{msg}</div>}
 
       {!settings.on && (
         <div style={{ background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e",
@@ -340,7 +353,7 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
                   <span style={{ color: "#b45309" }}>сначала впишите имя бота в «Основном»</span>
                 ) : (
                   <button className="btn btn-o" style={{ padding: "4px 11px", fontSize: 11.5 }}
-                    onClick={() => connect(u)}>🔗 Скопировать ссылку</button>
+                    onClick={() => connect(u)}>🔗 Ссылка для подключения</button>
                 )}
                 <span style={{ color: "#94a3b8" }}>охват</span>
                 <select className="fi" style={{ width: 86, fontSize: 11.5, padding: "3px 5px" }}
@@ -349,13 +362,41 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
                   <option value="own">свои</option>
                   <option value="all">все</option>
                 </select>
+
+                {/* Ссылка ВИДНА и никуда не убегает: её можно выделить мышью,
+                    скопировать кнопкой или открыть прямо здесь — если владелец
+                    подключает сам себя или меняет свой аккаунт. */}
+                {shownLink?.id === u.id && (
+                  <div style={{ flexBasis: "100%", marginTop: 8, padding: "8px 10px",
+                    background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8 }}>
+                    <div style={{ color: "#475569", fontSize: 11.5, marginBottom: 6 }}>
+                      Отправьте эту ссылку в Telegram — человек откроет её и нажмёт «Запустить».
+                      Себе можно открыть прямо отсюда.
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <input className="fi" readOnly value={shownLink.url}
+                        onFocus={e => e.target.select()}
+                        ref={el => { if (el && document.activeElement !== el) el.select?.(); }}
+                        style={{ flex: "1 1 320px", minWidth: 240, fontSize: 11.5, padding: "4px 7px" }} />
+                      <button className="btn btn-o" style={{ padding: "3px 10px", fontSize: 11 }}
+                        onClick={() => copyShown(shownLink.url)}>копировать</button>
+                      <a className="btn btn-o" href={shownLink.url} target="_blank" rel="noreferrer"
+                        style={{ padding: "3px 10px", fontSize: 11, textDecoration: "none" }}>
+                        открыть в Telegram
+                      </a>
+                      <button className="btn btn-o" style={{ padding: "3px 10px", fontSize: 11 }}
+                        onClick={() => setShownLink(null)}>скрыть</button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
           <div style={{ ...sub, marginTop: 10, marginBottom: 0 }}>
-            «Скопировать ссылку» — отправьте её человеку в Telegram, он открывает и жмёт
-            «Запустить». Подключение появится после ближайшего прогона службы (расписание
-            стоит на 15 минут, но GitHub держит его не строго — бывает и через час);
+            «Ссылка для подключения» — ссылка появится тут же в строке: её видно, можно
+            выделить, скопировать кнопкой или открыть самому. Человек открывает её в своём
+            Telegram и жмёт «Запустить». Подключение появится после ближайшего прогона службы
+            (расписание стоит на 15 минут, но GitHub держит его не строго — бывает и через час);
             рассылка для этого включённой быть не обязана.
             <br /><b>Сменить аккаунт</b> — отключать не нужно: откройте ту же ссылку из другого
             Telegram, привязка просто перезапишется на него.
