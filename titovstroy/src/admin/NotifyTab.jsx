@@ -125,14 +125,36 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
   // суммами. Поэтому здесь ставится ЗАЯВКА на отключение, а связь снимает сама
   // служба на ближайшем прогоне. Чтобы человек перестал получать сразу, тут же
   // снимаются все его подписки: маршрутизация без них ничего ему не отправит.
+  // Заявка ещё не отработана службой: привязка на месте, но отключение уже
+  // заказано. Без этого экран показывал «✓ подключён» и после нажатия —
+  // выглядело так, будто кнопка не сработала.
+  const pendingUnlink = (u) => {
+    const at = Number(settings?.unlink?.[u.id] || 0);
+    return at > 0 && at >= Number(links[u.id]?.ts || 0);
+  };
+  // Отмена возвращает и галочки: отключение снимает их сразу, и без этого
+  // передумавшему пришлось бы расставлять весь список заново по памяти.
+  const cancelDisconnect = async (u) => {
+    const unlink = { ...(settings.unlink || {}) }; delete unlink[u.id];
+    const stashes = { ...(settings.unlinkSubs || {}) };
+    const back = stashes[u.id]; delete stashes[u.id];
+    if (back) await patchUser(u.id, { subs: back }, "вернул уведомления — отключение отменено");
+    await patch({ unlink, unlinkSubs: stashes });
+    flash(back ? "Отключение отменено, подписки вернулись" : "Отключение отменено");
+  };
+
   const disconnect = async (u) => {
     if (!editable) return;
     if (!window.confirm(`Отключить уведомления для «${u.name || u.login}»?\n\n`
-      + "Подписки снимутся сразу, привязка к Telegram — на ближайшем прогоне службы "
-      + "(до 15 минут). Подключить обратно можно тем же способом.")) return;
+      + "Если нужно просто сменить Telegram-аккаунт — отключать НЕ надо: нажмите "
+      + "«сменить аккаунт» и откройте ссылку из другого Telegram, привязка перезапишется.\n\n"
+      + "Отключение снимет все подписки сразу, а связь с Telegram — на ближайшем "
+      + "прогоне службы. Пока он не прошёл, отключение можно отменить.")) return;
+    const had = explicitSubs(u);
     await patchUser(u.id, { subs: Object.fromEntries(NOTIFY_CATALOG.map(n => [n.key, false])) },
       "отключил уведомления");
-    await patch({ unlink: { ...(settings.unlink || {}), [u.id]: Date.now() } });
+    await patch({ unlink: { ...(settings.unlink || {}), [u.id]: Date.now() },
+      unlinkSubs: { ...(settings.unlinkSubs || {}), [u.id]: had } });
     flash(`«${u.name || u.login}» отключён — рассылка ему прекращена`);
   };
 
@@ -286,13 +308,30 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
                 display: "flex", alignItems: "center", gap: 10, fontSize: 12.5, flexWrap: "wrap" }}>
                 <b style={{ color: "#0f172a" }}>{u.name || u.login}</b>
                 {links[u.id]?.chatId ? (
-                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ color: "#059669", fontWeight: 700 }}>
-                      ✓ подключён{links[u.id]?.tgName ? ` · ${links[u.id].tgName}` : ""}
-                    </span>
-                    {editable && (
-                      <button className="btn btn-red" style={{ padding: "3px 10px", fontSize: 11 }}
-                        onClick={() => disconnect(u)}>отключить</button>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    {pendingUnlink(u) ? (
+                      <>
+                        <span style={{ color: "#b45309", fontWeight: 700 }}>⏳ отключается…</span>
+                        {editable && (
+                          <button className="btn btn-o" style={{ padding: "3px 10px", fontSize: 11 }}
+                            onClick={() => cancelDisconnect(u)}>отменить</button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ color: "#059669", fontWeight: 700 }}>
+                          ✓ подключён{links[u.id]?.tgName ? ` · ${links[u.id].tgName}` : ""}
+                        </span>
+                        {editable && (<>
+                          {/* Смена аккаунта не требует отключения: открыл ссылку из
+                              другого Telegram — привязка перезапишется. Поэтому
+                              кнопка со ссылкой доступна и у подключённого. */}
+                          <button className="btn btn-o" style={{ padding: "3px 10px", fontSize: 11 }}
+                            onClick={() => connect(u)}>🔗 сменить аккаунт</button>
+                          <button className="btn btn-red" style={{ padding: "3px 10px", fontSize: 11 }}
+                            onClick={() => disconnect(u)}>отключить</button>
+                        </>)}
+                      </>
                     )}
                   </span>
                 ) : !editable ? (
@@ -315,8 +354,11 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
           </div>
           <div style={{ ...sub, marginTop: 10, marginBottom: 0 }}>
             «Скопировать ссылку» — отправьте её человеку в Telegram, он открывает и жмёт
-            «Запустить». Подключение появится после ближайшего прогона службы (до 15 минут);
+            «Запустить». Подключение появится после ближайшего прогона службы (расписание
+            стоит на 15 минут, но GitHub держит его не строго — бывает и через час);
             рассылка для этого включённой быть не обязана.
+            <br /><b>Сменить аккаунт</b> — отключать не нужно: откройте ту же ссылку из другого
+            Telegram, привязка просто перезапишется на него.
             <br />
             «Охват»: <b>свои</b> — только объекты, где человек ответственный; <b>все</b> — вся компания.
             Общие сводки по компании получают только те, у кого «все».
@@ -490,8 +532,10 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
         <div style={card}>
           <div style={h}>Рассылка</div>
           <div style={sub}>
-            Сообщения собирает и отправляет отдельная служба каждые 15 минут. Она только читает
-            данные и никогда их не меняет.
+            Сообщения собирает и отправляет отдельная служба на стороне GitHub. Расписание —
+            каждые 15 минут, но GitHub соблюдает его не строго и часть прогонов пропускает,
+            поэтому уведомление может прийти позже. Ничего при этом не теряется: пропущенное
+            уходит следующим прогоном. Служба только читает данные и никогда их не меняет.
           </div>
           <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: editable ? "pointer" : "default" }}>
             <input type="checkbox" checked={!!settings.on} disabled={!editable}
