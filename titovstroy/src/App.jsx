@@ -5588,8 +5588,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             <div style={{position:"absolute",bottom:-50,right:60,width:120,height:120,borderRadius:"50%",background:"rgba(59,130,246,.05)"}}/>
             <div style={{position:"relative",zIndex:1,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
               <div>
-                <div style={{fontSize:22,fontWeight:900,color:"#fff",letterSpacing:-.5,marginBottom:4,fontFamily:"'Poppins',sans-serif"}}>
-                  {brand.name} <span style={{opacity:.6,fontWeight:600}}>ERP</span>
+                {/* Самое видное место в сервисе, особенно на телефоне: тут человек
+                    и видит, чей это ERP. Логотип показываем именно здесь — без
+                    него загруженная картинка нигде крупно бы не появилась. */}
+                <div style={{fontSize:22,fontWeight:900,color:"#fff",letterSpacing:-.5,marginBottom:4,fontFamily:"'Poppins',sans-serif",display:"flex",alignItems:"center",gap:10}}>
+                  <BrandMark brand={brand} size={32} radius={9} font={18} />
+                  <span>{brand.name} <span style={{opacity:.6,fontWeight:600}}>ERP</span></span>
                 </div>
                 <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>
                   {new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
