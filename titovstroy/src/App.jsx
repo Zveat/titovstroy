@@ -259,11 +259,6 @@ function EditorSessionGate({ currentUser, setCurrentUser }) {
 function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) {
   // Оформление компании (название, логотип, цвет) — из настроек, см. brand.js.
   const brand = useBrand();
-  // От какого юрлица выходит КП. Реквизиты берём из карточки контрагента — того
-  // же источника, что и договоры; в настройках оформления хранится только выбор.
-  const kpContragent = useMemo(
-    () => contragents.find(c => c.id === brand.kpContragentId) || contragents[0] || null,
-    [contragents, brand.kpContragentId]);
   const [catalogVersion, setCatalogVersion] = useState(0);
   useEffect(() => {
     setOnCatalogChange(() => setCatalogVersion(v => v + 1));
@@ -599,6 +594,12 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   // подставляло чужое ТОО с чужим БИН прямо в договоры. Настоящие реквизиты
   // приходят из базы (Админка → Реквизиты).
   const [contragents, setContragents] = useState([{id:"1",name:"",bin:"",bank:"",bik:"",account:"",director:"",phone:"",email:"",address:""}]);
+  // От какого юрлица выходит КП. Реквизиты берём из карточки контрагента — того
+  // же источника, что и договоры; в настройках оформления хранится только выбор.
+  const kpContragent = useMemo(
+    () => contragents.find(c => c.id === brand.kpContragentId) || contragents[0] || null,
+    [contragents, brand.kpContragentId]);
+
   const contragentsRef = useRef([]);
   useEffect(() => { contragentsRef.current = contragents; }, [contragents]);
   // «Мастера» — внешний справочник с naimi.kz. Пишет отдельный парсер (GitHub Actions)
