@@ -12,10 +12,19 @@ name: Копия базы
 #
 # ТОЛЬКО ЧТЕНИЕ. Скрипт ничего не пишет в базу — восстановление остаётся ручным
 # и осознанным действием владельца.
+# Ежедневно — только живые данные (около 5 МБ). Раз в неделю — всё целиком,
+# включая снимки *_backups и выгрузки парсера (94 МБ). Полный дамп каждую ночь
+# стоил бы 2,8 ГБ скачивания в месяц, а скачивание на тарифе Blaze платное.
 on:
   schedule:
-    - cron: "17 21 * * *"          # 02:17 по местному времени
+    - cron: "17 21 * * *"          # 02:17 по местному — живые данные
+    - cron: "47 20 * * 0"          # ночь на понедельник — полная копия
   workflow_dispatch:
+    inputs:
+      full:
+        description: "Полная копия, включая снимки и выгрузки парсера"
+        type: boolean
+        default: false
 
 concurrency:
   group: db-backup
@@ -46,6 +55,7 @@ jobs:
           GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
           GDRIVE_FOLDER_ID: ${{ vars.GDRIVE_FOLDER_ID }}
           KEEP_DAYS: ${{ vars.BACKUP_KEEP_DAYS }}
+          FULL: ${{ (github.event.schedule == '47 20 * * 0' || inputs.full) && '1' || '' }}
         run: node dump.mjs
 
       # Второй, независимый экземпляр копии. Хранится 90 дней — этого хватает,

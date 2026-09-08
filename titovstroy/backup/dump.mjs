@@ -16,6 +16,15 @@ import { writeFileSync } from "node:fs";
 
 const FB_DB_URL = process.env.FB_DB_URL || "https://titovstroy-da1cf-default-rtdb.firebaseio.com";
 const KEEP_DAYS = Number(process.env.KEEP_DAYS || 60);
+// ПОЛНАЯ копия — раз в неделю, ежедневная — только живые данные.
+//
+// Полный дамп базы весит 94 МБ, из них 61 МБ — узлы *_backups (снимки, которые
+// сервис делает перед каждой записью списка) и 16 МБ — выгрузки парсера мастеров.
+// Качать это каждую ночь значит 2,8 ГБ скачивания в месяц ради данных, которые
+// либо восстанавливаются из живых, либо собираются парсером заново. Живые данные
+// без них — около 5 МБ, и именно их потеря необратима.
+const FULL = process.env.FULL === "1";
+const SKIP = [/_backups/, /^titovstroy_masters/];
 const PREFIX = "titovstroy_backup_";
 
 const two = (n) => String(n).padStart(2, "0");
@@ -101,20 +110,58 @@ async function drivePrune(token) {
   return removed;
 }
 
+// ЧИТАЕМ ПО КЛЮЧАМ, А НЕ КОРЕНЬ ЦЕЛИКОМ.
+//
+// Это не про аккуратность, а про деньги: скачивание из Firebase на тарифе Blaze
+// платное. Прочитать корень и отфильтровать лишнее ПОСЛЕ — значит заплатить за
+// всё равно скачанные 94 МБ и сэкономить только место в архиве. Поэтому сначала
+// берём shallow-список ключей (он весит килобайты и в объём не считается
+// заметно), отбрасываем ненужное и качаем только отобранное.
+async function accessToken() {
+  const t = await admin.app().options.credential.getAccessToken();
+  if (!t?.access_token) throw new Error("Не удалось получить доступ к базе");
+  return t.access_token;
+}
+async function listKeys(token) {
+  const r = await fetch(`${FB_DB_URL}/.json?shallow=true&access_token=${encodeURIComponent(token)}`);
+  if (!r.ok) throw new Error("Список ключей: HTTP " + r.status);
+  const j = await r.json();
+  return j && typeof j === "object" ? Object.keys(j) : [];
+}
+async function readKey(token, key) {
+  const r = await fetch(`${FB_DB_URL}/${encodeURIComponent(key)}.json?access_token=${encodeURIComponent(token)}`);
+  if (!r.ok) throw new Error(`Узел ${key}: HTTP ${r.status}`);
+  return JSON.parse(await r.text());
+}
+
 async function main() {
   initFb();
-  console.log("Читаю базу целиком…");
-  const snap = await admin.database().ref("/").get();
-  const data = snap.val();
-  if (data === null || data === undefined) {
+  const token = await accessToken();
+  const all = await listKeys(token);
+  if (!all.length) {
     throw new Error("База вернула пусто — копию не делаем, чтобы не подменить хорошую пустой");
   }
-  const keys = Object.keys(data);
-  const json = JSON.stringify(data);
-  const gz = gzipSync(Buffer.from(json, "utf8"), { level: 9 });
-  console.log(`Узлов: ${keys.length}, объём ${mb(Buffer.byteLength(json))}, в архиве ${mb(gz.length)}`);
+  const keys = FULL ? all : all.filter(k => !SKIP.some(re => re.test(k)));
+  if (!keys.length) throw new Error("После отбора не осталось ни одного узла — копию не делаем");
+  console.log(`Ключей в базе ${all.length}, беру ${keys.length}…`);
 
-  const name = `${PREFIX}${stamp()}.json.gz`;
+  // По шесть за раз: последовательно 200+ узлов тянулись бы минутами, а всё
+  // сразу — это 200 одновременных соединений к базе на ровном месте.
+  const out = {};
+  const queue = [...keys];
+  await Promise.all(Array.from({ length: 6 }, async () => {
+    while (queue.length) {
+      const k = queue.shift();
+      out[k] = await readKey(token, k);
+    }
+  }));
+  const json = JSON.stringify(out);
+  const gz = gzipSync(Buffer.from(json, "utf8"), { level: 9 });
+  console.log(`${FULL ? "ПОЛНАЯ копия" : "Живые данные"}: узлов ${keys.length} из ${all.length}, `
+    + `объём ${mb(Buffer.byteLength(json))}, в архиве ${mb(gz.length)}`);
+  if (!FULL) console.log("  (пропущены снимки *_backups и выгрузки парсера — они в полной копии по воскресеньям)");
+
+  const name = `${PREFIX}${FULL ? "full_" : ""}${stamp()}.json.gz`;
   writeFileSync(name, gz);
   console.log(`Файл: ${name}`);
 
@@ -123,10 +170,10 @@ async function main() {
       + "Как подключить Диск — backup/README.md.");
     return;
   }
-  const token = await driveToken();
-  const up = await driveUpload(token, name, gz);
+  const gtoken = await driveToken();
+  const up = await driveUpload(gtoken, name, gz);
   console.log(`На Диск загружено: ${up.name}`);
-  const removed = await drivePrune(token);
+  const removed = await drivePrune(gtoken);
   console.log(removed ? `Удалено старых копий: ${removed} (старше ${KEEP_DAYS} дней)`
     : `Старых копий на удаление нет (храним ${KEEP_DAYS} дней)`);
 }
