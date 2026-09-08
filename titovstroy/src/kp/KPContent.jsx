@@ -1,6 +1,6 @@
 // Тело коммерческого предложения (модалка и печать). Перенос из App.jsx.
 // ВНИМАНИЕ: текст условий КП — клиентский документ, править нельзя.
-import { useBrand } from "../brand.js";
+import { brandInk, useBrand } from "../brand.js";
 import { fmt, today, validUntil } from "../format.js";
 
 // ─── КОМПОНЕНТ КП (используется в модале и при печати) ───────────────────────
@@ -9,6 +9,11 @@ import { fmt, today, validUntil } from "../format.js";
 // стоял бы чужой номер.
 export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note, contragent }) {
   const brand = useBrand();
+  // Фирменный цвет как ТЕКСТ: на светлой бумаге КП он темнеет, на тёмных плашках
+  // светлеет — иначе выбранный светлый цвет делает надписи невидимыми (так
+  // пропали название компании и телефон в шапке). См. brandInk в brand.js.
+  const ink = brandInk(brand, "#f5f2ec");
+  const inkOnDark = brandInk(brand, "#1a1a28");
   const ca = contragent || null;
   const CONDITIONS = [
     "Стоимость рассчитана исходя из указанных объемов работ без учета НДС.",
@@ -29,9 +34,9 @@ export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, 
           <div style={{fontSize:12,color:"#888",marginTop:3}}>на услуги ремонта и отделки недвижимости</div>
         </div>
         <div style={{textAlign:"right"}}>
-          <div style={{fontWeight:900,fontSize:16,color:brand.accent}}>{brand.name}</div>
+          <div style={{fontWeight:900,fontSize:16,color:ink}}>{brand.name}</div>
           {ca?.bin && <div style={{fontSize:11,color:"#555",marginTop:2}}>БИН {ca.bin}</div>}
-          {brand.whatsapp && <div style={{fontSize:11,color:"#555"}}>WA: <span style={{color:brand.accent}}>{brand.whatsapp}</span></div>}
+          {brand.whatsapp && <div style={{fontSize:11,color:"#555"}}>WA: <span style={{color:ink}}>{brand.whatsapp}</span></div>}
         </div>
       </div>
 
@@ -61,7 +66,7 @@ export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, 
                   {/* Заголовок категории */}
                   <div style={{background:"#1a1a28",color:"#f5f2ec",padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center",borderRadius:"6px 6px 0 0"}}>
                     <span style={{fontWeight:700,fontSize:13,letterSpacing:.5,textTransform:"uppercase"}}>{cat}</span>
-                    <span style={{fontWeight:700,fontSize:13,color:"#b8904a"}}>{fmt(catTotal)} ₸</span>
+                    <span style={{fontWeight:700,fontSize:13,color:inkOnDark}}>{fmt(catTotal)} ₸</span>
                   </div>
                   {/* Строки работ */}
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
@@ -91,7 +96,7 @@ export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, 
                     <tfoot>
                       <tr style={{background:"#e8e4da",borderTop:"2px solid #ccc"}}>
                         <td colSpan={6} style={{padding:"7px 8px",fontSize:12,fontWeight:700,color:"#444",textAlign:"right"}}>Итого по разделу «{cat}»:</td>
-                        <td style={{padding:"7px 8px",textAlign:"right",fontWeight:800,fontSize:13,color:"#b8904a"}}>{fmt(catTotal)} ₸</td>
+                        <td style={{padding:"7px 8px",textAlign:"right",fontWeight:800,fontSize:13,color:ink}}>{fmt(catTotal)} ₸</td>
                       </tr>
                     </tfoot>
                   </table>
@@ -125,7 +130,7 @@ export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, 
                         <td style={{padding:"6px 8px",fontWeight:600,fontSize:12}}>{item.name}</td>
                         <td style={{padding:"6px 8px",textAlign:"center",color:"#888",fontSize:11,width:"6%"}}>{item.unit}</td>
                         <td style={{padding:"6px 8px",textAlign:"center",fontWeight:500,width:"8%"}}>{item.qty}</td>
-                        <td style={{padding:"6px 8px",textAlign:"right",color:"#b8904a",fontWeight:700,whiteSpace:"nowrap",width:"20%"}}>от {fmt(item.priceFrom)} ₸</td>
+                        <td style={{padding:"6px 8px",textAlign:"right",color:ink,fontWeight:700,whiteSpace:"nowrap",width:"20%"}}>от {fmt(item.priceFrom)} ₸</td>
                       </tr>
                     ))}
                   </tbody>
@@ -138,7 +143,7 @@ export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, 
               {discount>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#e07070",marginBottom:6}}><span>Скидка {discount}% <span style={{opacity:.75}}>· учтена в ценах</span></span><span>− {fmt(discAmt)} ₸</span></div>}
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <span style={{fontSize:14,fontWeight:600,letterSpacing:.5}}>ИТОГО:</span>
-                <span style={{fontSize:28,fontWeight:900,color:"#b8904a",letterSpacing:-.5}}>{fmt(final)} ₸</span>
+                <span style={{fontSize:28,fontWeight:900,color:inkOnDark,letterSpacing:-.5}}>{fmt(final)} ₸</span>
               </div>
               {proj.area&&Number(proj.area)>0&&(
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,paddingTop:8,borderTop:"1px solid rgba(255,255,255,.08)"}}>
@@ -159,16 +164,16 @@ export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, 
         <div style={{fontWeight:700,color:"#1a1a28",marginBottom:10,fontSize:13}}>Условия:</div>
         {CONDITIONS.map((text, i) => (
           <div key={i} style={{display:"flex",gap:10,marginBottom:5}}>
-            <span style={{color:"#b8904a",fontWeight:700,minWidth:18,flexShrink:0}}>{i+1}.</span>
+            <span style={{color:ink,fontWeight:700,minWidth:18,flexShrink:0}}>{i+1}.</span>
             <span>{text}</span>
           </div>
         ))}
         <div style={{display:"flex",gap:10,marginTop:5}}>
-          <span style={{color:"#b8904a",fontWeight:700,minWidth:18,flexShrink:0}}>9.</span>
+          <span style={{color:ink,fontWeight:700,minWidth:18,flexShrink:0}}>9.</span>
           <span>Ссылка для ознакомления с договором (шаблон):{" "}
             <a href="https://drive.google.com/file/d/1qmhQhn6LE3F3lnU_BBEDXqCiyj-LDjSC/view?usp=sharing"
               target="_blank" rel="noreferrer"
-              style={{color:"#b8904a",textDecoration:"underline",wordBreak:"break-all"}}>
+              style={{color:ink,textDecoration:"underline",wordBreak:"break-all"}}>
               https://drive.google.com/file/d/1qmhQhn6LE3F3lnU_BBEDXqCiyj-LDjSC/view
             </a>
           </span>

@@ -175,3 +175,39 @@ export function fileToLogo(file, { maxSide = 320, maxBytes = 120 * 1024 } = {}) 
     fr.readAsDataURL(file);
   });
 }
+
+// ─── ЦВЕТ ДЛЯ ТЕКСТА ─────────────────────────────────────────────────────────
+// Один и тот же фирменный цвет нужен в двух разных ролях: заливкой плитки и
+// ТЕКСТОМ. Светлый цвет прекрасно смотрится плиткой и полностью исчезает
+// текстом на белом — именно так в шапке КП пропали название компании и номер
+// WhatsApp, а КП уходит клиенту. Поэтому для текста цвет не берётся как есть, а
+// доводится до читаемого контраста с тем фоном, на котором он лежит: на светлом
+// темнеет, на тёмном светлеет. Так владелец волен выбрать любой цвет и не может
+// им испортить документ.
+const hex2rgb = (h) => {
+  let s = S(h).replace("#", "");
+  if (s.length === 3) s = s.split("").map(c => c + c).join("");
+  const n = parseInt(s.slice(0, 6) || "000000", 16) || 0;
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+};
+const rgb2hex = (c) => "#" + c.map(v =>
+  Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
+// Относительная яркость по WCAG — та же формула, по которой считают контраст.
+const lum = ([r, g, b]) => {
+  const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+};
+const contrast = (a, b) => {
+  const l = [lum(a), lum(b)].sort((x, y) => y - x);
+  return (l[0] + 0.05) / (l[1] + 0.05);
+};
+
+export function brandInk(brand, bg = "#ffffff", min = 4.5) {
+  let c = hex2rgb(normalizeBrand(brand).accent);
+  const bgc = hex2rgb(bg);
+  const darken = lum(bgc) > 0.5;                 // светлый фон — текст темним
+  for (let i = 0; i < 30 && contrast(c, bgc) < min; i += 1) {
+    c = darken ? c.map(v => v * 0.88) : c.map(v => v + (255 - v) * 0.12);
+  }
+  return rgb2hex(c);
+}
