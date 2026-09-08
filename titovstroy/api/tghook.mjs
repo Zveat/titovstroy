@@ -65,11 +65,16 @@ export function createHookHandler({ env = process.env, db = null,
     res.setHeader("Cache-Control", "no-store");
     if (req.method !== "POST") return res.status(405).json({ ok: false });
 
-    const secret = String(env.TELEGRAM_WEBHOOK_SECRET || "");
-    const bot = String(env.TELEGRAM_BOT_TOKEN || "");
+    // trim обязателен: в поле Vercel и в секрете GitHub легко остаётся пробел
+    // или перевод строки в конце, а сравнение здесь побайтовое. Тогда всё
+    // выглядит настроенным, а бот молча отвечает отказом — искать такое можно
+    // долго. Пробелов внутри секрета быть и не может: Telegram разрешает в нём
+    // только буквы, цифры, «_» и «-».
+    const secret = String(env.TELEGRAM_WEBHOOK_SECRET || "").trim();
+    const bot = String(env.TELEGRAM_BOT_TOKEN || "").trim();
     if (!secret || !bot || !store.configured()) return res.status(503).json({ ok: false });
 
-    const got = String(req.headers?.["x-telegram-bot-api-secret-token"] || "");
+    const got = String(req.headers?.["x-telegram-bot-api-secret-token"] || "").trim();
     if (!sameSecret(got, secret)) return res.status(401).json({ ok: false });
 
     const update = readUpdate(req.body);

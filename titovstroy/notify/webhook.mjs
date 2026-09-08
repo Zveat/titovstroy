@@ -9,8 +9,11 @@
 // ошибкой он получил отказ в последний раз. Именно этого не хватало, когда бот
 // молчал: снаружи это выглядело одинаково — и «никто не писал», и «мы не
 // прочитали», и «Vercel отказал».
-const BOT = process.env.TELEGRAM_BOT_TOKEN || "";
-const SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || "";
+
+// trim — по той же причине, что и в api/tghook.mjs: хвостовой перевод строки
+// в секрете превратил бы «настроено» в молчаливый отказ.
+const BOT = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
+const SECRET = (process.env.TELEGRAM_WEBHOOK_SECRET || "").trim();
 const URL_ = (process.env.WEBHOOK_URL || "https://erp.titovstroy.kz/api/tghook").trim();
 const ACTION = (process.env.WEBHOOK_ACTION || "проверить").trim();
 
