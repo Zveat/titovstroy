@@ -1587,7 +1587,7 @@ export function mergeAuditEntries(current = [], backup = []) {
 export function validateBackupSchema(snap, arraySpecs = []) {
   const isPlain = v => v !== null && typeof v === "object" && !Array.isArray(v);
   if (!isPlain(snap)) return { ok: false, error: "файл не является объектом бэкапа" };
-  if (snap._type !== "titovstroy-backup") return { ok: false, error: "это не файл бэкапа TitovStroy" };
+  if (snap._type !== "titovstroy-backup") return { ok: false, error: "это не файл бэкапа этого сервиса" };
   const d = snap.data;
   if (!isPlain(d)) return { ok: false, error: "data не является объектом" };
   const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);

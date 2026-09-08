@@ -690,7 +690,7 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
           </label>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12, marginTop: 16 }}>
             <Field label="Имя бота" hint="без @, как в t.me/…">
-              <input className="fi" value={settings.botName || ""} disabled={!editable} placeholder="TitovStroyBot"
+              <input className="fi" value={settings.botName || ""} disabled={!editable} placeholder="MyCompanyBot"
                 onChange={e => setSettings({ ...settings, botName: e.target.value })}
                 onBlur={e => patch({ botName: e.target.value.trim().replace(/^@/, "") })} />
             </Field>

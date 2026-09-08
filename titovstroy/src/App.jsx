@@ -3,6 +3,8 @@ import { initializeApp } from "firebase/app";
 import { getDatabase, ref, get, set, runTransaction, onValue } from "firebase/database";
 import ProductionModule, { flushPendingProduction, stopProductionSession, hasPendingProduction, productionDraftsAreDurable, startProductionSession, setProductionCommandHandler } from "./production/ProductionModule.jsx";
 import { emptyProduction } from "./production/constants.js";
+import { useBrand } from "./brand.js";
+import { BrandMark } from "./ui/BrandMark.jsx";
 import { applyProductionCommand, runVerifiedProductionTransaction, accountProductionFailure, isBlockedWhileEnding, awaitQueueSettled, isRegenerableProductionCommand, productionCommandObjectIds, _stageKey, normalizeProductionIds } from "./production/commands.js";
 import { countAllProductionRecovery, listProductionRetries, saveProductionRetry, removeProductionRetry } from "./production/drafts.js";
 import { MASTER_CATEGORIES, NAIMI_CITY_FALLBACK, OLX_REPAIR_CATEGORIES } from "./masters/catalog.mjs";
@@ -50,7 +52,7 @@ import { clearLoginAttempts, getLoginLockout, hashPassword, passwordTooWeak, reg
 import { _finTypeLbl, _objLabel, _tng, logChange, logContractSave, logObjChange, writeAudit } from "./cloud/audit.js";
 import { _dirtyOwnerUid, _editorGateN, _fbAuthReady, _mem, _restToken, hasStaffClaim, nextEditorGate,
   signOutStaff, staffSessionState, storage } from "./cloud/storage.js";
-import { ASSET_INC_KEYS, ASSET_OUT_KEYS, AUDIT_SECTION_META, AUDIT_SOURCE_META, COMPANY_WA, CONTRACT_STATUSES, C_ASSET_INC, C_ASSET_OUT, C_FINACT, C_FINANCING_INC, C_INVEST, DEAL_STATUSES, DEAL_TO_PROD, DEFAULT_USERS, DOCS_NODE, EMPTY_PROJ, EXTRA_CAT, FA_SUB_MAP, KP_NODE, OBJ_TYPES, PRICE_SEAL_REASONS, PROD_TO_DEAL, PROGRESS_NODE, STATUSES, _PROG_ST, _auditActionMeta, _auditVal } from "./constants.js";
+import { ASSET_INC_KEYS, ASSET_OUT_KEYS, AUDIT_SECTION_META, AUDIT_SOURCE_META, CONTRACT_STATUSES, C_ASSET_INC, C_ASSET_OUT, C_FINACT, C_FINANCING_INC, C_INVEST, DEAL_STATUSES, DEAL_TO_PROD, DEFAULT_USERS, DOCS_NODE, EMPTY_PROJ, EXTRA_CAT, FA_SUB_MAP, KP_NODE, OBJ_TYPES, PRICE_SEAL_REASONS, PROD_TO_DEAL, PROGRESS_NODE, STATUSES, _PROG_ST, _auditActionMeta, _auditVal } from "./constants.js";
 import { ContractEditor } from "./contracts/ContractEditor.jsx";
 import { IssuePanel } from "./dashboard/IssuePanel.jsx";
 import { OperationsPanel } from "./dashboard/OperationsPanel.jsx";
@@ -255,6 +257,13 @@ function EditorSessionGate({ currentUser, setCurrentUser }) {
 
 
 function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) {
+  // Оформление компании (название, логотип, цвет) — из настроек, см. brand.js.
+  const brand = useBrand();
+  // От какого юрлица выходит КП. Реквизиты берём из карточки контрагента — того
+  // же источника, что и договоры; в настройках оформления хранится только выбор.
+  const kpContragent = useMemo(
+    () => contragents.find(c => c.id === brand.kpContragentId) || contragents[0] || null,
+    [contragents, brand.kpContragentId]);
   const [catalogVersion, setCatalogVersion] = useState(0);
   useEffect(() => {
     setOnCatalogChange(() => setCatalogVersion(v => v + 1));
@@ -585,7 +594,11 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [contractClients, setContractClients] = useState([]);
   const clientsRef = useRef([]);
   useEffect(() => { clientsRef.current = contractClients; }, [contractClients]);
-  const [contragents, setContragents] = useState([{id:"1",name:"ТОО TITOVSTROY",bin:"231040002769",bank:'АО "Kaspi Bank"',bik:"CASPKZKA",account:"KZ38722S000030058973",director:"Титов В.Е.",phone:"8707 667 8766",email:"titovstroy@mail.ru",address:"Казахстан, район им.Казыбек би, улица Кирпичная, дом 8г"}]);
+  // ПУСТАЯ карточка, а не реквизиты TitovStroy. Это стартовое значение до
+  // загрузки из базы, и на чистой установке другой компании оно раньше
+  // подставляло чужое ТОО с чужим БИН прямо в договоры. Настоящие реквизиты
+  // приходят из базы (Админка → Реквизиты).
+  const [contragents, setContragents] = useState([{id:"1",name:"",bin:"",bank:"",bik:"",account:"",director:"",phone:"",email:"",address:""}]);
   const contragentsRef = useRef([]);
   useEffect(() => { contragentsRef.current = contragents; }, [contragents]);
   // «Мастера» — внешний справочник с naimi.kz. Пишет отдельный парсер (GitHub Actions)
@@ -3535,7 +3548,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     if (!file) return;
     let snap;
     try { snap = JSON.parse(await file.text()); } catch { window.alert("Файл не читается как JSON."); return; }
-    if (!snap || snap._type !== "titovstroy-backup" || !snap.data) { window.alert("Это не файл бэкапа TitovStroy."); return; }
+    if (!snap || snap._type !== "titovstroy-backup" || !snap.data) { window.alert("Это не файл бэкапа этого сервиса."); return; }
     // ПРОВЕРКА СТРУКТУРЫ ДО ЛЮБОЙ ЗАПИСИ: валидный JSON может иметь неверную форму (массив
     // вместо цен, строка вместо каталога, кривые публичные ноды/журнал). При любой ошибке —
     // полная отмена, ни одна запись в Firebase не идёт.
@@ -5379,9 +5392,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       <div className={"sidebar"+(sideCollapsed?" collapsed":"")}>
         {/* Лого */}
         <div style={{padding:"18px 16px",display:"flex",alignItems:"center",gap:11,borderBottom:"1px solid rgba(148,163,184,.12)",minHeight:64}}>
-          <div style={{width:34,height:34,borderRadius:9,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:15,color:"#ffffff",flexShrink:0,boxShadow:"0 3px 10px rgba(37,99,235,.5)"}}>T</div>
+          <BrandMark brand={brand} size={34} radius={9} font={15} />
           <div className="nav-label" style={{lineHeight:1.25}}>
-            <div style={{fontWeight:700,fontSize:15,color:"#f8fafc",fontFamily:"'Poppins',sans-serif"}}>TitovStroy</div>
+            <div style={{fontWeight:700,fontSize:15,color:"#f8fafc",fontFamily:"'Poppins',sans-serif"}}>{brand.name}</div>
             <div style={{fontSize:11,color:"#64748b"}}>{currentUser.name}</div>
           </div>
         </div>
@@ -5572,7 +5585,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             <div style={{position:"relative",zIndex:1,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
               <div>
                 <div style={{fontSize:22,fontWeight:900,color:"#fff",letterSpacing:-.5,marginBottom:4,fontFamily:"'Poppins',sans-serif"}}>
-                  TitovStroy <span style={{opacity:.6,fontWeight:600}}>ERP</span>
+                  {brand.name} <span style={{opacity:.6,fontWeight:600}}>ERP</span>
                 </div>
                 <div style={{fontSize:13,color:"rgba(255,255,255,.75)"}}>
                   {new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
@@ -5665,9 +5678,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           {/* Шапка */}
           <div className="list-header" style={{background:"linear-gradient(135deg,#0f172a,#1e293b)",borderBottom:"1px solid #0f172a",padding:"14px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:"var(--topbar,0px)",zIndex:10,boxShadow:"0 2px 12px rgba(15,23,42,.2)"}}>
             <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
-              <div style={{width:28,height:28,borderRadius:8,background:"linear-gradient(135deg,#3b82f6,#2563eb)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,color:"#ffffff",flexShrink:0,boxShadow:"0 2px 8px rgba(37,99,235,.45)"}}>T</div>
+              <BrandMark brand={brand} size={28} radius={8} font={13} />
               <div style={{minWidth:0}}>
-                <div style={{fontWeight:800,fontSize:13,whiteSpace:"nowrap",color:"#f1f5f9"}}>TitovStroy</div>
+                <div style={{fontWeight:800,fontSize:13,whiteSpace:"nowrap",color:"#f1f5f9"}}>{brand.name}</div>
                 <div style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>
                   <span style={{color:"#2563eb"}}>{currentUser.role==="admin"?"👑":currentUser.role==="viewer"?"👁":"👤"}</span>{" "}{currentUser.name}
                 </div>
@@ -6744,7 +6757,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             onClick={()=>{ setShowKP(false); setKpLink(""); setKpStat(""); setKpMsg(""); setKpStale(false); }}>
             <div style={{background:"#ffffff",color:"#0f172a",borderRadius:8,padding:"24px 28px",maxWidth:700,width:"100%",maxHeight:"90vh",overflowY:"auto",fontFamily:"'Inter','Segoe UI',sans-serif"}}
               onClick={e=>e.stopPropagation()}>
-              <KPContent proj={proj} kpItems={kpItems} fromItems={kpFromItems} discount={discount} discAmt={discAmt} final={final} note={note}/>
+              <KPContent proj={proj} kpItems={kpItems} fromItems={kpFromItems} discount={discount} discAmt={discAmt} final={final} note={note} contragent={kpContragent}/>
               <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:20,flexWrap:"wrap"}}>
                 <button style={{background:"#e2e8f0",color:"#94a3b8",border:"none",cursor:"pointer",padding:"10px 18px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:600}} onClick={()=>{ setShowKP(false); setKpLink(""); setKpMsg(""); setKpStat(""); setKpStale(false); }}>Закрыть</button>
                 {canPublishCurrentEstimate && <button disabled={kpPublishing||!currentId} title="Опубликовать КП и получить ссылку для клиента" style={{background:"#b8904a",color:"#fff",border:"none",cursor:(kpPublishing||!currentId)?"default":"pointer",opacity:!currentId?0.6:1,padding:"10px 18px",borderRadius:7,fontFamily:"inherit",fontSize:13,fontWeight:700}} onClick={async ()=>{
@@ -6757,7 +6770,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     // снимок — перечитываем ноду ещё раз перед записью, иначе republish затрёт
                     // acceptedAt/viewCount более свежими, чем то, что мы прочитали в prev.
                     try { const pr2 = await storage.getResult("titovstroy-kp-"+currentId); if (pr2.status==="found" && pr2.value) { const fresh = JSON.parse(pr2.value); if ((fresh.viewCount||0) > (prev.viewCount||0) || fresh.acceptedAt) prev = fresh; } } catch {}
-                    const snap = { proj, kpItems, fromItems:kpFromItems, discount, discAmt, final, note, publishedAt:Date.now(), viewedAt:prev.viewedAt, viewCount:prev.viewCount, acceptedAt:prev.acceptedAt };
+                    const snap = { proj, kpItems, fromItems:kpFromItems, discount, discAmt, final, note, publishedAt:Date.now(), viewedAt:prev.viewedAt, viewCount:prev.viewCount, acceptedAt:prev.acceptedAt,
+                      contragent: kpContragent ? { name:kpContragent.name||"", bin:kpContragent.bin||"" } : null };
                     const res = await storage.set("titovstroy-kp-"+currentId, JSON.stringify(snap));
                     const link = window.location.origin + window.location.pathname + "#/kp/" + currentId;
                     setKpLink(link);
@@ -6792,7 +6806,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 let innerHTML = el.innerHTML;
                 if (stampB64) innerHTML = innerHTML.replace(/src="\/stamp\.jpg"/g, `src="${stampB64}"`);
                 const docParts = [proj.name, proj.phone, proj.address, today()].filter(Boolean);
-                const docTitle = docParts.length ? "КП " + docParts.join(" — ") : "КП TitovStroy";
+                const docTitle = docParts.length ? "КП " + docParts.join(" — ") : "КП " + brand.name;
                 const html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>" + docTitle + "</title><style>" + css + "</style></head><body>" + innerHTML + "<div class=\"no-print\" style=\"margin-top:24px;text-align:center\"><button onclick=\"window.print()\" style=\"padding:12px 32px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:inherit\">🖨 Сохранить PDF</button></div></body></html>";
                 openOrPrintHtml(html, 30000);
               }}>Печать / PDF</button>}
@@ -6802,7 +6816,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   <div style={{fontSize:12,color:"#059669",fontWeight:700,marginBottom:7}}>{kpMsg||"Ссылка готова"} — отправьте клиенту:</div>
                   <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
                     <input readOnly value={kpLink} onFocus={e=>e.target.select()} style={{flex:1,minWidth:160,border:"1px solid #cbd5e1",borderRadius:6,padding:"8px 10px",fontSize:12,fontFamily:"inherit",color:"#0f172a",background:"#fff"}}/>
-                    <a href={"https://wa.me/?text="+encodeURIComponent("Ценовое предложение от TitovStroy: "+kpLink)} target="_blank" rel="noopener" style={{background:"#25D366",color:"#fff",textDecoration:"none",padding:"9px 14px",borderRadius:6,fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>📲 WhatsApp</a>
+                    <a href={"https://wa.me/?text="+encodeURIComponent("Ценовое предложение от "+brand.name+": "+kpLink)} target="_blank" rel="noopener" style={{background:"#25D366",color:"#fff",textDecoration:"none",padding:"9px 14px",borderRadius:6,fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>📲 WhatsApp</a>
                   </div>
                   <div style={{display:"flex",gap:8,alignItems:"center",marginTop:9,flexWrap:"wrap"}}>
                     <button onClick={async ()=>{ setKpStat("проверяю…"); try { const r=await storage.getResult("titovstroy-kp-"+currentId); let d={}; try{ if(r.status==="found"&&r.value) d=JSON.parse(r.value); }catch{} setKpStat(kpStatusText(d)); } catch { setKpStat("не удалось проверить"); } }}
@@ -6817,7 +6831,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           </div>
           {/* Портал для печати — точная копия, отображается только при print */}
           <div id="kp-print-portal" style={{display:"none",fontFamily:"'Inter','Segoe UI',sans-serif",background:"#ffffff",padding:"20px 24px",color:"#0f172a"}}>
-            <KPContent proj={proj} kpItems={kpItems} fromItems={kpFromItems} discount={discount} discAmt={discAmt} final={final} note={note}/>
+            <KPContent proj={proj} kpItems={kpItems} fromItems={kpFromItems} discount={discount} discAmt={discAmt} final={final} note={note} contragent={kpContragent}/>
           </div>
         </>
       )}

@@ -1,9 +1,15 @@
 // Тело коммерческого предложения (модалка и печать). Перенос из App.jsx.
 // ВНИМАНИЕ: текст условий КП — клиентский документ, править нельзя.
+import { useBrand } from "../brand.js";
 import { fmt, today, validUntil } from "../format.js";
 
 // ─── КОМПОНЕНТ КП (используется в модале и при печати) ───────────────────────
-export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note }) {
+// Реквизиты (БИН) берём из карточки контрагента — того же источника, что и
+// договоры. Раньше БИН был вписан в разметку, и у второй компании в её же КП
+// стоял бы чужой номер.
+export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, note, contragent }) {
+  const brand = useBrand();
+  const ca = contragent || null;
   const CONDITIONS = [
     "Стоимость рассчитана исходя из указанных объемов работ без учета НДС.",
     "В стоимость работ могут входить расходы на материалы, оборудование, доставку и иные затраты, необходимые для выполнения работ, если иное прямо указано в договоре.",
@@ -23,9 +29,9 @@ export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, 
           <div style={{fontSize:12,color:"#888",marginTop:3}}>на услуги ремонта и отделки недвижимости</div>
         </div>
         <div style={{textAlign:"right"}}>
-          <div style={{fontWeight:900,fontSize:16,color:"#b8904a"}}>TitovStroy</div>
-          <div style={{fontSize:11,color:"#555",marginTop:2}}>БИН 231040002769</div>
-          <div style={{fontSize:11,color:"#555"}}>WA: <span style={{color:"#b8904a"}}>+7 707 982 4915</span></div>
+          <div style={{fontWeight:900,fontSize:16,color:brand.accent}}>{brand.name}</div>
+          {ca?.bin && <div style={{fontSize:11,color:"#555",marginTop:2}}>БИН {ca.bin}</div>}
+          {brand.whatsapp && <div style={{fontSize:11,color:"#555"}}>WA: <span style={{color:brand.accent}}>{brand.whatsapp}</span></div>}
         </div>
       </div>
 
@@ -178,7 +184,7 @@ export function KPContent({ proj, kpItems, fromItems, discount, discAmt, final, 
           <div style={{fontSize:10,color:"#aaa",marginTop:2}}>М.П.</div>
         </div>
         <div style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
-          <img src="/stamp.jpg" alt="Печать TitovStroy" style={{width:200,height:200,objectFit:"contain",opacity:.85,mixBlendMode:"multiply",marginBottom:4}}/>
+          <img src={brand.stamp} alt={"Печать " + brand.name} style={{width:200,height:200,objectFit:"contain",opacity:.85,mixBlendMode:"multiply",marginBottom:4}}/>
         </div>
       </div>
 

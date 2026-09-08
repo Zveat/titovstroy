@@ -158,4 +158,5 @@ export const KP_NODE = (id) => "titovstroy-kp-" + id;
 export const PROGRESS_NODE = (token) => "titovstroy-progress-" + token;
 export const DOCS_NODE = (token) => "titovstroy-progress-" + token + "-docs"; // документы клиента (договоры, акты)
 export const _PROG_ST = { todo:{l:"Не начат",c:"#64748b",bg:"#f1f5f9",i:"⏳"}, progress:{l:"В работе",c:"#2563eb",bg:"#eff6ff",i:"🔨"}, done:{l:"Готово",c:"#059669",bg:"#ecfdf5",i:"✓"}, delayed:{l:"Задержка",c:"#dc2626",bg:"#fef2f2",i:"⚠️"} };
-export const COMPANY_WA = "77079824915"; // WhatsApp компании для связи с клиентом
+// WhatsApp компании переехал в настройки оформления (Админка → 🎨 Оформление,
+// см. brand.js): у второй компании номер свой, в коде ему не место.

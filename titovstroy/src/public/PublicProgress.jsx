@@ -3,12 +3,15 @@
 // Перенос из App.jsx.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { storage } from "../cloud/storage.js";
-import { COMPANY_WA, DOCS_NODE, PROGRESS_NODE, _PROG_ST } from "../constants.js";
+import { useBrand, waLink } from "../brand.js";
+import { BrandMark } from "../ui/BrandMark.jsx";
+import { DOCS_NODE, PROGRESS_NODE, _PROG_ST } from "../constants.js";
 import { fmt } from "../format.js";
 import { ClientPhotoReport, ClientTabs, PhotoLightbox, stagesWithPhotos } from "../stage-reports/ClientPhotos.jsx";
 import { startPublicProgressAutoRefresh } from "../utils.js";
 
 export function PublicProgress({ token }) {
+  const brand = useBrand();
   const [state, setState] = useState("loading"); // loading | notfound | ok
   const [s, setS] = useState(null);
   const [rmText, setRmText] = useState("");
@@ -127,14 +130,14 @@ export function PublicProgress({ token }) {
     <div style={{ textAlign: "center", padding: "70px 20px", margin: "20px 12px", background: "#fff", borderRadius: 16 }}>
       <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
       <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 6 }}>Ссылка недоступна</div>
-      <div style={{ fontSize: 13, color: "#64748b" }}>Возможно, доступ закрыт. Свяжитесь с менеджером: <a href={"https://wa.me/" + COMPANY_WA} style={{ color: "#059669" }}>WhatsApp</a></div>
+      <div style={{ fontSize: 13, color: "#64748b" }}>Возможно, доступ закрыт. Свяжитесь с менеджером: <a href={waLink(brand)} style={{ color: "#059669" }}>WhatsApp</a></div>
     </div>
   );
   if (state === "expired") return wrap(
     <div style={{ textAlign: "center", padding: "70px 20px", margin: "20px 12px", background: "#fff", borderRadius: 16 }}>
       <div style={{ fontSize: 40, marginBottom: 12 }}>⏳</div>
       <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 6 }}>Срок действия ссылки истёк</div>
-      <div style={{ fontSize: 13, color: "#64748b" }}>Свяжитесь с менеджером, чтобы получить новую ссылку: <a href={"https://wa.me/" + COMPANY_WA} style={{ color: "#059669" }}>WhatsApp</a></div>
+      <div style={{ fontSize: 13, color: "#64748b" }}>Свяжитесь с менеджером, чтобы получить новую ссылку: <a href={waLink(brand)} style={{ color: "#059669" }}>WhatsApp</a></div>
     </div>
   );
 
@@ -219,8 +222,9 @@ export function PublicProgress({ token }) {
     <div style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e293b 62%,#2a3446 100%)", color: "#fff", padding: "22px 22px 24px", margin: "14px 14px 14px", borderRadius: 22, position: "relative", overflow: "hidden", boxShadow: "0 12px 32px -14px rgba(15,23,42,.55)" }}>
       <div style={{ position: "absolute", top: -45, right: -35, width: 160, height: 160, borderRadius: "50%", background: "radial-gradient(circle, rgba(184,144,74,.24), transparent 70%)" }} />
       <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 11, marginBottom: 18 }}>
-        <div style={{ width: 36, height: 36, borderRadius: 10, background: BRASS, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 21, fontWeight: 900, color: "#0c0e1a", boxShadow: "0 4px 14px rgba(184,144,74,.45)" }}>T</div>
-        <div style={{ fontSize: 17, fontWeight: 800, flex: 1, minWidth: 0, letterSpacing: "-.01em" }}>TitovStroy</div>
+        <BrandMark brand={brand} size={36} radius={10} font={21}
+          style={{ boxShadow: "0 4px 14px rgba(184,144,74,.45)" }} />
+        <div style={{ fontSize: 17, fontWeight: 800, flex: 1, minWidth: 0, letterSpacing: "-.01em" }}>{brand.name}</div>
         <button onClick={refresh} disabled={refreshing} title="Обновить"
           style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.1)", border: "1px solid rgba(255,255,255,.16)", color: "#e2e8f0", borderRadius: 10, padding: "7px 12px", fontSize: 12.5, fontWeight: 700, cursor: refreshing ? "default" : "pointer", fontFamily: "inherit", flexShrink: 0 }}>
           <span style={{ display: "inline-block", transition: "transform .6s ease", transform: refreshing ? "rotate(360deg)" : "none" }}>⟳</span>{refreshing ? "" : "Обновить"}
@@ -441,7 +445,7 @@ export function PublicProgress({ token }) {
       </div>
     )}
 
-    <div style={{ textAlign: "center", fontSize: 11.5, color: FAINT, marginTop: 20, paddingBottom: 4 }}>TitovStroy · ремонт и отделка{s.publishedAt ? ` · обновлено ${new Date(s.publishedAt).toLocaleDateString("ru-RU")}` : ""}</div>
+    <div style={{ textAlign: "center", fontSize: 11.5, color: FAINT, marginTop: 20, paddingBottom: 4 }}>{brand.name}{brand.tagline ? " · " + brand.tagline : ""}{s.publishedAt ? ` · обновлено ${new Date(s.publishedAt).toLocaleDateString("ru-RU")}` : ""}</div>
 
     <PhotoLightbox value={lb} onChange={setLb} onClose={() => setLb(null)} />
   </>);

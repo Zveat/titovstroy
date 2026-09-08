@@ -6,9 +6,11 @@ import { logChange } from "../cloud/audit.js";
 import { signInAsStaff, storage } from "../cloud/storage.js";
 import { DEFAULT_USERS } from "../constants.js";
 import { SESSION_KEY, USERS_KEY } from "../storageKeys.js";
+import { useBrand } from "../brand.js";
 
 // ─── ЭКРАН ВХОДА ─────────────────────────────────────────────────────────────
 export function LoginScreen({ onLogin, notice = "" }) {
+  const brand = useBrand();
   const [login, setLogin]   = useState("");
   const [password, setPassword] = useState("");
   const [error, setError]   = useState("");
@@ -122,7 +124,7 @@ export function LoginScreen({ onLogin, notice = "" }) {
         {/* Лого */}
         <div style={{textAlign:"center",marginBottom:32}}>
           <div style={{width:56,height:56,borderRadius:8,background:"#2563eb",display:"inline-flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:26,color:"#f3f4f6",marginBottom:12}}>T</div>
-          <div style={{fontWeight:900,fontSize:22,color:"#0f172a",letterSpacing:.3}}>TitovStroy</div>
+          <div style={{fontWeight:900,fontSize:22,color:"#0f172a",letterSpacing:.3}}>{brand.name}</div>
           <div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>Система расчёта смет · Вход</div>
         </div>
 
@@ -177,7 +179,7 @@ export function LoginScreen({ onLogin, notice = "" }) {
             {loading ? "Проверка..." : "Войти"}
           </button>
         </div>
-        <div style={{textAlign:"center",marginTop:16,fontSize:11,color:"#d1d5db"}}>TitovStroy · Только для сотрудников</div>
+        <div style={{textAlign:"center",marginTop:16,fontSize:11,color:"#d1d5db"}}>{brand.name} · Только для сотрудников</div>
       </div>
     </div>
   );

@@ -6,6 +6,7 @@ import { hashPassword, passwordTooWeak } from "../auth/loginGuard.js";
 import { logChange, writeAudit } from "../cloud/audit.js";
 import { storage } from "../cloud/storage.js";
 import { DEFAULT_USERS, PRICE_SEAL_REASONS } from "../constants.js";
+import { BrandTab } from "./BrandTab.jsx";
 import { IssuePanel } from "../dashboard/IssuePanel.jsx";
 import { EstimateSuggestionRulesEditor } from "../estimate/EstimateSuggestions.jsx";
 import { fmt, genId } from "../format.js";
@@ -35,6 +36,7 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
     ["permissions","🔐 Права ролей","adminRoles"],
     ["clients","👥 Клиенты","adminClients"],
     ["contragents","🏢 Реквизиты","adminClients"],
+    ["brand","🎨 Оформление","adminUsers"],
     ["workers","🔨 Подрядчики","adminContractors"],
     ["prices","💰 Прайс-лист", canSeeAdminTab("adminCatalog") || canSeeAdminTab("adminPrices") ? null : "__none"],
     ...(documentTemplateEnabled ? [["documentTemplates","📑 Шаблоны документов","templateView"]] : []),
@@ -1130,6 +1132,11 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
 
       {tab === "notify" && (
         <NotifyTab users={users} saveUsers={saveUsers} currentUser={currentUser}
+          readOnly={readOnlyRole} canEdit={hasAdminPermission("adminUsers")} />
+      )}
+
+      {tab === "brand" && (
+        <BrandTab currentUser={currentUser} contragents={contragents}
           readOnly={readOnlyRole} canEdit={hasAdminPermission("adminUsers")} />
       )}
 

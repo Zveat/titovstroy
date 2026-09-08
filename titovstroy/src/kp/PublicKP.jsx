@@ -1,4 +1,5 @@
 // Публичная страница КП по секретной ссылке (#/kp/<id>, без входа). Перенос из App.jsx.
+import { useBrand } from "../brand.js";
 import { useEffect, useRef, useState } from "react";
 import { storage } from "../cloud/storage.js";
 import { KP_NODE } from "../constants.js";
@@ -6,6 +7,7 @@ import { KPContent } from "./KPContent.jsx";
 import { ref } from "firebase/database";
 
 export function PublicKP({ id }) {
+  const brand = useBrand();
   const [state, setState] = useState("loading"); // loading | notfound | ok
   const [snap, setSnap] = useState(null);
   const [accepted, setAccepted] = useState(false);
@@ -72,7 +74,7 @@ export function PublicKP({ id }) {
     <div style={{background:"#fff",borderRadius:14,padding:"44px 24px",textAlign:"center"}}>
       <div style={{fontSize:42,marginBottom:10}}>🔍</div>
       <div style={{fontWeight:800,fontSize:18,color:"#1a1a28",marginBottom:6}}>Предложение не найдено</div>
-      <div style={{fontSize:13,color:"#888"}}>Ссылка устарела или КП ещё не опубликовано.<br/>Свяжитесь с менеджером TitovStroy: WA +7 707 982 4915</div>
+      <div style={{fontSize:13,color:"#888"}}>Ссылка устарела или КП ещё не опубликовано.<br/>Свяжитесь с менеджером {brand.name}{brand.whatsapp ? ": WA +" + brand.whatsapp : ""}</div>
     </div>
   );
   return wrap(
@@ -80,7 +82,7 @@ export function PublicKP({ id }) {
       <div ref={outerRef} style={{width:"100%",overflow:"hidden",height:fit.h||undefined}}>
         <div ref={innerRef} style={{width:DESIGN_W,transform:`scale(${fit.scale})`,transformOrigin:"top left"}}>
           <div style={{background:"#f5f2ec",borderRadius:14,padding:"22px 20px",boxShadow:"0 8px 30px rgba(26,26,40,.14)"}}>
-            <KPContent proj={snap.proj||{}} kpItems={snap.kpItems||[]} fromItems={snap.fromItems||[]} discount={snap.discount||0} discAmt={snap.discAmt||0} final={snap.final||0} note={snap.note||""}/>
+            <KPContent proj={snap.proj||{}} kpItems={snap.kpItems||[]} fromItems={snap.fromItems||[]} discount={snap.discount||0} discAmt={snap.discAmt||0} final={snap.final||0} note={snap.note||""} contragent={snap.contragent||null}/>
           </div>
         </div>
       </div>
@@ -102,7 +104,7 @@ export function PublicKP({ id }) {
             <div style={{marginTop:10,fontSize:11.5,color:"#8a8472"}}>Нажав «Принять», вы подтвердите согласие с предложением. Это не договор — менеджер свяжется для оформления.</div>
           </>
         )}
-        <div style={{marginTop:18,fontSize:11.5,color:"#a39e8e"}}>TitovStroy · ремонт и отделка · WA +7 707 982 4915</div>
+        <div style={{marginTop:18,fontSize:11.5,color:"#a39e8e"}}>{brand.name}{brand.tagline ? " · " + brand.tagline : ""}{brand.whatsapp ? " · WA +" + brand.whatsapp : ""}</div>
       </div>
     </>
   );

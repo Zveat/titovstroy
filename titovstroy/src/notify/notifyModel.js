@@ -794,7 +794,7 @@ export function handleBotCommand({ text = "", chatId = "", from = null,
     if (!user) {
       return { kind: "start_unknown", links: null,
         log: `/start от ${chat}: код «${code || "пустой"}» не узнан`,
-        reply: "Не узнал код. Откройте ссылку из Админки TitovStroy: "
+        reply: "Не узнал код. Откройте ссылку из админки: "
           + "«Уведомления» → напротив вашей фамилии кнопка «Подключить»." };
     }
     const was = links[user.id]?.chatId ? S(links[user.id].chatId) : "";
@@ -804,7 +804,7 @@ export function handleBotCommand({ text = "", chatId = "", from = null,
       kind: "start", links: { ...links, [user.id]: { chatId: chat, tgName, ts: now } },
       log: `/start: ${user.name || user.login} ← чат ${chat}`
         + (was && was !== chat ? ` (был ${was} — привязка переехала)` : ""),
-      reply: `Готово, ${esc(user.name || user.login)}. Уведомления TitovStroy подключены.\n\n`
+      reply: `Готово, ${esc(user.name || user.login)}. Уведомления подключены.\n\n`
         + subsList(user) + "\n\n" + HINT,
     };
   }
@@ -818,7 +818,7 @@ export function handleBotCommand({ text = "", chatId = "", from = null,
     const user = id ? users.find(u => S(u?.id) === S(id)) : null;
     if (!user) {
       return { kind: "menu_unlinked", links: null, log: `/menu от ${chat}: чат не подключён`,
-        reply: "Этот чат не подключён. Откройте ссылку из Админки TitovStroy: "
+        reply: "Этот чат не подключён. Откройте ссылку из админки: "
           + "«Уведомления» → напротив вашей фамилии кнопка «Ссылка для подключения»." };
     }
     return { kind: "menu", links: null, log: `/menu: ${user.name || user.login}`,
@@ -840,8 +840,8 @@ export function handleBotCommand({ text = "", chatId = "", from = null,
   if (/^\/(chatid|id)\b/.test(body)) {
     return { kind: "chatid", links: null, log: `/id от ${chat}`,
       reply: `Номер этого чата:\n<code>${esc(chat)}</code>\n\n`
-        + "Скопируйте его целиком, вместе с минусом, и вставьте в TitovStroy → "
-        + "Админка → Уведомления → Основное → «Номер общего чата»." };
+        + "Скопируйте его целиком, вместе с минусом, и вставьте в админке: "
+        + "Уведомления → Основное → «Номер общего чата»." };
   }
 
   return null;

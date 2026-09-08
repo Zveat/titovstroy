@@ -63,3 +63,9 @@ export const LOGIN_ATTEMPTS_KEY = "titovstroy-login-attempts";
 export const TG_SETTINGS_KEY = "titovstroy-tg-settings"; // общий чат, часы тишины, включение
 export const TG_LINKS_KEY    = "titovstroy-tg-links";    // { [userId]: {chatId, tgName, ts} }
 export const TG_STATE_KEY    = "titovstroy-tg-state";    // курсор журнала и защита от повторов
+
+// Оформление компании: название, логотип, цвет, WhatsApp, печать (см. brand.js).
+// Реквизитов здесь НЕТ — они в карточках контрагентов, оттуда же их берут
+// договоры. Узел читают и публичные страницы клиента, поэтому в правилах базы
+// он открыт на чтение всем вошедшим и на запись — только админу.
+export const BRAND_KEY = "titovstroy-brand";
