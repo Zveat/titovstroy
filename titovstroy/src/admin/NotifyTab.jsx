@@ -315,94 +315,117 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
             </table>
           </div>
 
-          <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 10 }}>
-            {users.map(u => (
-              <div key={u.id} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: "9px 13px",
-                display: "flex", alignItems: "center", gap: 10, fontSize: 12.5, flexWrap: "wrap" }}>
-                <b style={{ color: "#0f172a" }}>{u.name || u.login}</b>
-                {links[u.id]?.chatId ? (
-                  <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    {pendingUnlink(u) ? (
-                      <>
-                        <span style={{ color: "#b45309", fontWeight: 700 }}>⏳ отключается…</span>
-                        {editable && (
-                          <button className="btn btn-o" style={{ padding: "3px 10px", fontSize: 11 }}
-                            onClick={() => cancelDisconnect(u)}>отменить</button>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <span style={{ color: "#059669", fontWeight: 700 }}>
-                          ✓ подключён{links[u.id]?.tgName ? ` · ${links[u.id].tgName}` : ""}
-                        </span>
-                        {editable && (<>
-                          {/* Смена аккаунта не требует отключения: открыл ссылку из
-                              другого Telegram — привязка перезапишется. Поэтому
-                              кнопка со ссылкой доступна и у подключённого. */}
-                          <button className="btn btn-o" style={{ padding: "3px 10px", fontSize: 11 }}
-                            onClick={() => connect(u)}>🔗 сменить аккаунт</button>
-                          <button className="btn btn-red" style={{ padding: "3px 10px", fontSize: 11 }}
-                            onClick={() => disconnect(u)}>отключить</button>
-                        </>)}
-                      </>
-                    )}
-                  </span>
-                ) : !editable ? (
-                  <span style={{ color: "#94a3b8" }}>не подключён</span>
-                ) : !settings.botName ? (
-                  <span style={{ color: "#b45309" }}>сначала впишите имя бота в «Основном»</span>
-                ) : (
-                  <button className="btn btn-o" style={{ padding: "4px 11px", fontSize: 11.5 }}
-                    onClick={() => connect(u)}>🔗 Ссылка для подключения</button>
-                )}
-                <span style={{ color: "#94a3b8" }}>охват</span>
-                <select className="fi" style={{ width: 86, fontSize: 11.5, padding: "3px 5px" }}
-                  disabled={!editable} value={userScope(u)}
-                  onChange={e => patchUser(u.id, { scope: e.target.value })}>
-                  <option value="own">свои</option>
-                  <option value="all">все</option>
-                </select>
+          {/* Раньше это были карточки «по содержимому», и они скакали по строкам
+              разной ширины — ни имена, ни кнопки, ни «охват» не стояли в одну
+              линию. Теперь колонки выровнены, а кнопки перестали быть пёстрыми:
+              главное в этом списке — кто подключён, а не чем нажать. */}
+          <style>{`
+            .ntfL { border:1px solid #e2e8f0; border-radius:10px; overflow:hidden; margin-top:16px }
+            /* Колонки ФИКСИРОВАННОЙ ширины справа: пока «охват» и кнопки были
+               auto, каждая строка считала их по своему содержимому, и ни один
+               столбец не стоял в линию — из-за этого список и выглядел свалкой. */
+            .ntfR { display:grid; grid-template-columns:minmax(120px,1fr) minmax(140px,1fr) 96px 216px;
+                    align-items:center; gap:14px; padding:8px 14px; border-top:1px solid #eef2f7;
+                    font-size:12.5px }
+            .ntfR:hover { background:#f8fafc }
+            .ntfH { background:#f8fafc; border-top:0; padding:6px 14px; font-size:10.5px;
+                    letter-spacing:.04em; text-transform:uppercase; color:#94a3b8; font-weight:700 }
+            .ntfH:hover { background:#f8fafc }
+            .ntfA { display:flex; gap:4px; align-items:center; justify-content:flex-end }
+            .ntfT { border:0; background:none; padding:4px 9px; border-radius:6px; font:inherit;
+                    font-size:11.5px; color:#475569; cursor:pointer; white-space:nowrap;
+                    text-decoration:none; display:inline-block }
+            .ntfT:hover { background:#e2e8f0; color:#0f172a }
+            .ntfT.dng:hover { background:#fee2e2; color:#b91c1c }
+            .ntfT.acc { color:#1d4ed8; font-weight:600 }
+            .ntfT.acc:hover { background:#dbeafe; color:#1e3a8a }
+            .ntfP { grid-column:1/-1; display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+                    background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;
+                    padding:8px 10px; margin:2px 0 6px }
+            /* На узком экране колонок нет: имя и статус в строке, под ними —
+               охват и кнопки. Обёртка .ntfW в широком виде «прозрачная»
+               (display:contents), поэтому там колонки остаются раздельными. */
+            .ntfW { display:contents }
+            @media(max-width:820px){
+              .ntfH { display:none }
+              .ntfR { grid-template-columns:1fr auto; gap:8px }
+              .ntfW { display:flex; grid-column:1/-1; align-items:center; gap:10px;
+                      justify-content:space-between }
+            }
+          `}</style>
+          <div className="ntfL">
+            <div className="ntfR ntfH">
+              <span>Сотрудник</span><span>Telegram</span><span>Охват</span><span />
+            </div>
+            {users.map(u => {
+              const link = links[u.id];
+              const waiting = link?.chatId && pendingUnlink(u);
+              return (
+                <div className="ntfR" key={u.id}>
+                  <b style={{ color: "#0f172a" }}>{u.name || u.login}</b>
 
-                {/* Ссылка ВИДНА и никуда не убегает: её можно выделить мышью,
-                    скопировать кнопкой или открыть прямо здесь — если владелец
-                    подключает сам себя или меняет свой аккаунт. */}
-                {shownLink?.id === u.id && (
-                  <div style={{ flexBasis: "100%", marginTop: 8, padding: "8px 10px",
-                    background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8 }}>
-                    <div style={{ color: "#475569", fontSize: 11.5, marginBottom: 6 }}>
-                      Отправьте эту ссылку в Telegram — человек откроет её и нажмёт «Запустить».
-                      Себе можно открыть прямо отсюда.
-                    </div>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  {link?.chatId ? (
+                    waiting
+                      ? <span style={{ color: "#b45309", fontWeight: 600 }}>⏳ отключается…</span>
+                      : <span style={{ color: "#059669", fontWeight: 600, overflow: "hidden",
+                          textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          ✓ {link.tgName || "подключён"}
+                        </span>
+                  ) : !settings.botName && editable ? (
+                    <span style={{ color: "#b45309" }}>впишите имя бота в «Основном»</span>
+                  ) : (
+                    <span style={{ color: "#94a3b8" }}>не подключён</span>
+                  )}
+
+                  <span className="ntfW">
+                    <select className="fi" style={{ width: 92, fontSize: 11.5, padding: "3px 5px" }}
+                      disabled={!editable} value={userScope(u)}
+                      onChange={e => patchUser(u.id, { scope: e.target.value })}>
+                      <option value="own">свои</option>
+                      <option value="all">все</option>
+                    </select>
+
+                    <span className="ntfA">
+                      {!editable ? null : waiting ? (
+                        <button className="ntfT acc" onClick={() => cancelDisconnect(u)}>отменить</button>
+                      ) : link?.chatId ? (<>
+                        {/* Смена аккаунта не требует отключения: открыл ссылку из
+                            другого Telegram — привязка перезапишется. */}
+                        <button className="ntfT" onClick={() => connect(u)}>сменить аккаунт</button>
+                        <button className="ntfT dng" onClick={() => disconnect(u)}>отключить</button>
+                      </>) : settings.botName ? (
+                        <button className="ntfT acc" onClick={() => connect(u)}>🔗 подключить</button>
+                      ) : null}
+                    </span>
+                  </span>
+
+                  {/* Ссылка ВИДНА и никуда не убегает: её можно выделить мышью,
+                      скопировать кнопкой или открыть прямо здесь — если владелец
+                      подключает сам себя или меняет свой аккаунт. */}
+                  {shownLink?.id === u.id && (
+                    <div className="ntfP">
                       <input className="fi" readOnly value={shownLink.url}
                         onFocus={e => e.target.select()}
                         ref={el => { if (el && document.activeElement !== el) el.select?.(); }}
-                        style={{ flex: "1 1 320px", minWidth: 240, fontSize: 11.5, padding: "4px 7px" }} />
-                      <button className="btn btn-o" style={{ padding: "3px 10px", fontSize: 11 }}
-                        onClick={() => copyShown(shownLink.url)}>копировать</button>
-                      <a className="btn btn-o" href={shownLink.url} target="_blank" rel="noreferrer"
-                        style={{ padding: "3px 10px", fontSize: 11, textDecoration: "none" }}>
-                        открыть в Telegram
+                        style={{ flex: "1 1 300px", minWidth: 220, fontSize: 11.5, padding: "4px 7px" }} />
+                      <button className="ntfT" onClick={() => copyShown(shownLink.url)}>копировать</button>
+                      <a className="ntfT" href={shownLink.url} target="_blank" rel="noreferrer">
+                        открыть у себя
                       </a>
-                      <button className="btn btn-o" style={{ padding: "3px 10px", fontSize: 11 }}
-                        onClick={() => setShownLink(null)}>скрыть</button>
+                      <button className="ntfT" onClick={() => setShownLink(null)}>скрыть</button>
                     </div>
-                  </div>
-                )}
-              </div>
-            ))}
+                  )}
+                </div>
+              );
+            })}
           </div>
           <div style={{ ...sub, marginTop: 10, marginBottom: 0 }}>
-            «Ссылка для подключения» — ссылка появится тут же в строке: её видно, можно
-            выделить, скопировать кнопкой или открыть самому. Человек открывает её в своём
-            Telegram и жмёт «Запустить». Подключение появится после ближайшего прогона службы
-            (расписание стоит на 15 минут, но GitHub держит его не строго — бывает и через час);
-            рассылка для этого включённой быть не обязана.
-            <br /><b>Сменить аккаунт</b> — отключать не нужно: откройте ту же ссылку из другого
-            Telegram, привязка просто перезапишется на него.
-            <br />
-            «Охват»: <b>свои</b> — только объекты, где человек ответственный; <b>все</b> — вся компания.
-            Общие сводки по компании получают только те, у кого «все».
+            <b>Подключить</b> — в строке появится ссылка: отправьте её человеку, он откроет её
+            в своём Telegram и нажмёт «Запустить». Бот отвечает сразу.
+            <br /><b>Сменить аккаунт</b> — отключать не нужно: та же ссылка, открытая из другого
+            Telegram, просто перепишет привязку на него.
+            <br /><b>Охват</b>: «свои» — только объекты, где человек ответственный; «все» — вся
+            компания. Общие сводки получают только те, у кого «все».
           </div>
         </div>
       )}
