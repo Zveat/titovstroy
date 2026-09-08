@@ -115,17 +115,22 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
     const g = explicitGroup(); for (const k of keys) g[k] = on; patch({ groupSubs: g });
   };
 
-  // ССЫЛКУ ПОКАЗЫВАЕМ, А НЕ ПРЯЧЕМ В БУФЕР. Раньше кнопка молча писала её в
-  // буфер обмена — а браузер отказывает в записи, когда страница не в фокусе,
-  // и тогда не происходило вообще ничего видимого. Теперь кнопка только заводит
-  // код, а сама ссылка появляется в строке: её видно, по ней можно кликнуть
-  // (подключить себя) и её можно скопировать кнопкой рядом.
-  const makeLink = async (u) => {
-    if (!u.tg?.code) await patchUser(u.id, { code: makeLinkCode() });
-  };
-  const copyLink = async (url) => {
-    try { await navigator.clipboard.writeText(url); flash("Ссылка скопирована"); }
-    catch (e) { window.prompt("Скопируйте ссылку и отправьте сотруднику:", url); }
+  // Одна кнопка: завести код, если его ещё нет, и положить ссылку в буфер.
+  // Показывать саму ссылку в строке было нечитаемо — вернули кнопку.
+  // Если браузер откажет в записи в буфер (так бывает, когда вкладка не в
+  // фокусе), ссылка всё равно не пропадёт: покажем её окном, чтобы скопировать
+  // руками. Молча не завершаемся ни в одном случае.
+  const connect = async (u) => {
+    const code = u.tg?.code || makeLinkCode();
+    if (!u.tg?.code) await patchUser(u.id, { code });
+    const url = linkUrl(settings?.botName, code);
+    if (!url) { flash("Сначала впишите имя бота в разделе «Основное»"); return; }
+    try {
+      await navigator.clipboard.writeText(url);
+      flash(`Ссылка для «${u.name || u.login}» скопирована — отправьте её в Telegram`);
+    } catch (e) {
+      window.prompt("Скопируйте ссылку и отправьте сотруднику:", url);
+    }
   };
 
   const passing = useMemo(
@@ -272,20 +277,10 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
                   <span style={{ color: "#94a3b8" }}>не подключён</span>
                 ) : !settings.botName ? (
                   <span style={{ color: "#b45309" }}>сначала впишите имя бота в «Основном»</span>
-                ) : !u.tg?.code ? (
+                ) : (
                   <button className="btn btn-o" style={{ padding: "4px 11px", fontSize: 11.5 }}
-                    onClick={() => makeLink(u)}>🔗 Создать ссылку</button>
-                ) : (() => {
-                  const url = linkUrl(settings.botName, u.tg.code);
-                  return (
-                    <span style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-                      <a href={url} target="_blank" rel="noreferrer"
-                        style={{ color: "#2563eb", fontWeight: 600, wordBreak: "break-all" }}>{url}</a>
-                      <button className="btn btn-o" style={{ padding: "3px 9px", fontSize: 11 }}
-                        onClick={() => copyLink(url)}>копировать</button>
-                    </span>
-                  );
-                })()}
+                    onClick={() => connect(u)}>🔗 Скопировать ссылку</button>
+                )}
                 <span style={{ color: "#94a3b8" }}>охват</span>
                 <select className="fi" style={{ width: 86, fontSize: 11.5, padding: "3px 5px" }}
                   disabled={!editable} value={userScope(u)}
@@ -297,9 +292,9 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
             ))}
           </div>
           <div style={{ ...sub, marginTop: 10, marginBottom: 0 }}>
-            Ссылку рядом с фамилией отправьте человеку — он открывает её и жмёт в Telegram
-            «Запустить». Свою можно нажать прямо здесь. Подключение появится после ближайшего
-            прогона службы (до 15 минут), рассылка для этого включённой быть не обязана.
+            «Скопировать ссылку» — отправьте её человеку в Telegram, он открывает и жмёт
+            «Запустить». Подключение появится после ближайшего прогона службы (до 15 минут);
+            рассылка для этого включённой быть не обязана.
             <br />
             «Охват»: <b>свои</b> — только объекты, где человек ответственный; <b>все</b> — вся компания.
             Общие сводки по компании получают только те, у кого «все».

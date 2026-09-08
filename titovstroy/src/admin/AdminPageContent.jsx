@@ -133,8 +133,14 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
     })();
   }, []);
 
+  // setUsers ЗДЕСЬ ОБЯЗАТЕЛЕН. Свои обработчики на этой странице зовут setUsers
+  // сами, перед сохранением, а внешние (вкладка «Уведомления») — нет, и там
+  // получалось: в базу записалось, а на экране не изменилось ничего. Выглядело
+  // как «галочки не ставятся, кнопки не работают», хотя данные сохранялись.
+  // Повторный setUsers у своих обработчиков безвреден — значение то же.
   const saveUsers = async (list) => {
     if (!hasAdminPermission("adminUsers")) return false;
+    setUsers(list);
     setSaving(true);
     await storage.set(USERS_KEY, JSON.stringify(list));
     setSaving(false);

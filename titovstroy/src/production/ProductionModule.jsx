@@ -653,8 +653,33 @@ export default function ProductionModule({
     const budget = contractBudget || Number(finProj?.budget) || estimatePlan || 0;
     const debt = Math.max(0, budget - income);
     const margin = income > 0 ? Math.round((income - expense) / income * 100) : null;
+
+    // ДРУГИЕ ДОГОВОРЫ ЭТОГО ЖЕ ОБЪЕКТА. Бюджет выше — это ОДИН договор (тот, по
+    // которому заведён финпроект) и его допсоглашения. А «Все сметы» — это весь
+    // объект целиком. Пока договор один, числа совпадают и разницы не видно. Но
+    // если на объекте завели второй самостоятельный договор (а не допсоглашение
+    // к первому), плитки начинают расходиться — и раньше экран показывал две
+    // разные цифры молча, без объяснения. Ловили на объекте с договорами №1039
+    // и №1043: «договор 3 101 192» против «все сметы 4 339 199», и понять,
+    // почему, было нельзя. Считаем недостающее и называем поимённо.
+    const others = mainContracts
+      .filter(c => c !== main)
+      .map(c => {
+        const no = normCN(c.number);
+        const own = objectContracts.filter(a => (a.type === "annex" || a.type === "design_add")
+          && no && normCN(a.mainNumber) === no);
+        return {
+          number: c.number,
+          total: contractNetTotal(c) + own.reduce((sum, a) => sum + contractNetTotal(a), 0),
+          annexCount: own.length,
+        };
+      })
+      .filter(x => x.total > 0);
+    const othersTotal = others.reduce((sum, x) => sum + x.total, 0);
+
     return {
       budget, estimatePlan, income, expense, debt, margin,
+      others, othersTotal,
       contractNo: main?.number || finProj?.contractNo,
       status: finProj?.rawStatus || finProj?.status,
       hasProject: !!finProj,
@@ -1976,6 +2001,19 @@ function FinanceTab({ prod, patch, fmt, finSummary, stageReports, currentUser, a
               </div>
             ))}
           </div>
+          {finSummary.othersTotal > 0 && (
+            <div style={{ marginTop: 10, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10,
+              padding: "9px 12px", fontSize: 11.5, color: "#92400e", lineHeight: 1.55 }}>
+              Здесь считается только договор №{String(finSummary.contractNo || "").replace(/^№+/, "")} и его
+              допсоглашения. На объекте есть ещё {finSummary.others.length === 1 ? "договор" : "договоры"}, и
+              {finSummary.others.length === 1 ? " он" : " они"} в этот расчёт <b>не входят</b>:
+              {" "}{finSummary.others.map(x => `№${String(x.number).replace(/^№+/, "")} — ${fmt(x.total)} ₸`
+                + (x.annexCount ? ` (с ${x.annexCount} доп.)` : "")).join(", ")}.
+              <br />Поэтому «Все сметы (план)» больше: сметы считаются по объекту целиком, а договор — по одному.
+              Если это доп. работы к основному договору, их правильнее оформить допсоглашением к
+              №{String(finSummary.contractNo || "").replace(/^№+/, "")} — тогда цифры сойдутся.
+            </div>
+          )}
         </div>
       ) : (
         <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14 }}>
