@@ -164,6 +164,24 @@ async function main() {
   // тогда, когда рассылка ещё выключена: сотрудник жмёт «Запустить» в боте, в
   // группе отправляют /id, чтобы узнать её номер. Если выйти раньше, ни то ни
   // другое не сработает — и включить будет нечего.
+  // ЗАЯВКИ НА ОТКЛЮЧЕНИЕ. Админка не может писать в узел привязок (защита от
+  // подмены чужого chatId), поэтому она оставляет отметку времени в настройках,
+  // а связь снимаем здесь. Сравниваем со временем самой привязки: если человек
+  // после отключения подключился заново, его привязка новее заявки и остаётся.
+  // Поэтому заявку не нужно вычищать — она просто перестаёт действовать.
+  let unlinked = 0;
+  for (const [userId, at] of Object.entries(settings.unlink || {})) {
+    const link = links[userId];
+    if (!link?.chatId || Number(link.ts || 0) > Number(at || 0)) continue;
+    const who = users.find(u => u.id === userId);
+    await send(link.chatId, `Уведомления TitovStroy отключены администратором.\n`
+      + "Чтобы вернуть — попросите новую ссылку для подключения.");
+    delete links[userId];
+    unlinked += 1;
+    console.log(`Отключён: ${who?.name || userId}`);
+  }
+  if (unlinked) await writeJson(K.links, links);
+
   const upd = await processUpdates(state, users, links);
   if (upd.changed) await writeJson(K.links, upd.links);
   if (upd.lastUpdateId !== state.lastUpdateId) {

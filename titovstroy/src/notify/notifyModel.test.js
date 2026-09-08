@@ -26,11 +26,11 @@ const PHOTO = { ts: 1784888300000, by: "Сергей Штанько", entity: "s
   label: "Демонтаж", field: "фотоотчёт", action: "добавил фото" };
 
 describe("состав: ровно то, что просил владелец", () => {
-  it("семь уведомлений, не больше", () => {
-    expect(NOTIFY_CATALOG).toHaveLength(7);
+  it("девять уведомлений, не больше", () => {
+    expect(NOTIFY_CATALOG).toHaveLength(9);
     expect(NOTIFY_CATALOG.map(n => n.key).sort()).toEqual([
-      "contract_signed", "digest_month", "digest_week",
-      "handover_soon", "stages", "stale", "start_soon",
+      "contract_signed", "digest_month", "digest_sales_month", "digest_sales_week",
+      "digest_week", "handover_soon", "stages", "stale", "start_soon",
     ]);
   });
 
@@ -44,7 +44,7 @@ describe("состав: ровно то, что просил владелец", 
       expect(n.what.length).toBeGreaterThan(15);
       expect(NOTIFY_TOPIC_KEYS).toContain(n.topic);
     }
-    expect(new Set(NOTIFY_CATALOG.map(n => n.key)).size).toBe(7);
+    expect(new Set(NOTIFY_CATALOG.map(n => n.key)).size).toBe(NOTIFY_CATALOG.length);
   });
 });
 
@@ -266,6 +266,36 @@ describe("сводки за неделю и за месяц", () => {
       "Выручка", "Валовая прибыль", "Чистая прибыль", "7 200 000 ₸"]) {
       expect(t).toContain(part);
     }
+  });
+
+  // Владелец: «эту сводку я не могу в общий чат отправлять, там валовая и
+  // чистая прибыль». Сводка отдела продаж сделана ровно чтобы её было можно —
+  // значит денег компании в ней быть не должно ни при каких данных.
+  it("в сводке отдела продаж НЕТ выручки, прибыли и маржи", () => {
+    const t = buildDigestMessage(analytics, { key: "digest_sales_week", now }).text;
+    for (const forbidden of ["Выручка", "Валовая", "Чистая прибыль", "Просрочено к оплате"]) {
+      expect(t).not.toContain(forbidden);
+    }
+    expect(t).toContain("Отдел продаж");
+    expect(t).toContain("Подписано договоров");
+    expect(t).toContain("Конверсия");
+  });
+
+  it("в сводке отдела продаж есть разрез по менеджерам, в руководительской — нет", () => {
+    const withMgr = { ...analytics, sales: { ...analytics.sales, byManager: {
+      "Сергей Штанько": { objects: 5, signed: 2, signedSum: 3000000 },
+      "P.Zveat": { objects: 3, signed: 1, signedSum: 1200000 },
+    } } };
+    const sales = buildDigestMessage(withMgr, { key: "digest_sales_month", now }).text;
+    expect(sales).toContain("По менеджерам");
+    expect(sales).toContain("Сергей Штанько");
+    expect(buildDigestMessage(withMgr, { key: "digest_week", now }).text).not.toContain("По менеджерам");
+  });
+
+  it("руководительская сводка деньги по-прежнему показывает", () => {
+    const t = buildDigestMessage(analytics, { key: "digest_week", now }).text;
+    expect(t).toContain("Чистая прибыль");
+    expect(t).toContain("7 200 000 ₸");
   });
 
   it("месячная — та же форма, свой заголовок и ключ", () => {

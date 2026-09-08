@@ -1153,6 +1153,22 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const _todayIssues = useMemo(() => _allIssues.filter(i => i.scope === "today" && _issueActive(i)), [_allIssues, issueDismissed]);
   // Целостность данных — для «Проверка базы» в Админке (скрывать нельзя)
   const _checkIssues = useMemo(() => _allIssues.filter(i => i.scope === "check"), [_allIssues]);
+  // ПРОБЛЕМЫ ПО ОБЪЕКТАМ — для кружка на карточке. Проверки существовали давно,
+  // но жили только в «Админка → Проверка базы», куда владелец не заходил: про
+  // задвоенный договор и устаревший он узнал не из сервиса, а когда цифры
+  // перестали сходиться. Считаем один раз здесь, чтобы карточки не считали
+  // каждая за себя.
+  const _issuesByObject = useMemo(() => {
+    const map = new Map();
+    for (const i of _allIssues) {
+      const id = i?.nav?.object;
+      if (!id) continue;
+      if (i.scope === "today" && !_issueActive(i)) continue;
+      if (!map.has(id)) map.set(id, []);
+      map.get(id).push(i);
+    }
+    return map;
+  }, [_allIssues, issueDismissed]);
   // «Мои задачи» прораба: операционные проблемы по ЕГО объектам (ответственный/менеджер/создатель).
   // Финансовую группу исключаем: прораб финансы не видит, и финпроекты ему не загружаются
   // (loadFinance только для admin/manager) — иначе «подписан без финпроекта» давал бы ложные
@@ -1195,8 +1211,11 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
       const pr = productions.find(p => p.objectId === o.id);
       return !!pr && warrantyState(pr).status === "active";
     }
+    // «Есть замечания» — тоже не статус, а срез по проверке базы. Нужен, чтобы
+    // найти проблемные объекты одним щелчком, а не выискивая кружки глазами.
+    if (objectFilterStatus === "__issues") return (_issuesByObject.get(o.id) || []).length > 0;
     return unifiedStatusOf(o) === objectFilterStatus;
-  }, [objectFilterStatus, productions, unifiedStatusOf]);
+  }, [objectFilterStatus, productions, unifiedStatusOf, _issuesByObject]);
   useEffect(() => {
     setPendingObjectStatuses(prev => {
       let changed = false;
@@ -9109,6 +9128,25 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     </button>
                   );
                 })}
+                {/* Замечания — срез по проверке базы. Кружок на карточке показывает,
+                    что не так с КОНКРЕТНЫМ объектом; этот чип собирает все такие
+                    объекты вместе, чтобы разобрать их за один заход. */}
+                {(()=>{
+                  const bad = liveObjects.filter(o => (_issuesByObject.get(o.id) || []).length > 0);
+                  if (!bad.length && objectFilterStatus !== "__issues") return null;
+                  const red = bad.some(o => (_issuesByObject.get(o.id) || []).some(i => i.sev === "red"));
+                  const on = objectFilterStatus === "__issues";
+                  const col = red ? "#dc2626" : "#d97706";
+                  return (
+                    <button onClick={()=>setObjectFilterStatus(v=>v==="__issues"?"":"__issues")}
+                      title="Объекты, где проверка базы нашла проблемы"
+                      style={{background:on?(red?"#fef2f2":"#fffbeb"):"rgba(0,0,0,.03)",
+                        color:on?col:"#94a3b8",border:`1px solid ${on?col:"#e2e8f0"}`,borderRadius:8,
+                        padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                      ⚠ Есть замечания {bad.length>0&&<span style={{opacity:.7}}>({bad.length})</span>}
+                    </button>
+                  );
+                })()}
                 {/* Гарантия — не статус объекта, а отдельный срез: сданный объект живёт
                     ещё 12 месяцев, и раньше он просто пропадал из поля зрения. */}
                 {(()=>{
@@ -9337,6 +9375,21 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                           {obj.address&&<div style={{fontSize:11.5,color:"#64748b",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>📍 {obj.address}{obj.area?` · ${obj.area} м²`:""}</div>}
                         </div>
                         <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
+                          {(() => {
+                            // Кружок «сколько тут не так» — как непрочитанные в мессенджере.
+                            // Красный, если есть критичное; жёлтый — если только предупреждения.
+                            // Наводишь — видно что именно, не открывая объект.
+                            const list = _issuesByObject.get(obj.id) || [];
+                            if (!list.length) return null;
+                            const red = list.some(i => i.sev === "red");
+                            return (
+                              <span title={list.map(i => `• ${i.title}: ${i.detail}`).join("\n")}
+                                style={{minWidth:20,height:20,padding:"0 6px",borderRadius:20,
+                                  background:red?"#dc2626":"#f59e0b",color:"#fff",fontSize:11,fontWeight:800,
+                                  display:"flex",alignItems:"center",justifyContent:"center",
+                                  boxShadow:"0 1px 4px rgba(0,0,0,.2)"}}>{list.length}</span>
+                            );
+                          })()}
                           <span style={{fontSize:10,fontWeight:700,color:st.color,background:st.bg,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap"}}>{st.label}</span>
                           {accessAllows(currentPermissions.objectDelete, estimatorObjectIds.has(obj.id)) && (
                             <button onClick={e=>{e.stopPropagation(); if(window.confirm("Переместить объект в корзину?")){ saveObjects(objectsRef.current.map(x=>x.id===obj.id?{...x,deletedAt:Date.now()}:x)); logChange(currentUser,{entity:"object",entityId:obj.id,objectId:obj.id,label:_objLabel(obj),action:"удалил объект"}); }}}

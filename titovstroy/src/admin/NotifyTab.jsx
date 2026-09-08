@@ -120,6 +120,22 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
   // Если браузер откажет в записи в буфер (так бывает, когда вкладка не в
   // фокусе), ссылка всё равно не пропадёт: покажем её окном, чтобы скопировать
   // руками. Молча не завершаемся ни в одном случае.
+  // ОТКЛЮЧЕНИЕ. Узел привязок из браузера писать нельзя — это защита от того,
+  // чтобы сотрудник подменил чужой chatId на свой и получал чужую рассылку с
+  // суммами. Поэтому здесь ставится ЗАЯВКА на отключение, а связь снимает сама
+  // служба на ближайшем прогоне. Чтобы человек перестал получать сразу, тут же
+  // снимаются все его подписки: маршрутизация без них ничего ему не отправит.
+  const disconnect = async (u) => {
+    if (!editable) return;
+    if (!window.confirm(`Отключить уведомления для «${u.name || u.login}»?\n\n`
+      + "Подписки снимутся сразу, привязка к Telegram — на ближайшем прогоне службы "
+      + "(до 15 минут). Подключить обратно можно тем же способом.")) return;
+    await patchUser(u.id, { subs: Object.fromEntries(NOTIFY_CATALOG.map(n => [n.key, false])) },
+      "отключил уведомления");
+    await patch({ unlink: { ...(settings.unlink || {}), [u.id]: Date.now() } });
+    flash(`«${u.name || u.login}» отключён — рассылка ему прекращена`);
+  };
+
   const connect = async (u) => {
     const code = u.tg?.code || makeLinkCode();
     if (!u.tg?.code) await patchUser(u.id, { code });
@@ -270,8 +286,14 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
                 display: "flex", alignItems: "center", gap: 10, fontSize: 12.5, flexWrap: "wrap" }}>
                 <b style={{ color: "#0f172a" }}>{u.name || u.login}</b>
                 {links[u.id]?.chatId ? (
-                  <span style={{ color: "#059669", fontWeight: 700 }}>
-                    ✓ подключён{links[u.id]?.tgName ? ` · ${links[u.id].tgName}` : ""}
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ color: "#059669", fontWeight: 700 }}>
+                      ✓ подключён{links[u.id]?.tgName ? ` · ${links[u.id].tgName}` : ""}
+                    </span>
+                    {editable && (
+                      <button className="btn btn-red" style={{ padding: "3px 10px", fontSize: 11 }}
+                        onClick={() => disconnect(u)}>отключить</button>
+                    )}
                   </span>
                 ) : !editable ? (
                   <span style={{ color: "#94a3b8" }}>не подключён</span>

@@ -1319,6 +1319,60 @@ export function computeIssues(data = {}, opts = {}) {
     if (diff > budget*0.2) out.push({ id:`budget-mismatch:${o.id}`, group:"Финансы", sev:"yellow", scope:"check", dismissable:false,
       title:"Бюджет ≠ сумма смет", detail:`${_objLabel(o)}: бюджет ${_fmtT(budget)} ₸, сметы ${_fmtT(estSum)} ₸ (разница ${_fmtT(diff)} ₸)`, nav:{ object:o.id, tab:"finance" } });
   }
+  // 15а. ДУБЛЬ ДОГОВОРА. Один и тот же документ создан дважды: совпадают тип,
+  // сумма и дата. Нашли на боевой (№1040 и №1041 на одном объекте, смета одна) —
+  // из-за такого дубля бюджет и долг объекта удваивались.
+  // 15б. НЕСКОЛЬКО ОСНОВНЫХ ДОГОВОРОВ, которые вместе не сходятся со сметами:
+  // обычно один устарел после переделки сметы, и его забыли удалить.
+  // 15в. ДОКУМЕНТ БЕЗ НОМЕРА. Платежи привязываются к договору по номеру —
+  // оплата по безномерному допсоглашению не приклеится никуда и потеряется.
+  for (const o of objects) {
+    const cs = contracts.filter(c => c.objectId === o.id
+      && c.type !== "podryad" && c.type !== "podryad_annex");
+    if (!cs.length) continue;
+    const seenSig = new Map();
+    for (const c of cs) {
+      const money = Math.round(contractNetTotal(c));
+      if (money <= 0) continue;
+      const sig = `${c.type}|${money}|${String(c.date || "")}`;
+      const first = seenSig.get(sig);
+      if (!first) { seenSig.set(sig, c); continue; }
+      out.push({ id:`contract-dupe:${c.id}`, group:"Договоры", sev:"red", scope:"check", dismissable:false,
+        title:"Дубль договора",
+        detail:`${_objLabel(o)}: №${c.number||"без номера"} повторяет №${first.number||"без номера"} — `
+          + `та же сумма ${_fmtT(money)} ₸ и та же дата. Лишний лучше удалить, иначе бюджет объекта задвоен.`,
+        nav:{ object:o.id, tab:"docs" } });
+    }
+    const mains = cs.filter(c => c.type !== "annex" && c.type !== "design_add");
+    if (mains.length > 1) {
+      const uniq = [...seenSig.values()];
+      const uniqSum = uniq.reduce((sum, c) => sum + contractNetTotal(c), 0)
+        + cs.filter(c => Math.round(contractNetTotal(c)) <= 0).reduce((sum, c) => sum + contractNetTotal(c), 0);
+      const estSum = estimatesForObject(estimates, o.id).reduce((sum, e) => sum + (Number(e.total)||0), 0);
+      if (estSum > 0 && Math.round(uniqSum) !== Math.round(estSum)) {
+        out.push({ id:`contract-mains:${o.id}`, group:"Договоры", sev:"yellow", scope:"check", dismissable:false,
+          title:"Несколько основных договоров",
+          detail:`${_objLabel(o)}: ${mains.map(c=>"№"+(c.number||"без номера")).join(", ")} — вместе `
+            + `${_fmtT(uniqSum)} ₸, а сметы ${_fmtT(estSum)} ₸. Похоже, один устарел.`,
+          nav:{ object:o.id, tab:"docs" } });
+      }
+    }
+    // Только ОСНОВНОЙ договор обязан иметь номер. У допсоглашений своего номера
+    // нет по устройству: они опознаются номером родительского договора
+    // (mainNumber) и порядковым (appendix 2, 3…), и платежи идут по номеру
+    // основного. Проверено на боевой: ни у одного из 19 допсоглашений номера
+    // нет — это норма, а не потеря. Первая версия этой проверки ругалась на все
+    // 19 и была бы чистым шумом.
+    for (const c of mains) {
+      if (String(c.number || "").trim()) continue;
+      out.push({ id:`contract-nonum:${c.id}`, group:"Договоры", sev:"yellow", scope:"check", dismissable:false,
+        title:"Договор без номера",
+        detail:`${_objLabel(o)}: договор на ${_fmtT(contractNetTotal(c))} ₸ без номера. `
+          + `Оплаты привязываются к договору по номеру — этот платёж будет некуда отнести.`,
+        nav:{ object:o.id, tab:"docs" } });
+    }
+  }
+
   // 15. Платежи с номером договора, которому не соответствует ни проект, ни договор
   const knownCN = new Set();
   for (const fp of finProjects) if (fp.contractNo) knownCN.add(normCN(fp.contractNo));

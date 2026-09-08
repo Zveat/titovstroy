@@ -513,13 +513,28 @@ export function buildDateReminders({ objects = [], productions = [] } = {}, { no
 // Все числа — из той же buildAnalytics, что рисует «Аналитику», поэтому сводка
 // в Telegram и экран не могут разойтись.
 export const DIGESTS = Object.freeze([
-  { key: "digest_week", icon: "📈", topic: "digest", kind: "digest", def: true,
-    label: "Сводка за неделю", period: "week", title: "Итоги недели",
+  { key: "digest_week", icon: "📈", topic: "digest", kind: "digest", def: true, money: true,
+    label: "Сводка за неделю — с прибылью", period: "week", title: "Итоги недели",
     when: "по понедельникам, в час сводки (по умолчанию 9:00)",
+    what: "продажи и конверсия ПЛЮС выручка, валовая и чистая прибыль. "
+      + "Только руководству: в общий чат такое слать нельзя" },
+  { key: "digest_month", icon: "📊", topic: "digest", kind: "digest", def: true, money: true,
+    label: "Сводка за месяц — с прибылью", period: "month", title: "Итоги месяца",
+    when: "1-го числа, в час сводки",
+    what: "то же самое за прошедший месяц" },
+  // ТА ЖЕ СВОДКА, НО БЕЗ ДЕНЕГ КОМПАНИИ. Первую версию нельзя было отправить в
+  // общий чат: там валовая и чистая прибыль, а в чате сидит вся команда. Здесь
+  // только то, что отдел продаж и так видит по своей работе — сколько зашло,
+  // посчитали, подписали, на какую сумму и с какой конверсией. Ни выручки, ни
+  // прибыли, ни маржи, ни себестоимости, ни дебиторки. Плюс разрез по
+  // менеджерам: в общем чате это как раз то, ради чего сводку и читают.
+  { key: "digest_sales_week", icon: "🧑‍💼", topic: "digest", kind: "digest", def: true, money: false,
+    label: "Сводка отдела продаж за неделю", period: "week", title: "Отдел продаж — итоги недели",
+    when: "по понедельникам, в час сводки",
     what: "зашло новых, посчитано смет, подписано договоров и на сколько, средний чек, "
-      + "конверсия по шагам, потеряно и почему, выручка, валовая и чистая прибыль" },
-  { key: "digest_month", icon: "📊", topic: "digest", kind: "digest", def: true,
-    label: "Сводка за месяц", period: "month", title: "Итоги месяца",
+      + "конверсия, потери с причинами, разрез по менеджерам. Без прибыли — можно в общий чат" },
+  { key: "digest_sales_month", icon: "🏆", topic: "digest", kind: "digest", def: true, money: false,
+    label: "Сводка отдела продаж за месяц", period: "month", title: "Отдел продаж — итоги месяца",
     when: "1-го числа, в час сводки",
     what: "то же самое за прошедший месяц" },
 ]);
@@ -558,9 +573,28 @@ export function buildDigestMessage(analytics = {}, { key, now = Date.now(), reas
     }
   }
 
-  // Деньги показываем, только если они за период вообще были: строка
-  // «Выручка 0 ₸ · маржа —» в сводке выглядит как поломка, а не как факт.
-  if (Number(fin.income) || Number(fin.expense)) {
+  // РАЗРЕЗ ПО МЕНЕДЖЕРАМ — только в сводке отдела продаж: в общем чате именно
+  // ради него её и читают. В руководительскую не тащим, там своя оптика.
+  if (!meta.money) {
+    const rows = Object.entries(sales.byManager || {})
+      .filter(([, v]) => (v?.objects || 0) > 0 || (v?.signed || 0) > 0)
+      .sort((a, b) => (b[1]?.signedSum || 0) - (a[1]?.signedSum || 0))
+      .slice(0, 10);
+    if (rows.length) {
+      lines.push("");
+      lines.push("<b>По менеджерам</b>");
+      for (const [who, v] of rows) {
+        lines.push(`• ${esc(who)}: зашло ${v.objects || 0}, подписано <b>${v.signed || 0}</b>`
+          + (v.signedSum ? ` на ${tenge(v.signedSum)}` : ""));
+      }
+    }
+  }
+
+  // ДЕНЬГИ КОМПАНИИ — только в руководительской сводке. В сводке отдела продаж
+  // их нет намеренно: её отправляют в общий чат, где сидит вся команда.
+  // Показываем, только если движение вообще было: строка «Выручка 0 ₸ · маржа —»
+  // выглядит как поломка, а не как факт.
+  if (meta.money && (Number(fin.income) || Number(fin.expense))) {
     lines.push("");
     lines.push("<b>Деньги</b>");
     lines.push(`• Выручка: <b>${tenge(fin.income)}</b>`);
