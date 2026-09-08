@@ -145,6 +145,12 @@ export default function App() {
   const [freshInstall, setFreshInstall] = useState(null);   // null — ещё проверяем
   useEffect(() => {
     if (/^#\/(kp|progress)\//.test(typeof window !== "undefined" ? (window.location.hash || "") : "")) return;
+    // Спрашиваем, ТОЛЬКО когда собираемся показать вход. Если сессия уже есть,
+    // база заведомо не пустая — а лишний запрос летел бы на каждой загрузке и
+    // возвращал 401: список сотрудников закрыт от анонима, и до входа читать его
+    // нечем. Ошибка была безобидной (см. ниже), но красная строка в консоли на
+    // каждом открытии прячет настоящие проблемы.
+    if (currentUser) { setFreshInstall(false); return; }
     let alive = true;
     (async () => {
       const res = await storage.getResult(USERS_KEY);
@@ -154,7 +160,7 @@ export default function App() {
       if (alive) setFreshInstall(res.status === "empty");
     })();
     return () => { alive = false; };
-  }, []);
+  }, [currentUser]);
 
   // Публичная страница КП по ссылке #/kp/<id> — открывается без входа
   const _kpId = (() => { const m = (typeof window !== "undefined" ? (window.location.hash || "") : "").match(/^#\/kp\/(.+)$/); return m ? decodeURIComponent(m[1]) : null; })();
