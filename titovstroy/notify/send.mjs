@@ -102,6 +102,10 @@ async function processUpdates(state, users, links) {
     });
   } catch (e) { console.warn("getUpdates:", e.message); return { links, changed: false, lastUpdateId: state.lastUpdateId }; }
 
+  // Что бот увидел — обязательно в лог. Без этого «бот не отвечает» невозможно
+  // разобрать: в логе стояло только «к отправке событий 0», и пришлось ли
+  // сообщение вообще, приходилось выяснять по метке привязки в базе.
+  console.log(`Бот: новых сообщений ${updates.length}`);
   let changed = false;
   let lastUpdateId = Number(state.lastUpdateId) || 0;
   for (const u of updates) {
@@ -115,13 +119,17 @@ async function processUpdates(state, users, links) {
       const code = text.replace(/^\/start\b/, "").trim();
       const user = findUserByCode(users, code);
       if (!user) {
+        console.log(`  /start от ${chatId}: код «${code || "пустой"}» не узнан`);
         await send(chatId, "Не узнал код. Откройте ссылку из Админки TitovStroy: "
           + "«Уведомления» → напротив вашей фамилии кнопка «Подключить».");
         continue;
       }
+      const was = links[user.id]?.chatId ? String(links[user.id].chatId) : "";
       links[user.id] = { chatId, tgName: [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(" ")
         || msg.from?.username || "", ts: Date.now() };
       changed = true;
+      console.log(`  /start: ${user.name || user.login} ← чат ${chatId}`
+        + (was && was !== chatId ? ` (был ${was} — привязка переехала)` : ""));
       const mine = NOTIFY_CATALOG.filter(n => isSubscribed(user, n.key));
       await send(chatId, `Готово, ${esc(user.name || user.login)}. Уведомления TitovStroy подключены.\n\n`
         + (mine.length ? `Буду присылать (${mine.length}):\n`
@@ -135,6 +143,7 @@ async function processUpdates(state, users, links) {
     if (/^\/stop\b/.test(text)) {
       const id = Object.keys(links).find(k => String(links[k]?.chatId) === chatId);
       if (id) { delete links[id]; changed = true; }
+      console.log(`  /stop от ${chatId}${id ? "" : " (привязки не было)"}`);
       await send(chatId, "Отключено. Чтобы вернуть — снова откройте ссылку из Админки.");
       continue;
     }
@@ -142,6 +151,7 @@ async function processUpdates(state, users, links) {
     if (/^\/(chatid|id)\b/.test(text)) {
       // Для общего чата: бота добавляют в группу, он подсказывает её номер,
       // который админ вставляет в Админке. Иначе номер группы взять негде.
+      console.log(`  /id от ${chatId}`);
       await send(chatId, `Номер этого чата:\n<code>${chatId}</code>\n\n`
         + "Скопируйте его целиком, вместе с минусом, и вставьте в TitovStroy → "
         + "Админка → Уведомления → Основное → «Номер общего чата».");
