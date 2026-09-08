@@ -7,6 +7,7 @@ import { signInAsStaff, storage } from "../cloud/storage.js";
 import { DEFAULT_USERS } from "../constants.js";
 import { SESSION_KEY, USERS_KEY } from "../storageKeys.js";
 import { useBrand } from "../brand.js";
+import { BrandMark } from "../ui/BrandMark.jsx";
 
 // ─── ЭКРАН ВХОДА ─────────────────────────────────────────────────────────────
 export function LoginScreen({ onLogin, notice = "" }) {
@@ -123,9 +124,11 @@ export function LoginScreen({ onLogin, notice = "" }) {
       <div style={{width:"100%",maxWidth:380}}>
         {/* Лого */}
         <div style={{textAlign:"center",marginBottom:32}}>
-          <div style={{width:56,height:56,borderRadius:8,background:"#2563eb",display:"inline-flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:26,color:"#f3f4f6",marginBottom:12}}>T</div>
+          <BrandMark brand={brand} size={56} radius={8} font={26} style={{marginBottom:12, display:"inline-flex"}} />
           <div style={{fontWeight:900,fontSize:22,color:"#0f172a",letterSpacing:.3}}>{brand.name}</div>
-          <div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>Система расчёта смет · Вход</div>
+          {/* Было «Система расчёта смет» — сервис давно не только сметы, да и у
+              второй компании подпись своя. Берём из настроек оформления. */}
+          <div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>{brand.appTitle} · Вход</div>
         </div>
 
         {/* Форма */}
