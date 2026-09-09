@@ -5334,6 +5334,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             justify-content:flex-start!important}
           .doc-card-btns button{padding:5px 8px!important;font-size:11px!important}
         }
+        /* ПОЛЯ НА ТЕЛЕФОНЕ — 16px, И ЭТО НЕ ПРО КРАСОТУ.
+           Safari на айфоне САМ увеличивает страницу, когда встаёшь в поле со шрифтом меньше
+           16px, и обратно НЕ уменьшает: дальше листаешь уже перекошенный экран и жмёшь мимо.
+           Замер на боевой: в карточке объекта таких полей 18, в редакторе сметы 5 (12-14px).
+           Ровно отсюда ощущение «мобилка кривая и глючит».
+           Флажки и переключатели не трогаем: у них размер задан явно, шрифт им ни к чему. */
+        @media(max-width:700px){
+          input:not([type=checkbox]):not([type=radio]), select, textarea, .fi{font-size:16px!important}
+        }
         @media(max-width:700px){
           .sidebar{display:none!important}
           /* max(): полоса предупреждений сама уже включает вырез сверху, поэтому
