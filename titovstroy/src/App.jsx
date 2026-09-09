@@ -1013,6 +1013,22 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [dealFilterStatus, setDealFilterStatus] = useState("");
   const [dealReturnId, setDealReturnId] = useState(null);
   const [contractClientsTab, setContractClientsTab] = useState("list");
+  // ── ПЕРЕШЛИ НА ДРУГОЙ ЭКРАН — ПОКАЗЫВАЕМ ЕГО С НАЧАЛА ──
+  // Страница у нас одна и браузер её не перезагружает, поэтому прокрутка остаётся от прежнего
+  // экрана. Пролистал список объектов до середины, ткнул в объект — и карточка открывается не
+  // с шапки, а с блока «Связь», и надо мотать вверх руками. То же самое было при переходе на
+  // любой другой раздел и при переключении вкладок внутри карточки.
+  //
+  // Дёргаем ТОЛЬКО на смене экрана, вкладки или открытой карточки — не на каждом изменении
+  // состояния: иначе страница прыгала бы вверх от смены фильтра или правки поля.
+  //
+  // ВАЖНО про место: массив зависимостей собирается во время отрисовки, поэтому эффект обязан
+  // стоять ПОСЛЕ объявления всех этих состояний. Поднимешь выше — приложение упадёт белым
+  // экраном ещё до первой отрисовки (уже наступали на это).
+  useEffect(() => {
+    try { window.scrollTo({ top: 0, left: 0, behavior: "auto" }); }
+    catch { try { window.scrollTo(0, 0); } catch {} }
+  }, [screen, objectTab, objWsTab, currentObject?.id, contractTab, financeTab, dealTab, contractClientsTab]);
   const [sideCollapsed, setSideCollapsed] = useState(false);
   const [mobMoreOpen, setMobMoreOpen] = useState(false); // лист «Ещё» нижней панели телефона
   const [stampsBase64, setStampsBase64] = useState({});
