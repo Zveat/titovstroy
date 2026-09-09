@@ -76,6 +76,7 @@ import { LoginScreen } from "./screens/LoginScreen.jsx";
 import { SetupWizard } from "./screens/SetupWizard.jsx";
 import { DangerConfirmModal, confirmTyped } from "./ui/DangerConfirm.jsx";
 import { NumInput, SearchSelect } from "./ui/Inputs.jsx";
+import { currentEntry, fetchLatestEntry, isNewer, shouldCheck } from "./appVersion.js";
 
 const DocumentInstanceEditor = lazy(() => import("./documents/DocumentInstanceEditor.jsx"));
 const DOCUMENT_TEMPLATE_FEATURE = createDocumentTemplateFeaturePolicy();
@@ -5024,12 +5025,43 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
      ложились друг на друга и один текст закрывал другой.
      Теперь все они лежат в одной полосе, встают друг под другом, а высоту
      полосы страница знает как --topbar и на неё отступает. */
+  /* ── ВЫШЛА НОВАЯ ВЕРСИЯ ──────────────────────────────────────────────────
+     На телефоне страница почти никогда не загружается заново: приложение
+     сворачивают и разворачивают. Значит выкаченная правка может не доехать
+     неделями, а человек об этом даже не узнает. Поэтому спрашиваем сервер
+     сами — при запуске и каждый раз, когда приложение возвращается на экран.
+     ПЕРЕЗАГРУЖАЕМ ТОЛЬКО ПО НАЖАТИЮ. Сами — нельзя: экраны в адресе не живут,
+     и перезагрузка выкинула бы человека из открытого объекта на стартовый
+     экран, а недописанное в полях оборвала бы. */
+  const [newVersion, setNewVersion] = useState(false);
+  const versionCheckedAtRef = useRef(0);
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      if (newVersion) return;                                   // уже знаем, спрашивать незачем
+      const now = Date.now();
+      if (!shouldCheck(now, versionCheckedAtRef.current)) return;
+      versionCheckedAtRef.current = now;
+      const latest = await fetchLatestEntry((...a) => fetch(...a));
+      if (alive && isNewer(currentEntry(document), latest)) setNewVersion(true);
+    };
+    const onVisible = () => { if (document.visibilityState === "visible") check(); };
+    check();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      alive = false;
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [newVersion]);
+
   const showReauthBanner = needsReauth;
   const showLoadErrorBanner = loadError && !needsReauth;
   const showEditLockBanner = !editorTab;
   const showSaveFailBanner = saveFails.length > 0;
   const showSyncBanner = !loadError && !needsReauth && !syncBannerHidden && (cloudError || prodUnsyncedN > 0 || dirtyCount > 0 || legacyDirtyN > 0 || deniedN > 0);
-  const anyTopBanner = showReauthBanner || showLoadErrorBanner || showEditLockBanner || showSaveFailBanner || showSyncBanner;
+  const anyTopBanner = showReauthBanner || showLoadErrorBanner || showEditLockBanner || showSaveFailBanner || showSyncBanner || newVersion;
   const topBannerRef = useRef(null);
   const [topBannerH, setTopBannerH] = useState(0);
   /* Высоту меряем, а не считаем: текст переносится на узком экране, и полоса
@@ -5052,7 +5084,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [anyTopBanner, showReauthBanner, showLoadErrorBanner, showEditLockBanner, showSaveFailBanner, showSyncBanner]);
+  }, [anyTopBanner, showReauthBanner, showLoadErrorBanner, showEditLockBanner, showSaveFailBanner, showSyncBanner, newVersion]);
 
   /* ── МАСШТАБ ИНТЕРФЕЙСА ─────────────────────────────────────────────────
      Сервис рисовался под 100% и на большом мониторе выглядит крупно. Раньше
@@ -5090,6 +5122,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         <div style={{pointerEvents:"auto",background:"#b45309",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,flexWrap:"wrap",boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
           🔑 Нужно войти заново — в этом браузере старый вход, база его больше не пускает. Дело НЕ в правах роли и НЕ в интернете. Всё несохранённое осталось на устройстве и уйдёт в базу после входа.
           <button onClick={()=>doLogout()} style={{background:"#fff",color:"#b45309",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Выйти и войти</button>
+        </div>
+      )}
+      {/* Вышла новая версия. Не тревога, поэтому спокойный синий и одна строка:
+          человек дожимает своё дело и обновляется, когда ему удобно. */}
+      {newVersion && (
+        <div style={{pointerEvents:"auto",background:"#1d4ed8",color:"#fff",padding:"9px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,flexWrap:"wrap",boxShadow:"0 2px 8px rgba(0,0,0,.2)"}}>
+          🔄 Вышла новая версия сервиса
+          <button onClick={()=>{ try { window.location.reload(); } catch(e) {} }}
+            style={{background:"#fff",color:"#1d4ed8",border:"none",borderRadius:8,padding:"7px 14px",minHeight:36,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Обновить</button>
         </div>
       )}
       {/* Баннер: данные не загрузились — редактирование опасно */}
