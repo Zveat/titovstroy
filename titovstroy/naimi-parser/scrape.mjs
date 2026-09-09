@@ -26,6 +26,8 @@
 import admin from "firebase-admin";
 import {
   applyPhoneAttempt,
+  assertWritableSize,
+  lastAttemptAt,
   mergeFreshSnapshot,
   parseStoredJson,
   selectPhoneTargets,
@@ -263,7 +265,9 @@ async function readJson(key, empty) {
   return parseStoredJson(snap.val(), { key, empty });
 }
 async function writeJson(key, obj) {
-  await admin.database().ref(fbKey(key)).set(JSON.stringify(obj));
+  const json = JSON.stringify(obj);
+  assertWritableSize(key, json, { items: obj?.items });
+  await admin.database().ref(fbKey(key)).set(json);
 }
 
 // ── Решение «парсить сейчас или нет» по настройкам из базы ─────────────────────
@@ -295,7 +299,9 @@ function decideRun(cfg) {
   if (forced)                        return { run: true, reason: "форс FORCE_NAIMI", runNow };
   if (runNowPending)                 return { run: true, reason: "кнопка «Обновить сейчас» в CRM", runNow };
   if (freq === "off")                return { run: false, reason: "обновление выключено в настройках", runNow };
-  const sinceLast = Date.now() - (Number(cfg.lastRunAt) || 0);
+  // ОТ ПОПЫТКИ, А НЕ ОТ УСПЕХА (см. lastAttemptAt в parsercore.mjs). Упавший прогон иначе
+  // повторяется на каждом заходе внешнего крона и каждый раз читает базу мастеров целиком.
+  const sinceLast = Date.now() - lastAttemptAt(cfg);
   // HARVEST: пока есть непокрытые номера И harvest не «сдался» (мало пустых прогонов подряд) —
   // собираем каждые ~2ч. Один-два 0-прогона (окно лимита) НЕ выключают harvest, в отличие от старой
   // логики. Выключается только после NAIMI_ZERO_GIVEUP подряд пустых (реально всё выбрано/аккаунт лёг).
@@ -337,6 +343,18 @@ function decideRun(cfg) {
               (NAIMI_SESSION ? " (сессия задана)" : " (без сессии — телефоны пропускаются)"));
 
   // 2) уже собранное → мержим (телефоны и история не теряются)
+  // ОТМЕТКА О ПОПЫТКЕ — ДО чтения базы мастеров (это мегабайты) и до обхода найми. Упадём —
+  // следующий заход придёт по обычному зазору, а не через полчаса на том же месте.
+  // Кнопка «Обновить сейчас» этот зазор не трогает: она идёт по runNow.
+  try {
+    const mark = await readJson(CONFIG_KEY, {});
+    mark.lastTryAt = Date.now();
+    if (decision.runNow) mark.lastRunNow = decision.runNow;
+    await writeJson(CONFIG_KEY, mark);
+  } catch (e) {
+    console.warn("не удалось отметить попытку в настройках:", e.message);
+  }
+
   const existingDoc = await readJson(MASTERS_KEY, { items: [] });
   if (!existingDoc || typeof existingDoc !== "object" || Array.isArray(existingDoc) || !Array.isArray(existingDoc.items)) {
     throw new Error(`${MASTERS_KEY}: ожидался объект с массивом items; запись остановлена`);

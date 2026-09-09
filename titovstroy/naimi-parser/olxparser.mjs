@@ -25,7 +25,9 @@ import admin from "firebase-admin";
 import {
   OLX_REPAIR_CATEGORIES,
   applyPhoneAttempt,
+  assertWritableSize,
   expandOlxCategoryIds,
+  lastAttemptAt,
   mergeFreshSnapshot,
   parseStoredJson,
   selectPhoneTargets,
@@ -239,7 +241,11 @@ async function readJson(key, empty) {
   const value = (await admin.database().ref(fbKey(key)).get()).val();
   return parseStoredJson(value, { key, empty });
 }
-const writeJson = (key, obj) => admin.database().ref(fbKey(key)).set(JSON.stringify(obj));
+const writeJson = (key, obj) => {
+  const json = JSON.stringify(obj);
+  assertWritableSize(key, json, { items: obj?.items });
+  return admin.database().ref(fbKey(key)).set(json);
+};
 
 const INTERVALS = { daily: 22 * 3600e3, twice: 11 * 3600e3, weekly: 6.5 * 24 * 3600e3 };
 // DRAIN-режим: телефоны OLX упираются в анти-бот лимит IP (~15-20 за прогон), но между
@@ -268,7 +274,9 @@ function decideRun(cfg) {
   if (env("FORCE_OLX", "") === "1") return { run: true, mode: "full", reason: "форс FORCE_OLX", runNow };
   if (runNow > (Number(cfg.lastRunNow) || 0)) return { run: true, mode: "full", reason: "«Обновить сейчас»", runNow };
   if (freq === "off") return { run: false, mode: "skip", reason: "выключено", runNow };
-  const sinceLast = Date.now() - (Number(cfg.lastRunAt) || 0);
+  // ОТ ПОПЫТКИ, А НЕ ОТ УСПЕХА (см. lastAttemptAt в parsercore.mjs). Иначе упавший обход
+  // повторяется каждые полчаса и каждый раз читает базу мастеров целиком.
+  const sinceLast = Date.now() - lastAttemptAt(cfg);
   const pending = Number(cfg.lastPendingPhone) || 0;
   const progressed = cfg.lastGotPhones == null || Number(cfg.lastGotPhones) > 0; // null = ещё не мерили
   const iv = INTERVALS[freq] || INTERVALS.daily;
@@ -409,6 +417,19 @@ async function collectPhones(targets, save) {
     return;
   }
 
+  // ОТМЕТКА О ПОПЫТКЕ — ДО дорогой части, а не после неё.
+  // Ниже идёт чтение базы мастеров целиком (это мегабайты) и обход каталога. Если что-то из
+  // этого упадёт, lastRunAt не запишется, а lastTryAt уже стоит — и внешний крон, который
+  // дёргает воркфлоу каждые полчаса, не начнёт то же самое заново через тридцать минут.
+  // Кнопка «Обновить сейчас» этот зазор не трогает: она идёт по runNow.
+  try {
+    const mark = await readJson(CONFIG_KEY, {});
+    mark.lastTryAt = Date.now();
+    if (decision.runNow) mark.lastRunNow = decision.runNow;
+    await writeJson(CONFIG_KEY, mark);
+  } catch (e) {
+    console.warn("не удалось отметить попытку в настройках:", e.message);
+  }
 
   // уже собранное → мержим (телефоны не теряем)
   const existingDoc = await readJson(MASTERS_KEY, { items: [] });

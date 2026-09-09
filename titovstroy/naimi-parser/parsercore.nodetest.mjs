@@ -5,7 +5,9 @@ import {
   OLX_REPAIR_CATEGORIES,
   applyPhoneAttempt,
   applyPhoneResults,
+  assertWritableSize,
   buildPhoneQueue,
+  lastAttemptAt,
   phoneQueueKey,
   queueRowFromTarget,
   queueRowToTarget,
@@ -216,4 +218,51 @@ test("мусор вместо результатов ничего не лома�
 test("ключ записи совпадает с тем, по которому склеивается снимок", () => {
   assert.equal(phoneQueueKey({ source: "olx", extId: "u9" }), "olx:u9");
   assert.equal(phoneQueueKey(null), ":");
+});
+
+// ── ЗАЗОР СЧИТАЕТСЯ ОТ ПОПЫТКИ, А НЕ ОТ УСПЕХА ───────────────────────────────
+// Ради этого всё и делалось: упавший прогон не должен повторяться каждые полчаса.
+test("зазор считается от последней попытки, даже если она не удалась", () => {
+  const t = Date.parse("2026-09-09T06:00:00.000Z");
+  assert.equal(lastAttemptAt({ lastRunAt: t }), t, "успех считается попыткой");
+  assert.equal(lastAttemptAt({ lastTryAt: t }), t, "неудачная попытка тоже считается");
+  assert.equal(lastAttemptAt({ lastRunAt: t - DAY, lastTryAt: t }), t, "берём позднейшее");
+  assert.equal(lastAttemptAt({ lastRunAt: t, lastTryAt: t - DAY }), t, "и в обратном порядке");
+});
+
+test("без отметок зазор считается с нуля — первый прогон не блокируется", () => {
+  assert.equal(lastAttemptAt({}), 0);
+  assert.equal(lastAttemptAt(null), 0);
+  assert.equal(lastAttemptAt({ lastRunAt: "мусор", lastTryAt: null }), 0);
+});
+
+// ── ПРЕДЕЛ ЗНАЧЕНИЯ FIREBASE ─────────────────────────────────────────────────
+test("список в пределах лимита пишется как раньше", () => {
+  const json = JSON.stringify({ items: [{ extId: "a" }] });
+  assert.equal(assertWritableSize("узел", json), Buffer.byteLength(json, "utf8"));
+});
+
+test("переросший список не пишется, а объясняет почему", () => {
+  const items = [
+    { extId: "a", active: true, phone: "77010000000" },
+    { extId: "b", active: false, phone: "" },
+    { extId: "c", active: false, phone: "77020000000" },
+  ];
+  assert.throws(
+    () => assertWritableSize("titovstroy_masters_olx", "x".repeat(120), { limit: 100, items }),
+    (e) => {
+      assert.match(e.message, /titovstroy_masters_olx/);
+      assert.match(e.message, /не помещается в базу/);
+      assert.match(e.message, /Записей 3: активных 1, пропавших 2, с телефоном 2/);
+      assert.match(e.message, /Ничего не записано/);
+      return true;
+    },
+  );
+});
+
+test("размер считается в байтах, а не в символах — кириллица весит вдвое", () => {
+  const json = JSON.stringify({ n: "яяяяяяяяяя" });   // 10 букв = 20 байт
+  assert.equal(Buffer.byteLength(json, "utf8"), json.length + 10);
+  assert.throws(() => assertWritableSize("узел", json, { limit: json.length }));
+  assert.doesNotThrow(() => assertWritableSize("узел", json, { limit: json.length + 10 }));
 });
