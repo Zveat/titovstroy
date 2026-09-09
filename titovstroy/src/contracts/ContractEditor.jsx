@@ -397,12 +397,34 @@ export function ContractEditor({ contract, clients, contragents, onUpdate, onBac
       {/* Работы — только для ремонта и приложений */}
       {hasWorks && <div>
         <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",marginBottom:8}}>РАБОТЫ ({(contract.works||[]).length})</div>
+        {/* СТРОКА РАБОТЫ НА ТЕЛЕФОНЕ — В ДВА ЭТАЖА.
+            Шесть колонок десктопа держат под цифры 70+55+80+80+30 = 315px жёстко, плюс
+            зазоры. На экране 390px до колонки «Наименование» доходил ОДИН пиксель:
+            поле с названием работы физически было, но шириной в волосок, и править
+            название с телефона было нельзя вообще (замерено на боевом договоре
+            №1033). Поэтому на узком экране название занимает свою строку целиком,
+            а цифры выстраиваются под ней вторым этажом.
+            Шапка живёт по тому же правилу, поэтому подписи стоят ровно над своими
+            значениями, а не над соседними. */}
+        <style>{`
+          @media(max-width:700px){
+            .ce-wth,.ce-wrow{grid-template-columns:62px 50px minmax(0,1fr) minmax(0,1fr) 26px!important;
+              gap:4px!important;row-gap:6px!important}
+            .ce-wth>:first-child,.ce-wrow>:first-child{grid-column:1 / -1!important}
+            .ce-wrow>:last-child{min-height:36px}
+            /* Подвал таблицы: кнопка, скидка и итог в одну строку на 390px не влезают —
+               кнопка ломается на два слова, а у итога знак ₸ отрывается на свою строку.
+               Разрешаем перенос: кнопка сверху, скидка с итогом под ней. */
+            .ce-wfoot{flex-wrap:wrap!important;gap:10px!important}
+            .ce-wfoot>:last-child{flex:1 1 100%!important;justify-content:space-between!important}
+          }
+        `}</style>
         <div style={{background:"#f8fafc",borderRadius:8,overflow:"hidden",border:"1px solid #e2e8f0"}}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 70px 55px 80px 80px 30px",padding:"8px 12px",background:"#f8fafc",fontSize:10,color:"#94a3b8",fontWeight:700}}>
+          <div className="ce-wth" style={{display:"grid",gridTemplateColumns:"1fr 70px 55px 80px 80px 30px",padding:"8px 12px",background:"#f8fafc",fontSize:10,color:"#94a3b8",fontWeight:700}}>
             <span>НАИМЕНОВАНИЕ</span><span style={{textAlign:"center"}}>КОЛ-ВО</span><span style={{textAlign:"center"}}>ЕД.</span><span style={{textAlign:"right"}}>ЦЕНА</span><span style={{textAlign:"right"}}>СУММА</span><span/>
           </div>
           {(contract.works||[]).map((w,i)=>(
-            <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 70px 55px 80px 80px 30px",gap:4,padding:"6px 12px",borderTop:"1px solid #e2e8f0",alignItems:"center"}}>
+            <div key={i} className="ce-wrow" style={{display:"grid",gridTemplateColumns:"1fr 70px 55px 80px 80px 30px",gap:4,padding:"6px 12px",borderTop:"1px solid #e2e8f0",alignItems:"center"}}>
               <input value={w.name||""} onChange={e=>{const ws=[...(contract.works||[])];ws[i]={...ws[i],name:e.target.value};upd({works:ws});}}
                 style={{background:"transparent",border:"none",color:"#0f172a",fontSize:12,fontFamily:"inherit",padding:0,outline:"none",width:"100%"}}/>
               <input type="number" value={w.quantity||""} onChange={e=>{const ws=[...(contract.works||[])];ws[i]={...ws[i],quantity:parseFloat(e.target.value)||0};upd({works:ws});}}
@@ -416,7 +438,7 @@ export function ContractEditor({ contract, clients, contragents, onUpdate, onBac
                 style={{background:"none",border:"none",color:"#dc2626",cursor:"pointer",fontSize:14,padding:0}}>✕</button>
             </div>
           ))}
-          <div style={{padding:"8px 12px",borderTop:"1px solid #e2e8f0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div className="ce-wfoot" style={{padding:"8px 12px",borderTop:"1px solid #e2e8f0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <button onClick={()=>upd({works:[...(contract.works||[]),{name:"",quantity:0,unit:"м²",price:0}]})}
               className="btn btn-g" style={{fontSize:11,padding:"5px 12px"}}>
               + Добавить позицию
