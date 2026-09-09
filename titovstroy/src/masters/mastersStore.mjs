@@ -30,14 +30,15 @@ export const infoKey = (base) => `${base}-info`;
 // молча слиться в одного — это ровно та потеря данных, которой быть не должно. Поэтому
 // кодируем: разрешённые символы остаются как есть, остальные превращаются в «-» плюс код
 // символа. Дефис сам по себе тоже кодируется, поэтому обратной неоднозначности нет.
-export function recordKey(item) {
-  const raw = `${item?.source || ""}:${item?.extId || ""}`;
+export function childName(text) {
   let out = "";
-  for (const ch of raw) {
+  for (const ch of String(text ?? "")) {
     out += /[A-Za-z0-9_]/.test(ch) ? ch : `-${ch.codePointAt(0).toString(16).padStart(4, "0")}`;
   }
   return out;
 }
+
+export const recordKey = (item) => childName(`${item?.source || ""}:${item?.extId || ""}`);
 
 // Запись без источника или идентификатора склеить не с чем: у неё нет имени узла, и при
 // следующем обходе она превратилась бы в дубль. Такие пропускаем — их и раньше отбрасывал

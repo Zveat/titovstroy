@@ -33,12 +33,15 @@ import {
   selectPhoneTargets,
   buildPhoneQueue,
   queueRowToTarget,
-  queueRowFromTarget,
   applyPhoneResults,
-  phoneQueueKey,
+  decodePhoneResults,
+  encodePhoneResults,
+  overlayPhoneResults,
+  shardRows,
 } from "./parsercore.mjs";
 import {
   buildInfo,
+  childName,
   changedRecords,
   chunkRecords,
   decodeRecords,
@@ -80,6 +83,21 @@ const MASTERS_KEY   = env("OLX_MASTERS_KEY", "titovstroy-masters-olx");
 // телефонами читает только их (сотни килобайт), а не всю базу мастеров (мегабайты).
 const PHONE_QUEUE_KEY   = MASTERS_KEY + "-phoneq";
 const PHONE_RESULTS_KEY = MASTERS_KEY + "-phones";
+const PHONE_RUNS_KEY    = MASTERS_KEY + "-phoneruns";      // отметка последнего захода, по одной на поток
+
+// ── СБОР НОМЕРОВ В НЕСКОЛЬКО ПОТОКОВ ─────────────────────────────────────────
+// Телефоны OLX отдаёт без логина — аккаунта там нет, лимит держится на IP. С одного адреса
+// проходит ~19 номеров, дальше HTTP 400 и адрес молчит минимум минут семь. Зато каждое
+// задание GitHub Actions поднимается на своей машине со своим адресом: три задания — три
+// независимых лимита. OLX_PHONE_SHARD говорит заданию, какой кусок очереди его.
+//   не задан  — обычный заход, как раньше (одним потоком);
+//   0..N-1    — заход-поток: берёт свой кусок очереди и НИЧЕГО больше не делает.
+// OLX_PHONES_OFF ставится на задании полного обхода, когда номера собирают потоки: иначе
+// обход дёргал бы OLX параллельно с ними и сам себе выедал лимит.
+const PHONE_SHARD  = num("OLX_PHONE_SHARD", -1);
+const PHONE_SHARDS = num("OLX_PHONE_SHARDS", 1);
+const IS_SHARD     = PHONE_SHARD >= 0 && PHONE_SHARDS > 1;
+const PHONES_OFF   = env("OLX_PHONES_OFF", "") === "1";
 const CONFIG_KEY    = "titovstroy-masters-olx-config";
 const EVENT         = env("EVENT_NAME", "");
 
@@ -292,6 +310,36 @@ async function readMasters() {
   return merged;
 }
 
+// Отметка последнего телефонного захода — по одной на поток. Общие настройки для этого не
+// годятся: они лежат одной строкой, и потоки, записывая её одновременно, затирали бы друг друга.
+const phoneRunRef = () => admin.database().ref(`${fbKey(PHONE_RUNS_KEY)}/${IS_SHARD ? PHONE_SHARD : "main"}`);
+async function readPhoneRun() {
+  const raw = (await phoneRunRef().get()).val();
+  return parseStoredJson(raw, { key: PHONE_RUNS_KEY, empty: {} }) || {};
+}
+const markPhoneRun = (got, err) =>
+  phoneRunRef().set(JSON.stringify({ at: Date.now(), got, err: String(err || "").slice(0, 200) }));
+
+// СОБРАННЫЕ НОМЕРА — ПО ОДНОМУ УЗЛУ НА МАСТЕРА. Одной строкой три потока затёрли бы друг
+// друга: каждый записал бы целиком свою картину, осталась бы картина последнего.
+async function readPhoneResults() {
+  const node = (await admin.database().ref(fbKey(PHONE_RESULTS_KEY)).get()).val();
+  return decodePhoneResults(typeof node === "string" ? parseStoredJson(node, { key: PHONE_RESULTS_KEY, empty: {} }) : node);
+}
+const savePhoneResults = (results) => {
+  const patch = encodePhoneResults(results);
+  if (!Object.keys(patch).length) return Promise.resolve();
+  return admin.database().ref(fbKey(PHONE_RESULTS_KEY)).update(patch);
+};
+// Забираем ТОЛЬКО то, что прочитали. Полный обход и потоки работают одновременно, и если
+// вычистить узел целиком, пропадёт то, что поток дописал между чтением и очисткой.
+const dropPhoneResults = (keys) => {
+  const patch = {};
+  for (const key of keys) patch[childName(key)] = null;
+  if (!Object.keys(patch).length) return Promise.resolve();
+  return admin.database().ref(fbKey(PHONE_RESULTS_KEY)).update(patch);
+};
+
 async function saveMasters(items, extra) {
   const next = encodeRecords(items);
   // НИ ОДНА ЗАПИСЬ НЕ ДОЛЖНА ИСЧЕЗНУТЬ. Пропавшие объявления помечаются active:false и
@@ -405,7 +453,22 @@ async function collectPhones(targets, save) {
 (async () => {
   initFb();
   const cfg = await readJson(CONFIG_KEY, {});
-  const decision = decideRun(cfg);
+  // Заход-поток решает за себя сам: у него свой зазор и своя отметка. Расписание полного
+  // обхода и кнопка «Обновить сейчас» его не касаются — он только добирает номера.
+  let decision;
+  if (IS_SHARD) {
+    const since = Date.now() - (Number((await readPhoneRun()).at) || 0);
+    decision = since >= DRAIN_GAP_MS
+      ? { run: true, mode: "phones", reason: `поток ${PHONE_SHARD + 1} из ${PHONE_SHARDS} — добор номеров`, runNow: 0 }
+      : { run: false, mode: "skip", reason: `поток ${PHONE_SHARD + 1}: прошло ${Math.round(since / 60e3)} мин из ${Math.round(DRAIN_GAP_MS / 60e3)}`, runNow: 0 };
+  } else {
+    decision = decideRun(cfg);
+    // Когда номера собирают отдельные потоки, обычный заход за ними не идёт: иначе он
+    // дёргал бы OLX параллельно с ними и сам себе выедал лимит.
+    if (PHONES_OFF && decision.mode === "phones") {
+      decision = { ...decision, run: false, mode: "skip", reason: "номера собирают отдельные потоки" };
+    }
+  }
   console.log(`OLX · freq=${cfg.frequency || "—"}, lastRunAt=${cfg.lastRunAt || 0}, runNow=${decision.runNow}/${cfg.lastRunNow || 0}`);
   console.log(`решение: ${decision.run ? "ЗАПУСК" : "ПРОПУСК"} — ${decision.reason}`);
   if (!decision.run) { await admin.app().delete(); return; }
@@ -427,25 +490,31 @@ async function collectPhones(targets, save) {
   // Базу мастеров не читаем ВООБЩЕ — ради этого всё и затевалось. Берём компактную очередь
   // (её выложил прошлый полный обход), добираем порцию номеров и складываем собранное
   // отдельным маленьким узлом. Полный обход внесёт номера в базу и пересоберёт очередь.
+  //
+  // ОЧЕРЕДЬ ЗДЕСЬ БОЛЬШЕ НЕ ПЕРЕПИСЫВАЕТСЯ. Раньше заход укладывал её заново — и два потока
+  // затёрли бы работу друг друга. Теперь состояние попыток живёт в собранном, а очередь
+  // читается вместе с ним (overlayPhoneResults): у кого номер уже есть — тот выбывает,
+  // остальным подставляется последняя попытка. Пересобирает очередь только полный обход.
   if (decision.mode === "phones") {
     const queueRaw = await readJson(PHONE_QUEUE_KEY, []);
-    const rows = Array.isArray(queueRaw) ? queueRaw : [];
-    if (!rows.length) {
+    const stored = Array.isArray(queueRaw) ? queueRaw : [];
+    const known = await readPhoneResults();
+    const rows = overlayPhoneResults(stored, known);
+    const mine = shardRows(rows, PHONE_SHARD, PHONE_SHARDS);
+    if (!mine.length) {
       // Очереди нет (первый запуск после обновления) — ждём ближайшего полного обхода,
       // он её и выложит. Отмечаемся, чтобы не долбиться каждые полчаса впустую.
-      console.log("очередь номеров пуста — ждём полного обхода, он её соберёт");
-      const c = await readJson(CONFIG_KEY, {});
-      c.lastPhoneRunAt = Date.now();
-      await writeJson(CONFIG_KEY, c);
+      console.log(rows.length ? "в моём куске очереди пусто" : "очередь номеров пуста — ждём полного обхода, он её соберёт");
+      await markPhoneRun(0, "");
       await admin.app().delete();
       return;
     }
-    const targets = selectPhoneTargets(rows.map(queueRowToTarget), {
+    const targets = selectPhoneTargets(mine.map(queueRowToTarget), {
       limit: Math.min(Math.max(0, phonesPerRun), PHONES_HARD_CAP),
     });
-    console.log(`очередь: ${rows.length} кандидатов, цель ${targets.length} (без чтения базы мастеров)`);
-    const results = (await readJson(PHONE_RESULTS_KEY, {})) || {};
-    const byKey = new Map(targets.map(t => [t.key, t]));
+    console.log(`очередь: ${rows.length} кандидатов${IS_SHARD ? `, мой кусок ${PHONE_SHARD + 1} из ${PHONE_SHARDS} — ${mine.length}` : ""}`
+      + `, цель ${targets.length} (без чтения базы мастеров)`);
+    const results = {};
     // Состояние попытки складываем в результат: полный обход перенесёт его в базу.
     const harvest = () => {
       for (const t of targets) {
@@ -459,28 +528,25 @@ async function collectPhones(targets, save) {
     };
     const run = await collectPhones(targets, async (got, done) => {
       harvest();
-      await writeJson(PHONE_RESULTS_KEY, results);
+      await savePhoneResults(results);
       console.log(`  … собрано (номеров ${got}/${done})`);
     });
     harvest();
-    // Очередь: у кого номер нашёлся — выбывает, остальным обновляем состояние попытки.
-    const nextQueue = [];
-    for (const row of rows) {
-      const t = byKey.get(row.k);
-      if (!t) { nextQueue.push(row); continue; }          // до него не дошли — оставляем как был
-      if (t.phone) continue;                              // номер получен — из очереди убираем
-      nextQueue.push(queueRowFromTarget({ ...t, key: row.k }));
+    await savePhoneResults(results);
+    const left = rows.filter(r => !results[r.k]?.phone).length;
+    console.log(`✔ добор закончен: номеров ${run.gotPhones}, в очереди осталось ~${left}`);
+    await markPhoneRun(run.gotPhones, run.lastPhoneError);
+    // Общие счётчики трогает только обычный заход: потоки писали бы их одновременно и
+    // затирали друг друга, а по затёртому «собрано 0» drain-режим остановился бы весь.
+    if (!IS_SHARD) {
+      const c = await readJson(CONFIG_KEY, {});
+      c.lastPhoneRunAt = Date.now();                      // lastRunAt НЕ трогаем: срок полного обхода не сдвигается
+      c.lastGotPhones = run.gotPhones;
+      c.lastPendingPhone = left;
+      c.lastPhoneError = run.lastPhoneError;
+      if (decision.runNow) c.lastRunNow = decision.runNow;
+      await writeJson(CONFIG_KEY, c);
     }
-    await writeJson(PHONE_RESULTS_KEY, results);
-    await writeJson(PHONE_QUEUE_KEY, nextQueue);
-    console.log(`✔ очередь: было ${rows.length}, осталось ${nextQueue.length}; собранных номеров в узле результатов: ${Object.keys(results).length}`);
-    const c = await readJson(CONFIG_KEY, {});
-    c.lastPhoneRunAt = Date.now();                        // lastRunAt НЕ трогаем: срок полного обхода не сдвигается
-    c.lastGotPhones = run.gotPhones;
-    c.lastPendingPhone = nextQueue.length;
-    c.lastPhoneError = run.lastPhoneError;
-    if (decision.runNow) c.lastRunNow = decision.runNow;
-    await writeJson(CONFIG_KEY, c);
     await admin.app().delete();
     return;
   }
@@ -503,14 +569,16 @@ async function collectPhones(targets, save) {
   let existing = await readMasters();
   // Номера, собранные заходами «только номера», лежат отдельным узлом — вносим их в базу
   // и чистим узел. Без этого шага добранные телефоны в CRM бы не появились.
+  // Убираем РОВНО те записи, которые прочитали: потоки работают параллельно с обходом, и
+  // очистка узла целиком стёрла бы то, что они дописали между чтением и очисткой.
   try {
-    const harvested = (await readJson(PHONE_RESULTS_KEY, {})) || {};
+    const harvested = await readPhoneResults();
     const keys = Object.keys(harvested);
     if (keys.length) {
       const merged = applyPhoneResults(existing, harvested);
       existing = merged.items;
       console.log(`внесено собранных номеров: ${merged.applied} из ${keys.length}`);
-      await writeJson(PHONE_RESULTS_KEY, {});
+      await dropPhoneResults(keys);
     }
   } catch (e) { console.warn("не удалось внести собранные номера:", e?.message || e); }
   const freshByUser = new Map();
@@ -564,12 +632,16 @@ async function collectPhones(targets, save) {
   const saved = await saveMasters(all, infoExtra);
   console.log(`✔ список сохранён: записей ${saved.total}, из них записано изменившихся ${saved.written}`);
 
-  // телефоны (открыты, без логина) — приоритет по баллу, с потолком/бюджетом/сохранением
-  const targets = selectPhoneTargets(
+  // телефоны (открыты, без логина) — приоритет по баллу, с потолком/бюджетом/сохранением.
+  // Когда номера собирают отдельные потоки, обход за ними не идёт: у OLX лимит на IP, и
+  // обход выедал бы его у потоков, идущих в это же время. Заодно обход становится короче.
+  const targets = PHONES_OFF ? [] : selectPhoneTargets(
     all.filter(m => m.active !== false && m.hasPhoneFlag && m.offerId),
     { limit: Math.min(Math.max(0, phonesPerRun), PHONES_HARD_CAP) },
   );
-  console.log(`телефоны: цель ${targets.length} (темп ~${Math.round((PHONE_DELAY_MIN + PHONE_DELAY_MAX) / 2000)}с, бюджет ${Math.round(PHONE_BUDGET_MS / 60e3)} мин)`);
+  console.log(PHONES_OFF
+    ? "телефоны: их собирают отдельные потоки — обход за ними не идёт"
+    : `телефоны: цель ${targets.length} (темп ~${Math.round((PHONE_DELAY_MIN + PHONE_DELAY_MAX) / 2000)}с, бюджет ${Math.round(PHONE_BUDGET_MS / 60e3)} мин)`);
   const phoneRun = await collectPhones(targets, async (got, done) => {
     // Сохраняются только те записи, у которых номер только что появился, — это десятки узлов,
     // а не весь список заново. Раньше каждое такое сохранение перезаливало мегабайты.
@@ -596,9 +668,11 @@ async function collectPhones(targets, save) {
   fresh.lastCount = info.count; fresh.lastWithPhone = info.withPhone;
   fresh.lastActiveCount = info.activeCount;
   fresh.lastPendingPhone = info.pendingPhone;
-  fresh.lastGotPhones = gotPhones;            // прогресс за прогон — по нему drain решает, гнать ли дальше
+  // Прогресс за прогон — по нему drain решает, гнать ли дальше. Когда номера собирают потоки,
+  // обход за ними не ходил, и записать сюда свой ноль он не имеет права: это выключило бы
+  // drain у обычного захода, если потоки потом отключат.
+  if (!PHONES_OFF) { fresh.lastGotPhones = gotPhones; fresh.lastPhoneError = lastPhoneError; }
   fresh.lastRunStatus = crawlComplete ? "ok" : "partial";
-  fresh.lastPhoneError = lastPhoneError;
   fresh.availableCategories = OLX_REPAIR_CATEGORIES;
   await writeJson(CONFIG_KEY, fresh);
   console.log(`настройки: lastRunAt обновлён`);

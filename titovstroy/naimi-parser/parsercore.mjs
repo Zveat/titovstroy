@@ -1,4 +1,5 @@
 import { OLX_REPAIR_CATEGORIES } from "../src/masters/catalog.mjs";
+import { childName } from "../src/masters/mastersStore.mjs";
 
 export { OLX_REPAIR_CATEGORIES };
 
@@ -229,4 +230,76 @@ export function applyPhoneResults(items, results) {
     return { ...m, ...patch };
   });
   return { items: out, applied };
+}
+
+// ── СБОР НОМЕРОВ OLX В НЕСКОЛЬКО ПОТОКОВ ─────────────────────────────────────
+//
+// ЗАЧЕМ. Телефоны OLX отдаёт БЕЗ логина, аккаунта там нет вовсе — упирается всё в IP.
+// Замер по логам: с одного адреса проходит ~19 номеров, дальше OLX отвечает HTTP 400
+// («подозрительная активность») и адрес молчит минимум минут семь; долгие паузы внутри
+// прогона его не оживляют. То есть добавить аккаунтов нельзя, а ускорить темп — бессмысленно.
+//
+// Зато КАЖДОЕ задание GitHub Actions поднимается на своей машине со своим адресом. Значит
+// три задания подряд — это три независимых лимита и втрое больше номеров за заход. Ниже —
+// то, что нужно, чтобы они друг другу не мешали.
+
+// Кому какой кусок очереди. Делим по остатку от деления: куски не пересекаются, ни один
+// кандидат не достаётся двоим и ни один не теряется, сколько бы заданий ни было.
+export function shardRows(rows, shard, shards) {
+  const list = Array.isArray(rows) ? rows : [];
+  const n = Number(shards);
+  const i = Number(shard);
+  if (!Number.isFinite(n) || n < 2 || !Number.isFinite(i) || i < 0 || i >= n) return list;
+  return list.filter((_, index) => index % n === i);
+}
+
+// СОБРАННОЕ ХРАНИМ ПО ОДНОМУ УЗЛУ НА МАСТЕРА, а не одной строкой на всех. Одной строкой
+// три задания просто затёрли бы друг друга: каждое записало бы ЦЕЛИКОМ свою картину мира,
+// и осталась бы картина последнего. По узлам они пишут разные ключи и не пересекаются.
+//
+// Имя узла кодируется (childName): в ключе «olx:12345» двоеточие Firebase бы стерпел, но
+// правило про имена узлов в проекте одно, и помнить исключения не нужно.
+export function encodePhoneResults(results) {
+  const out = {};
+  for (const [key, value] of Object.entries(results && typeof results === "object" ? results : {})) {
+    if (!key || !value || typeof value !== "object") continue;
+    out[childName(key)] = JSON.stringify({ k: key, ...value });
+  }
+  return out;
+}
+
+// Читает и новый вид (узлы), и старый (одна строка со всем объектом) — на время перехода
+// в базе может лежать любой из них.
+export function decodePhoneResults(node) {
+  const out = {};
+  if (!node || typeof node !== "object") return out;
+  for (const [name, raw] of Object.entries(node)) {
+    let row = raw;
+    if (typeof raw === "string") { try { row = JSON.parse(raw); } catch { continue; } }
+    if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+    if (row.k) { const { k, ...rest } = row; out[k] = rest; }        // новый вид: ключ внутри
+    else out[name] = row;                                            // старый вид: ключ снаружи
+  }
+  return out;
+}
+
+// ОЧЕРЕДЬ БОЛЬШЕ НЕ ПЕРЕПИСЫВАЕТСЯ ТЕЛЕФОННЫМ ЗАХОДОМ. Раньше он в конце укладывал её заново,
+// и три задания снова затёрли бы друг друга. Вместо этого состояние попыток лежит в собранном,
+// а очередь читается вместе с ним: у кого номер уже есть — тот выбывает, остальным
+// подставляется последняя попытка, чтобы выбор кандидатов работал как раньше.
+// Полный обход по-прежнему пересобирает очередь с нуля.
+export function overlayPhoneResults(rows, results) {
+  const map = results && typeof results === "object" ? results : {};
+  const out = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const done = map[row?.k];
+    if (!done) { out.push(row); continue; }
+    if (done.phone) continue;                                        // номер добыт — из очереди вон
+    const next = { ...row };
+    if (done.phoneCheckedAt) next.c = done.phoneCheckedAt;
+    if (done.phoneStatus) next.s = done.phoneStatus;
+    if (Number(done.phoneAttempts)) next.a = Number(done.phoneAttempts);
+    out.push(next);
+  }
+  return out;
 }

@@ -100,4 +100,44 @@ jobs:
           OLX_REGION_ID: ${{ github.event.inputs.olx_region_id }}
           OLX_CATEGORY_IDS: ${{ github.event.inputs.olx_category_ids }}
           OLX_PHONES_PER_RUN: ${{ github.event.inputs.olx_phones_per_run }}
+          OLX_PHONES_OFF: "1"          # номера собирает задание ниже, тремя потоками
+        run: npm run scrape-olx
+
+  # ── НОМЕРА OLX В ТРИ ПОТОКА ────────────────────────────────────────────────
+  # Телефоны OLX отдаёт БЕЗ логина — аккаунта там нет вовсе, лимит держится на IP. Замер по
+  # логам: с одного адреса проходит ~19 номеров, дальше HTTP 400 «подозрительная активность»,
+  # и адрес молчит минимум минут семь; паузы внутри прогона его не оживляют. То есть ни
+  # аккаунты, ни темп не помогают — упирается всё в адрес.
+  #
+  # Зато КАЖДОЕ задание поднимается на своей машине со своим адресом. Три задания — три
+  # независимых лимита: ~57 номеров за заход вместо 19. Очередь делится по остатку от
+  # деления, куски не пересекаются; собранное пишется по одному узлу на мастера, поэтому
+  # потоки друг друга не затирают. Больше трёх ставить не стоит без замера: адреса раннеров
+  # живут в одних диапазонах, и OLX может считать лимит шире, чем по одному IP.
+  olx_phones:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false               # у одного потока сгорел лимит — остальные работают
+      matrix:
+        shard: [0, 1, 2]
+    defaults:
+      run:
+        working-directory: titovstroy/naimi-parser
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Установка зависимостей
+        run: npm install --no-audit --no-fund
+
+      - name: Добор номеров OLX (поток ${{ matrix.shard }})
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FB_DB_URL: ${{ vars.FB_DB_URL }}
+          EVENT_NAME: ${{ github.event_name }}
+          OLX_PHONE_SHARD: ${{ matrix.shard }}
+          OLX_PHONE_SHARDS: "3"
         run: npm run scrape-olx

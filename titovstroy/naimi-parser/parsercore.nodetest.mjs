@@ -5,6 +5,10 @@ import {
   OLX_REPAIR_CATEGORIES,
   applyPhoneAttempt,
   applyPhoneResults,
+  decodePhoneResults,
+  encodePhoneResults,
+  overlayPhoneResults,
+  shardRows,
   assertWritableSize,
   buildPhoneQueue,
   lastAttemptAt,
@@ -265,4 +269,67 @@ test("размер считается в байтах, а не в символа
   assert.equal(Buffer.byteLength(json, "utf8"), json.length + 10);
   assert.throws(() => assertWritableSize("узел", json, { limit: json.length }));
   assert.doesNotThrow(() => assertWritableSize("узел", json, { limit: json.length + 10 }));
+});
+
+// ── СБОР НОМЕРОВ В НЕСКОЛЬКО ПОТОКОВ ────────────────────────────────────────
+// Смысл: у OLX нет аккаунтов, лимит держится на IP, а каждое задание GitHub — свой IP.
+// Значит три задания дают втрое больше номеров. Проверяем, что они не мешают друг другу.
+
+test("куски очереди не пересекаются и ничего не теряют", () => {
+  const rows = Array.from({ length: 10 }, (_, i) => ({ k: "olx:" + i, o: String(i) }));
+  const parts = [0, 1, 2].map((i) => shardRows(rows, i, 3));
+  assert.deepEqual(parts.map((p) => p.length), [4, 3, 3]);
+  const all = parts.flat().map((r) => r.k).sort();
+  assert.equal(new Set(all).size, 10, "ни один кандидат не достался двоим");
+  assert.deepEqual(all.sort(), rows.map((r) => r.k).sort(), "ни один не потерялся");
+});
+
+test("без деления очередь возвращается целиком", () => {
+  const rows = [{ k: "a" }, { k: "b" }];
+  assert.deepEqual(shardRows(rows, -1, 1), rows);
+  assert.deepEqual(shardRows(rows, 0, 1), rows);
+  // Мусор в настройках не должен молча отрезать половину очереди.
+  assert.deepEqual(shardRows(rows, 5, 3), rows);
+  assert.deepEqual(shardRows(rows, 0, NaN), rows);
+});
+
+test("собранное пишется по узлам — три задания не затирают друг друга", () => {
+  const a = encodePhoneResults({ "olx:1": { phone: "7701", phoneStatus: "found" } });
+  const b = encodePhoneResults({ "olx:2": { phone: "7702", phoneStatus: "found" } });
+  // Разные имена узлов → update() каждого задания трогает только своё.
+  assert.deepEqual(Object.keys(a), ["olx-003a1"]);
+  assert.deepEqual(Object.keys(b), ["olx-003a2"]);
+  const merged = decodePhoneResults({ ...a, ...b });
+  assert.equal(merged["olx:1"].phone, "7701");
+  assert.equal(merged["olx:2"].phone, "7702");
+});
+
+test("старый вид результатов — одна строка на всех — тоже читается", () => {
+  const old = { "olx:1": { phone: "7701" } };            // как лежало до разделения
+  assert.deepEqual(decodePhoneResults(old), old);
+  assert.deepEqual(decodePhoneResults(null), {});
+  assert.deepEqual(decodePhoneResults({ x: "{сломано" }), {});
+});
+
+test("добытый номер выбывает из очереди, недобытому переносится состояние попытки", () => {
+  const rows = [{ k: "olx:1", o: "1" }, { k: "olx:2", o: "2" }, { k: "olx:3", o: "3" }];
+  const next = overlayPhoneResults(rows, {
+    "olx:1": { phone: "77010000000", phoneStatus: "found" },
+    "olx:2": { phone: "", phoneStatus: "unavailable", phoneCheckedAt: "2026-09-09T07:00:00.000Z", phoneAttempts: 2 },
+  });
+  assert.deepEqual(next.map((r) => r.k), ["olx:2", "olx:3"], "первый выбыл — номер есть");
+  assert.equal(next[0].s, "unavailable");
+  assert.equal(next[0].a, 2);
+  assert.equal(next[0].c, "2026-09-09T07:00:00.000Z");
+  assert.deepEqual(next[1], rows[2], "до третьего не дошли — строка как была");
+});
+
+test("состояние попытки доходит до выбора кандидатов — повторно его сегодня не возьмут", () => {
+  const now = Date.parse("2026-09-09T08:00:00.000Z");
+  const rows = overlayPhoneResults(
+    [{ k: "olx:1", o: "1" }, { k: "olx:2", o: "2" }],
+    { "olx:1": { phone: "", phoneStatus: "unavailable", phoneCheckedAt: "2026-09-09T07:00:00.000Z" } },
+  );
+  const picked = selectPhoneTargets(rows.map(queueRowToTarget), { limit: 10, now });
+  assert.deepEqual(picked.map((t) => t.key), ["olx:2"], "проверенного час назад пропускаем");
 });
