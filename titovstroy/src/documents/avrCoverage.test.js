@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { avrCoverage, avrLineKey, coverageLabel, coveredCount, markCoveredLines } from "./avrCoverage.js";
+import { avrCoverage, avrLineKey, coverageLabel, markCoveredLines } from "./avrCoverage.js";
 
 const act = (over = {}) => ({ id: 1, objectId: 10, type: "avr", actNo: "1", lines: [], ...over });
 const estLine = (over = {}) => ({ name: "Штукатурка стен", unit: "м2", qty: 10, price: 3000, included: true, doneQty: 10, ...over });
@@ -47,44 +47,38 @@ describe("что уже ушло в акты", () => {
   });
 });
 
-describe("разметка нового акта", () => {
-  it("сданное целиком снимается с галочки, но со списка не пропадает", () => {
+describe("разметка строк", () => {
+  // ГЛАВНОЕ ПРАВИЛО: пометка и только пометка. Первая версия снимала галочки и подставляла
+  // остаток — владелец на это ответил прямо, что нужна пометка, и всё. Сумма в строке считается
+  // из количества, поэтому обнуление количества стирало сумму с экрана.
+  it("галочка и количество остаются такими, какими были", () => {
     const cov = avrCoverage([act({ lines: [{ name: "Штукатурка стен", unit: "м2", doneQty: 10 }] })], 10);
-    const [line] = markCoveredLines([estLine()], cov);
-    expect(line.included).toBe(false);
-    expect(line.doneQty).toBe(0);
+    const [line] = markCoveredLines([estLine({ included: true, doneQty: 10 })], cov);
+    expect(line.included).toBe(true);
+    expect(line.doneQty).toBe(10);
     expect(line.usedQty).toBe(10);
     expect(line.usedActs).toEqual(["1"]);
+    expect(coverageLabel(line)).toBe("уже сдано · акт №1");
   });
 
-  it("частично сданному подставляется ОСТАТОК — это и есть смысл всей затеи", () => {
+  it("частично сданное подписывается, но количество не меняется", () => {
     const cov = avrCoverage([act({ lines: [{ name: "Штукатурка стен", unit: "м2", doneQty: 4 }] })], 10);
     const [line] = markCoveredLines([estLine()], cov);
-    expect(line.included).toBe(true);
-    expect(line.doneQty).toBe(6);
+    expect(line.doneQty).toBe(10);
+    expect(coverageLabel(line)).toBe("сдано 4 из 10 · акт №1");
   });
 
-  it("не сдававшаяся работа ведёт себя как раньше — отмечена, количество из сметы", () => {
+  it("не сдававшаяся работа остаётся без подписи", () => {
     const [line] = markCoveredLines([estLine()], new Map());
     expect(line.included).toBe(true);
     expect(line.doneQty).toBe(10);
-    expect(line.usedQty).toBe(0);
+    expect(coverageLabel(line)).toBe("");
   });
 
-  it("сдали больше сметы — остаток не уходит в минус", () => {
-    const cov = avrCoverage([act({ lines: [{ name: "Штукатурка стен", unit: "м2", doneQty: 25 }] })], 10);
+  it("сохранённый акт не считает сданными свои же строки", () => {
+    const cov = avrCoverage([act({ id: 7, lines: [{ name: "Штукатурка стен", unit: "м2", doneQty: 10 }] })], 10, { excludeId: 7 });
     const [line] = markCoveredLines([estLine()], cov);
-    expect(line.doneQty).toBe(0);
-    expect(line.included).toBe(false);
-  });
-
-  it("при открытии сохранённого акта галочки и количества НЕ трогаются", () => {
-    // Это выписанный документ, а не черновик: подписываем, но не переписываем.
-    const cov = avrCoverage([act({ id: 2, actNo: "2", lines: [{ name: "Штукатурка стен", unit: "м2", doneQty: 4 }] })], 10);
-    const [line] = markCoveredLines([estLine({ included: true, doneQty: 6 })], cov, { applyDefaults: false });
-    expect(line.included).toBe(true);
-    expect(line.doneQty).toBe(6);
-    expect(line.usedQty).toBe(4);
+    expect(coverageLabel(line)).toBe("");
   });
 });
 
@@ -96,9 +90,9 @@ describe("одна работа в нескольких сметах объек�
   it("сданное разносится по строкам, а не вычитается из каждой", () => {
     const cov = avrCoverage([act({ lines: [{ name: "Штукатурка стен", unit: "м2", doneQty: 90 }] })], 10);
     const [first, second] = markCoveredLines(two(), cov);
-    expect(first.included).toBe(false);          // первые 60 закрыты
-    expect(second.included).toBe(true);          // на вторую пришлось 30
-    expect(second.doneQty).toBe(30);
+    expect(first.usedQty).toBe(60);              // первые 60 закрыты
+    expect(second.usedQty).toBe(30);             // на вторую пришлось 30
+    expect(coverageLabel(first)).toBe("уже сдано · акт №1");
     expect(coverageLabel(second)).toBe("сдано 30 из 60 · акт №1");
   });
 
@@ -107,11 +101,8 @@ describe("одна работа в нескольких сметах объек�
     const [first, second] = markCoveredLines(two(), cov);
     expect(first.usedQty).toBe(60);
     expect(second.usedQty).toBe(0);
-    expect(second.included).toBe(true);          // остаток есть — работа не закрыта
-    expect(second.doneQty).toBe(60);
     // Молчать нельзя: человеку важно знать, что работа в актах уже фигурирует.
     expect(coverageLabel(second)).toBe("есть в акте №1");
-    expect(coveredCount([first, second])).toBe(2);
   });
 
   it("дробные количества не оставляют мусорного хвоста в акте", () => {
@@ -126,15 +117,18 @@ describe("одна работа в нескольких сметах объек�
       estLine({ name: "Ошкуривание стен", unit: "м²", qty: 30 }),
       estLine({ name: "Ошкуривание стен", unit: "м²", qty: 117.64 }),
     ], cov);
-    expect(marked.every((l) => l.included === false)).toBe(true);
-    expect(marked.map((l) => l.doneQty)).toEqual([0, 0]);
+    // Без округления второй строке досталось бы 117.63999999999999 из 117.64 и подпись
+    // соврала бы «сдано частично», хотя сдано всё.
+    expect(marked.map((l) => coverageLabel(l))).toEqual([
+      "уже сдано · акты №2, №3", "уже сдано · акты №2, №3",
+    ]);
   });
 
   it("ручная позиция без количества забирает остаток целиком — делить там нечего", () => {
     const cov = avrCoverage([act({ lines: [{ name: "Закуп материалов", unit: "усл", doneQty: 1 }] })], 10);
     const [line] = markCoveredLines([estLine({ name: "Закуп материалов", unit: "усл", qty: 0 })], cov);
     expect(line.usedQty).toBe(1);
-    expect(line.included).toBe(false);
+    expect(coverageLabel(line)).toBe("уже сдано · акт №1");
   });
 });
 
@@ -156,12 +150,5 @@ describe("подпись у строки", () => {
   it("ничего не сдавалось — подписи нет", () => {
     expect(coverageLabel({ qty: 10, usedQty: 0 })).toBe("");
     expect(coverageLabel(null)).toBe("");
-  });
-});
-
-describe("счётчик для шапки", () => {
-  it("считает строки, которые уже встречались в актах", () => {
-    expect(coveredCount([{ usedQty: 3 }, { usedQty: 0 }, { usedQty: 10 }, {}])).toBe(2);
-    expect(coveredCount(null)).toBe(0);
   });
 });
