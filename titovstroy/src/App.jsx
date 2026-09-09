@@ -10777,13 +10777,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 style={{background:"none",border:"1px solid #e2e8f0",borderRadius:7,padding:"6px 11px",fontSize:11,fontWeight:600,color:visible.length?"#475569":"#cbd5e1",cursor:visible.length?"pointer":"default",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
                 {allOn ? "☐ Снять" : "☑ Выбрать"}{q ? " найденные" : " все"}
               </button>
-              {/* Кнопка, а не автоматика: сам решает, когда оставить только то, чего в актах ещё
-                  не было. Снимает галочки СО ВСЕХ сданных, не только с найденных поиском —
-                  смысл в том, чтобы одним нажатием получить готовый следующий акт. */}
+              {/* Кнопка, а не автоматика: момент выбирает человек. Вид — ровно как у соседней
+                  «Выбрать все»: два спокойных пункта в ряд, а не яркое пятно. Цветом тут
+                  выделять нечего, это не предупреждение, а удобство. Показывается только
+                  когда есть что снимать. */}
               {doneN > 0 && (
                 <button onClick={()=>setAvrModal(p=>({...p, lines:p.lines.map(l=>l.inActs?{...l,included:false}:l)}))}
                   title="Снять галочки с позиций, которые уже уходили в прежние акты — останется только то, чего в актах ещё нет"
-                  style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:7,padding:"6px 11px",fontSize:11,fontWeight:700,color:"#92400e",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
+                  style={{background:"none",border:"1px solid #e2e8f0",borderRadius:7,padding:"6px 11px",fontSize:11,fontWeight:600,color:"#475569",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
                   ☐ Снять сданные ({doneN})
                 </button>
               )}
