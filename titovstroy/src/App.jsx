@@ -12,6 +12,7 @@ import { MASTER_CATEGORIES, NAIMI_CITY_FALLBACK, OLX_REPAIR_CATEGORIES } from ".
 import { SearchMultiSelect, SearchSelect as MasterSearchSelect } from "./masters/MasterSelects.jsx";
 import { parserRunMessage, triggerParserRun } from "./masters/parserTrigger.js";
 import { loadMasters } from "./masters/loadMasters.js";
+import { avrCoverage, coverageLabel, coveredCount, markCoveredLines } from "./documents/avrCoverage.js";
 import { MasterCrmButton, MasterCrmDatabase, MasterCrmEditor } from "./masters/MasterCRM.jsx";
 import { interactionsForContact, masterSourceKey, normalizeMasterCrm } from "./masters/masterCrm.js";
 import { EstimateSuggestions, EstimateSuggestionRulesEditor } from "./estimate/EstimateSuggestions.jsx";
@@ -798,7 +799,8 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   // черновик уходит в сохранение акта, и строка поиска там не нужна. Сбрасывается при открытии
   // и закрытии окна — иначе второй акт открылся бы с чужим фильтром и половиной скрытых работ.
   const [avrSearch, setAvrSearch] = useState("");
-  useEffect(() => { if (!avrModal) setAvrSearch(""); }, [!!avrModal]);
+  const [avrHideDone, setAvrHideDone] = useState(false);   // «Скрыть сданные» в построителе акта
+  useEffect(() => { if (!avrModal) { setAvrSearch(""); setAvrHideDone(false); } }, [!!avrModal]);
   // Реквизиты акта (номер, даты, заказчик, печать) на телефоне занимали почти всё окно, и на
   // список работ оставалась полоска в одну строку. Поэтому блок сворачивается: на узком экране
   // закрыт по умолчанию, на широком открыт — там места хватает и прятать нечего.
@@ -2004,7 +2006,10 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   };
   // Открыть построитель акта по объекту и его смете
   const openAvrBuilder = (obj, est) => {
-    const lines = buildAvrLinesFromEst(est);
+    // Что по этому объекту уже ушло в прежние акты. Сданное целиком снимается с галочки,
+    // частично сданному подставляется остаток — иначе на втором и третьем акте приходится
+    // вспоминать по памяти, что уже сдавал, и это гарантированная ошибка.
+    const lines = markCoveredLines(buildAvrLinesFromEst(est), avrCoverage(reportsRef.current, obj.id));
     if (lines.length === 0) { alert("В этой смете нет позиций с точной ценой для акта."); return; }
     const cons = contractsRef.current.filter(c => c.objectId === obj.id && (c.type || "repair_fiz") !== "annex").sort((a, b) => (b.id || 0) - (a.id || 0));
     const con = cons[0];
@@ -2023,7 +2028,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   // Открыть построитель акта по объекту сразу по ВСЕМ его сметам (основная + доп. сметы/ДС) —
   // кнопка «+ Сформировать АВР» раньше брала только первую (основную) смету объекта.
   const openAvrBuilderAll = (obj, ests) => {
-    const lines = (ests || []).flatMap(e => buildAvrLinesFromEst(e));
+    const lines = markCoveredLines((ests || []).flatMap(e => buildAvrLinesFromEst(e)), avrCoverage(reportsRef.current, obj.id));
     if (lines.length === 0) { alert("В сметах этого объекта нет позиций с точной ценой для акта."); return; }
     const cons = contractsRef.current.filter(c => c.objectId === obj.id && (c.type || "repair_fiz") !== "annex").sort((a, b) => (b.id || 0) - (a.id || 0));
     const con = cons[0];
@@ -10133,7 +10138,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                       style={{background:"#ecfdf5",color:"#059669",border:"1px solid rgba(5,150,105,.25)",borderRadius:4,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>↩ В смету</button>
                                   )}
                                   {accessAllows(currentPermissions.documentEdit, estimatorObjectIds.has(obj.id)) && (
-                                    <button title="Редактировать акт" onClick={()=>{ setAvrSearch(""); setAvrReqOpen(!_narrowScreen()); setAvrModal({ ...r, lines:(r.lines||[]).map(l=>({...l,included:true,doneQty:l.doneQty})) }); }}
+                                    <button title="Редактировать акт" onClick={()=>{ setAvrSearch(""); setAvrReqOpen(!_narrowScreen()); setAvrModal({ ...r, lines: markCoveredLines((r.lines||[]).map(l=>({...l,included:true,doneQty:l.doneQty})), avrCoverage(reportsRef.current, r.objectId, { excludeId: r.id }), { applyDefaults: false }) }); }}
                                       style={{background:"#eff6ff",color:"#2563eb",border:"1px solid rgba(66,133,244,.2)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
                                   )}
                                     {accessAllows(currentPermissions.documentDelete, estimatorObjectIds.has(obj.id)) && (
@@ -10701,9 +10706,13 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         // адресуются по позиции в m.lines, и если отдать им номер из отфильтрованного списка,
         // правка уедет в соседнюю работу. Поэтому visible — пары {l, i} с настоящим i.
         const q = avrSearch.trim().toLowerCase();
+        // Сколько позиций уже уходило в прежние акты — по ним и работает «Скрыть сданные».
+        // Прятать их насовсем нельзя: сдают и сверх сметы, тогда строку возвращают галочкой.
+        const doneN = coveredCount(m.lines);
         const visible = m.lines
           .map((l, i) => ({ l, i }))
-          .filter(({ l }) => !q || `${l.name || ""} ${l.cat || ""} ${l.unit || ""}`.toLowerCase().includes(q));
+          .filter(({ l }) => !q || `${l.name || ""} ${l.cat || ""} ${l.unit || ""}`.toLowerCase().includes(q))
+          .filter(({ l }) => !avrHideDone || !((Number(l.usedQty) || 0) > 0 && !l.included));
         // «Выбрать все» при активном поиске работает по НАЙДЕННЫМ строкам: набрал «демонтаж» —
         // отметил весь демонтаж одной кнопкой. Без фильтра ведёт себя как раньше.
         const scope = q ? visible.map(v => v.l) : m.lines;
@@ -10762,11 +10771,23 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 style={{background:"none",border:"1px solid #e2e8f0",borderRadius:7,padding:"6px 11px",fontSize:11,fontWeight:600,color:visible.length?"#475569":"#cbd5e1",cursor:visible.length?"pointer":"default",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
                 {allOn ? "☐ Снять" : "☑ Выбрать"}{q ? " найденные" : " все"}
               </button>
+              {doneN > 0 && (
+                <button onClick={()=>setAvrHideDone(v=>!v)} title="Позиции, которые целиком ушли в прежние акты"
+                  style={{background:avrHideDone?"#eff6ff":"none",border:"1px solid "+(avrHideDone?"#93c5fd":"#e2e8f0"),borderRadius:7,padding:"6px 11px",fontSize:11,fontWeight:600,color:avrHideDone?"#2563eb":"#475569",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
+                  {avrHideDone ? "👁 Показать сданные" : `🚫 Скрыть сданные (${doneN})`}
+                </button>
+              )}
               <span style={{fontSize:12,color:"#64748b",whiteSpace:"nowrap",flexShrink:0}}>
                 Выбрано: <b>{selected.length}</b> из {m.lines.length}
                 {q && <span style={{color:"#7c3aed",fontWeight:600}}> · найдено {visible.length}</span>}
               </span>
             </div>
+            {doneN > 0 && (
+              <div style={{padding:"7px 20px",background:"#fffbeb",borderBottom:"1px solid #fde68a",fontSize:11.5,color:"#92400e"}}>
+                По этому объекту уже есть акты, и часть работ в них попадала — они подписаны ниже.
+                Сданное целиком снято с галочки, у частично сданного подставлен остаток. Проверьте и поправьте.
+              </div>
+            )}
             {/* minHeight: даже с раскрытыми реквизитами списку остаётся читаемая высота,
                 а не полоска в одну строку (flex-элемент со скроллом иначе сжимается до нуля) */}
             <div style={{overflowY:"auto",flex:1,minHeight:170,padding:"6px 12px",WebkitOverflowScrolling:"touch"}}>
@@ -10785,6 +10806,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     <button title="Удалить строку" onClick={()=>setAvrModal(p=>({...p,lines:p.lines.filter((_,idx)=>idx!==i)}))}
                       style={{background:"none",border:"none",color:"#cbd5e1",cursor:"pointer",fontSize:18,flexShrink:0,lineHeight:1,padding:0}}>×</button>
                   </div>
+                  {coverageLabel(l) && (
+                    // Жёлтая метка — «эта работа уже уходила в акт». Ради неё всё и делалось:
+                    // на третьем акте видно, что сдавал раньше, не поднимая прежние документы.
+                    <div style={{paddingLeft:24,marginBottom:6}}>
+                      <span style={{display:"inline-block",background:"#fffbeb",border:"1px solid #fde68a",color:"#92400e",borderRadius:5,padding:"2px 7px",fontSize:10.5,fontWeight:700}}>
+                        {coverageLabel(l)}
+                      </span>
+                    </div>
+                  )}
                   <div style={{display:"flex",alignItems:"center",gap:7,paddingLeft:24,flexWrap:"wrap"}}>
                     <span style={{fontSize:11,color:"#94a3b8"}}>Кол-во</span>
                     <input type="number" min="0" step="any" value={l.doneQty} disabled={!l.included} onChange={e=>updLine(i,{doneQty:e.target.value})}
