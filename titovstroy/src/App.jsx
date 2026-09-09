@@ -512,7 +512,9 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
         const now = Date.now();
         // Presence — служебный heartbeat, не бизнес-данные. Его временный отказ не должен
         // создавать dirty-черновик и включать общий аварийный баннер смет/финансов.
-        const result = await storage.setCloudOnly(PRESENCE_KEY + "-" + currentUser.id, String(now));
+        // setPresence, а не setCloudOnly: последний проходит через замок редактора, а
+        // наблюдатель замок не захватывает вовсе — у него отметка не обновлялась никогда.
+        const result = await storage.setPresence(PRESENCE_KEY + "-" + currentUser.id, String(now));
         if (!stopped && result?.fbOk) setPresence(p => ({ ...p, [currentUser.id]: now }));
       } catch {}
     };
