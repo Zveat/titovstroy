@@ -32,6 +32,17 @@ import {
   parseStoredJson,
   selectPhoneTargets,
 } from "./parsercore.mjs";
+import {
+  buildInfo,
+  changedRecords,
+  chunkRecords,
+  decodeRecords,
+  droppedRecords,
+  encodeRecords,
+  infoKey,
+  mergeRecords,
+  recordsKey,
+} from "../src/masters/mastersStore.mjs";
 
 const API  = "https://apipub.naimi.kz/app";
 const SITE = "https://naimi.kz";
@@ -270,6 +281,51 @@ async function writeJson(key, obj) {
   await admin.database().ref(fbKey(key)).set(json);
 }
 
+// ── СПРАВОЧНИК: ПО ОДНОЙ ЗАПИСИ НА УЗЕЛ ──────────────────────────────────────
+// Устройство и причина — в src/masters/mastersStore.mjs. Здесь только работа с базой.
+const RECORDS_KEY = recordsKey(MASTERS_KEY);
+const INFO_KEY = infoKey(MASTERS_KEY);
+let savedRecords = {};
+
+async function readMasters() {
+  const children = (await admin.database().ref(fbKey(RECORDS_KEY)).get()).val();
+  const { items, broken } = decodeRecords(children);
+  if (broken) console.warn(`повреждённых записей пропущено: ${broken}`);
+  // Что РЕАЛЬНО лежит в базе. Дочитанное со старого узла сюда не входит намеренно: тогда оно
+  // попадёт в разницу и будет записано.
+  savedRecords = encodeRecords(items);
+
+  const info = await readJson(INFO_KEY, {});
+  if (items.length && info && info.migrated) return items;
+  // Переезд со старого узла. Старый только читаем и не удаляем: пока он на месте, открытая
+  // вкладка со старой версией приложения продолжает показывать последний список.
+  const legacy = await readJson(MASTERS_KEY, null);
+  const rows = Array.isArray(legacy?.items) ? legacy.items : [];
+  const merged = mergeRecords(items, rows);
+  if (merged.length) console.log(`переезд со старого узла ${MASTERS_KEY}: в новом ${items.length},`
+    + ` в старом ${rows.length}, после слияния ${merged.length}`);
+  return merged;
+}
+
+async function saveMasters(items, extra) {
+  const next = encodeRecords(items);
+  // Ни одна запись не должна исчезнуть: пропавшие помечаются active:false и остаются.
+  const dropped = droppedRecords(savedRecords, next);
+  if (dropped.length) {
+    throw new Error(`${RECORDS_KEY}: после слияния пропало записей ${dropped.length}`
+      + ` (${dropped.slice(0, 3).join(", ")}${dropped.length > 3 ? ", …" : ""})`
+      + " — запись остановлена, в базе всё осталось как было");
+  }
+  const changed = changedRecords(savedRecords, next);
+  for (const chunk of chunkRecords(changed)) {
+    await admin.database().ref(fbKey(RECORDS_KEY)).update(chunk);
+  }
+  savedRecords = next;
+  // migrated ставится ТОЛЬКО после того, как все записи доехали (см. readMasters).
+  await writeJson(INFO_KEY, buildInfo(items, { ...extra, migrated: true }));
+  return { written: Object.keys(changed).length, total: items.length };
+}
+
 // ── Решение «парсить сейчас или нет» по настройкам из базы ─────────────────────
 const INTERVALS = { daily: 22 * 3600e3, twice: 11 * 3600e3, weekly: 6.5 * 24 * 3600e3 };
 // HARVEST-режим найми. Лимит найми СКОЛЬЗЯЩИЙ (~5-6 раскрытий в ~час), а на naimi у КАЖДОГО
@@ -355,11 +411,7 @@ function decideRun(cfg) {
     console.warn("не удалось отметить попытку в настройках:", e.message);
   }
 
-  const existingDoc = await readJson(MASTERS_KEY, { items: [] });
-  if (!existingDoc || typeof existingDoc !== "object" || Array.isArray(existingDoc) || !Array.isArray(existingDoc.items)) {
-    throw new Error(`${MASTERS_KEY}: ожидался объект с массивом items; запись остановлена`);
-  }
-  const existing = existingDoc.items;
+  const existing = await readMasters();
   const freshById = new Map();
   console.log(`в базе уже: ${existing.length} мастеров (${existing.filter(m => m.phone).length} с телефоном)`);
 
@@ -409,29 +461,22 @@ function decideRun(cfg) {
   const all = mergeFreshSnapshot(existing, [...freshById.values()], { complete: crawlComplete });
   console.log(`ИТОГО: активных ${all.filter(m => m.active !== false).length}, всего с историей ${all.length}`);
 
-  const buildPayload = () => ({
-    updatedAt: new Date().toISOString(), source: "naimi.kz",
-    count: all.length,
-    activeCount: all.filter(m => m.active !== false).length,
-    withPhone: all.filter(m => m.phone).length,
-    pendingPhone: all.filter(m => m.active !== false && !m.phone).length,
-    crawlComplete,
-    items: all,
-  });
+  const infoExtra = { source: "naimi.kz", crawlComplete };
 
   // 5) СНАЧАЛА сохраняем список (чтобы возможный таймаут на телефонах не потерял данные)
-  await writeJson(MASTERS_KEY, buildPayload());
-  console.log(`✔ список сохранён: ${all.length} мастеров`);
+  const saved = await saveMasters(all, infoExtra);
+  console.log(`✔ список сохранён: записей ${saved.total}, из них записано изменившихся ${saved.written}`);
 
   // 6) телефоны — с промежуточным сохранением и лимитом по времени (только если задана сессия naimi)
   let phoneSummary = { got: 0, done: 0, authError: "" };
-  try { phoneSummary = await fillPhones(all, phonesPerRun, cities[0], () => writeJson(MASTERS_KEY, buildPayload())); }
+  try { phoneSummary = await fillPhones(all, phonesPerRun, cities[0], () => saveMasters(all, infoExtra)); }
   catch (e) { console.warn("этап телефонов:", e.message); phoneSummary.authError = e.message; }
 
   // 7) финальная запись + отметка в настройках (для расписания и кнопки «Обновить сейчас»)
-  const payload = buildPayload();
-  await writeJson(MASTERS_KEY, payload);
-  console.log(`✔ записано ${payload.count} мастеров (с телефоном: ${payload.withPhone}) в ${fbKey(MASTERS_KEY)}`);
+  const done = await saveMasters(all, infoExtra);
+  const payload = buildInfo(all, infoExtra);
+  console.log(`✔ записано ${payload.count} мастеров (с телефоном: ${payload.withPhone}) в ${fbKey(RECORDS_KEY)}`
+    + `, изменившихся на этом шаге ${done.written}`);
 
   const freshCfg = await readJson(CONFIG_KEY, {});
   freshCfg.lastRunAt = Date.now();

@@ -76,8 +76,11 @@ export function exportFilteredMasters(source, masters, crmValue) {
 }
 export function MastersSection({ masters = [], meta = null, loaded = true, config = null, onSaveConfig = null, canManage = false,
   mastersOlx = [], olxMeta = null, olxLoaded = true, olxConfig = null, onSaveOlxConfig = null,
-  crmData = null, onSaveCrm = null, currentUser = null }) {
+  crmData = null, onSaveCrm = null, currentUser = null, onSourceOpen = null }) {
   const [source, setSource] = useState("naimi"); // "naimi" | "olx" | "own"
+  // Справочник качается только по открытому источнику: раньше открывший раздел тянул оба,
+  // а видел один. Своя база («own») в облаке ничего не читает — она лежит в ключе CRM.
+  useEffect(() => { onSourceOpen?.(source); }, [source, onSourceOpen]);
   const [crmTarget, setCrmTarget] = useState(null);
   const [cfgOpen, setCfgOpen] = useState(false);
   const [freq, setFreq] = useState("daily");

@@ -346,6 +346,18 @@ export const _fbRestGet = async (key) => {
     return { ok: true, value: v === null ? null : (typeof v === "string" ? v : JSON.stringify(v)) };
   } catch { return { ok: false }; }
 };
+// То же чтение, но БЕЗ приведения к строке. Нужно для узлов с детьми (справочник мастеров):
+// там ответ — объект из тысяч записей, и JSON.stringify поверх него это лишний проход по
+// мегабайтам ради того, чтобы вызывающий тут же их распарсил обратно.
+export const _fbRestGetRaw = async (key) => {
+  if (!firebaseConfig.databaseURL) return { ok: false };
+  try {
+    const token = await _restToken();
+    const r = await _race(fetch(_restUrl(key, token)), 25000);
+    if (!r || r === _TIMEOUT || !r.ok) return { ok: false };
+    return { ok: true, value: await r.json() };
+  } catch { return { ok: false }; }
+};
 // Согласование локальной («грязной») копии с облаком: для СПИСКОВ записей с id (или
 // objectId — у production-записей нет id, они живут по objectId, см. emptyProduction)
 // объединяем по идентификатору и берём более свежую по updatedAt. Так незасинканная
@@ -468,6 +480,38 @@ export const storage = {
   async get(key) {
     const r = await this.getResult(key);
     return r.status === "found" ? { value: r.value } : null;
+  },
+  // ── ЧТЕНИЕ УЗЛА С ДЕТЬМИ ──
+  // Справочник мастеров лежит по одной записи на узел (зачем — в src/masters/mastersStore.mjs).
+  // От getResult отличается двумя вещами, и обе намеренные:
+  //   1) отдаём ОБЪЕКТ детей, а не строку — иначе тысячи записей пришлось бы склеить в одну
+  //      строку и тут же разобрать обратно;
+  //   2) НЕ трогаем localStorage — справочник весит мегабайты, в квоту браузера он не влезет,
+  //      да и не нужен: приложение его только читает, черновиков тут не бывает.
+  // Статусы те же, что у getResult, и по той же причине: «пусто» и «не смогли прочитать» —
+  // разные вещи, и пустой экран вместо данных из-за моргнувшей сети объяснять нечем.
+  async getChildren(key) {
+    let responded = !_fbDb;
+    try {
+      if (_fbDb) {
+        await _fbAuthReady;
+        // Срок больше обычного: узел может весить мегабайты, а телефон в дороге медленный.
+        const snap = await _race(get(ref(_fbDb, _fbKey(key))), 25000);
+        if (snap !== _TIMEOUT) {
+          const v = snap && snap.exists() ? snap.val() : null;
+          const ok = v && typeof v === "object";
+          return { status: ok ? "found" : "empty", value: ok ? v : null };
+        }
+        responded = false;      // SDK молчит (могли резать WebSocket) — пробуем REST ниже
+      }
+    } catch (e) {
+      console.warn("FB getChildren error:", key, e?.message || e);
+      responded = false;
+    }
+    const rr = await _fbRestGetRaw(key);
+    if (!rr.ok) return { status: responded ? "empty" : "unavailable", value: null };
+    const ok = rr.value && typeof rr.value === "object";
+    return { status: ok ? "found" : "empty", value: ok ? rr.value : null };
   },
   // ── ПОДПИСКА НА КЛЮЧ ──
   // База у нас realtime, но приложение исторически с ней работало как с обычным сервером:

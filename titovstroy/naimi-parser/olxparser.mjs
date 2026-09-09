@@ -37,6 +37,17 @@ import {
   applyPhoneResults,
   phoneQueueKey,
 } from "./parsercore.mjs";
+import {
+  buildInfo,
+  changedRecords,
+  chunkRecords,
+  decodeRecords,
+  droppedRecords,
+  encodeRecords,
+  infoKey,
+  mergeRecords,
+  recordsKey,
+} from "../src/masters/mastersStore.mjs";
 
 // Реакция на ответ телефонного эндпоинта при анти-бот лимите OLX (HTTP 400 «подозрительная
 // активность» на серии быстрых запросов). Вшито сюда, чтобы файл не зависел от parsercore.mjs.
@@ -247,6 +258,63 @@ const writeJson = (key, obj) => {
   return admin.database().ref(fbKey(key)).set(json);
 };
 
+// ── СПРАВОЧНИК: ПО ОДНОЙ ЗАПИСИ НА УЗЕЛ ──────────────────────────────────────
+// Почему так, а не одной строкой — в src/masters/mastersStore.mjs. Здесь только работа с
+// базой: прочитать, перевезти со старого узла и записать ИЗМЕНИВШЕЕСЯ.
+const RECORDS_KEY = recordsKey(MASTERS_KEY);
+const INFO_KEY = infoKey(MASTERS_KEY);
+// Что лежит в базе на данный момент, в закодированном виде. Прогон сохраняется несколько раз
+// (после обхода и по ходу добора номеров), и каждый раз писать надо только разницу.
+let savedRecords = {};
+
+async function readMasters() {
+  const children = (await admin.database().ref(fbKey(RECORDS_KEY)).get()).val();
+  const { items, broken } = decodeRecords(children);
+  if (broken) console.warn(`повреждённых записей пропущено: ${broken}`);
+  // Что РЕАЛЬНО лежит в базе. Дочитанное со старого узла сюда не входит намеренно: тогда оно
+  // попадёт в разницу и будет записано.
+  savedRecords = encodeRecords(items);
+
+  const info = await readJson(INFO_KEY, {});
+  if (items.length && info && info.migrated) {
+    console.log(`в базе уже: ${items.length} записей`);
+    return items;
+  }
+  // ПЕРЕЕЗД СО СТАРОГО УЗЛА. Старый только читаем — он остаётся в базе нетронутым, чтобы
+  // открытая вкладка со старой версией приложения продолжала показывать последний хороший
+  // список. Удалять его — осознанно и руками.
+  const legacy = await readJson(MASTERS_KEY, null);
+  const rows = Array.isArray(legacy?.items) ? legacy.items : [];
+  const merged = mergeRecords(items, rows);
+  if (!merged.length) console.log("справочник пуст — это первый обход");
+  else console.log(`переезд со старого узла ${MASTERS_KEY}: в новом ${items.length},`
+    + ` в старом ${rows.length}, после слияния ${merged.length}`);
+  return merged;
+}
+
+async function saveMasters(items, extra) {
+  const next = encodeRecords(items);
+  // НИ ОДНА ЗАПИСЬ НЕ ДОЛЖНА ИСЧЕЗНУТЬ. Пропавшие объявления помечаются active:false и
+  // остаются; если ключ всё-таки пропал — что-то не так со слиянием, и записывать это нельзя:
+  // узлы, которых нет в обновлении, остались бы в базе, а счётчики про них уже забыли.
+  const dropped = droppedRecords(savedRecords, next);
+  if (dropped.length) {
+    throw new Error(`${RECORDS_KEY}: после слияния пропало записей ${dropped.length}`
+      + ` (${dropped.slice(0, 3).join(", ")}${dropped.length > 3 ? ", …" : ""})`
+      + " — запись остановлена, в базе всё осталось как было");
+  }
+  const changed = changedRecords(savedRecords, next);
+  const chunks = chunkRecords(changed);
+  for (const chunk of chunks) {
+    await admin.database().ref(fbKey(RECORDS_KEY)).update(chunk);
+  }
+  savedRecords = next;
+  // migrated ставится ТОЛЬКО после того, как все записи доехали. Пока отметки нет, следующий
+  // прогон снова дочитает старый узел и допишет недостающее.
+  await writeJson(INFO_KEY, buildInfo(items, { ...extra, migrated: true }));
+  return { written: Object.keys(changed).length, total: items.length };
+}
+
 const INTERVALS = { daily: 22 * 3600e3, twice: 11 * 3600e3, weekly: 6.5 * 24 * 3600e3 };
 // DRAIN-режим: телефоны OLX упираются в анти-бот лимит IP (~15-20 за прогон), но между
 // прогонами он сбрасывается. Поэтому большой хвост непокрытых номеров выгоднее добирать
@@ -432,11 +500,7 @@ async function collectPhones(targets, save) {
   }
 
   // уже собранное → мержим (телефоны не теряем)
-  const existingDoc = await readJson(MASTERS_KEY, { items: [] });
-  if (!existingDoc || typeof existingDoc !== "object" || Array.isArray(existingDoc) || !Array.isArray(existingDoc.items)) {
-    throw new Error(`${MASTERS_KEY}: ожидался объект с массивом items; запись остановлена`);
-  }
-  let existing = existingDoc.items;
+  let existing = await readMasters();
   // Номера, собранные заходами «только номера», лежат отдельным узлом — вносим их в базу
   // и чистим узел. Без этого шага добранные телефоны в CRM бы не появились.
   try {
@@ -490,20 +554,15 @@ async function collectPhones(targets, save) {
   for (const m of all) m.score = scoreOf(m);          // пересчёт балла
   console.log(`ИТОГО: активных ${all.filter(m => m.active !== false).length}, всего с историей ${all.length}`);
 
-  const buildPayload = () => ({
-    updatedAt: new Date().toISOString(), source: "olx.kz",
-    count: all.length,
-    activeCount: all.filter(m => m.active !== false).length,
-    withPhone: all.filter(m => m.phone).length,
-    pendingPhone: all.filter(m => m.active !== false && !m.phone && m.hasPhoneFlag).length,
+  const infoExtra = {
+    source: "olx.kz",
     crawlComplete,
     selectedCategoryIds,
     parsedCategoryIds: categoryIds,
     availableCategories: OLX_REPAIR_CATEGORIES,
-    items: all,
-  });
-  await writeJson(MASTERS_KEY, buildPayload());
-  console.log(`✔ список сохранён: ${all.length}`);
+  };
+  const saved = await saveMasters(all, infoExtra);
+  console.log(`✔ список сохранён: записей ${saved.total}, из них записано изменившихся ${saved.written}`);
 
   // телефоны (открыты, без логина) — приоритет по баллу, с потолком/бюджетом/сохранением
   const targets = selectPhoneTargets(
@@ -512,14 +571,17 @@ async function collectPhones(targets, save) {
   );
   console.log(`телефоны: цель ${targets.length} (темп ~${Math.round((PHONE_DELAY_MIN + PHONE_DELAY_MAX) / 2000)}с, бюджет ${Math.round(PHONE_BUDGET_MS / 60e3)} мин)`);
   const phoneRun = await collectPhones(targets, async (got, done) => {
-    await writeJson(MASTERS_KEY, buildPayload());
-    console.log(`  … сохранено (номеров ${got}/${done})`);
+    // Сохраняются только те записи, у которых номер только что появился, — это десятки узлов,
+    // а не весь список заново. Раньше каждое такое сохранение перезаливало мегабайты.
+    const step = await saveMasters(all, infoExtra);
+    console.log(`  … сохранено (номеров ${got}/${done}, записей обновлено ${step.written})`);
   });
   const { gotPhones, lastPhoneError } = phoneRun;
 
-  const payload = buildPayload();
-  await writeJson(MASTERS_KEY, payload);
-  console.log(`✔ записано ${payload.count} мастеров (с телефоном: ${payload.withPhone}) в ${fbKey(MASTERS_KEY)}`);
+  const done = await saveMasters(all, infoExtra);
+  const info = buildInfo(all, infoExtra);
+  console.log(`✔ записано ${info.count} мастеров (с телефоном: ${info.withPhone}) в ${fbKey(RECORDS_KEY)}`
+    + `, изменившихся на этом шаге ${done.written}`);
 
   // Очередь для заходов «только номера»: кто ещё без телефона. Компактно, ~100 байт на строку.
   try {
@@ -531,9 +593,9 @@ async function collectPhones(targets, save) {
   const fresh = await readJson(CONFIG_KEY, {});
   fresh.lastRunAt = Date.now();
   if (decision.runNow) fresh.lastRunNow = decision.runNow;
-  fresh.lastCount = all.length; fresh.lastWithPhone = payload.withPhone;
-  fresh.lastActiveCount = payload.activeCount;
-  fresh.lastPendingPhone = payload.pendingPhone;
+  fresh.lastCount = info.count; fresh.lastWithPhone = info.withPhone;
+  fresh.lastActiveCount = info.activeCount;
+  fresh.lastPendingPhone = info.pendingPhone;
   fresh.lastGotPhones = gotPhones;            // прогресс за прогон — по нему drain решает, гнать ли дальше
   fresh.lastRunStatus = crawlComplete ? "ok" : "partial";
   fresh.lastPhoneError = lastPhoneError;

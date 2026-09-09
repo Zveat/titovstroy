@@ -11,6 +11,7 @@ import { countAllProductionRecovery, listProductionRetries, saveProductionRetry,
 import { MASTER_CATEGORIES, NAIMI_CITY_FALLBACK, OLX_REPAIR_CATEGORIES } from "./masters/catalog.mjs";
 import { SearchMultiSelect, SearchSelect as MasterSearchSelect } from "./masters/MasterSelects.jsx";
 import { parserRunMessage, triggerParserRun } from "./masters/parserTrigger.js";
+import { loadMasters } from "./masters/loadMasters.js";
 import { MasterCrmButton, MasterCrmDatabase, MasterCrmEditor } from "./masters/MasterCRM.jsx";
 import { interactionsForContact, masterSourceKey, normalizeMasterCrm } from "./masters/masterCrm.js";
 import { EstimateSuggestions, EstimateSuggestionRulesEditor } from "./estimate/EstimateSuggestions.jsx";
@@ -647,25 +648,27 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   // большинство сотрудников не открывает никогда.
   const [mastersNeeded, setMastersNeeded] = useState(false);
   useEffect(() => { if (screen === "masters") setMastersNeeded(true); }, [screen]);
+  // СПРАВОЧНИК ГРУЗИТСЯ ПО ОТКРЫТОМУ ИСТОЧНИКУ, А НЕ ОБА СРАЗУ. Раздел показывает naimi или
+  // OLX по очереди, а качал раньше оба — то есть открывший «Мастера» тянул мегабайты второго
+  // источника, которого не видел. Второй подгружается, когда на него переключаются.
+  const [mastersOpened, setMastersOpened] = useState({});
+  const openMastersSource = useCallback((src) => {
+    if (src === "naimi" || src === "olx") setMastersOpened(prev => (prev[src] ? prev : { ...prev, [src]: true }));
+  }, []);
   const [masters, setMasters] = useState([]);
   const [mastersMeta, setMastersMeta] = useState(null);
   const [mastersLoaded, setMastersLoaded] = useState(false);
   useEffect(() => {
-    if (!mastersNeeded) return undefined;
+    if (!mastersOpened.naimi) return undefined;
     let alive = true;
-    storage.getResult(MASTERS_KEY).then(res => {
+    loadMasters(MASTERS_KEY).then(res => {
       if (!alive) return;
+      setMasters(res.items);
+      setMastersMeta(res.meta);
       setMastersLoaded(true);
-      if (res && res.status === "found" && res.value) {
-        try {
-          const d = JSON.parse(res.value);
-          setMasters(Array.isArray(d?.items) ? d.items : (Array.isArray(d) ? d : []));
-          setMastersMeta(d && !Array.isArray(d) ? d : null);
-        } catch {}
-      }
     }).catch(() => { if (alive) setMastersLoaded(true); });
     return () => { alive = false; };
-  }, [mastersNeeded]);
+  }, [mastersOpened.naimi]);
   // Настройки парсера (частота/«Обновить сейчас») — редактирует Админ, читает парсер.
   const [mastersConfig, setMastersConfig] = useState(null);
   useEffect(() => {
@@ -698,19 +701,19 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [mastersOlxLoaded, setMastersOlxLoaded] = useState(false);
   const [mastersOlxConfig, setMastersOlxConfig] = useState(null);
   useEffect(() => {
+    if (!mastersOpened.olx) return undefined;
+    let alive = true;
+    loadMasters(MASTERS_OLX_KEY).then(res => {
+      if (!alive) return;
+      setMastersOlx(res.items);
+      setMastersOlxMeta(res.meta);
+      setMastersOlxLoaded(true);
+    }).catch(() => { if (alive) setMastersOlxLoaded(true); });
+    return () => { alive = false; };
+  }, [mastersOpened.olx]);
+  useEffect(() => {
     if (!mastersNeeded) return undefined;
     let alive = true;
-    storage.getResult(MASTERS_OLX_KEY).then(res => {
-      if (!alive) return;
-      setMastersOlxLoaded(true);
-      if (res && res.status === "found" && res.value) {
-        try {
-          const d = JSON.parse(res.value);
-          setMastersOlx(Array.isArray(d?.items) ? d.items : (Array.isArray(d) ? d : []));
-          setMastersOlxMeta(d && !Array.isArray(d) ? d : null);
-        } catch {}
-      }
-    }).catch(() => { if (alive) setMastersOlxLoaded(true); });
     storage.getResult(MASTERS_OLX_CONFIG_KEY).then(res => {
       if (!alive) return;
       if (res && res.status === "found" && res.value) { try { setMastersOlxConfig(JSON.parse(res.value)); } catch { setMastersOlxConfig({}); } }
@@ -10248,7 +10251,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       })()}
 
         {effScreen === "masters" && currentPermissions.masters === "none" && restrictedSection("Мастера", "сотрудникам с соответствующим правом")}
-        {effScreen === "masters" && currentPermissions.masters !== "none" && <MastersSection masters={masters} meta={mastersMeta} loaded={mastersLoaded} config={mastersConfig} onSaveConfig={saveMastersConfig} canManage={accessAllows(currentPermissions.mastersManage, true)} mastersOlx={mastersOlx} olxMeta={mastersOlxMeta} olxLoaded={mastersOlxLoaded} olxConfig={mastersOlxConfig} onSaveOlxConfig={saveMastersOlxConfig} crmData={mastersCrm} onSaveCrm={saveMastersCrm} currentUser={currentUser} />}
+        {effScreen === "masters" && currentPermissions.masters !== "none" && <MastersSection masters={masters} meta={mastersMeta} loaded={mastersLoaded} config={mastersConfig} onSaveConfig={saveMastersConfig} canManage={accessAllows(currentPermissions.mastersManage, true)} mastersOlx={mastersOlx} olxMeta={mastersOlxMeta} olxLoaded={mastersOlxLoaded} olxConfig={mastersOlxConfig} onSaveOlxConfig={saveMastersOlxConfig} crmData={mastersCrm} onSaveCrm={saveMastersCrm} currentUser={currentUser} onSourceOpen={openMastersSource} />}
 
         {effScreen === "contracts" && currentPermissions.documents === "none" && restrictedSection("Прочие документы", "сотрудникам с соответствующим правом")}
         {effScreen === "contracts" && currentPermissions.documents !== "none" && (
