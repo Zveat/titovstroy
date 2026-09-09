@@ -8,6 +8,7 @@ import { storage } from "../cloud/storage.js";
 import { PRICE_SEAL_REASONS } from "../constants.js";
 import { BrandTab } from "./BrandTab.jsx";
 import { IssuePanel } from "../dashboard/IssuePanel.jsx";
+import { TrafficTab } from "./TrafficTab.jsx";
 import { EstimateSuggestionRulesEditor } from "../estimate/EstimateSuggestions.jsx";
 import { fmt, genId } from "../format.js";
 import { _catalogOverrides, getEffectiveCatalog, setCatalogOverrides, setPriceOverrides } from "../pricing.js";
@@ -44,6 +45,7 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
     ["backups","🗄 Бэкапы", canSeeAdminTab("adminBackups") || canSeeAdminTab("adminRestore") ? null : "__none"],
     ["audit","📋 Журнал","adminAudit"],
     ["check","🔍 Проверка базы","adminDbCheck"],
+    ["traffic","📡 Трафик","adminDbCheck"],
   ];
   const allowedAdminTabs = adminTabs.filter(([, , key]) => key === null || (key !== "__none" && canSeeAdminTab(key)));
   useEffect(() => {
@@ -1150,6 +1152,8 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
       )}
 
       {tab === "audit" && <AuditTab />}
+
+      {tab === "traffic" && <TrafficTab />}
 
       {tab === "check" && (()=>{
         const reds = checkIssues.filter(i=>i.sev==="red").length;

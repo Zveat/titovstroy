@@ -9,8 +9,12 @@ import { WORKSPACE_BACKUPS_KEY } from "../storageKeys.js";
 import { EDIT_LEASE_KEY, adoptUserDirty, claimFallbackLease, clearSyncedLocalMirror, compactLocalStorageMirrors, discardOwnedDirty, isLegacyDirtyMarker, isPermissionDenied, listFlushableDirty, listOwnedDirty, makeDirtyMarker, makeLease, mayClearDirtyOnSuccess, mayUseLocalCopy, ownsActiveLease, parseLease, resolveVerifiedCloudRead, visibleDirtyKeys } from "../utils.js";
 import { initializeApp } from "firebase/app";
 import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken, signOut } from "firebase/auth";
-import { get, getDatabase, onValue, ref, runTransaction, set } from "firebase/database";
+import { get as _sdkGet, getDatabase, onValue as _sdkOnValue, ref, runTransaction, set } from "firebase/database";
+import { childrenBytes, createTrafficMeter, utf8Len } from "./trafficMeter.js";
 
+// Счётчик скачанного этой вкладкой. Заводим до инициализации базы: ниже на него подписывается
+// и обрыв связи, и обёртки чтений. Зачем он нужен — в trafficMeter.js.
+const _meter = createTrafficMeter();
 export let _fbDb = null;
 export let _fbAuth = null;
 // Promise resolves when anonymous auth is ready (or immediately if auth unavailable)
@@ -19,6 +23,24 @@ try {
   const _fbApp = initializeApp(firebaseConfig);
   _fbDb = getDatabase(_fbApp);
   _fbAuth = getAuth(_fbApp);
+  // ОБРЫВЫ СВЯЗИ. При каждом переподключении база заново шлёт всё, на что подписана вкладка,
+  // — это трафик, которого не видно ни в одном чтении. Первое срабатывание — это само
+  // подключение, оно обрывом не считается. Служебный узел .info/connected сетевого веса
+  // не имеет: он живёт на стороне клиента.
+  try {
+    // Первое подключение обрывом НЕ считается, хотя выглядит как оно: SDK успевает отдать
+    // false раньше, чем true, и наивная проверка «было false, стало true» рисовала обрыв
+    // сразу при открытии страницы. Поймано на живом прогоне.
+    let _wasConnected = null, _everConnected = false;
+    _sdkOnValue(ref(_fbDb, ".info/connected"), (snap) => {
+      const now = snap.val() === true;
+      if (now) {
+        if (_everConnected && _wasConnected === false) _meter.noteReconnect();
+        _everConnected = true;
+      }
+      _wasConnected = now;
+    });
+  } catch (e) {}
   const _realAuthReady = new Promise(resolve => {
     const unsub = onAuthStateChanged(_fbAuth, user => {
       unsub();
@@ -343,19 +365,46 @@ export const _fbRestGet = async (key) => {
     if (!r || r === _TIMEOUT || !r.ok) return { ok: false };
     const v = await r.json();
     // null = ключа нет (это ЧЕСТНЫЙ ответ базы, не ошибка); строка = новый формат; объект = старый
-    return { ok: true, value: v === null ? null : (typeof v === "string" ? v : JSON.stringify(v)) };
+    const value = v === null ? null : (typeof v === "string" ? v : JSON.stringify(v));
+    try { _meter.note(_fbKey(key), utf8Len(value)); } catch {}
+    return { ok: true, value };
   } catch { return { ok: false }; }
 };
 // То же чтение, но БЕЗ приведения к строке. Нужно для узлов с детьми (справочник мастеров):
 // там ответ — объект из тысяч записей, и JSON.stringify поверх него это лишний проход по
 // мегабайтам ради того, чтобы вызывающий тут же их распарсил обратно.
+// ── СЧЁТЧИК СКАЧАННОГО ─────────────────────────────────────────────────────────
+// Оборачиваем сам SDK, а не отдельные вызовы: чтений в файле семь, и помечать их по одному
+// значит однажды забыть про восьмое. Имена оставлены прежними (get/onValue), поэтому все
+// существующие вызовы считаются сами, и новые будут тоже.
+// Зачем это вообще — в trafficMeter.js. Коротко: база отдаёт около гигабайта в сутки, и
+// объяснить удалось меньше пятой части; профайлер Firebase живёт только в терминале.
+const _snapBytes = (snap) => {
+  try {
+    if (!snap || !snap.exists()) return 0;
+    const v = snap.val();
+    return typeof v === "string" ? utf8Len(v) : childrenBytes(v);
+  } catch { return 0; }
+};
+const get = async (r) => {
+  const snap = await _sdkGet(r);
+  try { _meter.note(r?.key || "?", _snapBytes(snap)); } catch {}
+  return snap;
+};
+const onValue = (r, cb, onErr) => _sdkOnValue(r, (snap) => {
+  try { _meter.note(r?.key || "?", _snapBytes(snap)); } catch {}
+  cb(snap);
+}, onErr);
+
 export const _fbRestGetRaw = async (key) => {
   if (!firebaseConfig.databaseURL) return { ok: false };
   try {
     const token = await _restToken();
     const r = await _race(fetch(_restUrl(key, token)), 25000);
     if (!r || r === _TIMEOUT || !r.ok) return { ok: false };
-    return { ok: true, value: await r.json() };
+    const value = await r.json();
+    try { _meter.note(_fbKey(key), typeof value === "string" ? utf8Len(value) : childrenBytes(value)); } catch {}
+    return { ok: true, value };
   } catch { return { ok: false }; }
 };
 // Согласование локальной («грязной») копии с облаком: для СПИСКОВ записей с id (или
@@ -379,6 +428,9 @@ export function _reconcileDirty(localStr, cloudStr) {
   return localStr; // не списки/ошибка разбора — доверяем локальной (как раньше)
 }
 export const storage = {
+  // Сколько эта вкладка скачала из базы с момента открытия. Только чтение — платим мы за него.
+  // Наружу отдаём как есть, показывает «Админка → Трафик».
+  trafficStats() { return _meter.stats(); },
   // Расширенное чтение: { value, status: 'found'|'empty'|'unavailable' }
   // 'found' — данные есть; 'empty' — источник точно ответил, данных нет;
   // 'unavailable' — Firebase не ответил/ошибка И локальной копии нет (НЕЛЬЗЯ затирать!)
