@@ -5236,6 +5236,21 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         .cpx-sel:focus{border-color:#2563eb}
         .card{background:#ffffff;box-shadow:0 1px 3px rgba(15,23,42,.07),0 4px 16px rgba(15,23,42,.04);border:1px solid #e2e8f0;border-radius:12px;overflow:hidden}
         .btn{border:none;cursor:pointer;padding:10px 20px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;transition:all .15s;letter-spacing:.1px}
+        /* ── КНОПКИ ОДНОГО РЯДА — ОДНОГО РАЗМЕРА ─────────────────────────────
+           Размеры набирались по месту, и в одном ряду стояли кнопки разной высоты
+           и очень разной длины: замерено на экране 390px — «🚪 Выйти» 77x24,
+           «☁ Обновить» 94x24, «⚠ N требуют внимания» 153x24, а в панели объектов
+           рядом 31, 33, 34 и 36 по высоте. Ряд от этого выглядит собранным наспех.
+           .tap-even — панель кнопок: выравниваем и высоту, и ширину. Ширину даём
+           через min-width, а не растягиванием на всю строку: кнопка догоняет
+           соседей, но длинную подпись не обрезает и лишнего места не занимает.
+           .tap-row  — чипы фильтров: там выравниваем ТОЛЬКО высоту. Подписи у них
+           от «Все» до «Согласование сметы», и одинаковая ширина превратила бы
+           девять чипов в пять рядов пустоты.
+           На телефоне высота 44px: палец накрывает примерно столько, а в 24px
+           попадаешь через раз — промах по «Выйти» стоит дороже всего. */
+        .tap-even button,.tap-row button{min-height:36px}
+        .tap-even button{min-width:155px;justify-content:center}
         .btn-g{background:#2563eb;color:#ffffff;box-shadow:0 1px 2px rgba(37,99,235,.3)}
         .btn-g:hover{background:#1d4ed8;box-shadow:0 4px 12px rgba(37,99,235,.35);transform:translateY(-1px)}
         .btn-g:active{transform:translateY(0)}
@@ -5381,6 +5396,12 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
              складывать одно с другим нельзя — берём большее из двух. */
           .sidebar-content{margin-left:0!important;padding-top:max(var(--topbar,0px),env(safe-area-inset-top,0px))!important;padding-bottom:calc(68px + env(safe-area-inset-bottom,0px))!important}
           .mob-nav-wrap{display:block!important}
+          /* Под палец — 44px (правило и замеры выше, у .tap-even). Высоту добираем
+             отступами: сам текст не растёт, поэтому вёрстка вокруг не съезжает.
+             Ширина остаётся общей, 155px: две такие кнопки в строку на 390px
+             помещаются, а на экране поуже ряд просто переносится — кнопки при
+             этом остаются одного размера, что и требовалось. */
+          .tap-even button,.tap-row button{min-height:44px!important;padding-top:8px!important;padding-bottom:8px!important}
           /* НИЖНЕЕ МЕНЮ ПРЯЧЕТСЯ, ПОКА ПЕЧАТАЮТ.
              Меню закреплено снизу (position:fixed; bottom:0). Когда на айфоне
              вылезает клавиатура, Safari ужимает видимую часть страницы, но
@@ -5718,7 +5739,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   {" · "}<span style={{color:"#bfdbfe",fontWeight:600}}>{currentUser.role==="admin"?"Администратор":currentUser.role==="viewer"?"Просмотр":currentUser.name}</span>
                 </div>
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              <div className="tap-even" style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                 {navHistory.length > 0 && <button onClick={goBack} style={{background:"none",border:"1px solid #ccc",borderRadius:6,padding:"4px 12px",cursor:"pointer",marginRight:8,fontSize:14,color:"#fff",borderColor:"rgba(255,255,255,.4)"}}>← Назад</button>}
                 {staleObjs.length>0&&<button onClick={openStaleObjects} style={{background:"rgba(251,191,36,.2)",color:"#fde68a",border:"1px solid rgba(251,191,36,.3)",borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⚠ {staleObjs.length} требуют внимания</button>}
                 <button onClick={resyncNow} disabled={resyncing}
@@ -9196,7 +9217,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 <div style={{fontSize:12,color:"rgba(255,255,255,.7)",marginTop:3}}>{objectTab==="workspace" ? "Карточка объекта · сметы и договора" : "Клиенты, сметы и договора"}</div>
               </div>
               <div style={{flex:1}}/>
-              {objectTab==="list" && (currentPermissions.objectCreate !== "none" || currentPermissions.objectDelete !== "none") && (<>
+              {objectTab==="list" && (currentPermissions.objectCreate !== "none" || currentPermissions.objectDelete !== "none") && (
+                <div className="tap-even" style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                 {(()=>{const trashed=objectsRef.current.filter(o=>o.deletedAt); return trashed.length>0&&(<button onClick={()=>setObjectTab("trash")} style={{background:"rgba(220,38,38,.12)",color:"#dc2626",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"7px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginRight:4}}>🗑 Корзина ({trashed.length})</button>);})()}
                   {currentPermissions.objectCreate !== "none" && <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>{
                   const newObj = {id:genId(),clientId:"",clientName:"",clientPhone:"",clientType:"физ",clientIin:"",clientDoc:"",address:"",objType:"Вторичка",area:"",status:"new",note:"",manager:currentUser.name,createdBy:currentUser.name,createdById:currentUser.id,createdAt:Date.now(),updatedAt:Date.now(),financeCalcMode:"contracts-v2"};
@@ -9209,7 +9231,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     saveObjects(nextList).catch(e=>console.warn("bg save object err", e));
                     writeAudit(currentUser,"создал объект","object",newObj.id,"Новый объект");
                   }}>+ Новый объект</button>}
-              </>)}
+                </div>
+              )}
             </div>
           </div>
 
@@ -9217,7 +9240,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           {objectTab==="list" && (
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
               {/* Поиск + сортировка + экспорт */}
-              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+              <div className="tap-even" style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                 <input value={objectSearch} onChange={e=>setObjectSearch(e.target.value)} placeholder="🔍 Поиск по клиенту, телефону, адресу..."
                   style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:13,flex:1,minWidth:200,boxSizing:"border-box",outline:"none",fontFamily:"inherit"}}/>
                 {currentPermissions.objectExport !== "none" && <button onClick={()=>downloadCSV(
@@ -9259,7 +9282,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 </div>
               )}
               {/* Фильтр по статусу */}
-              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              <div className="tap-row" style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 <button onClick={()=>setObjectFilterStatus("")}
                   style={{background:!objectFilterStatus?"#2563eb":"rgba(0,0,0,.03)",color:!objectFilterStatus?"#fff":"#94a3b8",border:`1px solid ${!objectFilterStatus?"#2563eb":"#e2e8f0"}`,borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Все ({liveObjects.length})</button>
                 {DEAL_STATUSES.map(s=>{
