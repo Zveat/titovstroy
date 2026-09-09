@@ -5236,6 +5236,22 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         .cpx-sel:focus{border-color:#2563eb}
         .card{background:#ffffff;box-shadow:0 1px 3px rgba(15,23,42,.07),0 4px 16px rgba(15,23,42,.04);border:1px solid #e2e8f0;border-radius:12px;overflow:hidden}
         .btn{border:none;cursor:pointer;padding:10px 20px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;transition:all .15s;letter-spacing:.1px}
+        /* ── КНОПКИ ОДНОГО РЯДА — ОДНОГО РАЗМЕРА ─────────────────────────────
+           Размеры набирались по месту, и ряд выглядел собранным наспех. Замерено
+           на экране 390px: в шапке Главной 153 / 94 / 77 по ширине, в панели
+           объектов 111x31 рядом с 138x36, а ниже 70x33, 63x34 и 110x33.
+           РАЗМЕР НЕ УВЕЛИЧИВАЕМ. Была попытка заодно поднять всё до 44px «под
+           палец» — владелец отверг: кнопки стали огромными, а прежний размер его
+           устраивал. Поэтому каждый ряд подтягивается к САМОЙ БОЛЬШОЙ кнопке
+           этого же ряда, и ни к чему больше.
+           Размер задаётся в месте использования (--tw/--th), а не здесь: он
+           разный у разных панелей, и «одна кнопка на всё приложение» тут
+           означала бы либо обрезанные подписи, либо лишнюю пустоту.
+           Честное ограничение: ширина — константа, а в подписях есть счётчики
+           («Корзина (7)»). Вырастет счётчик на разряд — эта кнопка станет шире
+           соседей. Ширину берём с небольшим запасом, но совсем от этого не
+           застрахованы: CSS не умеет «по самой длинной в ряду». */
+        .tap-even button{min-width:var(--tw);min-height:var(--th);justify-content:center}
         .btn-g{background:#2563eb;color:#ffffff;box-shadow:0 1px 2px rgba(37,99,235,.3)}
         .btn-g:hover{background:#1d4ed8;box-shadow:0 4px 12px rgba(37,99,235,.35);transform:translateY(-1px)}
         .btn-g:active{transform:translateY(0)}
@@ -5718,7 +5734,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   {" · "}<span style={{color:"#bfdbfe",fontWeight:600}}>{currentUser.role==="admin"?"Администратор":currentUser.role==="viewer"?"Просмотр":currentUser.name}</span>
                 </div>
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              {/* 153px — ширина самой длинной кнопки ряда, «⚠ N требуют внимания» */}
+              <div className="tap-even" style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap","--tw":"153px","--th":"24px"}}>
                 {navHistory.length > 0 && <button onClick={goBack} style={{background:"none",border:"1px solid #ccc",borderRadius:6,padding:"4px 12px",cursor:"pointer",marginRight:8,fontSize:14,color:"#fff",borderColor:"rgba(255,255,255,.4)"}}>← Назад</button>}
                 {staleObjs.length>0&&<button onClick={openStaleObjects} style={{background:"rgba(251,191,36,.2)",color:"#fde68a",border:"1px solid rgba(251,191,36,.3)",borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⚠ {staleObjs.length} требуют внимания</button>}
                 <button onClick={resyncNow} disabled={resyncing}
@@ -9196,7 +9213,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 <div style={{fontSize:12,color:"rgba(255,255,255,.7)",marginTop:3}}>{objectTab==="workspace" ? "Карточка объекта · сметы и договора" : "Клиенты, сметы и договора"}</div>
               </div>
               <div style={{flex:1}}/>
-              {objectTab==="list" && (currentPermissions.objectCreate !== "none" || currentPermissions.objectDelete !== "none") && (<>
+              {objectTab==="list" && (currentPermissions.objectCreate !== "none" || currentPermissions.objectDelete !== "none") && (
+                /* 138x36 — размер «+ Новый объект», самой крупной кнопки ряда */
+                <div className="tap-even" style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap","--tw":"138px","--th":"36px"}}>
                 {(()=>{const trashed=objectsRef.current.filter(o=>o.deletedAt); return trashed.length>0&&(<button onClick={()=>setObjectTab("trash")} style={{background:"rgba(220,38,38,.12)",color:"#dc2626",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"7px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginRight:4}}>🗑 Корзина ({trashed.length})</button>);})()}
                   {currentPermissions.objectCreate !== "none" && <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>{
                   const newObj = {id:genId(),clientId:"",clientName:"",clientPhone:"",clientType:"физ",clientIin:"",clientDoc:"",address:"",objType:"Вторичка",area:"",status:"new",note:"",manager:currentUser.name,createdBy:currentUser.name,createdById:currentUser.id,createdAt:Date.now(),updatedAt:Date.now(),financeCalcMode:"contracts-v2"};
@@ -9209,15 +9228,17 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     saveObjects(nextList).catch(e=>console.warn("bg save object err", e));
                     writeAudit(currentUser,"создал объект","object",newObj.id,"Новый объект");
                   }}>+ Новый объект</button>}
-              </>)}
+                </div>
+              )}
             </div>
           </div>
 
           {/* Список объектов */}
           {objectTab==="list" && (
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
-              {/* Поиск + сортировка + экспорт */}
-              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+              {/* Поиск + сортировка + экспорт. 112x34 — по «⚙ Фильтры», самой
+                  крупной кнопки ряда; поле поиска правило не трогает, оно не кнопка */}
+              <div className="tap-even" style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap","--tw":"112px","--th":"34px"}}>
                 <input value={objectSearch} onChange={e=>setObjectSearch(e.target.value)} placeholder="🔍 Поиск по клиенту, телефону, адресу..."
                   style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:13,flex:1,minWidth:200,boxSizing:"border-box",outline:"none",fontFamily:"inherit"}}/>
                 {currentPermissions.objectExport !== "none" && <button onClick={()=>downloadCSV(
