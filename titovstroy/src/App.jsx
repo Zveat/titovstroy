@@ -10048,7 +10048,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       return (
                         <div key={c.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"12px 16px",cursor:_podLocked?"default":"pointer",transition:"all .12s",marginLeft:isAnnex?16:0,borderLeft:isAnnex?"3px solid #ede9fe":"1px solid #e5e7eb",opacity:_podLocked?.75:1}}
                           onClick={_podLocked?undefined:()=>{ setCurrentContract({...c}); setObjectReturnId(obj.id); setContractTab("editor"); setScreen("contracts"); }}>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                          {/* КНОПКИ — ОТДЕЛЬНОЙ СТРОКОЙ, как в карточках смет.
+                              Разметка тут была та же, что у акта, но кнопки договора шире: «PDF»,
+                              «GDoc», «В проект ✓» и корзина занимают почти 260 px и не переносятся.
+                              На телефоне левой колонке оставалось меньше сотни, и заголовок
+                              «Доп. соглашение №3 к договору №1033» сыпался по одному слову в столбик,
+                              а за ним и название клиента. Теперь заголовок с суммой идут в строку и
+                              занимают всю ширину, а кнопки живут своей строкой и переносятся. */}
+                          <div style={{display:"flex",alignItems:"flex-start",gap:8}}>
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                                 {isAnnex && <span style={{fontSize:10,fontWeight:700,color:"#7c3aed",background:"rgba(124,58,237,.08)",borderRadius:3,padding:"1px 6px"}}>{c.type==="podryad_annex"?"Прил. подряда":"Доп. согл."}</span>}
@@ -10060,9 +10067,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                 {_isPod ? (_workerName ? `🔨 ${_workerName}` : "Подрядчик не выбран") : (cl2?.name||c.estClient||"Клиент не выбран")} · {new Date(c.date||Date.now()).toLocaleDateString("ru-RU")} · {(c.works||[]).length} позиций
                               </div>
                             </div>
-                            <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
-                              <div style={{fontWeight:800,fontSize:15,color:"#0f172a"}}>{fmt(total)} ₸</div>
-                              <div style={{display:"flex",gap:4}} onClick={e=>e.stopPropagation()}>
+                            <div style={{fontWeight:800,fontSize:15,color:"#0f172a",flexShrink:0,whiteSpace:"nowrap"}}>{fmt(total)} ₸</div>
+                          </div>
+                          <div style={{display:"flex",gap:4,flexWrap:"wrap",justifyContent:"flex-end",marginTop:8}} onClick={e=>e.stopPropagation()}>
                                 {accessAllows(currentPermissions.documentExport, estimatorObjectIds.has(obj.id)) && !_podLocked && <button onClick={()=>generateContractPdf(c,cl2,ca2)}
                                   style={{background:"#e2e8f0",color:"#334155",border:"1px solid #e2e8f0",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>📄 PDF</button>}
                                 {accessAllows(currentPermissions.documentExport, estimatorObjectIds.has(obj.id)) && !_podLocked && <button onClick={()=>generateContractGDoc(c,cl2,ca2)}
@@ -10081,8 +10088,6 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                                     <button onClick={async ()=>{ if(await confirmTyped("Удалить договор?\nЭто действие нельзя отменить через интерфейс.")){ const nl=contractsRef.current.filter(x=>x.id!==c.id); contractsRef.current=nl; setContracts(nl); saveContracts(nl,{removedIds:[c.id],allowEmpty:true}).catch(e=>console.warn("bg contract del",e)); } }}
                                     style={{background:"rgba(220,38,38,.08)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:4,padding:"2px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                                 )}
-                              </div>
-                            </div>
                           </div>
                         </div>
                       );
