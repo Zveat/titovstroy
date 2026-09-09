@@ -5305,7 +5305,11 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         @media(max-width:700px){
           .doc-card-row{flex-direction:column!important;align-items:stretch!important;gap:10px!important}
           /* Сумма — своей строкой. Если оставить её в одной строке с кнопками,
-             четыре кнопки перестают помещаться и рвутся на два неровных ряда. */
+             четыре кнопки перестают помещаться и рвутся на два неровных ряда.
+             ПРОВЕРЕНО ЗАМЕРОМ: попытка поставить сумму рядом с заголовком (как в
+             карточке внутри объекта) здесь ухудшает — заголовки тут длинные,
+             «Договор подряда №1017 — Мукашев Чингиз Мейрамович» становится в три
+             строки вместо двух, а высота карточки падает всего с 217 до 204 px. */
           .doc-card-side{text-align:left!important;display:flex!important;flex-direction:column!important;
             align-items:stretch!important;gap:8px!important}
           .doc-card-btns{flex-wrap:wrap!important;gap:6px!important;margin-top:0!important;
@@ -10713,6 +10717,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         const visible = m.lines
           .map((l, i) => ({ l, i }))
           .filter(({ l }) => !q || `${l.name || ""} ${l.cat || ""} ${l.unit || ""}`.toLowerCase().includes(q));
+        // Сколько позиций уже уходило в прежние акты — по ним работает «Снять сданные».
+        const doneN = m.lines.filter(l => l.inActs).length;
         // «Выбрать все» при активном поиске работает по НАЙДЕННЫМ строкам: набрал «демонтаж» —
         // отметил весь демонтаж одной кнопкой. Без фильтра ведёт себя как раньше.
         const scope = q ? visible.map(v => v.l) : m.lines;
@@ -10771,6 +10777,16 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 style={{background:"none",border:"1px solid #e2e8f0",borderRadius:7,padding:"6px 11px",fontSize:11,fontWeight:600,color:visible.length?"#475569":"#cbd5e1",cursor:visible.length?"pointer":"default",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
                 {allOn ? "☐ Снять" : "☑ Выбрать"}{q ? " найденные" : " все"}
               </button>
+              {/* Кнопка, а не автоматика: сам решает, когда оставить только то, чего в актах ещё
+                  не было. Снимает галочки СО ВСЕХ сданных, не только с найденных поиском —
+                  смысл в том, чтобы одним нажатием получить готовый следующий акт. */}
+              {doneN > 0 && (
+                <button onClick={()=>setAvrModal(p=>({...p, lines:p.lines.map(l=>l.inActs?{...l,included:false}:l)}))}
+                  title="Снять галочки с позиций, которые уже уходили в прежние акты — останется только то, чего в актах ещё нет"
+                  style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:7,padding:"6px 11px",fontSize:11,fontWeight:700,color:"#92400e",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>
+                  ☐ Снять сданные ({doneN})
+                </button>
+              )}
               <span style={{fontSize:12,color:"#64748b",whiteSpace:"nowrap",flexShrink:0}}>
                 Выбрано: <b>{selected.length}</b> из {m.lines.length}
                 {q && <span style={{color:"#7c3aed",fontWeight:600}}> · найдено {visible.length}</span>}
