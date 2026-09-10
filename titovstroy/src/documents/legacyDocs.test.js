@@ -7,8 +7,13 @@ import { buildContractHtml, buildPodryadHtml, buildAvrHtml, podryadContractToMod
 // поэтому суммы, даты и формат разделителей на него не влияют, а любое изменение
 // формулировки — влияет и роняет тест. Если документ поменяли осознанно, отпечаток
 // обновляют тем же прогоном и это видно в истории отдельной строкой.
+// СЧИТАЕМ ТОЛЬКО ТЕЛО. В <head> лежит <title> — это имя файла при сохранении в PDF, а не
+// текст документа, и меняться оно может. Пока голова входила в отпечаток, правка имени
+// файла роняла сторожа юридического текста, то есть он кричал не о том. Само тело при той
+// правке было сверено побайтно и не изменилось.
 const fingerprint = (html) => {
-  const text = String(html).replace(/<[^>]*>/g, " ")      // только видимый текст
+  const text = String(html).replace(/^[\s\S]*?<body[^>]*>/i, "")
+    .replace(/<[^>]*>/g, " ")                             // только видимый текст
     .replace(/&nbsp;|&#\d+;|&[a-z]+;/gi, " ")
     .replace(/[\d\s  .,:%№-]+/g, "");            // цифры/пробелы/пунктуация вон
   let h = 0;
@@ -45,16 +50,16 @@ beforeAll(() => {
 
 describe("юридический текст документов не менялся", () => {
   it("договор ремонта", () => {
-    expect(fingerprint(buildContractHtml(CONTRACT, CLIENT, CONTRAGENTS[0], false, ""))).toBe("24539:a8zs86");
+    expect(fingerprint(buildContractHtml(CONTRACT, CLIENT, CONTRAGENTS[0], false, ""))).toBe("23720:16uke2e");
   });
   it("договор ремонта — вариант для DOCX", () => {
-    expect(fingerprint(buildContractHtml(CONTRACT, CLIENT, CONTRAGENTS[0], true, ""))).toBe("24279:1gcywl7");
+    expect(fingerprint(buildContractHtml(CONTRACT, CLIENT, CONTRAGENTS[0], true, ""))).toBe("23694:15rws27");
   });
   it("договор подряда", () => {
-    expect(fingerprint(buildPodryadHtml(podryadContractToModel(PODRYAD, WORKERS[0], false), CONTRAGENTS))).toBe("11520:am8n4a");
+    expect(fingerprint(buildPodryadHtml(podryadContractToModel(PODRYAD, WORKERS[0], false), CONTRAGENTS))).toBe("10706:ldas2x");
   });
   it("акт выполненных работ (форма Р-1)", () => {
-    expect(fingerprint(buildAvrHtml(REPORT))).toBe("1363:1l14kmi");
+    expect(fingerprint(buildAvrHtml(REPORT))).toBe("472:1k4egkq");
   });
 });
 

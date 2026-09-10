@@ -9,6 +9,32 @@
 // legacyExports, поэтому их сигнатуры и поведение обязаны остаться прежними.
 import { lineTotal, tengeInWords } from "../utils.js";
 
+// ИМЯ ФАЙЛА ПРИ СОХРАНЕНИИ В PDF. Браузер берёт его из заголовка страницы и УКОРАЧИВАЕТ:
+// на боевой из 69 символов в окне сохранения оставалось 29 — «Приложение №3 Четверикова Таи».
+// Обрезаем не мы: в базе клиент записан целиком, и ни одного slice в коде нет. Значит
+// единственное, чем мы управляем, — что попадёт в первые ~25 символов.
+//
+// ПОРЯДОК ТАКОЙ: чем документ является (коротко) → к чему привязан → клиент → дата.
+// Дата уходит в конец сознательно: по ней документы не ищут, а стоит она 11 символов.
+// Слова сокращены («Дог.» вместо «Договор ремонта») ровно по той же причине — каждые
+// семь букв в начале это семь букв фамилии, которые иначе не поместятся.
+//
+// ТЕКСТА САМИХ ДОКУМЕНТОВ ЭТО НЕ КАСАЕТСЯ. Внутри у каждого свой полный заголовок по
+// закону; здесь только имя файла. Проверено побайтовым сравнением тела до и после.
+export const docFileTitle = (head, who, date) => [
+  ...(Array.isArray(head) ? head : [head]),
+  who || "",
+  date || "",
+].map(v => String(v == null ? "" : v).trim()).filter(Boolean).join(" ")
+  .replace(/[<>:"/\\|?*]/g, "_");
+
+// Короткие метки типов договоров. Полные («Соглашение о дизайн-проекте») съедали бы
+// имя целиком: в окне сохранения осталось бы «Соглашение о дизайн-проекте №» и всё.
+const SHORT_DOC = { repair_fiz:"Дог.", annex:"Прил.", design:"Дизайн", design_add:"Дизайн-доп", reservation:"Резерв" };
+export const contractFileTitle = (c, type, who, date) => (type === "annex"
+  ? docFileTitle(["Прил." + (c?.appendix || 2), "дог." + (c?.mainNumber || c?.number || "")], who, date)
+  : docFileTitle([(SHORT_DOC[type] || "Дог.") + (String(SHORT_DOC[type] || "").endsWith(".") ? "" : " ") + (c?.number || "")], who, date));
+
 export const buildAvrHtml = (m) => {
   const esc = s => String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
   const P = l => Number(l.price) || 0, Q = l => Number(l.doneQty) || 0;
@@ -20,7 +46,7 @@ export const buildAvrHtml = (m) => {
   // Название документа (как у договора: номер + клиент + дата) — от него зависит имя файла
   // при сохранении/печати в PDF (браузер подставляет заголовок вкладки), у голого «АВР №5»
   // не разобрать, чей это акт.
-  const docTitle = ("АВР №" + (m.actNo || "б_н") + (m.clientName ? " " + m.clientName : "") + (dateShort ? " от " + dateShort : "")).replace(/[<>:"/\\|?*]/g, "_");
+  const docTitle = docFileTitle(["АВР", m.actNo || "б_н"], m.clientName, dateShort);
   const rowsHtml = items.map((l, i) => `<tr>
     <td class="c">${i + 1}</td>
     <td>${esc(l.name)}</td>
@@ -232,10 +258,9 @@ ${(m.termDays !== "" && m.termDays != null) ? `<p class="b">Срок выпол�
 ${reqBlock}`;
   // Название документа (как у договора: номер + подрядчик + дата) — от него зависит имя
   // файла при сохранении/печати в PDF, у голого «Приложение №2» не разобрать, к чему оно.
-  const docTitle = (m.kind === "annex"
-    ? "Приложение №" + (m.annexNo || "") + (w.name ? " " + w.name : "") + " к Договору №" + (m.mainNumber || "") + " от " + dd + "." + mm + "." + yy
-    : "Договор подряда №" + (m.number || "") + (w.name ? " " + w.name : "") + " от " + dd + "." + mm + "." + yy
-  ).replace(/[<>:"/\\|?*]/g, "_");
+  const docTitle = m.kind === "annex"
+    ? docFileTitle(["Прил." + (m.annexNo || ""), "подряд " + (m.mainNumber || "")], w.name, `${dd}.${mm}.${yy}`)
+    : docFileTitle(["Подряд", m.number || ""], w.name, `${dd}.${mm}.${yy}`);
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(docTitle)}</title><style>${CSS}</style></head><body>${mainBody}${annexBody}
 <div class="np"><button onclick="window.print()" style="padding:12px 32px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:Arial,sans-serif">🖨 Печать / Сохранить PDF</button></div>
 </body></html>`;
@@ -750,16 +775,9 @@ ${sigBlock("Исполнитель:", "Заказчик:")}`;
   const printBtn = forDocx ? "" : `\n<div class="np" style="margin-top:24px;text-align:center;padding:16px">\n  <button onclick="window.print()" style="padding:12px 36px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;font-weight:700;font-family:Verdana,sans-serif">🖨 Распечатать / Сохранить PDF</button>\n</div>`;
   // Название документа (номер + клиент + дата, как при скачивании DOCX/GDoc) — иначе при
   // печати/сохранении в PDF браузер подставляет в имя файла голый «Договор №123» без клиента.
-  const docLabelT = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Соглашение о дизайн-проекте",design_add:"Доп соглашение к дизайн-проекту",reservation:"Соглашение о резервировании"}[type] || "Договор";
   const dateStrT = c.date ? c.date.split("-").reverse().join(".") : "";
-  // Имя файла (номер + клиент + дата ВПЕРЕДИ, ссылка на договор в конце) — иначе браузер при
-  // сохранении PDF обрезает длинную прописную фразу и остаётся «Приложение №3 Перечень доп ра».
-  // Тело документа не меняется (там свой полный заголовок «Перечень дополнительных работ»).
-  const _clientT = client?.name ? " " + client.name : (c.estClient ? " " + c.estClient : "");
-  const docTitle = (type === "annex"
-    ? "Приложение №" + (c.appendix || 2) + _clientT + (dateStrT ? " от " + dateStrT : "") + " к дог. №" + (c.mainNumber || c.number || "")
-    : docLabelT + " №" + (c.number || "") + _clientT + (dateStrT ? " от " + dateStrT : "")
-  ).replace(/[<>:"/\\|?*]/g, "_");
+  const _clientT = client?.name || c.estClient || "";
+  const docTitle = contractFileTitle(c, type, _clientT, dateStrT);
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(docTitle)}</title><style>${CSS}</style></head>
 <body>${body}${printBtn}
 </body></html>`;
@@ -788,11 +806,11 @@ export const generateContractDocxLegacy = async (c, client, ca) => {
   const clientName = client?.name || c.estClient || "договор";
   const num = c.number || c.id?.slice(-4) || "б-н";
   const dateStr = c.date ? c.date.split("-").reverse().join(".") : "";
-  const isAnnexD = (c.type||"repair_fiz") === "annex";
-  const docLabel = {repair_fiz:"Договор ремонта",annex:"Приложение",design:"Соглашение о дизайн-проекте",design_add:"Доп соглашение к дизайн-проекту",reservation:"Соглашение о резервировании"}[c.type||"repair_fiz"] || "Договор";
-  const filename = isAnnexD
-    ? ("Приложение №"+(c.appendix||2)+" "+clientName+(dateStr?" от "+dateStr:"")+" к дог. №"+(c.mainNumber||num)+".docx").replace(/[<>:"/\\|?*]/g,"_")
-    : (docLabel+" №"+num+" "+clientName+(dateStr?" от "+dateStr:"")+".docx").replace(/[<>:"/\\|?*]/g,"_");
+  // Имя DOCX строится ТОЙ ЖЕ функцией, что и заголовок для печати: иначе один и тот же
+  // документ приезжал бы к клиенту под двумя разными именами в зависимости от кнопки.
+  // Само по себе скачивание имя не режет (оно идёт мимо заголовка страницы) — но
+  // расхождение путает сильнее, чем длина.
+  const filename = contractFileTitle({ ...c, number: num }, c.type || "repair_fiz", clientName, dateStr) + ".docx";
 
   try {
   // Раньше библиотека docx грузилась скриптом с unpkg.com в момент клика — если CDN

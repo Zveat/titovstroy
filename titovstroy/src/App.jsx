@@ -66,7 +66,7 @@ import { OperationsPanel } from "./dashboard/OperationsPanel.jsx";
 import { StaleObjectsPanel } from "./dashboard/StaleObjectsPanel.jsx";
 import { buildAvrHtml, buildContractHtml as _buildContractHtml, buildPodryadHtml as _buildPodryadHtml,
   generateContractDocxLegacy, generateContractGDocLegacy as _generateContractGDocLegacy,
-  podryadContractToModel } from "./documents/legacyDocs.js";
+  docFileTitle, podryadContractToModel } from "./documents/legacyDocs.js";
 import { migrateRowsToCodeKeys } from "./estimate/rowKeys.js";
 import { BalanceSheet } from "./finance/BalanceSheet.jsx";
 import { _auditYM, _ts, downloadCSV, fmt, fmtDate, genId, kpStatusText, openOrPrintHtml, today } from "./format.js";
@@ -4861,7 +4861,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     const final = total - disc;
     const esc = s => String(s||"").replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));
     const rows = works.map((w,i)=>`<tr><td style="padding:6px 8px;border-bottom:1px solid #eee">${i+1}</td><td style="padding:6px 8px;border-bottom:1px solid #eee">${esc(w.name)}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">${w.quantity||0}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">${esc(w.unit||"м²")}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${fmt(w.price||0)}</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${fmt(lineTotal(w.quantity,w.price))}</td></tr>`).join("");
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Смета ${esc(client?.name||deal.address||"")}</title>
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(docFileTitle(["Смета"], client?.name || deal.address || "", new Date().toLocaleDateString("ru-RU")))}</title>
     <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Inter',sans-serif;color:#111827;padding:28px}@page{margin:10mm;size:A4 portrait}h1{font-size:20px}table{width:100%;border-collapse:collapse;font-size:13px;margin-top:14px}th{background:#f3f4f6;padding:8px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase}.no-print{margin-top:20px;text-align:center}@media print{.no-print{display:none}}</style></head><body>
     <h1>Смета на ремонтные работы</h1>
     <div style="color:#6b7280;font-size:13px;margin-top:6px;line-height:1.6">
@@ -7188,8 +7188,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 ].join(" ");
                 let innerHTML = el.innerHTML;
                 if (stampB64) innerHTML = innerHTML.replace(/src="\/stamp\.jpg"/g, `src="${stampB64}"`);
-                const docParts = [proj.name, proj.phone, proj.address, today()].filter(Boolean);
-                const docTitle = docParts.length ? "КП " + docParts.join(" — ") : "КП " + brand.name;
+                // Телефон из имени файла убран: он занимает 16 символов в начале, а браузер
+                // при сохранении PDF оставляет около 29 — с телефоном не помещался даже адрес.
+                const docTitle = docFileTitle(["КП"], [proj.name, proj.address].filter(Boolean).join(" ") || brand.name, today());
                 const html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>" + docTitle + "</title><style>" + css + "</style></head><body>" + innerHTML + "<div class=\"no-print\" style=\"margin-top:24px;text-align:center\"><button onclick=\"window.print()\" style=\"padding:12px 32px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:inherit\">🖨 Сохранить PDF</button></div></body></html>";
                 openOrPrintHtml(html, 30000);
               }}>Печать / PDF</button>}
