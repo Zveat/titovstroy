@@ -44,9 +44,46 @@ export function normalizeIndex(raw) {
   return out.sort((a, b) => b.ts - a.ts);
 }
 
+// ПРОРЕЖИВАНИЕ ПО ВРЕМЕНИ: «всё за последние сутки + по одной точке на день назад».
+//
+// ЗАЧЕМ. Общий снимок рабочей области создаётся на КАЖДОЕ изменение (через 8 секунд
+// после того, как правки утихли). Мест было 30, и активный рабочий день съедал их
+// целиком: на боевой все тридцать снимков уложились в 15 часов — с 9 сентября 21:19
+// по 10 сентября 11:33, причём девять из них за девять минут. Откатиться можно было
+// только на сегодня-вчера, а всё, что старше, уже вытеснено. Владелец это и заметил:
+// в списке подряд идут 9 сентября и 22 июля, между ними пусто.
+//
+// ПОЧЕМУ ИМЕННО СУТКИ. Ошибку в данных замечают в тот же день — «сделал в 10, увидел
+// в 18». Пока снимку меньше суток, он нужен весь, с мелким шагом. Дальше от дня нужна
+// одна точка: разбираться в двадцати снимках позапрошлого вторника всё равно никто не
+// будет, а вот дотянуться до позапрошлого вторника — нужно.
+const DAY_MS = 24 * 3600 * 1000;
+const dayKeyOf = (ts, tzOffsetMin) => Math.floor((ts + tzOffsetMin * 60000) / DAY_MS);
+export function thinIndex(rows, {
+  now = Date.now(), recentMs = DAY_MS, recentMax = 20, dailyMax = 20, tzOffsetMin = 5 * 60,
+} = {}) {
+  const sorted = normalizeIndex(rows);                  // по убыванию времени
+  const cut = now - recentMs;
+  const out = sorted.filter((r) => r.ts > cut).slice(0, recentMax);
+  const seenDay = new Set();
+  for (const r of sorted) {
+    if (r.ts > cut) continue;
+    const d = dayKeyOf(r.ts, tzOffsetMin);
+    if (seenDay.has(d)) continue;                       // за этот день точка уже есть
+    seenDay.add(d);
+    out.push(r);                                        // список убывающий — порядок сохраняется
+    if (seenDay.size >= dailyMax) break;
+  }
+  return out;
+}
+
 // Добавить снимок в указатель. Возвращает новый указатель и список ts, чьи ключи
 // пора удалить: иначе старые снимки остались бы в базе навсегда и место росло бы.
-export function pushIndex(index, entry, keep = BACKUP_KEEP) {
+// Третьим аргументом можно передать число (сколько держать) или настройки:
+// { keep, thin } — thin включает прореживание по времени, см. thinIndex выше.
+export function pushIndex(index, entry, keepOrOpts = BACKUP_KEEP) {
+  const opts = keepOrOpts && typeof keepOrOpts === "object" ? keepOrOpts : { keep: keepOrOpts };
+  const keep = Number.isFinite(Number(opts.keep)) ? Number(opts.keep) : BACKUP_KEEP;
   const ts = num(entry?.ts);
   if (!ts) return { index: normalizeIndex(index), drop: [] };
   const rest = normalizeIndex(index).filter((item) => item.ts !== ts);
@@ -55,7 +92,10 @@ export function pushIndex(index, entry, keep = BACKUP_KEEP) {
   if (entry?.counts && typeof entry.counts === "object") head.counts = { ...entry.counts };
   const next = [head, ...rest]
     .sort((a, b) => b.ts - a.ts);
-  return { index: next.slice(0, keep), drop: next.slice(keep).map((item) => item.ts) };
+  const thinned = opts.thin ? thinIndex(next, { now: ts, ...opts.thin }) : next;
+  const kept = thinned.slice(0, keep);
+  const keptTs = new Set(kept.map((item) => item.ts));
+  return { index: kept, drop: next.filter((item) => !keptTs.has(item.ts)).map((item) => item.ts) };
 }
 
 // Единый список для окна «Бэкапы»: новые снимки (по указателю) и старые из общего

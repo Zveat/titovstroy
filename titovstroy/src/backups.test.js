@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  BACKUP_KEEP, backupIndexKey, backupItemKey, normalizeIndex, pushIndex,
+  BACKUP_KEEP, backupIndexKey, backupItemKey, normalizeIndex, pushIndex, thinIndex,
   mergeBackupViews, makeSnapshot, loadSnapshotData,
 } from "./backups.js";
 
@@ -42,6 +42,61 @@ describe("резервные копии списков", () => {
 
   it("по умолчанию храним двадцать копий", () => {
     expect(BACKUP_KEEP).toBe(20);
+  });
+
+  // Настоящий случай: все тридцать снимков рабочей области уместились в 15 часов
+  // (9 сентября 21:19 → 10 сентября 11:33), из них девять за девять минут. Откатиться
+  // можно было только на сегодня, а в списке 9 сентября шло сразу после 22 июля.
+  describe("прореживание по времени: сутки подробно, дальше по дню", () => {
+    const HOUR = 3600e3, DAY = 24 * HOUR;
+    const NOW = 1789000000000;
+    const rows = (list) => list.map((ts, i) => ({ ts, by: "П", count: i }));
+
+    it("всё за последние сутки остаётся как есть", () => {
+      const src = rows([NOW, NOW - HOUR, NOW - 3 * HOUR, NOW - 8 * HOUR, NOW - 20 * HOUR]);
+      expect(thinIndex(src, { now: NOW }).map(r => r.ts)).toEqual(src.map(r => r.ts));
+    });
+
+    it("старше суток — по одной точке на день, самой свежей за день", () => {
+      // Три снимка одного дня трёхдневной давности: остаться должен только последний.
+      const day = NOW - 3 * DAY;
+      const src = rows([NOW, day, day - HOUR, day - 2 * HOUR]);
+      expect(thinIndex(src, { now: NOW }).map(r => r.ts)).toEqual([NOW, day]);
+    });
+
+    it("рабочий день больше не вытесняет всю историю", () => {
+      // Двадцать снимков за сегодня + по одному за десять прошлых дней.
+      const today = Array.from({ length: 20 }, (_, i) => NOW - i * 20 * 60e3);
+      const past = Array.from({ length: 10 }, (_, i) => NOW - (i + 1) * DAY - HOUR);
+      const out = thinIndex(rows([...today, ...past]), { now: NOW });
+      expect(out).toHaveLength(30);
+      // Дотянуться до каждого из десяти прошлых дней всё ещё можно — это и было сломано.
+      for (const ts of past) expect(out.some(r => r.ts === ts)).toBe(true);
+    });
+
+    it("глубина истории ограничена, но не рабочим днём", () => {
+      const past = Array.from({ length: 40 }, (_, i) => NOW - (i + 1) * DAY);
+      const out = thinIndex(rows(past), { now: NOW, dailyMax: 20 });
+      expect(out).toHaveLength(20);
+      expect(out[0].ts).toBe(past[0]);                 // самые свежие дни, не самые старые
+    });
+
+    it("pushIndex с прореживанием отдаёт вытесненные на удаление", () => {
+      const day = NOW - 3 * DAY;
+      const src = rows([day, day - HOUR, day - 2 * HOUR]);
+      const step = pushIndex(src, { ts: NOW, by: "П", count: 1 }, { keep: 40, thin: {} });
+      expect(step.index.map(r => r.ts)).toEqual([NOW, day]);
+      // Ключи вытесненных снимков обязаны стираться, иначе база растёт вечно.
+      expect(step.drop.sort()).toEqual([day - 2 * HOUR, day - HOUR].sort());
+    });
+
+    it("без настройки thin поведение прежнее — просто последние N", () => {
+      let index = [];
+      for (let i = 1; i <= 25; i += 1) index = pushIndex(index, { ts: i * 1000, by: "П", count: i }, 20).index;
+      expect(index).toHaveLength(20);
+      expect(index[0].ts).toBe(25000);
+      expect(index[19].ts).toBe(6000);
+    });
   });
 
   // Главное требование владельца: ничего не должно теряться. Старые копии,

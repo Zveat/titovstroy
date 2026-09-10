@@ -3464,7 +3464,15 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
         // Автоматический технический снимок не является пользовательской правкой.
         // При недоступном облаке просто повторим его после следующего изменения/входа,
         // но не создаём dirty-копию и не блокируем выход ложным предупреждением.
-        const step = pushIndex(wsIndex, { ts: snap.ts, by: snap.by, count: snap.counts.e, sig, counts: snap.counts }, 30);
+        // 40 мест и прореживание по времени: всё за последние сутки, дальше по одной
+        // точке на день. Раньше стояло просто «последние 30», и рабочий день съедал их
+        // целиком — на боевой все тридцать уместились в 15 часов, а до вчерашнего
+        // дотянуться было уже нельзя. Подробности — в thinIndex.
+        const step = pushIndex(
+          wsIndex,
+          { ts: snap.ts, by: snap.by, count: snap.counts.e, sig, counts: snap.counts },
+          { keep: 40, thin: { recentMax: 20, dailyMax: 20 } },
+        );
         await storage.setCloudOnly(backupItemKey(WORKSPACE_BACKUPS_KEY, snap.ts), JSON.stringify(snap));
         await storage.setCloudOnly(wsIdxKey, JSON.stringify(step.index));
         for (const oldTs of step.drop) {
@@ -3476,19 +3484,35 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [objects, estimates, contracts, financeTx, loadedTick]);
 
+  // СТАРЫЙ ОБЩИЙ МАССИВ СНИМКОВ НЕ ЧИТАЕМ ПРИ ОТКРЫТИИ. До перехода на «снимок = свой
+  // ключ» все копии лежали в одном ключе ВМЕСТЕ С ДАННЫМИ: на боевой это 24 снимка
+  // и 9,59 МБ в одном значении. Строка «сами снимки не читаем» была правдой только
+  // про новые — каждое открытие окна тянуло эти 9,6 МБ целиком, ради двух десятков
+  // строк списка за июль. Теперь они подгружаются кнопкой, если действительно нужны.
+  const [wsLegacyLoading, setWsLegacyLoading] = useState(false);
+  const [wsLegacyLoaded, setWsLegacyLoaded] = useState(false);
   const openWorkspaceBackups = async () => {
+    setWsLegacyLoaded(false);
     try {
-      // Список строим по оглавлению — сами снимки (по 350 КБ) не читаем. Старый общий
-      // массив тоже показываем: снимки, сделанные до перехода, никуда не делись.
-      const [raw, iRaw] = await Promise.all([
-        storage.get(WORKSPACE_BACKUPS_KEY), storage.get(backupIndexKey(WORKSPACE_BACKUPS_KEY)),
-      ]);
-      let legacy = []; try { if (raw?.value) legacy = JSON.parse(raw.value); } catch {}
+      const iRaw = await storage.get(backupIndexKey(WORKSPACE_BACKUPS_KEY));
       const idx = normalizeIndex(iRaw?.value).map(r => ({ ...r, key: backupItemKey(WORKSPACE_BACKUPS_KEY, r.ts) }));
-      const seen = new Set(idx.map(r => r.ts));
-      const old = Array.isArray(legacy) ? legacy.filter(x => x?.ts && !seen.has(x.ts)) : [];
-      setWsBackupsModal([...idx, ...old].sort((a, b) => (b.ts || 0) - (a.ts || 0)));
+      setWsBackupsModal(idx.sort((a, b) => (b.ts || 0) - (a.ts || 0)));
     } catch { setWsBackupsModal([]); }
+  };
+  const loadLegacyWorkspaceBackups = async () => {
+    setWsLegacyLoading(true);
+    try {
+      const raw = await storage.get(WORKSPACE_BACKUPS_KEY);
+      let legacy = []; try { if (raw?.value) legacy = JSON.parse(raw.value); } catch {}
+      setWsBackupsModal(cur => {
+        const rows = Array.isArray(cur) ? cur : [];
+        const seen = new Set(rows.map(r => r.ts));
+        const old = Array.isArray(legacy) ? legacy.filter(x => x?.ts && !seen.has(x.ts)) : [];
+        return [...rows, ...old].sort((a, b) => (b.ts || 0) - (a.ts || 0));
+      });
+      setWsLegacyLoaded(true);
+    } catch { setWsLegacyLoaded(true); }
+    setWsLegacyLoading(false);
   };
   // Полный снимок рабочей области: у старых он лежит прямо в строке, у новых — в своём ключе.
   const _wsFull = async (row) => {
@@ -6944,7 +6968,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               <div style={{fontWeight:800,fontSize:16,color:"#0f172a"}}>🕘 Бэкапы рабочего пространства</div>
               <button onClick={()=>setWsBackupsModal(null)} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#94a3b8"}}>✕</button>
             </div>
-            <div style={{fontSize:12,color:"#94a3b8",marginBottom:14}}>Каждый снимок — объекты, сметы, договоры + финансовые операции (последние 30). Восстановление вернёт всё целиком.</div>
+            <div style={{fontSize:12,color:"#94a3b8",marginBottom:14}}>Каждый снимок — объекты, сметы, договоры + финансовые операции. Держим всё за последние сутки и по одной точке на каждый день назад. Восстановление вернёт всё целиком.</div>
             {wsBackupsModal.length===0 && <div style={{textAlign:"center",padding:"30px 0",color:"#94a3b8",fontSize:13}}>Снимков пока нет — появятся автоматически после изменений</div>}
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
               {wsBackupsModal.map((snap,i)=>(
@@ -6968,6 +6992,13 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 </div>
               ))}
             </div>
+            {!wsLegacyLoaded && (
+              <button type="button" onClick={loadLegacyWorkspaceBackups} disabled={wsLegacyLoading}
+                title="Снимки, сделанные до перехода на новое хранение. Лежат одним куском на 9,6 МБ, поэтому качаются только по нажатию."
+                style={{marginTop:12,width:"100%",background:"#f8fafc",color:"#64748b",border:"1px dashed #cbd5e1",borderRadius:8,padding:"9px 12px",fontSize:12,cursor:wsLegacyLoading?"default":"pointer",fontFamily:"inherit"}}>
+                {wsLegacyLoading ? "Загружаю…" : "Показать старые снимки (архив, ~9,6 МБ)"}
+              </button>
+            )}
             <div style={{fontSize:11,color:"#94a3b8",marginTop:12,lineHeight:1.5}}><b>«Вернуть сметы»</b> — безопасно: добавит только пропавшие сметы, финансы и остальное не изменятся. <b>«Восстановить всё»</b> — откатит объекты/сметы/договоры/финансы к снимку.</div>
           </div>
         </div>
