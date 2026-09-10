@@ -3378,7 +3378,13 @@ function MainApp({ currentUser, setCurrentUser, editorTab, lockTimedOut = false,
         if (!sameAsLast) {
           const ts = Date.now();
           const snap = makeSnapshot({ ts, by: currentUser?.name || "", count: stored.length, data: prevValue });
-          const step = pushIndex(index, snap);
+          // ГЛУБИНА ОТКАТА СЧИТАЕТСЯ В ДНЯХ, А НЕ В ШТУКАХ. Держали ровно двадцать
+          // последних снимков — и активный день съедал их целиком: на боевой все
+          // двадцать снимков смет уложились в ЧЕТЫРЕ ЧАСА одного дня, дальше отката
+          // не было вовсе. Та же беда, что уже поймана у рабочего пространства.
+          // Теперь всё за последние сутки плюс по точке на каждый день назад —
+          // подробности и тесты в backups.js (thinIndex).
+          const step = pushIndex(index, snap, { keep: 30, thin: { recentMax: 12, dailyMax: 20 } });
           await storage.setCloudOnly(backupItemKey(backupKey, ts), JSON.stringify(snap));
           await storage.setCloudOnly(idxKey, JSON.stringify(step.index));
           // Вытесненные снимки стираем, иначе база растёт без предела.
