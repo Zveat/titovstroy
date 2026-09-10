@@ -191,10 +191,18 @@ export default function App() {
   return <EditorSessionGate key={currentUser.id} currentUser={currentUser} setCurrentUser={setCurrentUser} />;
 }
 
+// Сколько ждём ответа от браузерного замка, прежде чем открыть приложение
+// в режиме просмотра. Подробности — в эффекте ниже.
+const GATE_WAIT_MS = 7000;
+
 function EditorSessionGate({ currentUser, setCurrentUser }) {
   const [mode, setMode] = useState("checking"); // checking | editor | readonly
   const modeRef = useRef("checking");
   const setSafeMode = useCallback((next) => { modeRef.current = next; setMode(next); }, []);
+  // ПОЧЕМУ только просмотр: "busy" — редактируют в другой вкладке, "timeout" — замок
+  // не ответил вовремя. Разница не косметическая: во втором случае никакой другой
+  // вкладки может не быть, и отправлять человека её закрывать — просто врать.
+  const [readonlyReason, setReadonlyReason] = useState("busy");
   const viewerOnly = currentUser?.role === "viewer";
 
   const tryAcquire = useCallback(async ({ explicit = false } = {}) => {
@@ -236,8 +244,24 @@ function EditorSessionGate({ currentUser, setCurrentUser }) {
         });
       };
     }
+    // ЖДЁМ ЗАМОК НЕ ДОЛЬШЕ СЕМИ СЕКУНД — ИНАЧЕ ПРИЛОЖЕНИЕ НЕ ОТКРЫВАЕТСЯ ВООБЩЕ.
+    // Пока замок не ответил, экран показывает «Проверяю доступ к редактированию…»
+    // и больше ничего. Ответа могло не быть НИКОГДА: браузерный Web Locks иногда
+    // не отвечает после того, как приложение подняли с иконки из фона (владелец
+    // ловил это как «бесконечная загрузка»), а таймаута тут не было ни одного.
+    // Семь секунд — с огромным запасом: замок браузерный, обычно отвечает мгновенно.
+    // Не ответил — открываемся в режиме просмотра: читать можно, «взять
+    // редактирование» есть кнопкой. Поздний ответ поднимет режим до полного сам,
+    // поэтому ожидание ничего не ломает, а только перестаёт быть бесконечным.
+    const slow = setTimeout(() => {
+      if (stopped) return;
+      setReadonlyReason("timeout");
+      setSafeMode("readonly");
+    }, GATE_WAIT_MS);
     storage.acquireEditLease().then(ok => {
+      clearTimeout(slow);
       if (!stopped) {
+        if (!ok) setReadonlyReason("busy");
         if (ok) {
           storage.compactLocalMirrors();
           storage.adoptUserDirty();
@@ -266,6 +290,7 @@ function EditorSessionGate({ currentUser, setCurrentUser }) {
       clearInterval(iv);
       window.removeEventListener("beforeunload", onLeave);
       window.removeEventListener("pagehide", onLeave);
+      clearTimeout(slow);
       storage.releaseEditLease().finally(() => {
         if (_editorGateN === gateSession && _dirtyOwnerUid === ownerUid) {
           storage.setLeaseEnforced(false);
@@ -288,13 +313,14 @@ function EditorSessionGate({ currentUser, setCurrentUser }) {
       currentUser={currentUser}
       setCurrentUser={setCurrentUser}
       editorTab={mode === "editor"}
+      lockTimedOut={mode === "readonly" && readonlyReason === "timeout"}
       takeoverEditLease={() => tryAcquire({ explicit: true })}
     />
   );
 }
 
 
-function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) {
+function MainApp({ currentUser, setCurrentUser, editorTab, lockTimedOut = false, takeoverEditLease }) {
   // Оформление компании (название, логотип, цвет) — из настроек, см. brand.js.
   // Перечитываем принудительно: на экране входа чтение могло не пройти (человек
   // тогда ещё не вошёл), а здесь права уже есть.
@@ -5314,6 +5340,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         <div style={{pointerEvents:"auto",background:"#475569",color:"#fff",padding:"10px 16px",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,.2)",flexWrap:"wrap"}}>
           {_isViewer
             ? "Режим просмотра — изменения недоступны для этой учётной записи."
+            : lockTimedOut
+            ? "Не удалось проверить, редактирует ли кто-то ещё — пока только просмотр (изменения не сохраняются). Нажмите кнопку, чтобы начать редактировать."
             : "Сервис открыт для редактирования в другой вкладке — здесь только просмотр (изменения не сохраняются)."}
           {!_isViewer && <button onClick={takeoverEditLease} style={{background:"#fff",color:"#475569",border:"none",borderRadius:8,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Перехватить редактирование</button>}
         </div>
