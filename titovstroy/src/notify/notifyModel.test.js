@@ -25,13 +25,30 @@ const LOGIN = { ts: 1784888000000, by: "Сергей Штанько", entity: "s
   label: "вход", field: "вход", action: "вошёл в систему" };
 const PHOTO = { ts: 1784888300000, by: "Сергей Штанько", entity: "stage", entityId: "s1",
   label: "Демонтаж", field: "фотоотчёт", action: "добавил фото" };
+// Записи сентября — тоже настоящие, снятые с боевой перед тем как писать правила.
+const LOST = { ts: 1789017234492, userId: "2", by: "Сергей Штанько", entity: "object",
+  entityId: "mr1ztpllyvfo", label: "Акдана", objectId: "mr1ztpllyvfo", field: "статус",
+  action: "изменил", old: "Согласование сметы", new: "Потерян", detail: "", source: "manual" };
+const HANDED = { ts: 1788971105687, userId: "1", by: "P.Zveat", entity: "object", entityId: "",
+  label: "Рауан", objectId: "mspz8fw2nup2", field: "факт сдачи", action: "изменил",
+  old: "—", new: "30.09.2026", detail: "", source: "manual" };
+const HANDED_CLEARED = { ...HANDED, old: "30.09.2026", new: "—" };
+const EST_DELETED = { ts: 1788843435592, userId: "1", by: "P.Zveat", entity: "estimate",
+  entityId: "mt72vat3n3bj", label: "Алина", objectId: "mt729ulyn4pk", field: "смета",
+  action: "удалил смету", old: "3 523 942 ₸", new: "—", detail: "", source: "manual" };
+const OBJ_DELETED = { ts: 1783625325054, by: "P.Zveat", entity: "object",
+  entityId: "mrdelkc58ma8", label: "Муканова 108/1", action: "удалил объект" };
+const REPORT_DELETED = { ts: 1788981013773, userId: "1", by: "P.Zveat", entity: "report",
+  entityId: "mtubddeitb80", label: "avr", objectId: "", field: "запись", action: "удалил",
+  old: "avr", new: "—", detail: "", source: "manual" };
 
 describe("состав: ровно то, что просил владелец", () => {
-  it("девять уведомлений, не больше", () => {
-    expect(NOTIFY_CATALOG).toHaveLength(9);
+  it("двенадцать уведомлений, не больше", () => {
+    expect(NOTIFY_CATALOG).toHaveLength(12);
     expect(NOTIFY_CATALOG.map(n => n.key).sort()).toEqual([
-      "contract_signed", "digest_month", "digest_sales_month", "digest_sales_week",
-      "digest_week", "handover_soon", "stages", "stale", "start_soon",
+      "contract_signed", "deleted", "digest_month", "digest_sales_month", "digest_sales_week",
+      "digest_week", "handover_soon", "object_done", "object_status", "stages", "stale",
+      "start_soon",
     ]);
   });
 
@@ -49,7 +66,7 @@ describe("состав: ровно то, что просил владелец", 
   });
 });
 
-describe("из журнала берём только подписание договора", () => {
+describe("что из журнала становится сообщением", () => {
   it("статус сменили на «Договор подписан» — сообщение есть", () => {
     const m = auditMessage(SIGNED);
     expect(m.key).toBe("contract_signed");
@@ -57,14 +74,92 @@ describe("из журнала берём только подписание до�
     expect(m.body).toContain("Договор подписан");
   });
 
-  it("любая другая смена статуса — молчим", () => {
-    expect(auditMessage(OTHER_STATUS)).toBeNull();
+  it("подписание НЕ дублируется общей сменой статуса", () => {
+    // Одно действие — одно сообщение. Правило подписания стоит первым и забирает
+    // запись себе; сорвись это, владелец получал бы каждое подписание дважды.
+    expect(auditMessage(SIGNED).key).toBe("contract_signed");
   });
 
-  it("деньги, входы, фото и прочее из журнала больше не рассылаются", () => {
+  it("остальные смены статуса приходят, и с разным значком", () => {
+    // Раньше здесь стоял «молчим»: правило было одно, и «Потерян» — девять раз за
+    // сентябрь, самое частое событие месяца — не доходило вообще.
+    const lost = auditMessage(LOST);
+    expect(lost.key).toBe("object_status");
+    expect(lost.title).toBe("Клиент потерян — Акдана");
+    expect(lost.icon).toBe("💔");
+    expect(lost.body).toContain("Согласование сметы");
+
+    const moved = auditMessage(OTHER_STATUS);
+    expect(moved.key).toBe("object_status");
+    expect(moved.title).toBe("Смета на согласовании — Максат");
+    expect(moved.icon).toBe("🔁");
+    // Незнакомый статус не проваливается мимо уведомления — уходит общим случаем.
+    expect(auditMessage({ ...LOST, new: "Придуманный статус" }).title).toBe("Статус объекта — Акдана");
+
+    expect(auditMessage({ ...LOST, new: "В работе" }).icon).toBe("🔨");
+    expect(auditMessage({ ...LOST, new: "Приостановлен" }).title).toContain("приостановлен");
+    expect(auditMessage({ ...LOST, new: "Расторгнут" }).title).toContain("расторгнут");
+  });
+
+  it("факт сдачи: поставили — шлём, стёрли — нет", () => {
+    const m = auditMessage(HANDED);
+    expect(m.key).toBe("object_done");
+    expect(m.title).toBe("Объект сдан — Рауан");
+    expect(m.body).toContain("30.09.2026");
+    expect(auditMessage(HANDED_CLEARED)).toBeNull();
+  });
+
+  it("удаления: объект, смета и договор — одна подписка, но разный текст", () => {
+    const est = auditMessage(EST_DELETED);
+    expect(est.key).toBe("deleted");
+    expect(est.title).toBe("Удалена смета — Алина");
+    expect(est.body).toContain("3 523 942 ₸");        // сумма — главное в этой новости
+
+    const obj = auditMessage(OBJ_DELETED);
+    expect(obj.key).toBe("deleted");
+    expect(obj.title).toBe("Удалён объект — Муканова 108/1");
+
+    const dog = auditMessage({ ts: 1, by: "P.Zveat", entity: "contract",
+      entityId: "c1", label: "№0919", action: "удалил договор" });
+    expect(dog.title).toBe("Удалён договор — №0919");
+  });
+
+  it("разбор воронки пачкой — одно сообщение, а не четыре", () => {
+    // Настоящий случай 9 сентября: Сергей за полторы минуты отметил четверых
+    // потерянными. Четыре сообщения подряд про одно и то же — это отписка от бота.
+    const batch = ["Эльвира", "Баян", "Сымбат", "Катерина"].map((label, i) => ({
+      ...LOST, label, entityId: "o" + i, objectId: "o" + i, ts: LOST.ts + i * 20_000,
+    }));
+    const out = buildEventMessages(batch, { sinceTs: 0 });
+    expect(out).toHaveLength(1);
+    expect(out[0].title).toBe("Клиент потерян");         // без имени: их четверо
+    expect(out[0].body).toContain("переведено <b>4</b> объекта");
+    for (const n of ["Эльвира", "Баян", "Сымбат", "Катерина"]) expect(out[0].body).toContain(n);
+  });
+
+  it("в пачку идут только ОДИНАКОВЫЕ исходы одного человека", () => {
+    // Иначе «двое потеряны, один подписан» слиплось бы в одну строку, и хорошая
+    // новость растворилась бы в плохой.
+    const mixed = [
+      { ...LOST, entityId: "a", objectId: "a", label: "Эльвира" },
+      { ...LOST, entityId: "b", objectId: "b", label: "Баян", ts: LOST.ts + 1000 },
+      { ...LOST, entityId: "c", objectId: "c", label: "Пётр", ts: LOST.ts + 2000, new: "В работе" },
+    ];
+    const out = buildEventMessages(mixed, { sinceTs: 0 });
+    expect(out).toHaveLength(3);                          // до тройки одинаковых не добрали
+  });
+
+  it("удаления актов НЕ рассылаются", () => {
+    // За сентябрь владелец удалил 156 актов подряд, разбирая старьё. Попади они
+    // в рассылку — это 156 сообщений за два дня и отписка от бота.
+    expect(auditMessage(REPORT_DELETED)).toBeNull();
+  });
+
+  it("деньги, входы, фото и прочее из журнала не рассылаются", () => {
     for (const e of [MONEY, LOGIN, PHOTO]) expect(auditMessage(e)).toBeNull();
     expect(auditMessage({ entity: "role", action: "изменил право", label: "manager" })).toBeNull();
-    expect(auditMessage({ entity: "report", action: "удалил", label: "АВР" })).toBeNull();
+    expect(auditMessage({ entity: "client", action: "изменил", field: "address", label: "Вера" })).toBeNull();
+    expect(auditMessage({ entity: "object", action: "создал объект", detail: "Новый объект" })).toBeNull();
   });
 
   it("мусор на входе не роняет", () => {
