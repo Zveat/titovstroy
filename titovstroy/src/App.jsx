@@ -1561,9 +1561,11 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     const sig = _estSig(newList.find(e => e.id === currentId));
     if (sig && sig === _estSavedSig.current) return;
     _estSavedSig.current = sig;
+    _estLastSaveAt.current = Date.now();
     setEstimates(newList);
     saveEstimates(newList);
   };
+  const _estLastSaveAt = useRef(0);
   // Открыли другую смету — подпись берём с её СОДЕРЖИМОГО, а не пустую.
   // Пустая означала «в базе ничего нет», поэтому одно только ОТКРЫТИЕ сметы через 2,5 секунды
   // выгружало, сливало и переписывало ВЕСЬ список смет (96 штук), хотя человек ничего не трогал.
@@ -1575,15 +1577,31 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   useEffect(() => {
     const est = estimatesRef.current.find(e => e.id === currentId);
     _estSavedSig.current = est ? _estSig(est) : "";
+    // Отсчёт «когда сохраняли в прошлый раз» начинаем с открытия сметы. Иначе ноль означал бы
+    // «не сохраняли никогда», потолок в 45 секунд считался бы просроченным, и ПЕРВАЯ же правка
+    // уходила бы в базу мгновенно — ровно то, от чего уходим.
+    _estLastSaveAt.current = Date.now();
   }, [currentId]);
   useEffect(() => {
     if (!currentId) { _estFlushRef.current = null; return; }
     _estFlushRef.current = currentId;
     if (_autoSaveRef.current) clearTimeout(_autoSaveRef.current);
-    // 2,5 секунды вместо 0,9: при наборе текста дебаунс в 0,9 с срабатывал почти на каждой
-    // паузе между словами, и каждый раз это был полный обход списка смет. Потерять правку
-    // нельзя: уход из редактора, смена экрана и закрытие вкладки дожимают сохранение сами.
-    _autoSaveRef.current = setTimeout(_flushEstimate, 2500);
+    // ГЛАВНЫЙ РАСХОД ТРАФИКА ВО ВСЁМ СЕРВИСЕ — ИМЕННО ЭТО МЕСТО.
+    // Каждое сохранение сметы читает ВЕСЬ список смет (278 КБ на боевой): иначе не слить
+    // с чужими правками, а это защита «ничего не теряется». Владелец десять минут заполнял
+    // смету и снял счётчик: 9,95 МБ, из них 5,07 МБ — сам список смет, то есть восемнадцать
+    // полных чтений. В пересчёте — 59,7 МБ в час на ОДНОГО человека.
+    //
+    // Дебаунс был 0,9 с, потом 2,5 с — и каждая пауза длиннее этого стоила полного обхода.
+    // Теперь пауза 12 секунд, но с потолком: если с прошлого сохранения прошло больше 45
+    // секунд, сохраняем не дожидаясь паузы. Без потолка непрерывный набор текста откладывал
+    // бы запись бесконечно, а это уже про потерю работы, а не про трафик.
+    //
+    // Потерять правку по-прежнему нельзя: уход из редактора, смена экрана и закрытие
+    // вкладки дожимают сохранение сами (эффект ниже и endSessionSafely).
+    const IDLE_MS = 12_000, HARD_MS = 45_000;
+    const since = Date.now() - (_estLastSaveAt.current || 0);
+    _autoSaveRef.current = setTimeout(_flushEstimate, Math.max(0, Math.min(IDLE_MS, HARD_MS - since)));
     return () => clearTimeout(_autoSaveRef.current);
   }, [rows, proj, discount, markup, note, estStatus, estSentAt, estComment, currentPermissions.estimateEdit, isOwnEstimate]);
   // ПРИНУДИТЕЛЬНЫЙ ФЛЕШ при уходе из редактора сметы: если пользователь ушёл (сменил экран
