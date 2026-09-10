@@ -427,6 +427,8 @@ function MainApp({ currentUser, setCurrentUser, editorTab, lockTimedOut = false,
     setSaveFails(prev => prev.some(f => f.key === key) ? clearSaveFailsFor(prev, key) : prev);
   }, []);
   const [listBackups, setListBackups] = useState(null); // {label, items, onRestore}
+  const [legacyLoaded, setLegacyLoaded] = useState({});   // какие старые архивы уже подтянули
+  const [legacyLoading, setLegacyLoading] = useState("");
   const [documentSnapshotsById, setDocumentSnapshotsById] = useState(() => new Map());
   const [documentInstanceSnapshot, setDocumentInstanceSnapshot] = useState(null);
 
@@ -2861,12 +2863,16 @@ function MainApp({ currentUser, setCurrentUser, editorTab, lockTimedOut = false,
       objects:     { backupKey: OBJECTS_BACKUPS_KEY,     label: "объектов",    save: (l)=>saveObjects(l, {replace:true, allowEmpty:true}) },
     }[kind];
     if (!cfg) return;
-    // Оба источника: новые снимки по указателю и старые из общего массива.
-    const [bRaw, iRaw] = await Promise.all([storage.get(cfg.backupKey), storage.get(backupIndexKey(cfg.backupKey))]);
-    const items = mergeBackupViews(bRaw?.value, iRaw?.value, cfg.backupKey);
+    // ТОЛЬКО ОГЛАВЛЕНИЕ. Рядом лежит старый общий массив, где снимки хранятся ВМЕСТЕ
+    // С ДАННЫМИ: у договоров это 2,15 МБ, у объектов 938 КБ — и они качались на каждое
+    // открытие окна ради двух десятков строк списка. Старое подгружается кнопкой.
+    setLegacyLoaded(s => ({ ...s, [cfg.backupKey]: false }));   // окно открыли заново — кнопка снова доступна
+    const iRaw = await storage.get(backupIndexKey(cfg.backupKey));
+    const items = mergeBackupViews(null, iRaw?.value, cfg.backupKey);
     setListBackups({
       label: cfg.label,
       items,
+      backupKey: cfg.backupKey,
       onRestore: async (snap) => {
         const data = await loadSnapshotData(snap, async (k) => (await storage.get(k))?.value || null);
         if (!data) { window.alert("Снимок не читается — возможно, облако недоступно. Попробуйте ещё раз."); return; }
@@ -3426,12 +3432,25 @@ function MainApp({ currentUser, setCurrentUser, editorTab, lockTimedOut = false,
   const _allowEmptySave = useRef(false); // явное разрешение сохранить пустую смету (Сбросить позиции)
 
   // ── Бэкапы / восстановление ──
+  // ТОЛЬКО ОГЛАВЛЕНИЕ, как и в окнах выше: старый общий массив архива смет весит на
+  // боевой 6,14 МБ и качался при каждом открытии окна. Подгружаем его кнопкой.
   const openBackups = async () => {
     try {
-      // Новые снимки лежат по указателю, старые — в общем массиве. Показываем и те, и те.
-      const [bRaw, iRaw] = await Promise.all([storage.get(BACKUPS_KEY), storage.get(backupIndexKey(BACKUPS_KEY))]);
-      setBackupsModal(mergeBackupViews(bRaw?.value, iRaw?.value, BACKUPS_KEY));
+      setLegacyLoaded(s => ({ ...s, [BACKUPS_KEY]: false }));
+      const iRaw = await storage.get(backupIndexKey(BACKUPS_KEY));
+      setBackupsModal(mergeBackupViews(null, iRaw?.value, BACKUPS_KEY));
     } catch(e) { setBackupsModal([]); }
+  };
+  // Догрузить старый общий массив в уже открытое окно. apply получает готовые строки.
+  const loadLegacyBackups = async (backupKey, apply) => {
+    setLegacyLoading(backupKey);
+    try {
+      const bRaw = await storage.get(backupKey);
+      const older = mergeBackupViews(bRaw?.value, null, backupKey).filter(r => r.data !== undefined);
+      apply(older);
+    } catch { apply([]); }
+    setLegacyLoaded(s => ({ ...s, [backupKey]: true }));
+    setLegacyLoading("");
   };
   // Данные снимка: у старого они в самой строке, у нового — в своём ключе.
   const _snapData = async (snap) => loadSnapshotData(snap, async (k) => (await storage.get(k))?.value || null);
@@ -6974,6 +6993,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 </div>
               ))}
             </div>
+            {!legacyLoaded[listBackups.backupKey] && (
+              <button type="button" disabled={legacyLoading === listBackups.backupKey}
+                onClick={()=>loadLegacyBackups(listBackups.backupKey, older =>
+                  setListBackups(cur => cur && { ...cur, items: [...cur.items, ...older].sort((a,b)=>(b.ts||0)-(a.ts||0)) }))}
+                title="Снимки, сделанные до перехода на новое хранение. Лежат одним куском в несколько мегабайт, поэтому качаются только по нажатию."
+                style={{marginTop:12,width:"100%",background:"#f8fafc",color:"#64748b",border:"1px dashed #cbd5e1",borderRadius:8,padding:"9px 12px",fontSize:12,cursor:legacyLoading?"default":"pointer",fontFamily:"inherit"}}>
+                {legacyLoading === listBackups.backupKey ? "Загружаю…" : "Показать старые снимки (архив)"}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -7010,6 +7038,15 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 </div>
               ))}
             </div>
+            {!legacyLoaded[BACKUPS_KEY] && (
+              <button type="button" disabled={legacyLoading === BACKUPS_KEY}
+                onClick={()=>loadLegacyBackups(BACKUPS_KEY, older =>
+                  setBackupsModal(cur => [...(cur || []), ...older].sort((a,b)=>(b.ts||0)-(a.ts||0))))}
+                title="Снимки, сделанные до перехода на новое хранение. Лежат одним куском на 6 МБ, поэтому качаются только по нажатию."
+                style={{marginTop:12,width:"100%",background:"#f8fafc",color:"#64748b",border:"1px dashed #cbd5e1",borderRadius:8,padding:"9px 12px",fontSize:12,cursor:legacyLoading?"default":"pointer",fontFamily:"inherit"}}>
+                {legacyLoading === BACKUPS_KEY ? "Загружаю…" : "Показать старые снимки (архив, ~6 МБ)"}
+              </button>
+            )}
           </div>
         </div>
       )}
