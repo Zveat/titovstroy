@@ -8,7 +8,13 @@
 // выручает, если новый узел прочитать не удалось: показать вчерашние данные честнее, чем
 // пустой экран. Когда владелец удалит старый узел, эта ветка просто перестанет что-либо
 // находить — ломаться тут нечему.
+//
+// КОПИЯ В БРАУЗЕРЕ. Справочник весит мегабайты и меняется дважды в сутки, а качался
+// при каждой загрузке страницы. Перед чтением базы спрашиваем сохранённую копию —
+// подробности и цифры замера в mastersCache.js. Кэш только ускоряет: не открылся,
+// протух, не совпала подпись — читаем из базы ровно как раньше.
 import { storage as defaultStore } from "../cloud/storage.js";
+import { isCacheUsable, readCache, writeCache } from "./mastersCache.js";
 import { decodeRecords, infoKey, recordsKey } from "./mastersStore.mjs";
 
 const parseAny = (result) => {
@@ -24,7 +30,27 @@ const parse = (result) => {
   return value && !Array.isArray(value) ? value : null;
 };
 
-export async function loadMasters(baseKey, store = defaultStore) {
+export async function loadMasters(baseKey, store = defaultStore, { stamp = "", force = false, cache = true } = {}) {
+  if (cache && !force) {
+    try {
+      const saved = await readCache(baseKey);
+      if (isCacheUsable(saved, stamp)) {
+        return { items: saved.items, meta: saved.meta || null, format: saved.format || "cache", broken: 0, fromCache: true, savedAt: saved.savedAt };
+      }
+    } catch { /* копии нет или хранилище недоступно — читаем из базы */ }
+  }
+
+  const fresh = await loadFromDb(baseKey, store);
+  if (cache) {
+    // Записать не вышло (нет места, приватное окно) — не беда: в следующий раз просто
+    // прочитаем из базы. Ошибку сюда пускать нельзя, раздел уже получил данные.
+    try { await writeCache(baseKey, { stamp, savedAt: Date.now(), items: fresh.items, meta: fresh.meta, format: fresh.format }); }
+    catch { /* см. выше */ }
+  }
+  return fresh;
+}
+
+async function loadFromDb(baseKey, store) {
   // Оба узла запрашиваем сразу: «-info» весит килобайт и ждать его последовательно незачем.
   const [records, info] = await Promise.all([
     store.getChildren(recordsKey(baseKey)),

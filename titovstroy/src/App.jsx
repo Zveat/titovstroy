@@ -12,6 +12,7 @@ import { MASTER_CATEGORIES, NAIMI_CITY_FALLBACK, OLX_REPAIR_CATEGORIES } from ".
 import { SearchMultiSelect, SearchSelect as MasterSearchSelect } from "./masters/MasterSelects.jsx";
 import { parserRunMessage, triggerParserRun } from "./masters/parserTrigger.js";
 import { loadMasters } from "./masters/loadMasters.js";
+import { mastersStamp } from "./masters/mastersCache.js";
 import { avrCoverage, coverageLabel, markCoveredLines } from "./documents/avrCoverage.js";
 import { MasterCrmButton, MasterCrmDatabase, MasterCrmEditor } from "./masters/MasterCRM.jsx";
 import { interactionsForContact, masterSourceKey, normalizeMasterCrm } from "./masters/masterCrm.js";
@@ -700,17 +701,6 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [masters, setMasters] = useState([]);
   const [mastersMeta, setMastersMeta] = useState(null);
   const [mastersLoaded, setMastersLoaded] = useState(false);
-  useEffect(() => {
-    if (!mastersOpened.naimi) return undefined;
-    let alive = true;
-    loadMasters(MASTERS_KEY).then(res => {
-      if (!alive) return;
-      setMasters(res.items);
-      setMastersMeta(res.meta);
-      setMastersLoaded(true);
-    }).catch(() => { if (alive) setMastersLoaded(true); });
-    return () => { alive = false; };
-  }, [mastersOpened.naimi]);
   // Настройки парсера (частота/«Обновить сейчас») — редактирует Админ, читает парсер.
   const [mastersConfig, setMastersConfig] = useState(null);
   useEffect(() => {
@@ -723,6 +713,25 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     }).catch(() => { if (alive) setMastersConfig({}); });
     return () => { alive = false; };
   }, [mastersNeeded]);
+  // СПРАВОЧНИК ЧИТАЕМ ПОСЛЕ НАСТРОЕК, А НЕ ПАРАЛЛЕЛЬНО. В настройках лежит подпись
+  // («когда последний раз собирали и сколько»), и по ней видно, годится ли копия,
+  // сохранённая в браузере, — см. masters/mastersCache.js. Без подписи справочник
+  // качался бы заново на каждую загрузку страницы: 5,8 МБ naimi, 10,1 МБ OLX.
+  // Отдельной кнопки «обновить» тут нет и не нужно: «Обновить сейчас» в настройках
+  // запускает парсер, тот в конце прогона переписывает lastRunAt/lastCount — подпись
+  // меняется, и справочник перечитывается сам. Само нажатие подпись НЕ трогает
+  // (runNow и updatedAt в неё не входят), поэтому лишнего чтения от него не будет.
+  useEffect(() => {
+    if (!mastersOpened.naimi || mastersConfig === null) return undefined;
+    let alive = true;
+    loadMasters(MASTERS_KEY, undefined, { stamp: mastersStamp(mastersConfig) }).then(res => {
+      if (!alive) return;
+      setMasters(res.items);
+      setMastersMeta(res.meta);
+      setMastersLoaded(true);
+    }).catch(() => { if (alive) setMastersLoaded(true); });
+    return () => { alive = false; };
+  }, [mastersOpened.naimi, mastersConfig]);
   const saveMastersConfig = useCallback(async (patch) => {
     if (!accessAllows(currentPermissions.mastersManage, true)) return false;
     const next = { ...(mastersConfig || {}), ...patch, updatedAt: Date.now() };
@@ -743,17 +752,6 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   const [mastersOlxLoaded, setMastersOlxLoaded] = useState(false);
   const [mastersOlxConfig, setMastersOlxConfig] = useState(null);
   useEffect(() => {
-    if (!mastersOpened.olx) return undefined;
-    let alive = true;
-    loadMasters(MASTERS_OLX_KEY).then(res => {
-      if (!alive) return;
-      setMastersOlx(res.items);
-      setMastersOlxMeta(res.meta);
-      setMastersOlxLoaded(true);
-    }).catch(() => { if (alive) setMastersOlxLoaded(true); });
-    return () => { alive = false; };
-  }, [mastersOpened.olx]);
-  useEffect(() => {
     if (!mastersNeeded) return undefined;
     let alive = true;
     storage.getResult(MASTERS_OLX_CONFIG_KEY).then(res => {
@@ -763,6 +761,18 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     }).catch(() => { if (alive) setMastersOlxConfig({}); });
     return () => { alive = false; };
   }, [mastersNeeded]);
+  // Тот же порядок, что у naimi выше: сначала настройки (подпись), потом справочник.
+  useEffect(() => {
+    if (!mastersOpened.olx || mastersOlxConfig === null) return undefined;
+    let alive = true;
+    loadMasters(MASTERS_OLX_KEY, undefined, { stamp: mastersStamp(mastersOlxConfig) }).then(res => {
+      if (!alive) return;
+      setMastersOlx(res.items);
+      setMastersOlxMeta(res.meta);
+      setMastersOlxLoaded(true);
+    }).catch(() => { if (alive) setMastersOlxLoaded(true); });
+    return () => { alive = false; };
+  }, [mastersOpened.olx, mastersOlxConfig]);
   const saveMastersOlxConfig = useCallback(async (patch) => {
     if (!accessAllows(currentPermissions.mastersManage, true)) return false;
     const next = { ...(mastersOlxConfig || {}), ...patch, updatedAt: Date.now() };
