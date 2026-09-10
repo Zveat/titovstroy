@@ -12,7 +12,7 @@ import { TrafficTab } from "./TrafficTab.jsx";
 import { EstimateSuggestionRulesEditor } from "../estimate/EstimateSuggestions.jsx";
 import { fmt, genId } from "../format.js";
 import { _catalogOverrides, getEffectiveCatalog, setCatalogOverrides, setPriceOverrides } from "../pricing.js";
-import { CATALOG_BACKUPS_KEY, CATALOG_KEY, PRICES_KEY, USERS_KEY } from "../storageKeys.js";
+import { CATALOG_BACKUPS_KEY, CATALOG_KEY, FORCE_LOGOUT_KEY, PRICES_KEY, USERS_KEY } from "../storageKeys.js";
 import { confirmTyped } from "../ui/DangerConfirm.jsx";
 import { DEFAULT_ROLE_PERMISSIONS, ROLE_DEFINITIONS, accessAllows, contractNetTotal, resolveEstimateSuggestionRules, withCatalogOverrides } from "../utils.js";
 import { AuditTab } from "./AuditTab.jsx";
@@ -162,6 +162,25 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
     setNewLogin(""); setNewName(""); setNewPass(""); setNewRole("user");
     setMsg("✓ Пользователь добавлен"); setTimeout(() => setMsg(""), 2500);
   };
+  // ЗАВЕРШИТЬ СЕССИЮ СОТРУДНИКА.
+  // Кладём в его личный узел время нажатия — устройство сотрудника слушает свой узел и
+  // выходит само, безопасным путём (сначала дожимает несохранённое).
+  //
+  // setForceLogout, а не обычная запись: она проходит через замок редактирования, а кнопка
+  // нужна ровно тогда, когда замок держит ТОТ, кого разлогинивают, — владелец в этот момент
+  // сидит в режиме просмотра, и обычная запись у него не пройдёт. Проверка имени ключа внутри
+  // storage не даёт записать через эту дыру ничего другого.
+  const [forcedOut, setForcedOut] = useState(null);
+  const forceLogoutUser = async (u) => {
+    if (!u?.id) return;
+    if (!window.confirm(`Завершить сессию: ${u.name}?\n\nНа его устройстве приложение выйдет из учётной записи. Несохранённое сначала отправится в базу.\n\nЕсли приложение у него закрыто — ничего не произойдёт.`)) return;
+    const res = await storage.setForceLogout(`${FORCE_LOGOUT_KEY}-${u.id}`, String(Date.now()));
+    if (!res?.fbOk) { alert("Не удалось отправить: " + (res?.fbError || "нет связи с базой")); return; }
+    writeAudit(currentUser, "завершил сессию сотрудника", "user", u.id, u.name);
+    setForcedOut(u.id);
+    setTimeout(() => setForcedOut(v => (v === u.id ? null : v)), 4000);
+  };
+
   const removeUser = async (id) => {
     if (!hasAdminPermission("adminUsers")) return;
     if (id === currentUser.id) { setMsg("Нельзя удалить себя"); setTimeout(()=>setMsg(""),2000); return; }
@@ -436,6 +455,19 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
                       style={{background:"#e2e8f0",color:"#94a3b8",border:"1px solid #e2e8f0",borderRadius:7,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
                       🔑
                     </button>
+                    {/* ЗАВЕРШИТЬ СЕССИЮ. Нужна, когда сотрудник ушёл, а вкладка осталась
+                        открытой: она держит замок редактирования, и остальные сидят в
+                        просмотре. Сотруднику НЕ рубим соединение на полуслове — на его
+                        устройстве срабатывает обычный безопасный выход: сначала дожимается
+                        несохранённое, потом сессия закрывается. Работает только пока у него
+                        открыто приложение; закрытую вкладку завершать нечего. */}
+                    {u.id !== currentUser.id && (
+                      <button onClick={()=>forceLogoutUser(u)} disabled={forcedOut === u.id}
+                        title="Завершить сессию сотрудника на его устройстве"
+                        style={{background:"#fff7ed",color:"#b45309",border:"1px solid #fed7aa",borderRadius:7,padding:"6px 12px",fontSize:12,cursor:forcedOut===u.id?"default":"pointer",fontFamily:"inherit",opacity:forcedOut===u.id?.6:1}}>
+                        {forcedOut === u.id ? "✓ Отправлено" : "🚪 Разлогинить"}
+                      </button>
+                    )}
                     {u.id !== currentUser.id && (
                       <button onClick={()=>removeUser(u.id)}
                         style={{background:"rgba(220,38,38,.1)",color:"#dc2626",border:"1px solid rgba(220,38,38,.1)",borderRadius:7,padding:"6px 10px",fontSize:12,cursor:"pointer"}}>✕</button>

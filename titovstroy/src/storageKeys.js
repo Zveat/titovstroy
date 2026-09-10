@@ -35,6 +35,10 @@ export const ROLE_PERMISSIONS_KEY = "titovstroy-role-permissions";
 export const ROLE_PERMISSIONS_BACKUPS_KEY = "titovstroy-role-permissions-backups";
 export const SESSION_KEY        = "titovstroy-session";
 export const PRESENCE_KEY       = "titovstroy-presence"; // { [userId]: lastSeenTs } — кто когда был онлайн
+// Принудительный выход: владелец кладёт в titovstroy-force-logout-<userId> время нажатия,
+// устройство сотрудника видит его и выходит само. Узел на сотрудника, а не общий блок: общий
+// пришлось бы читать целиком каждому, и два одновременных нажатия затирали бы друг друга.
+export const FORCE_LOGOUT_KEY   = "titovstroy-force-logout";
 export const PRICES_KEY         = "titovstroy-prices";  // переопределённые цены {code: {fixedPrice?, tiers?}}
 export const PRICES_BACKUPS_KEY = "titovstroy-prices-backups"; // ОТДЕЛЬНО от каталога: цены — объект другого формата
 export const PUBLIC_NODES_BACKUPS_KEY = "titovstroy-public-nodes-backups"; // пред-бэкап публичных нод (КП/кабинеты) перед restore

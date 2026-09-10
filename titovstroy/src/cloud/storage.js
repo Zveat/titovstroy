@@ -655,6 +655,31 @@ export const storage = {
       return { fbOk: false, fbError: e?.message || String(e) };
     }
   },
+  // ── ПРИНУДИТЕЛЬНЫЙ ВЫХОД СОТРУДНИКА ──
+  // Владелец нажимает «Разлогинить» — сюда кладётся время, устройство сотрудника это видит и
+  // выходит само (безопасно: сначала дожимает несохранённое).
+  //
+  // ПОЧЕМУ МИМО ЗАМКА РЕДАКТОРА, как и отметка присутствия. Ровно в тот момент, когда кнопка
+  // нужнее всего — сотрудник забыл вкладку открытой и держит замок, — владелец сидит в режиме
+  // просмотра, и обычная запись у него не проходит. Дыра узкая и держится на проверке имени
+  // ключа: через неё нельзя записать НИЧЕГО, кроме отметки о выходе. Это стережёт
+  // forceLogoutKey.test.js — цена ошибки тут высокая.
+  async setForceLogout(key, value) {
+    if (!/^titovstroy-force-logout-[A-Za-z0-9_-]+$/.test(String(key))) {
+      return { fbOk: false, fbError: "not-a-force-logout-key" };
+    }
+    try {
+      if (_fbDb) {
+        await _fbAuthReady;
+        const res = await _race(set(ref(_fbDb, _fbKey(key)), value), 8000);
+        if (res !== _TIMEOUT) return { fbOk: true, fbError: null };
+      }
+      const rr = await _fbRestSet(key, value);
+      return { fbOk: !!rr.ok, fbError: rr.ok ? null : (rr.denied ? "no-rights" : "timeout") };
+    } catch (e) {
+      return { fbOk: false, fbError: e?.message || String(e) };
+    }
+  },
   // АТОМАРНОЕ чтение-слияние-запись СПИСКА через Firebase runTransaction. mutator получает
   // текущий массив (распарсенный), возвращает новый массив ИЛИ undefined для отмены. Хранилище
   // держит значения JSON-СТРОКАМИ, поэтому парсим внутри транзакции; битое/не-массив → отмена.

@@ -39,7 +39,7 @@ import {
   REPORTS_BACKUPS_KEY, WORKERS_KEY, WORKERS_BACKUPS_KEY, PODRYADS_KEY, PODRYADS_BACKUPS_KEY, MASTERS_KEY,
   MASTERS_CONFIG_KEY, MASTERS_OLX_KEY, MASTERS_OLX_CONFIG_KEY, MASTERS_CRM_KEY, WORKSPACE_BACKUPS_KEY,
   DEALS_KEY, DEALS_BACKUPS_KEY, STORAGE_KEY, BACKUPS_KEY, USERS_KEY, USERS_BACKUPS_KEY,
-  ROLE_PERMISSIONS_KEY, ROLE_PERMISSIONS_BACKUPS_KEY, SESSION_KEY, PRESENCE_KEY, PRICES_KEY,
+  ROLE_PERMISSIONS_KEY, ROLE_PERMISSIONS_BACKUPS_KEY, SESSION_KEY, PRESENCE_KEY, FORCE_LOGOUT_KEY, PRICES_KEY,
   PRICES_BACKUPS_KEY, PUBLIC_NODES_BACKUPS_KEY, CATALOG_BACKUPS_KEY, CONTRACTS_BACKUPS_KEY,
   CLIENTS_BACKUPS_KEY, CONTRAGENTS_BACKUPS_KEY, CATALOG_KEY, CONTRACTS_KEY, CLIENTS_KEY, CONTRAGENTS_KEY,
   AUDIT_KEY, AUDIT_INDEX_KEY, AUDIT_MONTH_KEY, FINANCE_TX_KEY, FINANCE_TX_BACKUPS_KEY, FINANCE_META_KEY,
@@ -52,6 +52,7 @@ import { AuditTab } from "./admin/AuditTab.jsx";
 import { RolePermissionsEditor } from "./admin/RolePermissions.jsx";
 import { IS_DEV_ENV, _env, confirmDangerous, firebaseConfig } from "./appConfig.js";
 import { clearLoginAttempts, getLoginLockout, hashPassword, passwordTooWeak, registerFailedLogin, verifyPassword } from "./auth/loginGuard.js";
+import { shouldForceLogout } from "./auth/forceLogout.js";
 import { _finTypeLbl, _objLabel, _tng, logChange, logContractSave, logObjChange, writeAudit } from "./cloud/audit.js";
 import { _dirtyOwnerUid, _editorGateN, _fbAuthReady, _mem, _restToken, hasStaffClaim, nextEditorGate,
   signOutStaff, staffSessionState, storage } from "./cloud/storage.js";
@@ -524,6 +525,25 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     const onVis = () => { if (document.visibilityState === "visible") touch(); };
     document.addEventListener("visibilitychange", onVis);
     return () => { stopped = true; clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+  }, [currentUser?.id]);
+
+  /* ── ВЛАДЕЛЕЦ НАЖАЛ «РАЗЛОГИНИТЬ» ───────────────────────────────────────
+     Слушаем ТОЛЬКО СВОЙ узел: в нём одно число, и подписка на него ничего не стоит.
+     Сравниваем со временем открытия вкладки, а не просто «есть отметка»: иначе прошлое
+     нажатие выкидывало бы человека сразу после каждого нового входа, навсегда.
+     Выход идёт обычным безопасным путём (forced): сначала дожимается несохранённое, и
+     только потом сессия закрывается. Отдельного «жёсткого» выхода тут нет намеренно —
+     терять чужую работу нажатием кнопки нельзя. */
+  const sessionStartedAtRef = useRef(Date.now());
+  useEffect(() => {
+    if (!currentUser?.id) return undefined;
+    const stop = storage.watch(FORCE_LOGOUT_KEY + "-" + currentUser.id, (raw) => {
+      if (!shouldForceLogout(raw, sessionStartedAtRef.current)) return;
+      // Сдвигаем точку отсчёта, чтобы на ту же отметку не сработать второй раз.
+      sessionStartedAtRef.current = Date.now();
+      try { endSessionSafelyRef.current?.({ forced: true, reason: "admin" }); } catch {}
+    });
+    return () => { try { stop?.(); } catch {} };
   }, [currentUser?.id]);
   // Админ периодически подтягивает чужие отметки для отображения
   // Состав списка сотрудников строкой. Пока список не догрузился из базы, allUsersRef
@@ -1894,7 +1914,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
   // 4) только данные, для которых durable-копии НЕТ, требуют confirm/alert о потере;
   // 5) при подтверждённой потере обычные dirty удаляются целиком; 6) остановка очередей и выход.
   const _endingSessionRef = useRef(false);
-  const endSessionSafely = useCallback(async ({ forced = false } = {}) => {
+  const endSessionSafely = useCallback(async ({ forced = false, reason = "" } = {}) => {
     if (_endingSessionRef.current) return; // повторный вход (например, второй тик загрузки)
     _endingSessionRef.current = true;
     _prodEndingRef.current = true; // новые bg_ команды больше не принимаются, ретрай-таймер молчит
@@ -1921,7 +1941,7 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
         const what = [prodAtRisk ? `производство без резервного черновика: ${prodLeft}` : "", dirtyLeft > 0 ? `сметы/финансы/прочее: ${dirtyLeft}` : "",
                       failsLeft.length ? `не принято базой: ${failsLeft.map(f => f.label).join(", ")}` : ""].filter(Boolean).join("; ");
         if (forced) {
-          alert(`Внимание: несинхронизированные изменения (${what}) не удалось отправить — они будут потеряны. Выход принудительный: пароль был изменён.`);
+          alert(`Внимание: несинхронизированные изменения (${what}) не удалось отправить — они будут потеряны. Выход принудительный: ${reason === "admin" ? "сессию завершил администратор" : "пароль был изменён"}.`);
         } else {
           const drop = window.confirm(`Несинхронизированные изменения (${what}) не удалось отправить — облако не отвечает.\n\nOK — выйти и ПОТЕРЯТЬ их.\nОтмена — остаться (попробуйте «Повторить сейчас» в баннере).`);
           if (!drop) { setLogoutConfirm(false); return; } // остаёмся: finally вернёт очереди в работу
