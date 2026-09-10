@@ -54,6 +54,7 @@ import { IS_DEV_ENV, _env, confirmDangerous, firebaseConfig } from "./appConfig.
 import { clearLoginAttempts, getLoginLockout, hashPassword, passwordTooWeak, registerFailedLogin, verifyPassword } from "./auth/loginGuard.js";
 import { shouldForceLogout } from "./auth/forceLogout.js";
 import { equalizeRows } from "./ui/equalizeRows.js";
+import { LAST_SCREEN_KEY, decodeLastScreen, encodeLastScreen } from "./ui/lastScreen.js";
 import { _finTypeLbl, _objLabel, _tng, logChange, logContractSave, logObjChange, writeAudit } from "./cloud/audit.js";
 import { _dirtyOwnerUid, _editorGateN, _fbAuthReady, _mem, _restToken, hasStaffClaim, nextEditorGate,
   signOutStaff, staffSessionState, storage } from "./cloud/storage.js";
@@ -5006,6 +5007,49 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       ...(show(currentPermissions.admin) ? [{ id:"admin", icon:"⚙️", label:"Админка" }] : []),
     ];
   }, [currentPermissions]);
+
+  /* ── ГДЕ ЧЕЛОВЕК БЫЛ, КОГДА ОБНОВИЛ СТРАНИЦУ ────────────────────────────
+     Перезагрузка браузера выкидывала на Главную: открыл объект, обновил страницу — ищи
+     его заново. Правила «что можно восстанавливать» — в ui/lastScreen.js, там же тесты:
+     чужой экран, раздел без прав и вчерашнее не поднимаются.
+     Отметку читаем ОДИН раз при первой отрисовке, ДО того как эффект ниже успеет записать
+     поверх неё сегодняшний экран по умолчанию. */
+  const [savedScreenRaw] = useState(() => {
+    try { return localStorage.getItem(LAST_SCREEN_KEY); } catch (e) { return null; }
+  });
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const saved = encodeLastScreen({
+      uid: currentUser.id, screen,
+      objectId: objectTab === "workspace" ? currentObject?.id : null,
+      objWsTab, financeTab,
+    });
+    try {
+      if (saved) localStorage.setItem(LAST_SCREEN_KEY, JSON.stringify(saved));
+      else localStorage.removeItem(LAST_SCREEN_KEY);
+    } catch (e) {}
+  }, [currentUser?.id, screen, objectTab, currentObject?.id, objWsTab, financeTab]);
+
+  const screenRestoredRef = useRef(false);
+  useEffect(() => {
+    if (screenRestoredRef.current || !currentUser?.id) return;
+    const want = decodeLastScreen(savedScreenRaw, { uid: currentUser.id, allowed: NAV_ITEMS.map(i => i.id) });
+    if (!want) { screenRestoredRef.current = true; return; }
+    if (want.objectId) {
+      // Объект ждём: список приходит из базы позже первой отрисовки. Пока пусто — не
+      // отмечаемся восстановленными, попробуем на следующем заходе.
+      if (!objects.length) return;
+      screenRestoredRef.current = true;
+      setScreen("objects");
+      // Объект могли удалить, пока человека не было, — тогда просто список объектов.
+      const obj = objects.find(o => o.id === want.objectId && !o.deletedAt);
+      if (obj) { setCurrentObject(obj); setObjectTab("workspace"); if (want.objWsTab) setObjWsTab(want.objWsTab); }
+      return;
+    }
+    screenRestoredRef.current = true;
+    setScreen(want.screen);
+    if (want.financeTab) setFinanceTab(want.financeTab);
+  }, [currentUser?.id, objects, NAV_ITEMS, savedScreenRaw]);
 
   // Нижняя панель телефона: максимум пять мест. Разделов бывает восемь, а подписи русские —
   // больше пяти в строку читаемо не помещается ни на одном телефоне. Редко используемые
