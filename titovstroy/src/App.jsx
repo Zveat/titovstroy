@@ -2357,6 +2357,12 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     () => objects.filter(o => o?.progressShared && o?.progressToken).map(o => `${o.id}:${o.progressToken}`).sort().join(","),
     [objects],
   );
+  // saveObjects — ОБЫЧНАЯ функция внутри компонента, а не useCallback: её личность меняется на
+  // КАЖДУЮ перерисовку. Стояла в зависимостях эффекта ниже — и подписки на кабинеты
+  // пересоздавались на каждый чих, а каждая новая подписка заново качает узел ЦЕЛИКОМ.
+  // Замерено счётчиком на боевой: 1393 чтения за 13 минут, 34.6 МБ в час с ОДНОЙ вкладки,
+  // из них 5.85 МБ из 7.5 — узлы кабинетов. Держим ссылку в ref и из зависимостей убираем.
+  const saveObjectsRef = useRef(); saveObjectsRef.current = saveObjects;
   useEffect(() => {
     if (!editorTab) return undefined;
     // ПОДПИСКА вместо опроса. Раньше приложение раз в минуту читало узел КАЖДОГО
@@ -2381,14 +2387,14 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
         if (!o.progressExpiresAt || Date.now() <= o.progressExpiresAt) return;
         // Гасим доступ насовсем: иначе «истёк» был бы виден только в интерфейсе, а сама нода
         // продолжала бы жить и читаться по старому токену.
-        try { await saveObjects([...objectsRef.current.filter(x => x.id !== o.id), { ...o, progressShared: false, updatedAt: Date.now() }]); } catch {}
+        try { await saveObjectsRef.current([...objectsRef.current.filter(x => x.id !== o.id), { ...o, progressShared: false, updatedAt: Date.now() }]); } catch {}
         try { await _revokeProgressAccess(o.progressToken); } catch {}
       });
     };
     checkExpiry();
     const iv = setInterval(checkExpiry, 30 * 60 * 1000);
     return () => { clearInterval(iv); for (const stop of stops) { try { stop(); } catch {} } };
-  }, [saveObjects, _revokeProgressAccess, editorTab, _progWatchKey]);
+  }, [_revokeProgressAccess, editorTab, _progWatchKey]);
   // Включить/выключить доступ клиента; возвращает ссылку (или null при выключении)
   const toggleClientShare = useCallback(async (objectId) => {
     if (!accessAllows(currentPermissions.productionClientAccess, estimatorObjectIds.has(objectId))) return null;
