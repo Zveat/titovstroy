@@ -53,6 +53,7 @@ import { RolePermissionsEditor } from "./admin/RolePermissions.jsx";
 import { IS_DEV_ENV, _env, confirmDangerous, firebaseConfig } from "./appConfig.js";
 import { clearLoginAttempts, getLoginLockout, hashPassword, passwordTooWeak, registerFailedLogin, verifyPassword } from "./auth/loginGuard.js";
 import { shouldForceLogout } from "./auth/forceLogout.js";
+import { equalizeRows } from "./ui/equalizeRows.js";
 import { _finTypeLbl, _objLabel, _tng, logChange, logContractSave, logObjChange, writeAudit } from "./cloud/audit.js";
 import { _dirtyOwnerUid, _editorGateN, _fbAuthReady, _mem, _restToken, hasStaffClaim, nextEditorGate,
   signOutStaff, staffSessionState, storage } from "./cloud/storage.js";
@@ -534,6 +535,22 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
      Выход идёт обычным безопасным путём (forced): сначала дожимается несохранённое, и
      только потом сессия закрывается. Отдельного «жёсткого» выхода тут нет намеренно —
      терять чужую работу нажатием кнопки нельзя. */
+  /* ── КНОПКИ ОДНОГО РЯДА — ОДНОГО РАЗМЕРА ────────────────────────────────
+     Проход после каждой перерисовки: ряды появляются и исчезают вместе с разделами,
+     а подписи меняются от данных («Корзина (7)» → «Корзина (12)»), поэтому один
+     замер при загрузке не годится.
+     Работа сворачивается в ОДИН кадр: подряд идущие перерисовки дают один проход,
+     а не десять. Сам проход трогает только кнопки (их на экране десятки), и ничего
+     не пишет, если размер не изменился, — см. ui/equalizeRows.js. */
+  useEffect(() => {
+    let frame = 0;
+    const run = () => { frame = 0; try { equalizeRows(document); } catch {} };
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(run); };
+    schedule();
+    window.addEventListener("resize", schedule);
+    return () => { window.removeEventListener("resize", schedule); if (frame) cancelAnimationFrame(frame); };
+  });
+
   const sessionStartedAtRef = useRef(Date.now());
   useEffect(() => {
     if (!currentUser?.id) return undefined;
@@ -5262,22 +5279,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         .cpx-sel:focus{border-color:#2563eb}
         .card{background:#ffffff;box-shadow:0 1px 3px rgba(15,23,42,.07),0 4px 16px rgba(15,23,42,.04);border:1px solid #e2e8f0;border-radius:12px;overflow:hidden}
         .btn{border:none;cursor:pointer;padding:10px 20px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;transition:all .15s;letter-spacing:.1px}
-        /* ── КНОПКИ ОДНОГО РЯДА — ОДНОГО РАЗМЕРА ─────────────────────────────
-           Размеры набирались по месту, и ряд выглядел собранным наспех. Замерено
-           на экране 390px: в шапке Главной 153 / 94 / 77 по ширине, в панели
-           объектов 111x31 рядом с 138x36, а ниже 70x33, 63x34 и 110x33.
-           РАЗМЕР НЕ УВЕЛИЧИВАЕМ. Была попытка заодно поднять всё до 44px «под
-           палец» — владелец отверг: кнопки стали огромными, а прежний размер его
-           устраивал. Поэтому каждый ряд подтягивается к САМОЙ БОЛЬШОЙ кнопке
-           этого же ряда, и ни к чему больше.
-           Размер задаётся в месте использования (--tw/--th), а не здесь: он
-           разный у разных панелей, и «одна кнопка на всё приложение» тут
-           означала бы либо обрезанные подписи, либо лишнюю пустоту.
-           Честное ограничение: ширина — константа, а в подписях есть счётчики
-           («Корзина (7)»). Вырастет счётчик на разряд — эта кнопка станет шире
-           соседей. Ширину берём с небольшим запасом, но совсем от этого не
-           застрахованы: CSS не умеет «по самой длинной в ряду». */
-        .tap-even button{min-width:var(--tw);min-height:var(--th);justify-content:center}
+        /* Размер кнопок в ряду выравнивается не отсюда, а замером: правило «по самой
+           длинной кнопке ряда» на CSS не выражается. Подробности — ui/equalizeRows.js.
+           Ряд, который трогать нельзя, помечается классом tap-keep. */
         .btn-g{background:#2563eb;color:#ffffff;box-shadow:0 1px 2px rgba(37,99,235,.3)}
         .btn-g:hover{background:#1d4ed8;box-shadow:0 4px 12px rgba(37,99,235,.35);transform:translateY(-1px)}
         .btn-g:active{transform:translateY(0)}
@@ -5760,8 +5764,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   {" · "}<span style={{color:"#bfdbfe",fontWeight:600}}>{currentUser.role==="admin"?"Администратор":currentUser.role==="viewer"?"Просмотр":currentUser.name}</span>
                 </div>
               </div>
-              {/* 153px — ширина самой длинной кнопки ряда, «⚠ N требуют внимания» */}
-              <div className="tap-even" style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap","--tw":"153px","--th":"24px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                 {navHistory.length > 0 && <button onClick={goBack} style={{background:"none",border:"1px solid #ccc",borderRadius:6,padding:"4px 12px",cursor:"pointer",marginRight:8,fontSize:14,color:"#fff",borderColor:"rgba(255,255,255,.4)"}}>← Назад</button>}
                 {staleObjs.length>0&&<button onClick={openStaleObjects} style={{background:"rgba(251,191,36,.2)",color:"#fde68a",border:"1px solid rgba(251,191,36,.3)",borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⚠ {staleObjs.length} требуют внимания</button>}
                 <button onClick={resyncNow} disabled={resyncing}
@@ -9240,8 +9243,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               </div>
               <div style={{flex:1}}/>
               {objectTab==="list" && (currentPermissions.objectCreate !== "none" || currentPermissions.objectDelete !== "none") && (
-                /* 138x36 — размер «+ Новый объект», самой крупной кнопки ряда */
-                <div className="tap-even" style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap","--tw":"138px","--th":"36px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                 {(()=>{const trashed=objectsRef.current.filter(o=>o.deletedAt); return trashed.length>0&&(<button onClick={()=>setObjectTab("trash")} style={{background:"rgba(220,38,38,.12)",color:"#dc2626",border:"1px solid rgba(220,38,38,.2)",borderRadius:8,padding:"7px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginRight:4}}>🗑 Корзина ({trashed.length})</button>);})()}
                   {currentPermissions.objectCreate !== "none" && <button className="btn btn-g" style={{fontSize:13,padding:"9px 16px"}} onClick={()=>{
                   const newObj = {id:genId(),clientId:"",clientName:"",clientPhone:"",clientType:"физ",clientIin:"",clientDoc:"",address:"",objType:"Вторичка",area:"",status:"new",note:"",manager:currentUser.name,createdBy:currentUser.name,createdById:currentUser.id,createdAt:Date.now(),updatedAt:Date.now(),financeCalcMode:"contracts-v2"};
@@ -9264,7 +9266,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
               {/* Поиск + сортировка + экспорт. 112x34 — по «⚙ Фильтры», самой
                   крупной кнопки ряда; поле поиска правило не трогает, оно не кнопка */}
-              <div className="tap-even" style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap","--tw":"112px","--th":"34px"}}>
+              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                 <input value={objectSearch} onChange={e=>setObjectSearch(e.target.value)} placeholder="🔍 Поиск по клиенту, телефону, адресу..."
                   style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:13,flex:1,minWidth:200,boxSizing:"border-box",outline:"none",fontFamily:"inherit"}}/>
                 {currentPermissions.objectExport !== "none" && <button onClick={()=>downloadCSV(
@@ -9305,8 +9307,10 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   <button onClick={()=>setObjectAttentionFilter("")} style={{background:"#fff",border:"1px solid #fcd34d",borderRadius:7,padding:"4px 9px",color:"#92400e",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Показать все</button>
                 </div>
               )}
-              {/* Фильтр по статусу */}
-              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {/* Фильтр по статусу. tap-keep — «размер не выравнивать»: подписи тут от
+                  «Все» до «Согласование сметы», и общая ширина развернула бы девять чипов
+                  в пять рядов пустоты. Почему так — в ui/equalizeRows.js. */}
+              <div className="tap-keep" style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 <button onClick={()=>setObjectFilterStatus("")}
                   style={{background:!objectFilterStatus?"#2563eb":"rgba(0,0,0,.03)",color:!objectFilterStatus?"#fff":"#94a3b8",border:`1px solid ${!objectFilterStatus?"#2563eb":"#e2e8f0"}`,borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Все ({liveObjects.length})</button>
                 {DEAL_STATUSES.map(s=>{
