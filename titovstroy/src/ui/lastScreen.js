@@ -8,8 +8,14 @@
 // и складывать туда ещё и внутреннюю навигацию — это менять то, чем клиенты пользуются снаружи.
 // Слишком дорого ради возврата на свой экран. Кладём в память браузера.
 //
+// РЕДАКТОР СМЕТЫ ВОССТАНАВЛИВАЕМ. Сначала я его исключил — «там несохранённые правки». Это
+// оказалось неверно: смета сохраняется сама через 2,5 секунды после правки и ещё раз
+// принудительно при уходе с экрана, так что к перезагрузке терять уже нечего. А замерщик из
+// редактора почти не выходит, то есть без него правка не решает задачу как раз для того, кто
+// на неё и пожаловался. Открывается он тем же openEstimate, что и по нажатию, — а тот сам
+// проверяет права и молча ничего не делает, если сметы больше нет или доступа к ней нет.
+//
 // ЧТО НЕ ВОССТАНАВЛИВАЕМ И ПОЧЕМУ:
-//   — редактор сметы: он про несохранённые правки, поднимать его «сам собой» опасно;
 //   — экран чужого пользователя: вошёл другой человек — он не должен оказаться в объекте
 //     предыдущего. Отметка привязана к идентификатору сотрудника;
 //   — раздел, на который у роли нет прав: права могли поменять, пока человека не было;
@@ -24,8 +30,11 @@ export const NAV_SCREENS = ["dashboard", "objects", "calendar", "contracts", "an
 
 export const MAX_AGE_MS = 12 * 3600 * 1000;
 
-export function encodeLastScreen({ uid, screen, objectId, objWsTab, financeTab, now = Date.now() }) {
-  if (!uid || !NAV_SCREENS.includes(screen)) return null;
+export function encodeLastScreen({ uid, screen, objectId, objWsTab, financeTab, estimateId, now = Date.now() }) {
+  if (!uid) return null;
+  // Редактор сметы — не раздел меню, у него своя запись: важен только номер сметы.
+  if (screen === "editor") return estimateId ? { uid: String(uid), screen: "editor", estimateId: String(estimateId), ts: now } : null;
+  if (!NAV_SCREENS.includes(screen)) return null;
   const out = { uid: String(uid), screen, ts: now };
   // Объект помним только вместе со своим разделом: «карточка объекта» в Финансах не значит ничего.
   if (screen === "objects" && objectId) { out.objectId = String(objectId); if (objWsTab) out.objWsTab = String(objWsTab); }
@@ -41,6 +50,9 @@ export function decodeLastScreen(raw, { uid, now = Date.now(), allowed = NAV_SCR
   if (!uid || String(saved.uid) !== String(uid)) return null;
   const ts = Number(saved.ts);
   if (!Number.isFinite(ts) || now - ts > maxAgeMs || ts > now + 60_000) return null;
+  // Редактор проверяем отдельно: разрешения на него в списке разделов нет, право на саму
+  // смету проверит openEstimate — он же её и открывает.
+  if (saved.screen === "editor") return saved.estimateId ? { screen: "editor", estimateId: String(saved.estimateId) } : null;
   if (!NAV_SCREENS.includes(saved.screen) || !allowed.includes(saved.screen)) return null;
   const out = { screen: saved.screen };
   if (saved.screen === "objects" && saved.objectId) {

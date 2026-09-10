@@ -1564,8 +1564,18 @@ function MainApp({ currentUser, setCurrentUser, editorTab, takeoverEditLease }) 
     setEstimates(newList);
     saveEstimates(newList);
   };
-  // Открыли другую смету — прежняя подпись к ней не относится.
-  useEffect(() => { _estSavedSig.current = ""; }, [currentId]);
+  // Открыли другую смету — подпись берём с её СОДЕРЖИМОГО, а не пустую.
+  // Пустая означала «в базе ничего нет», поэтому одно только ОТКРЫТИЕ сметы через 2,5 секунды
+  // выгружало, сливало и переписывало ВЕСЬ список смет (96 штук), хотя человек ничего не трогал.
+  // Проверено на боевой: открыл смету «Галина» без единой правки — в базе появилась запись
+  // updatedBy=P.Zveat и лишняя строка истории «редактировал» с той же суммой; со сравнением по
+  // содержимому запись не уходит вовсе. Отсюда же брались фантомные строки в журнале сметы и
+  // враньё в «кто менял последним»: там оказывался тот, кто просто посмотрел.
+  // Новая смета (её ещё нет в списке) сохраняется как и раньше — подпись пустая.
+  useEffect(() => {
+    const est = estimatesRef.current.find(e => e.id === currentId);
+    _estSavedSig.current = est ? _estSig(est) : "";
+  }, [currentId]);
   useEffect(() => {
     if (!currentId) { _estFlushRef.current = null; return; }
     _estFlushRef.current = currentId;
@@ -5022,34 +5032,54 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     const saved = encodeLastScreen({
       uid: currentUser.id, screen,
       objectId: objectTab === "workspace" ? currentObject?.id : null,
-      objWsTab, financeTab,
+      objWsTab, financeTab, estimateId: currentId,
     });
     try {
       if (saved) localStorage.setItem(LAST_SCREEN_KEY, JSON.stringify(saved));
       else localStorage.removeItem(LAST_SCREEN_KEY);
     } catch (e) {}
-  }, [currentUser?.id, screen, objectTab, currentObject?.id, objWsTab, financeTab]);
+  }, [currentUser?.id, screen, objectTab, currentObject?.id, objWsTab, financeTab, currentId]);
 
   const screenRestoredRef = useRef(false);
+  const wantObjectRef = useRef(null);
+  const wantEstimateRef = useRef(null);
+  // ЭКРАН СТАВИМ СРАЗУ, ОБЪЕКТ ОТКРЫВАЕМ ПОЗЖЕ.
+  // Первая версия ждала список объектов, чтобы сделать и то и другое разом, — и если список
+  // приходил пустым (у замерщика он свой и короткий) или не приходил вовсе, восстановление
+  // зависало навсегда: человек так и оставался на Главной. Теперь одно от другого не зависит.
   useEffect(() => {
     if (screenRestoredRef.current || !currentUser?.id) return;
-    const want = decodeLastScreen(savedScreenRaw, { uid: currentUser.id, allowed: NAV_ITEMS.map(i => i.id) });
-    if (!want) { screenRestoredRef.current = true; return; }
-    if (want.objectId) {
-      // Объект ждём: список приходит из базы позже первой отрисовки. Пока пусто — не
-      // отмечаемся восстановленными, попробуем на следующем заходе.
-      if (!objects.length) return;
-      screenRestoredRef.current = true;
-      setScreen("objects");
-      // Объект могли удалить, пока человека не было, — тогда просто список объектов.
-      const obj = objects.find(o => o.id === want.objectId && !o.deletedAt);
-      if (obj) { setCurrentObject(obj); setObjectTab("workspace"); if (want.objWsTab) setObjWsTab(want.objWsTab); }
-      return;
-    }
     screenRestoredRef.current = true;
+    const want = decodeLastScreen(savedScreenRaw, { uid: currentUser.id, allowed: NAV_ITEMS.map(i => i.id) });
+    if (!want) return;
+    // Редактор сметы экран сам не ставит: его поставит openEstimate, когда список смет
+    // приедет из базы. Если сметы больше нет или прав на неё нет — просто останемся там,
+    // куда приложение открылось по умолчанию.
+    if (want.screen === "editor") { wantEstimateRef.current = want.estimateId; return; }
     setScreen(want.screen);
     if (want.financeTab) setFinanceTab(want.financeTab);
-  }, [currentUser?.id, objects, NAV_ITEMS, savedScreenRaw]);
+    if (want.objectId) wantObjectRef.current = { id: want.objectId, tab: want.objWsTab };
+  }, [currentUser?.id, NAV_ITEMS, savedScreenRaw]);
+
+  useEffect(() => {
+    const id = wantEstimateRef.current;
+    if (!id || !estimates.length) return;
+    wantEstimateRef.current = null;
+    const est = estimates.find(e => String(e.id) === String(id));
+    if (est) openEstimate(est);   // права и «смета ещё существует» проверяет он сам
+  }, [estimates]);
+
+  useEffect(() => {
+    const want = wantObjectRef.current;
+    if (!want || !objects.length) return;
+    wantObjectRef.current = null;
+    // Объект могли удалить, пока человека не было, — тогда остаёмся в списке объектов.
+    const obj = objects.find(o => o.id === want.id && !o.deletedAt);
+    if (!obj) return;
+    setCurrentObject(obj);
+    setObjectTab("workspace");
+    if (want.tab) setObjWsTab(want.tab);
+  }, [objects]);
 
   // Нижняя панель телефона: максимум пять мест. Разделов бывает восемь, а подписи русские —
   // больше пяти в строку читаемо не помещается ни на одном телефоне. Редко используемые

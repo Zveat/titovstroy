@@ -21,9 +21,17 @@ describe("что запоминаем", () => {
       .toEqual({ uid: UID, screen: "finance", ts: NOW });
   });
 
-  it("внутренние экраны не запоминаем", () => {
-    // Редактор сметы — про несохранённые правки, поднимать его сам собой опасно.
-    for (const screen of ["editor", "deals", "production", "list", "", null]) {
+  it("редактор сметы запоминаем по номеру сметы", () => {
+    expect(encodeLastScreen({ uid: UID, screen: "editor", estimateId: "e5", now: NOW }))
+      .toEqual({ uid: UID, screen: "editor", estimateId: "e5", ts: NOW });
+  });
+
+  it("редактор без номера сметы не запоминаем — открывать нечего", () => {
+    expect(encodeLastScreen({ uid: UID, screen: "editor", now: NOW })).toBeNull();
+  });
+
+  it("прочие внутренние экраны не запоминаем", () => {
+    for (const screen of ["deals", "production", "list", "", null]) {
       expect(encodeLastScreen({ uid: UID, screen, now: NOW })).toBeNull();
     }
   });
@@ -71,6 +79,18 @@ describe("что восстанавливаем", () => {
   it("незнакомый раздел НЕ восстанавливаем", () => {
     // Раздел могли переименовать — старая отметка не должна открывать пустоту.
     expect(decodeLastScreen(saved({ screen: "старый_раздел" }), { uid: UID, now: NOW })).toBeNull();
+  });
+
+  it("редактор сметы восстанавливаем, права проверит openEstimate", () => {
+    // Разрешения на редактор в списке разделов нет — и не должно быть: право на конкретную
+    // смету знает только openEstimate, он её и открывает.
+    expect(decodeLastScreen({ uid: UID, screen: "editor", estimateId: "e5", ts: NOW }, { uid: UID, now: NOW, allowed: [] }))
+      .toEqual({ screen: "editor", estimateId: "e5" });
+  });
+
+  it("чужой и вчерашний редактор — тоже мимо", () => {
+    expect(decodeLastScreen({ uid: UID, screen: "editor", estimateId: "e5", ts: NOW }, { uid: "u2", now: NOW })).toBeNull();
+    expect(decodeLastScreen({ uid: UID, screen: "editor", estimateId: "e5", ts: NOW }, { uid: UID, now: NOW + MAX_AGE_MS + 1 })).toBeNull();
   });
 
   it("мусор и пустота — просто ничего, без падения", () => {
