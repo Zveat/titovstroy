@@ -5764,16 +5764,19 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                   {" · "}<span style={{color:"#bfdbfe",fontWeight:600}}>{currentUser.role==="admin"?"Администратор":currentUser.role==="viewer"?"Просмотр":currentUser.name}</span>
                 </div>
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                {navHistory.length > 0 && <button onClick={goBack} style={{background:"none",border:"1px solid #ccc",borderRadius:6,padding:"4px 12px",cursor:"pointer",marginRight:8,fontSize:14,color:"#fff",borderColor:"rgba(255,255,255,.4)"}}>← Назад</button>}
-                {staleObjs.length>0&&<button onClick={openStaleObjects} style={{background:"rgba(251,191,36,.2)",color:"#fde68a",border:"1px solid rgba(251,191,36,.3)",borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⚠ {staleObjs.length} требуют внимания</button>}
-                <button onClick={resyncNow} disabled={resyncing}
-                  title={dirtyCount>0 ? `Есть несинхронизированные изменения (${dirtyCount}). Нажмите, чтобы синхронизировать с сервером.` : "Обновить данные с сервера"}
-                  style={{fontSize:11,fontWeight:700,display:"flex",alignItems:"center",gap:5,padding:"4px 12px",borderRadius:20,cursor:resyncing?"default":"pointer",fontFamily:"inherit",border:"1px solid "+(dirtyCount>0?"rgba(251,191,36,.5)":"rgba(255,255,255,.25)"),background:dirtyCount>0?"rgba(251,191,36,.2)":"rgba(255,255,255,.15)",color:dirtyCount>0?"#fde68a":"rgba(255,255,255,.9)",backdropFilter:"blur(4px)"}}>
-                  {resyncing ? "🔄 Синхронизирую…"
-                    : dirtyCount>0 ? `⚠ Не синхронизировано (${dirtyCount})`
-                    : syncStatus==="saving"?"⏳ Сохраняю...":syncStatus==="saved"?"✓ Сохранено":syncStatus==="error"?"⚠ Ошибка":"☁ Обновить"}
-                </button>
+              {/* ДЕЙСТВИЯ В ШАПКЕ. Их тут ровно столько, сколько нужно, и они РАЗНЫЕ по смыслу:
+                  «Назад» — переход, «требуют внимания» — предупреждение со счётчиком,
+                  «Выйти» — конец сессии. Поэтому ряд помечен tap-keep: одинаковая ширина
+                  ровняла их по самой длинной, и «Выйти» уезжало на отдельную строку
+                  растянутым во всю панель — три кнопки лесенкой в три этажа.
+                  Кнопки «☁ Обновить» здесь больше нет: владелец ей не пользовался, а место
+                  она занимала всегда. Ручная синхронизация никуда не делась — она в полосе
+                  предупреждений («Повторить сейчас»), и появляется ровно тогда, когда
+                  действительно есть что дожать. Предупреждение «не синхронизировано» тоже
+                  показывает та полоса, так что вместе с кнопкой ничего не потерялось. */}
+              <div className="tap-keep" style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                {navHistory.length > 0 && <button onClick={goBack} style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.25)",borderRadius:20,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:600,color:"rgba(255,255,255,.9)",fontFamily:"inherit"}}>← Назад</button>}
+                {staleObjs.length>0&&<button onClick={openStaleObjects} style={{background:"rgba(251,191,36,.2)",color:"#fde68a",border:"1px solid rgba(251,191,36,.3)",borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⚠ {staleObjs.length} {staleObjs.length % 10 === 1 && staleObjs.length % 100 !== 11 ? "требует" : "требуют"} внимания</button>}
                 <button onClick={()=>{ setLogoutConfirm(true); }}
                   style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.25)",borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:600,cursor:"pointer",color:"rgba(255,255,255,.9)",fontFamily:"inherit"}}>
                   🚪 Выйти
