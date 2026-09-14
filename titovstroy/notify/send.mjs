@@ -10,6 +10,7 @@
 // данные роняет прогон с ошибкой, а не портит базу молча.
 import admin from "firebase-admin";
 import { buildAnalytics } from "../src/analytics/analyticsModel.js";
+import { buildObjectSums } from "../src/notify/objectSums.js";
 import { refuseReasonLabel } from "../src/analytics/analyticsModel.js";
 import {
   buildEventMessages, buildReminderMessages, buildDateReminders, buildDigestMessage,
@@ -210,9 +211,24 @@ async function main() {
   // Карточки производства нужны и событиям (дополнить «договор подписан» датами),
   // и напоминаниям о будущем — читаем один раз.
   const productions = (await readJson(K.productions, [])) || [];
-  const events = quiet ? [] : buildEventMessages(entries, {
+  let events = quiet ? [] : buildEventMessages(entries, {
     sinceTs, sentIds, settings, context: makeEventContext({ productions }),
   });
+
+  // СУММЫ ЧИТАЕМ ТОЛЬКО ЕСЛИ ДОГОВОР ДЕЙСТВИТЕЛЬНО ПОДПИСАЛИ. Договоры и сметы вместе
+  // весят 374 КБ, прогонов в сутки под полсотни, а подписаний — три в месяц. Постоянное
+  // чтение стоило бы 18 МБ в сутки ради одного числа раз в десять дней. Поэтому сначала
+  // собираем события, и только увидев подписание, идём за суммами и пересобираем.
+  if (events.some(m => (m.key || m.event) === "contract_signed")) {
+    const [contracts, estimates] = await Promise.all([
+      readJson(K.contracts, []), readJson(K.estimates, []),
+    ]);
+    const sumsByObject = buildObjectSums(contracts || [], estimates || []);
+    events = buildEventMessages(entries, {
+      sinceTs, sentIds, settings, context: makeEventContext({ productions, sumsByObject }),
+    });
+    console.log(`Подписание в журнале — читаю суммы: объектов с суммой ${Object.keys(sumsByObject).length}`);
+  }
   console.log(`Журнал: записей ${entries.length}, к отправке событий ${events.length}`);
 
   // 3. Напоминания — раз в сутки, после часа сводки

@@ -342,13 +342,22 @@ export function groupMessages(messages) {
 // человеку не надо лезть в сервис, чтобы понять, что делать дальше.
 function eventExtras(msg, entry, ctx) {
   if (!ctx || !msg.objectId) return "";
-  const prod = ctx.prodBy?.get(msg.objectId);
-  if (!prod) return "";
   const rows = [];
+  // Сумма идёт ПЕРВОЙ строкой и не зависит от карточки производства: «договор
+  // подписан» без суммы — это половина новости, а карточки у объекта может и не быть.
   if (msg.key === "contract_signed") {
-    if (prod.startDate) rows.push(`старт работ: <b>${esc(dateRu(prod.startDate))}</b>`);
-    if (prod.planEndDate) rows.push(`сдача по плану: <b>${esc(dateRu(prod.planEndDate))}</b>`);
-    if (!rows.length) rows.push("<i>даты старта и сдачи не заполнены</i>");
+    const sum = ctx.sumBy?.get(msg.objectId);
+    if (sum) rows.push(`сумма: <b>${esc(tenge(sum))}</b>`);
+  }
+  const prod = ctx.prodBy?.get(msg.objectId);
+  if (!prod) return rows.length ? "\n" + rows.join("\n") : "";
+  if (msg.key === "contract_signed") {
+    // Счётчик дат отдельный: проверять по длине rows нельзя — там уже может лежать
+    // сумма, и тогда «даты не заполнены» молча пропадало бы.
+    let dates = 0;
+    if (prod.startDate) { rows.push(`старт работ: <b>${esc(dateRu(prod.startDate))}</b>`); dates++; }
+    if (prod.planEndDate) { rows.push(`сдача по плану: <b>${esc(dateRu(prod.planEndDate))}</b>`); dates++; }
+    if (!dates) rows.push("<i>даты старта и сдачи не заполнены</i>");
     // Ответственного показываем, только если это НЕ тот, кто и так подписан внизу
     // сообщения. Иначе получалось «ответственный: P.Zveat» и строкой ниже
     // «P.Zveat · 18:33» — одно и то же имя дважды подряд, ни слова новой информации.
@@ -380,10 +389,22 @@ export function buildEventMessages(entries = [], { sinceTs = 0, sentIds = {}, se
 }
 
 // Готовит справочники для дополнения сообщений (карточки производства по объекту).
-export function makeEventContext({ productions = [] } = {}) {
+//
+// СУММЫ. Владелец: «сумма нужна же, это просто цифра». Она и правда просто цифра, но
+// лежит в договорах и сметах — вместе это 374 КБ. Читать их 48 раз в сутки ради трёх
+// подписаний в месяц нельзя, поэтому отправщик берёт их ТОЛЬКО когда подписание
+// действительно случилось (см. send.mjs). Здесь суммы просто раскладываются по объекту.
+// Берём договор, если он есть: подписали именно его. Нет договора — сумма смет по
+// объекту, это то же число, из которого договор и собирают.
+export function makeEventContext({ productions = [], sumsByObject = null } = {}) {
   const prodBy = new Map();
   for (const p of productions || []) if (p && p.objectId) prodBy.set(p.objectId, p);
-  return { prodBy };
+  const sumBy = new Map();
+  for (const [objectId, sum] of Object.entries(sumsByObject || {})) {
+    const n = Number(sum);
+    if (objectId && Number.isFinite(n) && n > 0) sumBy.set(objectId, n);
+  }
+  return { prodBy, sumBy };
 }
 
 export function renderEvent(msg) {
