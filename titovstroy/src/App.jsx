@@ -54,6 +54,7 @@ import { RolePermissionsEditor } from "./admin/RolePermissions.jsx";
 import { IS_DEV_ENV, _env, confirmDangerous, firebaseConfig } from "./appConfig.js";
 import { clearLoginAttempts, getLoginLockout, hashPassword, passwordTooWeak, registerFailedLogin, verifyPassword } from "./auth/loginGuard.js";
 import { shouldForceLogout } from "./auth/forceLogout.js";
+import { askIfDue, startNotifyTicker } from "./notify/notifyTicker.js";
 import { equalizeRows } from "./ui/equalizeRows.js";
 import { LAST_SCREEN_KEY, decodeLastScreen, encodeLastScreen } from "./ui/lastScreen.js";
 import { _finTypeLbl, _objLabel, _tng, logChange, logContractSave, logObjChange, writeAudit } from "./cloud/audit.js";
@@ -1938,6 +1939,19 @@ function MainApp({ currentUser, setCurrentUser, editorTab, lockTimedOut = false,
       alert("Не удалось убрать замечание с главной. Проверьте соединение и повторите.");
     }
   }, [currentUser?.id, currentUser?.name, dismissIssueTomorrow, mutateProductions]);
+
+  // РАСПИСАНИЕ УВЕДОМЛЕНИЙ ДЕРЖИТСЯ НА ЭТИХ ЧАСАХ. Раз в минуту спрашиваем
+  // сервер «пора?» — и в час сводки ответ становится «да». Подробно, и почему
+  // не планировщиком, — в notify/notifyTicker.js.
+  // Спрашивает только вкладка-редактор (иначе пять вкладок задавали бы один и
+  // тот же вопрос впятером) и только на боевой базе: прогон ходит в боевую.
+  useEffect(() => {
+    if (!editorTab || !currentUser?.id || IS_DEV_ENV) return undefined;
+    return startNotifyTicker({
+      ask: () => askIfDue({ getToken: _restToken }),
+      isVisible: () => typeof document === "undefined" || document.visibilityState === "visible",
+    });
+  }, [editorTab, currentUser?.id]);
 
   // 2Б: связать module-scope очередь с App сразу после входа и поднять фоновые команды прошлого
   // запуска. Это работает даже если пользователь ещё не открыл ни одной карточки объекта.

@@ -35,8 +35,8 @@
 // через барьер assertWritable внутри runNotify: разрешены только два узла
 // рассылки, попытка тронуть боевые данные роняет вызов.
 import { createDb } from "./fbrest.mjs";
-import { runNotify } from "../src/notify/runNotify.js";
-import { canSendNow } from "../src/notify/notifyModel.js";
+import { K, runNotify } from "../src/notify/runNotify.js";
+import { canSendNow, inQuietHours, localDayKey, localParts, pendingSendNow } from "../src/notify/notifyModel.js";
 
 const PROD_FIREBASE_API_KEY = "AIzaSyCPawCUYGY20SB5cLLszjoNzK5ytew9tCs";
 const PROD_FIREBASE_DB_URL = "https://titovstroy-da1cf-default-rtdb.firebaseio.com";
@@ -44,6 +44,11 @@ const DEFAULT_ORIGINS = ["https://www.titovstroy.kz", "https://titovstroy.kz", "
 // Событие старше этого — уже не «только что случилось».
 const EVENT_MAX_AGE_MS = 10 * 60 * 1000;
 const SEND_NOW_MAX_AGE_MS = 30 * 60 * 1000;
+// Как часто тик из вкладки поднимает ПОЛНЫЙ прогон, даже когда по времени
+// ничего не назначено. Это подстраховка для событий, чья мгновенная отправка
+// не дошла (пропала сеть, функция ответила ошибкой). Чаще незачем: полный
+// прогон читает журнал, а он к концу месяца заметно тяжелеет.
+const FULL_RUN_EVERY_MS = 10 * 60 * 1000;
 
 const parseList = (value) => {
   try {
@@ -72,6 +77,32 @@ export function auditMonthKeys(ts) {
 function reply(res, status, body) {
   res.setHeader("Cache-Control", "no-store");
   return res.status(status).json(body);
+}
+
+// ЧТО-НИБУДЬ НАЗНАЧЕНО НА СЕЙЧАС?
+//
+// Это ответ на «сводка в 10:00 должна уйти в 10:00». Планировщик, который
+// сходит с секундной точностью, требует либо платного тарифа Vercel, либо
+// настройки руками во внешнем сервисе. Но время знает и само приложение: пока
+// у кого-то открыта вкладка, она раз в минуту спрашивает «пора?», и в 10:00
+// ответ становится «да».
+//
+// Вопрос стоит ДВУХ МАЛЕНЬКИХ ЧТЕНИЙ (настройки и состояние рассылки), поэтому
+// спрашивать хоть каждую минуту не жалко. Тяжёлый прогон поднимается только
+// когда ответ «да»: настал час сводки и сегодня её ещё не было, лежит
+// невыполненная заявка от кнопки, или просто прошло десять минут с прошлого
+// прогона — последнее и есть подстраховка для событий, чья мгновенная отправка
+// не дошла.
+export function whatIsDue({ settings = {}, state = {}, now = Date.now() } = {}) {
+  if (!settings.on) return null;
+  const quiet = inQuietHours(now, settings);
+  const digestHour = Number.isFinite(+settings.digestHour) ? +settings.digestHour : 9;
+  if (!quiet && localParts(now).hh >= digestHour && state.lastDigest !== localDayKey(now)) {
+    return "digest";
+  }
+  if (pendingSendNow({ settings, state, now }).keys.length) return "sendNow";
+  if (now - (Number(state.lastRun) || 0) > FULL_RUN_EVERY_MS) return "catchUp";
+  return null;
 }
 
 export function createNotifyRunHandler({
@@ -147,17 +178,31 @@ export function createNotifyRunHandler({
       // ── Поводы 2 и 3 приходят из браузера сотрудника.
       const origin = String(req.headers?.origin || "");
       if (!allowedOrigins.has(origin)) return reply(res, 403, { ok: false, code: "origin_not_allowed" });
-      if (kind !== "event" && kind !== "sendNow") {
+      if (kind !== "event" && kind !== "sendNow" && kind !== "due") {
         return reply(res, 400, { ok: false, code: "invalid_request" });
       }
-      const maxAge = kind === "event" ? EVENT_MAX_AGE_MS : SEND_NOW_MAX_AGE_MS;
-      if (!Number.isFinite(at) || at <= 0 || at > t + 5 * 60_000 || t - at > maxAge) {
-        return reply(res, 400, { ok: false, code: "invalid_request" });
+      if (kind !== "due") {
+        const maxAge = kind === "event" ? EVENT_MAX_AGE_MS : SEND_NOW_MAX_AGE_MS;
+        if (!Number.isFinite(at) || at <= 0 || at > t + 5 * 60_000 || t - at > maxAge) {
+          return reply(res, 400, { ok: false, code: "invalid_request" });
+        }
       }
       const token = await staffToken(req);
       if (!token) return reply(res, 401, { ok: false, code: "firebase_auth_required" });
 
-      if (kind === "event") {
+      if (kind === "due") {
+        // Вопрос «пора?» задаёт открытая вкладка раз в минуту. Отвечаем дёшево:
+        // два маленьких узла. Ничего не назначено — расходимся, не читая журнал.
+        if (!store.configured()) return reply(res, 503, { ok: false, code: "service_key_missing" });
+        const [settings, state] = await Promise.all([
+          store.read(K.settings, {}), store.read(K.state, {}),
+        ]);
+        const due = whatIsDue({ settings: settings || {}, state: state || {}, now: t });
+        if (!due) return reply(res, 200, { ok: true, idle: true });
+        // Дальше — обычный полный прогон. Подтверждать тик нечем и не нужно:
+        // он не может отправить ничего, чего рассылка не отправила бы сама по
+        // своему расписанию, — только раньше на минуту.
+      } else if (kind === "event") {
         // Подтверждение события — запись в журнале ровно с этой отметкой.
         let found = false;
         for (const key of auditMonthKeys(at)) {
