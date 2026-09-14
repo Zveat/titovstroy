@@ -792,6 +792,56 @@ const SENDABLE_KINDS = new Set(["reminder", "digest", "dates"]);
 export const canSendNow = (key) => SENDABLE_KINDS.has(NOTIFY_BY_KEY[key]?.kind);
 export const SENDABLE_NOW = Object.freeze(NOTIFY_CATALOG.filter(n => canSendNow(n.key)).map(n => n.key));
 
+// Сколько заявка «отправить сейчас» считается живой. Дольше получаса — это уже не
+// «нажал и жду», а забытая отметка, по которой сообщение придёт неожиданно.
+export const SEND_NOW_TTL_MS = 30 * 60 * 1000;
+
+// ЗАЯВКИ «ОТПРАВИТЬ СЕЙЧАС» — СПИСКОМ, А НЕ ОДНОЙ.
+//
+// Владелец нажал все четыре сводки подряд и получил ОДНУ: заявка лежала в
+// настройках одним полем sendNow={at,key}, и каждое нажатие затирало предыдущее.
+// К моменту прогона от четырёх нажатий оставалось последнее. Со стороны это
+// выглядит как «кнопка не работает» — человек нажал, подтверждение показали,
+// сообщения нет.
+//
+// Теперь заявки копятся в sendNowQueue={ключ: отметка}, а выполненные
+// отмечаются по каждому ключу отдельно (state.sentNow). Одиночное поле sendNow
+// остаётся: по нему точка запуска сверяет, что заявка правда записана, — и
+// заодно это путь для заявки, сделанной старой версией приложения.
+export function pendingSendNow({ settings = {}, state = {}, now = Date.now() } = {}) {
+  const queue = { ...(settings.sendNowQueue || {}) };
+  const single = settings.sendNow || {};
+  const singleKey = String(single.key || "");
+  const singleAt = Number(single.at) || 0;
+  // Старый одиночный слот — это заявка на один ключ. Защита от повтора у него
+  // своя (lastSendNow), поэтому и сверяем с ней, а не с новой отметкой по ключу.
+  if (singleKey && !(singleKey in queue) && singleAt > (Number(state.lastSendNow) || 0)) {
+    queue[singleKey] = singleAt;
+  }
+  const done = state.sentNow || {};
+  const keys = [];
+  const skipped = [];
+  for (const [key, value] of Object.entries(queue)) {
+    const at = Number(value) || 0;
+    if (!canSendNow(key)) { skipped.push([key, "такое руками не шлём"]); continue; }
+    if (at <= (Number(done[key]) || 0)) { skipped.push([key, "уже выполнена"]); continue; }
+    if (now - at >= SEND_NOW_TTL_MS) { skipped.push([key, "устарела"]); continue; }
+    keys.push(key);
+  }
+  return { keys, ats: queue, skipped };
+}
+
+// Отметки выполненных заявок. Держим только живые: ключей у нас единицы, но
+// хранить навсегда отметку, которая ни на что не влияет, незачем.
+export function markSendNowDone(done = {}, keys = [], ats = {}, { now = Date.now() } = {}) {
+  const out = {};
+  for (const [key, value] of Object.entries(done)) {
+    if (now - (Number(value) || 0) < SEND_NOW_TTL_MS) out[key] = Number(value) || 0;
+  }
+  for (const key of keys) out[key] = Number(ats[key]) || now;
+  return out;
+}
+
 // ─── КОМУ ОТПРАВЛЯТЬ ──────────────────────────────────────────────────────────
 // Подписка сотрудника лежит в его карточке: u.tg = { topics: [...], scope, code }.
 // scope: "all" — все объекты компании, "own" — только там, где он ответственный.

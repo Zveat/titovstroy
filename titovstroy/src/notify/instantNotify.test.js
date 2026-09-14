@@ -135,7 +135,7 @@ describe("запрос на запуск", () => {
     const r = await dispatchEventRun(777, { getToken: token, fetchImpl });
     expect(r.ok).toBe(true);
     const [url, init] = fetchImpl.mock.calls[0];
-    expect(url).toBe("/api/trigger-notify");
+    expect(url).toBe("/api/notify-run");
     expect(JSON.parse(init.body)).toEqual({ kind: "event", at: 777 });
     expect(init.headers.Authorization).toBe("Bearer tok");
   });

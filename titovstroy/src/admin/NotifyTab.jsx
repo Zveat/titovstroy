@@ -17,7 +17,7 @@
 //   titovstroy-tg-settings  — всё с этого экрана (подписки чата, пороги, объекты)
 //   titovstroy-tg-links     — кто к какому чату привязан (пишет ТОЛЬКО рассыльщик)
 //   карточка сотрудника     — его подписки (u.tg.subs), вместе с сотрудниками
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { storage } from "../cloud/storage.js";
 import { logChange } from "../cloud/audit.js";
 import { OBJECTS_KEY, TG_LINKS_KEY, TG_SETTINGS_KEY } from "../storageKeys.js";
@@ -68,9 +68,17 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
 
   const flash = (t) => { setMsg(t); setTimeout(() => setMsg(""), 2600); };
 
+  // Слияние идёт от ССЫЛКИ НА ПОСЛЕДНИЕ настройки, а не от значения этого
+  // рендера. Иначе два быстрых изменения подряд (владелец нажимает четыре
+  // сводки одну за другой) собирались бы оба из одного устаревшего снимка, и
+  // первое терялось бы — ровно так и пропадали заявки «отправить сейчас».
+  const settingsRef = useRef(settings);
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
+
   const patch = async (p) => {
     if (!editable) return { ok: false };
-    const next = { ...settings, ...p };
+    const next = { ...(settingsRef.current || settings), ...p };
+    settingsRef.current = next;
     setSettings(next);
     try { await storage.set(TG_SETTINGS_KEY, JSON.stringify(next)); return { ok: true }; }
     catch (e) { flash("Не сохранилось: " + (e?.message || "ошибка")); return { ok: false }; }
@@ -80,15 +88,32 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
   // прогон: сервер запускает рассылку только по уже записанной заявке, сам по себе
   // вызов ничего не делает. Не удалось запустить — заявка всё равно лежит, и её
   // выполнит ближайший обычный прогон; человеку об этом говорим прямо.
+  // НАЖАТИЯ ВСТАЮТ В ОЧЕРЕДЬ, А НЕ ТЕРЯЮТСЯ. Раньше, пока уходила одна заявка,
+  // любое другое нажатие молча игнорировалось — а нажимают их подряд, по всем
+  // сводкам сразу, и на телефоне четыре касания укладываются в пару секунд.
+  // Заявки идут строго по одной: каждая дописывает себя в общий список настроек,
+  // и два одновременных сохранения затёрли бы друг друга.
   const [sending, setSending] = useState("");
-  const sendNow = async (key) => {
-    if (!editable || sending) return;
+  const [queued, setQueued] = useState([]);
+  const chain = useRef(Promise.resolve());
+  const sendNow = (key) => {
+    if (!editable) return;
     if (!settings?.on) { flash("Рассылка выключена — включите её в «Основном»"); return; }
-    setSending(key);
-    const res = await requestSendNow({ key, saveSettings: patch, getToken: _restToken });
-    flash(sendNowMessage(res));
-    setSending("");
+    if (sending === key || queued.includes(key)) return;
+    setQueued(q => (q.includes(key) ? q : [...q, key]));
+    chain.current = chain.current.then(async () => {
+      setQueued(q => q.filter(k => k !== key));
+      setSending(key);
+      const res = await requestSendNow({ key, queue: settingsRef.current?.sendNowQueue,
+        saveSettings: patch, getToken: _restToken });
+      flash(sendNowMessage(res));
+      setSending("");
+    });
   };
+  // Подпись и доступность кнопки — одинаковые в таблице и в карточках.
+  const sendBtnLabel = (key) => (sending === key ? "Отправляю…"
+    : queued.includes(key) ? "В очереди…" : "Отправить сейчас");
+  const sendBtnBusy = (key) => sending === key || queued.includes(key);
 
   // Подписки живут в карточке сотрудника — сохраняются тем же путём, что имя и
   // роль. Отдельного узла нет намеренно: меньше мест, где данные о человеке
@@ -318,14 +343,14 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
                                   отправить руками «договор подписан» значит сообщить о том,
                                   чего не было. Список решает canSendNow, не эта разметка. */}
                               {editable && canSendNow(n.key) && (
-                                <button type="button" onClick={() => sendNow(n.key)} disabled={!!sending}
+                                <button type="button" onClick={() => sendNow(n.key)} disabled={sendBtnBusy(n.key)}
                                   title="Посчитать прямо сейчас и отправить тем, кто на это подписан"
                                   style={{ background: "#eff6ff", color: "#2563eb",
                                     border: "1px solid rgba(37,99,235,.2)", borderRadius: 7,
                                     padding: "3px 9px", fontSize: 11, fontWeight: 700,
-                                    cursor: sending ? "default" : "pointer", fontFamily: "inherit",
-                                    opacity: sending && sending !== n.key ? .5 : 1, whiteSpace: "nowrap" }}>
-                                  {sending === n.key ? "Отправляю…" : "Отправить сейчас"}
+                                    cursor: sendBtnBusy(n.key) ? "default" : "pointer", fontFamily: "inherit",
+                                    opacity: sendBtnBusy(n.key) ? .6 : 1, whiteSpace: "nowrap" }}>
+                                  {sendBtnLabel(n.key)}
                                 </button>
                               )}
                             </div>
@@ -381,13 +406,13 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
                             рисуется ЭТОТ список, а не таблица, — поэтому её нужно
                             держать в обоих местах, иначе на телефоне её просто нет. */}
                         {editable && canSendNow(n.key) && (
-                          <button type="button" onClick={() => sendNow(n.key)} disabled={!!sending}
+                          <button type="button" onClick={() => sendNow(n.key)} disabled={sendBtnBusy(n.key)}
                             style={{ background: "#eff6ff", color: "#2563eb",
                               border: "1px solid rgba(37,99,235,.2)", borderRadius: 7,
                               padding: "4px 10px", fontSize: 11, fontWeight: 700,
-                              cursor: sending ? "default" : "pointer", fontFamily: "inherit",
-                              opacity: sending && sending !== n.key ? .5 : 1, whiteSpace: "nowrap" }}>
-                            {sending === n.key ? "Отправляю…" : "Отправить сейчас"}
+                              cursor: sendBtnBusy(n.key) ? "default" : "pointer", fontFamily: "inherit",
+                              opacity: sendBtnBusy(n.key) ? .6 : 1, whiteSpace: "nowrap" }}>
+                            {sendBtnLabel(n.key)}
                           </button>
                         )}
                       </div>
