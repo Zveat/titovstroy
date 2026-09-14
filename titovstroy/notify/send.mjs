@@ -14,7 +14,7 @@ import { buildObjectSums } from "../src/notify/objectSums.js";
 import { refuseReasonLabel } from "../src/analytics/analyticsModel.js";
 import {
   buildEventMessages, buildReminderMessages, buildDateReminders, buildDigestMessage,
-  makeEventContext, routeMessages, DIGESTS, isDigestDue,
+  makeEventContext, routeMessages, DIGESTS, isDigestDue, canSendNow,
   inQuietHours, localDayKey, localParts, assertWritable, pruneSent, nextCursor,
   handleBotCommand, buildSubsChangeMessages,
 } from "../src/notify/notifyModel.js";
@@ -234,7 +234,22 @@ async function main() {
   // 3. Напоминания — раз в сутки, после часа сводки
   const digestHour = Number.isFinite(+settings.digestHour) ? +settings.digestHour : 9;
   const today = localDayKey(now);
-  const digestDue = FORCE_DIGEST
+  // ОТПРАВИТЬ СЕЙЧАС, КНОПКОЙ ИЗ АДМИНКИ. Админка кладёт в настройки {at, key}, мы
+  // сверяем отметку с уже обработанной в своём состоянии — так заявка выполняется
+  // РОВНО ОДИН РАЗ, даже если прогон случится дважды подряд. Тихие часы и «уже
+  // отправляли сегодня» для ручной отправки не действуют: человек нажал кнопку
+  // сознательно и ждёт сообщение сейчас, а не завтра утром.
+  const ask = settings.sendNow || {};
+  const askAt = Number(ask.at) || 0;
+  const askKey = canSendNow(ask.key) ? String(ask.key) : "";
+  const manual = askKey && askAt > (Number(state.lastSendNow) || 0) && now - askAt < 30 * 60e3;
+  if (askAt && !manual) {
+    console.log(`Заявка «отправить сейчас» пропущена: ${!askKey ? "такое руками не шлём"
+      : askAt <= (Number(state.lastSendNow) || 0) ? "уже выполнена" : "устарела"}`);
+  }
+  if (manual) console.log(`Ручная отправка: ${askKey}`);
+
+  const digestDue = FORCE_DIGEST || manual
     || (!quiet && localParts(now).hh >= digestHour && state.lastDigest !== today);
   let reminders = [];
   if (digestDue) {
@@ -256,9 +271,18 @@ async function main() {
       // карточкам производства, а не по журналу — в журнале будущего нет.
       ...buildDateReminders({ objects: data.objects, productions }, { now, settings }),
     ];
-    reminders = all.filter(m => !(sentIds[m.id] && now - sentIds[m.id] < repeatMs));
-    console.log(`Сводка дня: напоминаний ${all.length}, к отправке ${reminders.length}`
-      + `${all.length !== reminders.length ? " (остальное уже отправляли, состав не менялся)" : ""}`);
+    if (manual) {
+      // Просили одно конкретное — остальное не трогаем, иначе нажатие «покажи
+      // просроченные этапы» вываливало бы разом и сводку, и всё остальное.
+      // Защиту «уже отправляли» здесь тоже снимаем: её и просят обойти кнопкой.
+      reminders = all.filter(m => (m.key || m.event) === askKey);
+      console.log(`Ручная отправка «${askKey}»: сообщений ${reminders.length}`
+        + (reminders.length ? "" : " — сейчас по этому напоминанию нечего показать"));
+    } else {
+      reminders = all.filter(m => !(sentIds[m.id] && now - sentIds[m.id] < repeatMs));
+      console.log(`Сводка дня: напоминаний ${all.length}, к отправке ${reminders.length}`
+        + `${all.length !== reminders.length ? " (остальное уже отправляли, состав не менялся)" : ""}`);
+    }
 
     // СВОДКИ ЗА ПЕРИОД. Неделя — по понедельникам, месяц — 1-го числа: сводка
     // «за неделю» в среду отвечает на вопрос, которого никто не задавал.
@@ -268,7 +292,8 @@ async function main() {
     // Здесь раньше стояло перечисление ключей, и сводки отдела продаж в него не попали:
     // они существовали в каталоге и в админке, но не отправлялись ни разу.
     for (const d of DIGESTS) {
-      if (!isDigestDue(d, { now, force: FORCE_DIGEST })) continue;
+      if (manual && d.key !== askKey) continue;   // просили одну сводку — шлём одну
+      if (!isDigestDue(d, { now, force: FORCE_DIGEST || manual })) continue;
       const periodAnalytics = buildAnalytics(data, { period: d.period, users, now });
       const msg = buildDigestMessage(periodAnalytics, { key: d.key, now, reasonLabel: refuseReasonLabel });
       if (msg && !sentIds[msg.id]) reminders.push(msg);
@@ -306,7 +331,11 @@ async function main() {
   await writeJson(K.state, {
     lastTs: nextCursor({ prev: state.lastTs, maxTs, sinceTs, now, firstRun, quiet }),
     lastUpdateId: upd.lastUpdateId || 0,
-    lastDigest: (digestDue && reminders.length >= 0) ? today : (state.lastDigest || ""),
+    // Ручная отправка НЕ закрывает день: иначе нажатие кнопки утром отменило бы
+    // обычную дневную сводку, и человек получил бы одно сообщение вместо двух.
+    lastDigest: (digestDue && !manual) ? today : (state.lastDigest || ""),
+    // Заявка выполнена — второй раз по ней не шлём, даже если прогон повторится.
+    lastSendNow: manual ? askAt : (Number(state.lastSendNow) || 0),
     subsSent: subsChange.fingerprints,
     sent: pruneSent(nextSent, { now }),
     lastRun: now,

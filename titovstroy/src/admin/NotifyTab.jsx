@@ -24,9 +24,11 @@ import { OBJECTS_KEY, TG_LINKS_KEY, TG_SETTINGS_KEY } from "../storageKeys.js";
 import {
   NOTIFY_TOPICS, NOTIFY_CATALOG, NOTIFY_REMINDERS, DATE_REMINDERS, OBJECT_MODES,
   reminderOn, reminderNum, reminderDays, objectAllowed,
-  isSubscribed, groupSubscribed, subsOf,
+  isSubscribed, groupSubscribed, subsOf, canSendNow,
   linkUrl, makeLinkCode, userScope,
 } from "../notify/notifyModel.js";
+import { requestSendNow, sendNowMessage } from "../notify/sendNowTrigger.js";
+import { _restToken } from "../cloud/storage.js";
 
 const card = { background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 const h = { fontSize: 15, fontWeight: 800, color: "#0f172a", marginBottom: 4 };
@@ -67,11 +69,25 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
   const flash = (t) => { setMsg(t); setTimeout(() => setMsg(""), 2600); };
 
   const patch = async (p) => {
-    if (!editable) return;
+    if (!editable) return { ok: false };
     const next = { ...settings, ...p };
     setSettings(next);
-    try { await storage.set(TG_SETTINGS_KEY, JSON.stringify(next)); }
-    catch (e) { flash("Не сохранилось: " + (e?.message || "ошибка")); }
+    try { await storage.set(TG_SETTINGS_KEY, JSON.stringify(next)); return { ok: true }; }
+    catch (e) { flash("Не сохранилось: " + (e?.message || "ошибка")); return { ok: false }; }
+  };
+
+  // ОТПРАВИТЬ СЕЙЧАС. Сначала заявка ложится в настройки, потом просим запустить
+  // прогон: сервер запускает рассылку только по уже записанной заявке, сам по себе
+  // вызов ничего не делает. Не удалось запустить — заявка всё равно лежит, и её
+  // выполнит ближайший обычный прогон; человеку об этом говорим прямо.
+  const [sending, setSending] = useState("");
+  const sendNow = async (key) => {
+    if (!editable || sending) return;
+    if (!settings?.on) { flash("Рассылка выключена — включите её в «Основном»"); return; }
+    setSending(key);
+    const res = await requestSendNow({ key, saveSettings: patch, getToken: _restToken });
+    flash(sendNowMessage(res));
+    setSending("");
   };
 
   // Подписки живут в карточке сотрудника — сохраняются тем же путём, что имя и
@@ -294,8 +310,24 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
                         <tr key={n.key} style={{ borderTop: "1px solid #f1f5f9" }}>
                           <td style={{ padding: "10px 12px", position: "sticky", left: 0, background: "#fff",
                             maxWidth: 460 }}>
-                            <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 13 }}>
-                              {n.icon} {n.label}
+                            <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 13,
+                              display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                              <span>{n.icon} {n.label}</span>
+                              {/* Кнопка есть только у того, что СЧИТАЕТСЯ по текущим данным —
+                                  напоминания и сводки. У событий журнала её нет намеренно:
+                                  отправить руками «договор подписан» значит сообщить о том,
+                                  чего не было. Список решает canSendNow, не эта разметка. */}
+                              {editable && canSendNow(n.key) && (
+                                <button type="button" onClick={() => sendNow(n.key)} disabled={!!sending}
+                                  title="Посчитать прямо сейчас и отправить тем, кто на это подписан"
+                                  style={{ background: "#eff6ff", color: "#2563eb",
+                                    border: "1px solid rgba(37,99,235,.2)", borderRadius: 7,
+                                    padding: "3px 9px", fontSize: 11, fontWeight: 700,
+                                    cursor: sending ? "default" : "pointer", fontFamily: "inherit",
+                                    opacity: sending && sending !== n.key ? .5 : 1, whiteSpace: "nowrap" }}>
+                                  {sending === n.key ? "Отправляю…" : "Отправить сейчас"}
+                                </button>
+                              )}
                             </div>
                             <div style={{ fontSize: 11.5, color: "#64748b", lineHeight: 1.45, marginTop: 3 }}>
                               <b style={{ color: "#94a3b8", fontWeight: 700 }}>Когда:</b> {n.when}

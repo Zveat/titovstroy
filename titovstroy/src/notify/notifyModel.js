@@ -780,6 +780,18 @@ export const NOTIFY_CATALOG = Object.freeze([
 ].map(n => Object.freeze({ ...n, def: n.def !== false })));
 export const NOTIFY_BY_KEY = Object.freeze(Object.fromEntries(NOTIFY_CATALOG.map(n => [n.key, n])));
 
+// КАКИЕ УВЕДОМЛЕНИЯ МОЖНО ОТПРАВИТЬ РУКАМИ, КНОПКОЙ.
+//
+// Напоминания и сводки — можно: они СЧИТАЮТСЯ по текущим данным, и «покажи сейчас»
+// для них осмысленно. Нажал — увидел, что горит прямо сейчас, не дожидаясь утра.
+//
+// События журнала (подписан договор, сменили статус, удалили смету) — НЕЛЬЗЯ, и это
+// не ограничение, а смысл: они сообщают о том, что кто-то сделал. Отправить такое
+// руками — это отправить сообщение о событии, которого не было. Кнопки у них нет.
+const SENDABLE_KINDS = new Set(["reminder", "digest", "dates"]);
+export const canSendNow = (key) => SENDABLE_KINDS.has(NOTIFY_BY_KEY[key]?.kind);
+export const SENDABLE_NOW = Object.freeze(NOTIFY_CATALOG.filter(n => canSendNow(n.key)).map(n => n.key));
+
 // ─── КОМУ ОТПРАВЛЯТЬ ──────────────────────────────────────────────────────────
 // Подписка сотрудника лежит в его карточке: u.tg = { topics: [...], scope, code }.
 // scope: "all" — все объекты компании, "own" — только там, где он ответственный.

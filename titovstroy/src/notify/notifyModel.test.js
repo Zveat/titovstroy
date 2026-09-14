@@ -7,7 +7,7 @@ import {
   objectAllowed, reminderOn, reminderNum, reminderDays, daysUntil,
   inQuietHours, localDayKey, daysWord, esc, tenge, pruneSent, nextCursor,
   makeLinkCode, linkUrl, findUserByCode, assertWritable, handleBotCommand,
-  subsList, subsFingerprint, buildSubsChangeMessages, isDigestDue, DIGESTS, staleLine,
+  subsList, subsFingerprint, buildSubsChangeMessages, isDigestDue, DIGESTS, staleLine, canSendNow, SENDABLE_NOW,
 } from "./notifyModel.js";
 
 // Записи ниже — НЕ выдуманные: настоящие строки из боевого журнала, снятые
@@ -857,5 +857,35 @@ describe("общий и личный списки не приходят одно
     const out = routeMessages([wide, mine], { users, links,
       settings: { groupChatId: "-100", groupSubs: subs } });
     expect(out.filter(l => l.chatId === "-100").map(l => l.text)).toEqual(["общий"]);
+  });
+});
+
+describe("что можно отправить руками, кнопкой", () => {
+  it("напоминания и сводки — можно: они считаются по текущим данным", () => {
+    for (const k of ["stale", "stages", "start_soon", "handover_soon",
+      "digest_week", "digest_month", "digest_sales_week", "digest_sales_month"]) {
+      expect(canSendNow(k), k).toBe(true);
+    }
+  });
+
+  it("СОБЫТИЯ ЖУРНАЛА — НЕЛЬЗЯ, и это не ограничение, а смысл", () => {
+    // Они сообщают о том, что кто-то сделал. Отправить такое руками — значит
+    // сообщить о событии, которого не было.
+    for (const k of ["contract_signed", "object_status", "object_done", "deleted"]) {
+      expect(canSendNow(k), k).toBe(false);
+    }
+  });
+
+  it("незнакомый ключ кнопку не получает", () => {
+    for (const k of ["", null, undefined, "придуманный", "__proto__", "constructor"]) {
+      expect(canSendNow(k)).toBe(false);
+    }
+  });
+
+  it("список отправляемых собран из каталога, а не вписан руками", () => {
+    // Иначе он разойдётся с каталогом ровно так же, как уже разошёлся список
+    // сводок в отправщике.
+    expect(SENDABLE_NOW.every(k => canSendNow(k))).toBe(true);
+    expect(SENDABLE_NOW).toEqual(NOTIFY_CATALOG.filter(n => canSendNow(n.key)).map(n => n.key));
   });
 });
