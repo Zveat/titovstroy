@@ -208,28 +208,11 @@ async function main() {
   if (firstRun) console.log("Первый запуск: старые записи журнала не рассылаем, начинаем с текущего момента.");
 
   const sentIds = pruneSent(state.sent || {}, { now });
-  // Карточки производства нужны и событиям (дополнить «договор подписан» датами),
-  // и напоминаниям о будущем — читаем один раз.
-  const productions = (await readJson(K.productions, [])) || [];
-  let events = quiet ? [] : buildEventMessages(entries, {
-    sinceTs, sentIds, settings, context: makeEventContext({ productions }),
-  });
 
-  // СУММЫ ЧИТАЕМ ТОЛЬКО ЕСЛИ ДОГОВОР ДЕЙСТВИТЕЛЬНО ПОДПИСАЛИ. Договоры и сметы вместе
-  // весят 374 КБ, прогонов в сутки под полсотни, а подписаний — три в месяц. Постоянное
-  // чтение стоило бы 18 МБ в сутки ради одного числа раз в десять дней. Поэтому сначала
-  // собираем события, и только увидев подписание, идём за суммами и пересобираем.
-  if (events.some(m => (m.key || m.event) === "contract_signed")) {
-    const [contracts, estimates] = await Promise.all([
-      readJson(K.contracts, []), readJson(K.estimates, []),
-    ]);
-    const sumsByObject = buildObjectSums(contracts || [], estimates || []);
-    events = buildEventMessages(entries, {
-      sinceTs, sentIds, settings, context: makeEventContext({ productions, sumsByObject }),
-    });
-    console.log(`Подписание в журнале — читаю суммы: объектов с суммой ${Object.keys(sumsByObject).length}`);
-  }
-  console.log(`Журнал: записей ${entries.length}, к отправке событий ${events.length}`);
+  // ПЕРВЫЙ ПРОХОД — БЕЗ ДОПОЛНЕНИЙ, ТОЛЬКО ЧТОБЫ УЗНАТЬ, ЕСТЬ ЛИ ВООБЩЕ СОБЫТИЯ.
+  // Набор сообщений от дополнений не зависит (они лишь добавляют строки внутрь),
+  // а вот тяжёлые узлы за ними читать незачем, если отправлять нечего.
+  let events = quiet ? [] : buildEventMessages(entries, { sinceTs, sentIds, settings });
 
   // 3. Напоминания — раз в сутки, после часа сводки
   const digestHour = Number.isFinite(+settings.digestHour) ? +settings.digestHour : 9;
@@ -251,6 +234,35 @@ async function main() {
 
   const digestDue = FORCE_DIGEST || manual
     || (!quiet && localParts(now).hh >= digestHour && state.lastDigest !== today);
+
+  // КАРТОЧКИ ПРОИЗВОДСТВА — 421 КБ, И РАНЬШЕ ОНИ ЧИТАЛИСЬ КАЖДЫМ ПРОГОНОМ.
+  // Это было незаметно, пока прогонов было пять-шесть в сутки. Теперь рассылку
+  // будит каждое событие плюс пульс раз в полчаса — под полсотни заходов, из
+  // которых подавляющее большинство не находит ничего. Полсотни раз по 421 КБ —
+  // это 21 МБ в сутки за «посмотреть и разойтись». Читаем, только когда есть
+  // что дополнять (события) или что считать (сводка дня).
+  const productions = (events.length || digestDue) ? ((await readJson(K.productions, [])) || []) : [];
+
+  // СУММЫ ЧИТАЕМ ТОЛЬКО ЕСЛИ ДОГОВОР ДЕЙСТВИТЕЛЬНО ПОДПИСАЛИ. Договоры и сметы вместе
+  // весят 374 КБ, а подписаний — три в месяц. Постоянное чтение стоило бы ещё 18 МБ в
+  // сутки ради одного числа раз в десять дней.
+  let sumsByObject = null;
+  if (events.some(m => (m.key || m.event) === "contract_signed")) {
+    const [contracts, estimates] = await Promise.all([
+      readJson(K.contracts, []), readJson(K.estimates, []),
+    ]);
+    sumsByObject = buildObjectSums(contracts || [], estimates || []);
+    console.log(`Подписание в журнале — читаю суммы: объектов с суммой ${Object.keys(sumsByObject).length}`);
+  }
+  // Пересобираем с дополнениями — набор тот же, но теперь в сообщениях есть даты,
+  // ответственный и сумма. Пустой список пересобирать не за чем.
+  if (events.length) {
+    events = buildEventMessages(entries, {
+      sinceTs, sentIds, settings, context: makeEventContext({ productions, sumsByObject }),
+    });
+  }
+  console.log(`Журнал: записей ${entries.length}, к отправке событий ${events.length}`);
+
   let reminders = [];
   if (digestDue) {
     const [objects, estimates, contracts, financeTx, financeMeta] = await Promise.all([

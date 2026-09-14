@@ -1,11 +1,22 @@
 // Журнал изменений: помесячное хранение + обёртки логирования по сущностям.
 // Перенос из App.jsx без изменения логики.
+import { IS_DEV_ENV } from "../appConfig.js";
 import { CONTRACT_STATUSES, DEAL_STATUSES } from "../constants.js";
 import { _auditYM, fmt } from "../format.js";
+import { createInstantNotifier, dispatchEventRun } from "../notify/instantNotify.js";
 import { AUDIT_INDEX_KEY, AUDIT_MONTH_KEY } from "../storageKeys.js";
 import { contractNetTotal } from "../utils.js";
-import { _TIMEOUT, _TS_SUFFIX, _beginEditorWrite, _endEditorWrite, _fbAuthReady, _fbDb, _fbKey, _foreignDirty, _mayApplyEditorResult, _mem, _race, storage } from "./storage.js";
+import { _TIMEOUT, _TS_SUFFIX, _beginEditorWrite, _endEditorWrite, _fbAuthReady, _fbDb, _fbKey, _foreignDirty, _mayApplyEditorResult, _mem, _race, _restToken, storage } from "./storage.js";
 import { ref, runTransaction } from "firebase/database";
+
+// ТОЛЧОК РАССЫЛКЕ УВЕДОМЛЕНИЙ. Журнал — единственное место, где событие
+// появляется, поэтому и просить о запуске правильно отсюда: одна воронка,
+// и новое правило в notifyModel начинает приходить быстро само, без правок
+// в местах, которые пишут в журнал. Подробности и сроки — в instantNotify.js.
+// На dev-базе молчим: прогон ходит в боевую и нашёл бы там пустоту.
+const _instant = createInstantNotifier({
+  dispatch: (ts) => dispatchEventRun(ts, { getToken: _restToken }),
+});
 
 // Аудит-журнал. Структурная запись изменения:
 //   {ts, userId, by, entity, entityId, label, objectId, field, action, old, new, detail, source}
@@ -76,6 +87,12 @@ export const logChange = async (user, ev = {}) => {
     // Добавляем запись АТОМАРНО (Firebase-транзакция), чтобы при одновременных действиях
     // с разных устройств записи не затирали друг друга (read-modify-write гонка).
     await _appendAuditEntry(mk, entry);
+    // Запись в журнале — значит событие уже случилось. Просим рассылку проснуться,
+    // не дожидаясь расписания. Внутри есть пауза на сворачивание пачки, а любой
+    // сбой глушится: журнал важнее скорости уведомления.
+    if (!IS_DEV_ENV && typeof window !== "undefined") {
+      try { _instant.note(entry); } catch { /* ускорялка не смеет мешать журналу */ }
+    }
     // индекс месяцев — дописываем только когда появился новый месяц
     try {
       const ir = await storage.get(AUDIT_INDEX_KEY);
