@@ -396,6 +396,16 @@ export function AdminPageContent({ currentUser, presence = {}, onAuditPrice = nu
         .admt:hover { background:#eef2f7; color:#0f172a }
         .admt.on { background:#fff; color:#0f172a; border-color:#e2e8f0;
                    box-shadow:0 1px 3px rgba(15,23,42,.09) }
+        /* НА ТЕЛЕФОНЕ — РОВНАЯ СЕТКА, А НЕ ПЕРЕНОС ПО ШИРИНЕ. Кнопки разной длины
+           («Клиенты» и «Шаблоны документов»), и обычный перенос набивал строки как
+           придётся: три, два, два, один — с рваным правым краем и дырами. Владелец
+           назвал это «меню кривое». Две колонки одинаковой ширины читаются глазом
+           сверху вниз и не прыгают при смене набора вкладок (у ролей он разный).
+           Длинные подписи переносим по словам, иначе они вылезают за колонку. */
+        @media(max-width:820px){
+          .admin-tabs { display:grid !important; grid-template-columns:1fr 1fr; gap:4px !important }
+          .admt { white-space:normal; text-align:center; padding:9px 8px; line-height:1.25 }
+        }
       `}</style>
       <div className="admin-tabs" style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:24,
         background:"#f8fafc",borderRadius:10,padding:4}}>

@@ -374,8 +374,22 @@ export function NotifyTab({ users = [], saveUsers, currentUser, readOnly = false
                   </div>
                   {rows.map(n => (
                     <div className="ntfNi" key={n.key}>
-                      <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 13 }}>
-                        {n.icon} {n.label}
+                      <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 13,
+                        display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span>{n.icon} {n.label}</span>
+                        {/* Та же кнопка, что и в табличной вёрстке выше. На телефоне
+                            рисуется ЭТОТ список, а не таблица, — поэтому её нужно
+                            держать в обоих местах, иначе на телефоне её просто нет. */}
+                        {editable && canSendNow(n.key) && (
+                          <button type="button" onClick={() => sendNow(n.key)} disabled={!!sending}
+                            style={{ background: "#eff6ff", color: "#2563eb",
+                              border: "1px solid rgba(37,99,235,.2)", borderRadius: 7,
+                              padding: "4px 10px", fontSize: 11, fontWeight: 700,
+                              cursor: sending ? "default" : "pointer", fontFamily: "inherit",
+                              opacity: sending && sending !== n.key ? .5 : 1, whiteSpace: "nowrap" }}>
+                            {sending === n.key ? "Отправляю…" : "Отправить сейчас"}
+                          </button>
+                        )}
                       </div>
                       <div style={{ fontSize: 11.5, color: "#64748b", lineHeight: 1.45, marginTop: 3 }}>
                         <b style={{ color: "#94a3b8", fontWeight: 700 }}>Когда:</b> {n.when}
