@@ -7,7 +7,7 @@ import {
   objectAllowed, reminderOn, reminderNum, reminderDays, daysUntil,
   inQuietHours, localDayKey, daysWord, esc, tenge, pruneSent, nextCursor,
   makeLinkCode, linkUrl, findUserByCode, assertWritable, handleBotCommand,
-  subsList, subsFingerprint, buildSubsChangeMessages,
+  subsList, subsFingerprint, buildSubsChangeMessages, isDigestDue, DIGESTS,
 } from "./notifyModel.js";
 
 // Записи ниже — НЕ выдуманные: настоящие строки из боевого журнала, снятые
@@ -749,5 +749,44 @@ describe("список подписок и его изменения", () => {
     const a = { id: "1", tg: { subs: { stages: true, contract_signed: true } } };
     const b = { id: "1", tg: { subs: { contract_signed: true, stages: true } } };
     expect(subsFingerprint(a)).toBe(subsFingerprint(b));
+  });
+});
+
+describe("какие сводки вообще уходят", () => {
+  // Понедельник 14 сентября 2026, 12:00 по местному; первое число — 1 сентября.
+  const MONDAY = Date.parse("2026-09-14T07:00:00Z");
+  const WEDNESDAY = Date.parse("2026-09-16T07:00:00Z");
+  const FIRST = Date.parse("2026-09-01T07:00:00Z");
+  const byKey = (k) => DIGESTS.find(d => d.key === k);
+
+  it("КАЖДАЯ недельная сводка уходит в понедельник — включая отдел продаж", () => {
+    // Здесь была дыра: отправщик перечислял ключи руками, сводки отдела продаж в
+    // перечисление не попали и не отправлялись НИ РАЗУ. Владелец заметил это так:
+    // «итоги недели в общий чат не пришли, только в бот».
+    for (const d of DIGESTS.filter(x => x.period === "week")) {
+      expect(isDigestDue(d, { now: MONDAY }), d.key).toBe(true);
+      expect(isDigestDue(d, { now: WEDNESDAY }), d.key).toBe(false);
+    }
+  });
+
+  it("КАЖДАЯ месячная сводка уходит первого числа", () => {
+    for (const d of DIGESTS.filter(x => x.period === "month")) {
+      expect(isDigestDue(d, { now: FIRST }), d.key).toBe(true);
+      expect(isDigestDue(d, { now: MONDAY }), d.key).toBe(false);
+    }
+  });
+
+  it("у каждой сводки в каталоге есть период — иначе она не уйдёт никогда", () => {
+    for (const d of DIGESTS) expect(["week", "month"], d.key).toContain(d.period);
+  });
+
+  it("принудительный прогон шлёт всё и в любой день", () => {
+    for (const d of DIGESTS) expect(isDigestDue(d, { now: WEDNESDAY, force: true })).toBe(true);
+  });
+
+  it("мусор вместо сводки не роняет прогон", () => {
+    for (const bad of [null, undefined, {}, { period: "квартал" }]) {
+      expect(isDigestDue(bad, { now: MONDAY })).toBe(false);
+    }
   });
 });

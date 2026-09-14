@@ -13,7 +13,7 @@ import { buildAnalytics } from "../src/analytics/analyticsModel.js";
 import { refuseReasonLabel } from "../src/analytics/analyticsModel.js";
 import {
   buildEventMessages, buildReminderMessages, buildDateReminders, buildDigestMessage,
-  makeEventContext, routeMessages, DIGESTS,
+  makeEventContext, routeMessages, DIGESTS, isDigestDue,
   inQuietHours, localDayKey, localParts, assertWritable, pruneSent, nextCursor,
   handleBotCommand, buildSubsChangeMessages,
 } from "../src/notify/notifyModel.js";
@@ -248,13 +248,11 @@ async function main() {
     // «за неделю» в среду отвечает на вопрос, которого никто не задавал.
     // Считаем ОТДЕЛЬНОЙ buildAnalytics со своим периодом, иначе в «итогах
     // недели» стояли бы месячные числа.
-    const localNow = localParts(now);
-    const weekday = new Date(Date.UTC(localNow.y, localNow.m - 1, localNow.d)).getUTCDay();
+    // Пора ли слать — решает isDigestDue по периоду самой сводки (notifyModel, под тестами).
+    // Здесь раньше стояло перечисление ключей, и сводки отдела продаж в него не попали:
+    // они существовали в каталоге и в админке, но не отправлялись ни разу.
     for (const d of DIGESTS) {
-      const due = FORCE_DIGEST
-        || (d.key === "digest_week" && weekday === 1)      // понедельник
-        || (d.key === "digest_month" && localNow.d === 1); // первое число
-      if (!due) continue;
+      if (!isDigestDue(d, { now, force: FORCE_DIGEST })) continue;
       const periodAnalytics = buildAnalytics(data, { period: d.period, users, now });
       const msg = buildDigestMessage(periodAnalytics, { key: d.key, now, reasonLabel: refuseReasonLabel });
       if (msg && !sentIds[msg.id]) reminders.push(msg);

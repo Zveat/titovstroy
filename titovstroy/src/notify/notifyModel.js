@@ -646,6 +646,24 @@ export const DIGESTS = Object.freeze([
 const pctText = (v) => (v === null || v === undefined ? "—" : `${v}%`);
 const numText = (v) => (v === null || v === undefined ? "—" : String(v));
 
+// ПОРА ЛИ СЛАТЬ ЭТУ СВОДКУ. Решение по ПЕРИОДУ из каталога, а не по списку ключей.
+//
+// Раньше в отправщике стояло перечисление: «digest_week по понедельникам, digest_month
+// первого числа». Сводки отдела продаж добавили позже — они появились в каталоге, в
+// админке, владелец отметил их в общий чат, подписка работала. А вот собирать их никто
+// не собирался: в перечислении их не было, и они не могли уйти НИ РАЗУ. Владелец это и
+// заметил: «итоги недели в общий чат не пришли, только в бот». Перечисление ключей и
+// каталог обязаны были совпадать вручную — рано или поздно это расходится. Теперь
+// решает поле period самой сводки, и новая строка в каталоге работает сразу.
+export function isDigestDue(digest, { now = Date.now(), force = false } = {}) {
+  if (!digest || !digest.period) return false;
+  if (force) return true;
+  const p = localParts(now);
+  if (digest.period === "month") return p.d === 1;
+  if (digest.period === "week") return new Date(Date.UTC(p.y, p.m - 1, p.d)).getUTCDay() === 1; // понедельник
+  return false;
+}
+
 export function buildDigestMessage(analytics = {}, { key, now = Date.now(), reasonLabel = (k) => k } = {}) {
   const meta = DIGESTS.find(d => d.key === key);
   if (!meta) return null;
