@@ -7,7 +7,7 @@ import {
   objectAllowed, reminderOn, reminderNum, reminderDays, daysUntil,
   inQuietHours, localDayKey, daysWord, esc, tenge, pruneSent, nextCursor,
   makeLinkCode, linkUrl, findUserByCode, assertWritable, handleBotCommand,
-  subsList, subsFingerprint, buildSubsChangeMessages, isDigestDue, DIGESTS,
+  subsList, subsFingerprint, buildSubsChangeMessages, isDigestDue, DIGESTS, staleLine,
 } from "./notifyModel.js";
 
 // Записи ниже — НЕ выдуманные: настоящие строки из боевого журнала, снятые
@@ -189,13 +189,26 @@ describe("что из журнала становится сообщением",
 // такая-то по плану». Без дат это половина новости — сразу возникает вопрос
 // «а когда выходить».
 describe("к подписанию подтягиваются плановые даты", () => {
-  it("старт, сдача и ответственный", () => {
+  it("старт и сдача подтягиваются", () => {
     const ctx = makeEventContext({ productions: [{ objectId: "o1",
       startDate: "2026-09-15", planEndDate: "2026-11-20", responsible: "Сергей Штанько" }] });
     const [m] = buildEventMessages([SIGNED], { sinceTs: 0, context: ctx });
     expect(m.body).toContain("15 сентября");
     expect(m.body).toContain("20 ноября");
-    expect(m.body).toContain("Сергей Штанько");
+  });
+
+  it("ответственный — только если это НЕ тот, кто и так подписан внизу", () => {
+    // Было «ответственный: P.Zveat» и строкой ниже «P.Zveat · 18:33» — одно имя
+    // дважды подряд, ни слова новой информации. Владелец это и увидел в чате.
+    const same = makeEventContext({ productions: [{ objectId: "o1",
+      startDate: "2026-09-15", responsible: "Сергей Штанько" }] });   // SIGNED.by = Сергей Штанько
+    expect(buildEventMessages([SIGNED], { sinceTs: 0, context: same })[0].body)
+      .not.toContain("ответственный");
+
+    const other = makeEventContext({ productions: [{ objectId: "o1",
+      startDate: "2026-09-15", responsible: "Василий Титов" }] });
+    expect(buildEventMessages([SIGNED], { sinceTs: 0, context: other })[0].body)
+      .toContain("ответственный: Василий Титов");
   });
 
   it("дат нет — так и написано, а не пустая строка", () => {
@@ -788,5 +801,61 @@ describe("какие сводки вообще уходят", () => {
     for (const bad of [null, undefined, {}, { period: "квартал" }]) {
       expect(isDigestDue(bad, { now: MONDAY })).toBe(false);
     }
+  });
+});
+
+describe("объекты без движения: что видно в строке и кто её получает", () => {
+  const STALE = { id: "o1", name: "Вера", address: "Сатыбалдина 7/28", status: "work",
+    manager: "P.Zveat", days: 44 };
+
+  it("в строке видно адрес и статус, а не только имя клиента", () => {
+    // Было «• Вера — тишина 44 дня · P.Zveat»: какой объект и что с ним — непонятно,
+    // пока не откроешь сервис.
+    const line = staleLine(STALE, true);
+    expect(line).toContain("Вера, Сатыбалдина 7/28");
+    expect(line).toContain("тишина <b>44 дня</b>");
+    expect(line).toContain("в работе");
+    expect(line).toContain("P.Zveat");
+  });
+
+  it("в личном списке ответственного не повторяем — он и так один", () => {
+    expect(staleLine(STALE, false)).not.toContain("P.Zveat");
+  });
+
+  it("адрес не дублирует имя, если объект назван адресом", () => {
+    expect(staleLine({ ...STALE, name: "Сатыбалдина 7/28", address: "" }, true))
+      .toContain("• Сатыбалдина 7/28 — тишина");
+  });
+
+  it("мусор не роняет строку", () => {
+    for (const bad of [null, undefined, {}]) expect(() => staleLine(bad, true)).not.toThrow();
+  });
+});
+
+describe("общий и личный списки не приходят одному человеку дважды", () => {
+  const wide = { id: "rem~stale~all", key: "stale", kind: "reminder", person: null, text: "общий" };
+  const mine = { id: "rem~stale~me", key: "stale", kind: "reminder", person: "P.Zveat", text: "личный" };
+  const links = { "1": { chatId: "111" }, "2": { chatId: "222" } };
+  const subs = { stale: true };
+
+  it("кто видит всю компанию — получает ТОЛЬКО общий список", () => {
+    // Владелец получал «Объекты без движения» на шесть строк и следом «Ваши объекты
+    // без движения» с тремя из тех же шести — два сообщения в одну минуту.
+    const users = [{ id: "1", name: "P.Zveat", tg: { subs, scope: "all" } }];
+    const out = routeMessages([wide, mine], { users, links, settings: {} });
+    expect(out.map(l => l.text)).toEqual(["общий"]);
+  });
+
+  it("кто общего НЕ видит — получает свой личный, иначе остался бы без всего", () => {
+    const users = [{ id: "1", name: "P.Zveat", tg: { subs, scope: "own" } }];
+    const out = routeMessages([wide, mine], { users, links, settings: {} });
+    expect(out.map(l => l.text)).toEqual(["личный"]);
+  });
+
+  it("в общий чат общий список уходит по-прежнему", () => {
+    const users = [{ id: "1", name: "P.Zveat", tg: { subs, scope: "all" } }];
+    const out = routeMessages([wide, mine], { users, links,
+      settings: { groupChatId: "-100", groupSubs: subs } });
+    expect(out.filter(l => l.chatId === "-100").map(l => l.text)).toEqual(["общий"]);
   });
 });

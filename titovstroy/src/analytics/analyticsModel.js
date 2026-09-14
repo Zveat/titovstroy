@@ -599,6 +599,12 @@ function buildProduction(idx, { from, to, now }) {
           manager: o.manager || "",
           value: 0,
           days: daysFull(touched, now),
+          // Адрес и статус — для уведомления в Telegram. По одному имени клиента
+          // непонятно, о каком объекте речь и что с ним: «Вера — тишина 44 дня»
+          // ничего не говорит, пока не откроешь сервис. Оба поля лежат в объекте
+          // рядом, лишних чтений не стоят. Адрес кладём, только если имя — не он же.
+          address: o.address && o.address !== o.clientName ? o.address : "",
+          status,
         });
       }
     }

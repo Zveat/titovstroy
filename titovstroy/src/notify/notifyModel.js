@@ -349,7 +349,12 @@ function eventExtras(msg, entry, ctx) {
     if (prod.startDate) rows.push(`старт работ: <b>${esc(dateRu(prod.startDate))}</b>`);
     if (prod.planEndDate) rows.push(`сдача по плану: <b>${esc(dateRu(prod.planEndDate))}</b>`);
     if (!rows.length) rows.push("<i>даты старта и сдачи не заполнены</i>");
-    if (prod.responsible) rows.push(`ответственный: ${esc(prod.responsible)}`);
+    // Ответственного показываем, только если это НЕ тот, кто и так подписан внизу
+    // сообщения. Иначе получалось «ответственный: P.Zveat» и строкой ниже
+    // «P.Zveat · 18:33» — одно и то же имя дважды подряд, ни слова новой информации.
+    if (prod.responsible && trim(prod.responsible) !== trim(msg.by)) {
+      rows.push(`ответственный: ${esc(prod.responsible)}`);
+    }
   }
   return rows.length ? "\n" + rows.join("\n") : "";
 }
@@ -441,6 +446,18 @@ export function reminderNum(key, field, settings) {
   return Number(NOTIFY_REMINDERS.find(r => r.key === key)?.threshold?.def) || 0;
 }
 
+// Строка объекта без движения. Было «• Вера — тишина 44 дня · P.Zveat»: по имени
+// клиента не понять, какой это объект и что с ним происходит, — приходилось лезть в
+// сервис. Теперь рядом адрес и статус. Ответственного показываем только в общем
+// списке: в личном он и так один и тот же — тот, кто письмо читает.
+const STALE_STATUS = { work: "в работе", signed: "договор подписан", paused: "приостановлен" };
+export function staleLine(x, withManager) {
+  const where = trim(x?.address) ? `, ${esc(x.address)}` : "";
+  const st = STALE_STATUS[trim(x?.status)] || "";
+  const tail = [st, withManager && trim(x?.manager) ? esc(x.manager) : ""].filter(Boolean).join(" · ");
+  return `• ${esc(x?.name)}${where} — тишина <b>${daysWord(x?.days)}</b>${tail ? ` · ${tail}` : ""}`;
+}
+
 export function buildReminderMessages(analytics = {}, { now = Date.now(), settings = {} } = {}) {
   const prod = analytics.production || {};
   const backlog = analytics.backlog || {};
@@ -481,15 +498,13 @@ export function buildReminderMessages(analytics = {}, { now = Date.now(), settin
     out.push({
       id: `rem~stale~${fingerprint(idsOf(stale))}`,
       key: "stale", topic: "production", kind: "reminder", person: null,
-      text: block(`🔇 <b>Объекты без движения</b> · ${day}`, stale.map(x =>
-        `• ${esc(x.name)} — тишина <b>${daysWord(x.days)}</b>${x.manager ? ` · ${esc(x.manager)}` : ""}`)),
+      text: block(`🔇 <b>Объекты без движения</b> · ${day}`, stale.map(x => staleLine(x, true))),
     });
     for (const [person, items] of byPerson(stale)) {
       out.push({
         id: `rem~stale~${fingerprint([person, ...idsOf(items)])}`,
         key: "stale", topic: "production", kind: "reminder", person,
-        text: block(`🔇 <b>Ваши объекты без движения</b> · ${day}`, items.map(x =>
-          `• ${esc(x.name)} — тишина <b>${daysWord(x.days)}</b>`)),
+        text: block(`🔇 <b>Ваши объекты без движения</b> · ${day}`, items.map(x => staleLine(x, false))),
       });
     }
   }
@@ -803,6 +818,23 @@ export function routeMessages(messages = [], { users = [], links = {}, settings 
   };
 
   const groupChat = trim(settings.groupChatId);
+  // КОМУ ОБЩИЙ СПИСОК УЖЕ УШЁЛ — АДРЕСНЫЙ НЕ ШЛЁМ. Владелец видит всю компанию, поэтому
+  // получал «Объекты без движения» со всеми шестью строками, а следом «Ваши объекты без
+  // движения» с тремя из тех же шести — два сообщения подряд в одну минуту. Адресный
+  // список существует для тех, кто общего НЕ видит; тому, кто видит, он только шум,
+  // причём его строки в общем списке и так помечены фамилией.
+  const gotWide = new Map();                       // ключ напоминания → id людей с общим списком
+  for (const msg of messages) {
+    if (msg.person || msg.kind !== "reminder") continue;
+    const key = msg.key || msg.event;
+    const set = gotWide.get(key) || new Set();
+    for (const u of users) {
+      if (!links[u?.id]?.chatId || !isSubscribed(u, key)) continue;
+      if (userScope(u) === "all") set.add(u.id);
+    }
+    gotWide.set(key, set);
+  }
+
   for (const msg of messages) {
     const text = msg.text || renderEvent(msg);
     const key = msg.key || msg.event;
@@ -816,6 +848,8 @@ export function routeMessages(messages = [], { users = [], links = {}, settings 
       if (msg.person) {
         // адресное — только тому, чьё имя стоит ответственным
         if (trim(msg.person) !== trim(u.name)) continue;
+        // …и только если общий список этому человеку не ушёл, см. gotWide выше
+        if (gotWide.get(key)?.has(u.id)) continue;
       } else if (msg.kind === "reminder" && userScope(u) !== "all") {
         // общую сводку получают только те, кому положено видеть всю компанию;
         // остальным уже ушла их персональная часть
