@@ -23,10 +23,10 @@
 import { buildAnalytics, refuseReasonLabel } from "../analytics/analyticsModel.js";
 import { buildObjectSums } from "./objectSums.js";
 import {
-  DIGESTS, assertWritable, buildDateReminders, buildDigestMessage, buildEventMessages,
-  buildReminderMessages, buildSubsChangeMessages, inQuietHours, isDigestDue, localDayKey,
-  localParts, makeEventContext, markSendNowDone, nextCursor, pendingSendNow, pruneSent,
-  routeMessages,
+  DIGESTS, assertWritable, buildDateReminders, buildDayDigest, buildDigestMessage,
+  buildEventMessages, buildReminderMessages, buildSubsChangeMessages, inQuietHours,
+  isDigestDue, localDayKey, localParts, makeEventContext, markSendNowDone, nextCursor,
+  pendingSendNow, pruneSent, routeMessages, yesterdayBounds,
 } from "./notifyModel.js";
 
 export const K = {
@@ -194,8 +194,19 @@ export async function runNotify(io, { now = Date.now(), forceDigest = false } = 
     for (const d of DIGESTS) {
       if (manual && !askKeys.includes(d.key)) continue;   // шлём ровно те, что просили
       if (!isDigestDue(d, { now, force: forceDigest || manual })) continue;
-      const periodAnalytics = buildAnalytics(data, { period: d.period, users, now });
-      const msg = buildDigestMessage(periodAnalytics, { key: d.key, now, reasonLabel: refuseReasonLabel });
+      let msg;
+      if (d.period === "day") {
+        // Ежедневная считается по ВЧЕРАШНИМ суткам (закрытый день), а «что
+        // сегодня» берёт из уже посчитанной текущей аналитики и карточек.
+        const b = yesterdayBounds(now);
+        msg = buildDayDigest({
+          yesterday: buildAnalytics(data, { period: "custom", from: b.from, to: b.to, users, now }),
+          current: analytics, objects: data.objects, productions,
+        }, { now, settings });
+      } else {
+        const periodAnalytics = buildAnalytics(data, { period: d.period, users, now });
+        msg = buildDigestMessage(periodAnalytics, { key: d.key, now, reasonLabel: refuseReasonLabel });
+      }
       // ПО КНОПКЕ «УЖЕ ОТПРАВЛЯЛИ» НЕ ДЕЙСТВУЕТ. У напоминаний защиту сняли
       // сразу, а у сводок она осталась — и нажатие на сводку, которая сегодня
       // уже уходила, молча не давало ничего.

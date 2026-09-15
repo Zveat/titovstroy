@@ -43,12 +43,12 @@ const REPORT_DELETED = { ts: 1788981013773, userId: "1", by: "P.Zveat", entity: 
   old: "avr", new: "—", detail: "", source: "manual" };
 
 describe("состав: ровно то, что просил владелец", () => {
-  it("двенадцать уведомлений, не больше", () => {
-    expect(NOTIFY_CATALOG).toHaveLength(12);
+  it("тринадцать уведомлений, не больше", () => {
+    expect(NOTIFY_CATALOG).toHaveLength(13);
     expect(NOTIFY_CATALOG.map(n => n.key).sort()).toEqual([
-      "contract_signed", "deleted", "digest_month", "digest_sales_month", "digest_sales_week",
-      "digest_week", "handover_soon", "object_done", "object_status", "stages", "stale",
-      "start_soon",
+      "contract_signed", "deleted", "digest_day", "digest_month", "digest_sales_month",
+      "digest_sales_week", "digest_week", "handover_soon", "object_done", "object_status",
+      "stages", "stale", "start_soon",
     ]);
   });
 
@@ -790,7 +790,7 @@ describe("какие сводки вообще уходят", () => {
   });
 
   it("у каждой сводки в каталоге есть период — иначе она не уйдёт никогда", () => {
-    for (const d of DIGESTS) expect(["week", "month"], d.key).toContain(d.period);
+    for (const d of DIGESTS) expect(["day", "week", "month"], d.key).toContain(d.period);
   });
 
   it("принудительный прогон шлёт всё и в любой день", () => {

@@ -653,6 +653,28 @@ export function buildDateReminders({ objects = [], productions = [] } = {}, { no
 // Все числа — из той же buildAnalytics, что рисует «Аналитику», поэтому сводка
 // в Telegram и экран не могут разойтись.
 export const DIGESTS = Object.freeze([
+  // ЕЖЕДНЕВНАЯ — ПРО ВЧЕРА И ПРО СЕГОДНЯ, И В ЭТОМ ВСЯ РАЗНИЦА.
+  //
+  // Соблазн был собрать её как недельную, только за сутки. Это было бы четвёртым
+  // пересказом одного и того же: каждое подписание и каждая смена статуса и так
+  // прилетают отдельным сообщением в ту же минуту, когда случились.
+  //
+  // Поэтому утром нужно другое — две вещи, которых нет больше нигде:
+  //   ВЧЕРА одной строкой — не событие, а ИТОГ дня. Сколько зашло, посчитали,
+  //     подписали и потеряли, и на какие суммы. По отдельным сообщениям за день
+  //     эту сумму в голове никто не складывает;
+  //   СЕГОДНЯ — что стартует и что сдаём ИМЕННО СЕГОДНЯ, плюс счётчик горящего.
+  //     Напоминания про «через три дня выходим» есть отдельно, но они молчат,
+  //     пока состав не менялся, а «сегодня» — это то, с чем идут на планёрку.
+  //
+  // Денег здесь нет намеренно: сводка расчитана на общий чат, где сидит вся
+  // команда. Прибыль и маржа — только в недельной и месячной, и только адресно.
+  { key: "digest_day", icon: "📅", topic: "digest", kind: "digest", def: true, money: false,
+    label: "Итоги дня", period: "day", title: "Итоги дня",
+    when: "каждый день, в час сводки",
+    what: "вчера: зашло, посчитано, подписано, потеряно и на какие суммы. "
+      + "Сегодня: какие объекты стартуют и какие сдаём, сколько этапов горит. "
+      + "Без прибыли — можно в общий чат" },
   { key: "digest_week", icon: "📈", topic: "digest", kind: "digest", def: true, money: true,
     label: "Сводка за неделю — с прибылью", period: "week", title: "Итоги недели",
     when: "по понедельникам, в час сводки (по умолчанию 9:00)",
@@ -694,6 +716,7 @@ const numText = (v) => (v === null || v === undefined ? "—" : String(v));
 export function isDigestDue(digest, { now = Date.now(), force = false } = {}) {
   if (!digest || !digest.period) return false;
   if (force) return true;
+  if (digest.period === "day") return true;      // каждый день; час проверяет прогон
   const p = localParts(now);
   if (digest.period === "month") return p.d === 1;
   if (digest.period === "week") return new Date(Date.UTC(p.y, p.m - 1, p.d)).getUTCDay() === 1; // понедельник
@@ -708,6 +731,34 @@ export function buildDigestMessage(analytics = {}, { key, now = Date.now(), reas
   const lines = [];
 
   lines.push(`${meta.icon} <b>${meta.title}</b> · ${localDateLabel(now)}`);
+
+  // ДЕНЬГИ ИДУТ ПЕРВЫМИ И ПОКАЗЫВАЮТСЯ ВСЕГДА.
+  //
+  // Раньше блок стоял в конце и рисовался, ТОЛЬКО если в периоде было движение
+  // денег: «строка „Выручка 0 ₸“ выглядит как поломка». Рассуждение оказалось
+  // неверным. У владельца последняя операция в финансах датирована 1 августа,
+  // движения нет — и руководительская сводка превращалась в продажную минус
+  // разрез по менеджерам. Владелец это и заметил: «эти уведомления одинаковые,
+  // присылают одно и то же». Молчание вместо нуля не спасает от вида поломки,
+  // а делает два разных письма неразличимыми.
+  //
+  // Теперь блок есть всегда, а когда движения не было — так и написано. Это
+  // тоже новость: значит в финансы за период ничего не занесли.
+  if (meta.money) {
+    lines.push("");
+    lines.push("<b>Деньги</b>");
+    if (Number(fin.income) || Number(fin.expense)) {
+      lines.push(`• Выручка: <b>${tenge(fin.income)}</b>`);
+      lines.push(`• Валовая прибыль: <b>${tenge(fin.gross)}</b> (${pctText(fin.grossMarginPct)})`);
+      lines.push(`• Чистая прибыль: <b>${tenge(fin.net)}</b> (${pctText(fin.marginPct)})`);
+      if (Number(fin.receivablesOverdue)) {
+        lines.push(`• Просрочено к оплате: <b>${tenge(fin.receivablesOverdue)}</b>`);
+      }
+    } else {
+      lines.push("• Движения денег за период не было — в «Финансы» ничего не заносили");
+    }
+  }
+
   lines.push("");
   lines.push("<b>Продажи</b>");
   lines.push(`• Зашло новых: <b>${numText(sales.newObjects)}</b>`);
@@ -748,24 +799,101 @@ export function buildDigestMessage(analytics = {}, { key, now = Date.now(), reas
     }
   }
 
-  // ДЕНЬГИ КОМПАНИИ — только в руководительской сводке. В сводке отдела продаж
-  // их нет намеренно: её отправляют в общий чат, где сидит вся команда.
-  // Показываем, только если движение вообще было: строка «Выручка 0 ₸ · маржа —»
-  // выглядит как поломка, а не как факт.
-  if (meta.money && (Number(fin.income) || Number(fin.expense))) {
-    lines.push("");
-    lines.push("<b>Деньги</b>");
-    lines.push(`• Выручка: <b>${tenge(fin.income)}</b>`);
-    lines.push(`• Валовая прибыль: <b>${tenge(fin.gross)}</b> (${pctText(fin.grossMarginPct)})`);
-    lines.push(`• Чистая прибыль: <b>${tenge(fin.net)}</b> (${pctText(fin.marginPct)})`);
-    if (Number(fin.receivablesOverdue)) {
-      lines.push(`• Просрочено к оплате: <b>${tenge(fin.receivablesOverdue)}</b>`);
-    }
-  }
-
   return {
     id: `${key}~${localDayKey(now)}`,
     key, topic: meta.topic, kind: "digest", person: null,
+    text: lines.join("\n"),
+  };
+}
+
+// Границы ВЧЕРАШНИХ суток по местному времени. День считаем по Астане, а не по
+// UTC: «вчера» для человека — это его вчера, иначе с полуночи до пяти утра
+// сводка говорила бы про позавчера.
+export function yesterdayBounds(now = Date.now(), offsetMin = TZ_OFFSET_MIN) {
+  const start = dayStart(now, offsetMin);
+  return { from: start - 86400000, to: start - 1 };
+}
+
+// ЕЖЕДНЕВНАЯ СВОДКА. Что было вчера и что сегодня — см. комментарий у digest_day.
+//
+// Возвращает null, когда говорить нечего: вчера по воронке пусто И сегодня
+// ничего не стартует, не сдаётся и не горит. Сообщение «сегодня ничего», если
+// слать его каждое утро, ровно за неделю превращает сводку в шум, который
+// пролистывают не читая, — а вместе с ней и всё остальное от бота.
+export function buildDayDigest(
+  { yesterday = {}, current = {}, objects = [], productions = [] } = {},
+  { now = Date.now(), settings = {} } = {},
+) {
+  const meta = NOTIFY_BY_KEY.digest_day || DIGESTS.find(d => d.key === "digest_day");
+  const sales = yesterday.sales || {};
+  // ОБА СПИСКА ЛЕЖАТ В production. staleObjects выглядит как «бэклог», и первый
+  // раз я взял его из analytics.backlog — счётчик молча был бы всегда нулевым.
+  // Берём оттуда же, откуда его берёт напоминание «Объекты без движения».
+  const prod = current.production || {};
+
+  const newObjects = Number(sales.newObjects) || 0;
+  const estimated = Number(sales.estimatedCount) || 0;
+  const signed = Number(sales.signedCount) || 0;
+  const lost = Number(sales.lostCount) || 0;
+  const moved = newObjects || estimated || signed || lost;
+
+  // Что сегодня. Берём из карточек производства — в журнале будущего нет.
+  const prodBy = new Map();
+  for (const p of productions || []) if (p && p.objectId) prodBy.set(p.objectId, p);
+  const starts = [];
+  const handovers = [];
+  for (const o of objects || []) {
+    if (!o || o.deletedAt || !objectAllowed(o.id, settings)) continue;
+    const card = prodBy.get(o.id);
+    if (!card || card.factEndDate) continue;
+    const status = trim(card.prodStatus) || trim(o.status);
+    if (DEAD_STATUS.has(status)) continue;
+    const name = trim(o.clientName) || trim(o.address) || "Без названия";
+    if (daysUntil(card.startDate, now) === 0) starts.push(name);
+    if (daysUntil(card.planEndDate, now) === 0) handovers.push(name);
+  }
+  const burning = (prod.overdueStageList || []).filter(x => objectAllowed(x.objectId || x.id, settings));
+  const stale = (prod.staleObjects || []).filter(x => objectAllowed(x.objectId || x.id, settings));
+  const hasToday = starts.length || handovers.length || burning.length || stale.length;
+
+  if (!moved && !hasToday) return null;
+
+  const lines = [`${meta.icon} <b>${meta.title}</b> · ${localDateLabel(now)}`];
+
+  lines.push("");
+  lines.push("<b>Вчера</b>");
+  if (!moved) {
+    lines.push("• По воронке движения не было");
+  } else {
+    if (newObjects) lines.push(`• Зашло новых: <b>${newObjects}</b>`);
+    if (estimated) {
+      lines.push(`• Посчитано смет: <b>${estimated}</b>`
+        + (sales.estimatedSum ? ` на ${tenge(sales.estimatedSum)}` : ""));
+    }
+    if (signed) {
+      lines.push(`• Подписано договоров: <b>${signed}</b>`
+        + (sales.signedSum ? ` на <b>${tenge(sales.signedSum)}</b>` : ""));
+    }
+    if (lost) {
+      lines.push(`• Потеряли: <b>${lost}</b>${sales.lostSum ? ` на ${tenge(sales.lostSum)}` : ""}`);
+    }
+  }
+
+  if (hasToday) {
+    lines.push("");
+    lines.push("<b>Сегодня</b>");
+    if (starts.length) lines.push(`• Старт работ: <b>${starts.map(esc).join(" · ")}</b>`);
+    if (handovers.length) lines.push(`• Сдача по плану: <b>${handovers.map(esc).join(" · ")}</b>`);
+    if (burning.length) {
+      lines.push(`• Просрочено этапов: <b>${burning.length}</b>`
+        + ` (дольше всех — ${daysWord(Math.max(...burning.map(x => Number(x.days) || 0)))})`);
+    }
+    if (stale.length) lines.push(`• Объектов без движения: <b>${stale.length}</b>`);
+  }
+
+  return {
+    id: `digest_day~${localDayKey(now)}`,
+    key: "digest_day", topic: meta.topic, kind: "digest", person: null,
     text: lines.join("\n"),
   };
 }
