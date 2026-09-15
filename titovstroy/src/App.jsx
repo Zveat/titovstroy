@@ -56,7 +56,7 @@ import { clearLoginAttempts, getLoginLockout, hashPassword, passwordTooWeak, reg
 import { shouldForceLogout } from "./auth/forceLogout.js";
 import { askIfDue, startNotifyTicker } from "./notify/notifyTicker.js";
 import { equalizeRows } from "./ui/equalizeRows.js";
-import { LAST_SCREEN_KEY, decodeLastScreen, encodeLastScreen } from "./ui/lastScreen.js";
+import { LAST_SCREEN_KEY, TOUCH_EVERY_MS, decodeLastScreen, encodeLastScreen, touchLastScreen } from "./ui/lastScreen.js";
 import { _finTypeLbl, _objLabel, _tng, logChange, logContractSave, logObjChange, writeAudit } from "./cloud/audit.js";
 import { _dirtyOwnerUid, _editorGateN, _fbAuthReady, _mem, _restToken, hasStaffClaim, nextEditorGate,
   signOutStaff, staffSessionState, storage } from "./cloud/storage.js";
@@ -5156,6 +5156,30 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       else localStorage.removeItem(LAST_SCREEN_KEY);
     } catch (e) {}
   }, [currentUser?.id, screen, objectTab, currentObject?.id, objWsTab, financeTab, currentId]);
+
+  // ОТМЕТКА ВРЕМЕНИ ДОЛЖНА ЗНАЧИТЬ «КОГДА ВКЛАДКА БЫЛА ЖИВА». Эффект выше ставит её
+  // при переходе по меню, и этого мало: срок восстановления теперь 10 минут, и человек,
+  // просидевший полчаса в одной карточке, при обновлении улетал бы на Главную. Поэтому
+  // пока вкладку видно — подновляем раз в минуту, и обязательно в момент ухода со
+  // страницы. Это запись в localStorage на несколько десятков байт.
+  useEffect(() => {
+    if (!currentUser?.id) return undefined;
+    const touch = () => {
+      try {
+        const next = touchLastScreen(localStorage.getItem(LAST_SCREEN_KEY), { uid: currentUser.id });
+        if (next) localStorage.setItem(LAST_SCREEN_KEY, next);
+      } catch (e) { /* приватный режим или переполнение — восстановление не критично */ }
+    };
+    const onHide = () => { if (document.visibilityState === "hidden") touch(); };
+    const timer = setInterval(() => { if (document.visibilityState === "visible") touch(); }, TOUCH_EVERY_MS);
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", touch);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", touch);
+    };
+  }, [currentUser?.id]);
 
   const screenRestoredRef = useRef(false);
   const wantObjectRef = useRef(null);

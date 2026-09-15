@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_AGE_MS, decodeLastScreen, encodeLastScreen } from "./lastScreen.js";
+import { MAX_AGE_MS, decodeLastScreen, encodeLastScreen, touchLastScreen } from "./lastScreen.js";
 
 const NOW = 1_700_000_000_000;
 const UID = "u1";
@@ -60,7 +60,9 @@ describe("что восстанавливаем", () => {
   });
 
   it("вчерашнее НЕ восстанавливаем", () => {
-    // Через полсуток человек начинает новый день и ждёт Главную.
+    // Владелец: «закрыл давно, открываешь — а он на той же странице, переборщил».
+    // Правка нужна, чтобы пережить ПЕРЕЗАГРУЗКУ, а это секунды. Через десять минут
+    // это уже новый заход.
     expect(decodeLastScreen(saved(), { uid: UID, now: NOW + MAX_AGE_MS + 1 })).toBeNull();
     expect(decodeLastScreen(saved(), { uid: UID, now: NOW + MAX_AGE_MS - 1 })).not.toBeNull();
   });
@@ -104,5 +106,42 @@ describe("что восстанавливаем", () => {
       .toEqual({ screen: "objects", objectId: "o7", objWsTab: "documents" });
     expect(decodeLastScreen({ uid: UID, screen: "finance", financeTab: "ops", ts: NOW }, { uid: UID, now: NOW }))
       .toEqual({ screen: "finance", financeTab: "ops" });
+  });
+});
+
+describe("отметка живёт, пока жива вкладка", () => {
+  const UID2 = "u1";
+  const NOW2 = 1_789_400_000_000;
+  const rec = { uid: UID2, screen: "objects", objectId: "o7", ts: NOW2 };
+
+  it("срок восстановления — десять минут, не полсуток", () => {
+    expect(MAX_AGE_MS).toBe(10 * 60 * 1000);
+  });
+
+  // Без этого человек, просидевший полчаса в карточке, при обновлении улетал бы
+  // на Главную — вместо старой беды получили бы новую.
+  it("подновление двигает только время, экран не трогает", () => {
+    const next = JSON.parse(touchLastScreen(JSON.stringify(rec), { uid: UID2, now: NOW2 + 20 * 60e3 }));
+    expect(next.ts).toBe(NOW2 + 20 * 60e3);
+    expect(next.screen).toBe("objects");
+    expect(next.objectId).toBe("o7");
+  });
+
+  it("подновлённая отметка снова восстанавливается, старая — нет", () => {
+    const later = NOW2 + 30 * 60e3;
+    expect(decodeLastScreen(rec, { uid: UID2, now: later })).toBeNull();
+    const touched = touchLastScreen(rec, { uid: UID2, now: later });
+    expect(decodeLastScreen(touched, { uid: UID2, now: later + 60e3 })).not.toBeNull();
+    expect(decodeLastScreen(touched, { uid: UID2, now: later + 11 * 60e3 })).toBeNull();
+  });
+
+  it("чужую отметку не подновляем — иначе она пережила бы смену пользователя", () => {
+    expect(touchLastScreen(rec, { uid: "другой", now: NOW2 })).toBeNull();
+  });
+
+  it("мусор и пустота не роняют", () => {
+    for (const bad of [null, undefined, "", "{", "[]", 5, {}]) {
+      expect(touchLastScreen(bad, { uid: UID2, now: NOW2 })).toBeNull();
+    }
   });
 });

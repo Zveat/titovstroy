@@ -19,8 +19,17 @@
 //   — экран чужого пользователя: вошёл другой человек — он не должен оказаться в объекте
 //     предыдущего. Отметка привязана к идентификатору сотрудника;
 //   — раздел, на который у роли нет прав: права могли поменять, пока человека не было;
-//   — вчерашнее: через полсуток человек начинает новый день и ждёт Главную, а не объект,
-//     который смотрел вчера вечером.
+//   — давнее. Сначала срок был полсуток, и владелец на это пожаловался: «закрыл давно,
+//     открываешь — а он на той же странице, ты переборщил». Он прав. Смысл правки —
+//     пережить ПЕРЕЗАГРУЗКУ (обновил страницу, вышла новая версия, упала вкладка), а это
+//     секунды. Вернулся через полчаса — это уже новый заход, и ждут Главную. Срок 10 минут.
+//
+// ОТМЕТКА ВРЕМЕНИ — ЭТО «КОГДА ВКЛАДКА БЫЛА ЖИВА», А НЕ «КОГДА ПЕРЕШЛИ ПО МЕНЮ».
+// Разница решает всё. Пишется отметка при смене экрана, и если оставить так, то человек,
+// просидевший полчаса в одной карточке и нажавший обновление, улетал бы на Главную —
+// вместо старой беды получили бы новую. Поэтому пока вкладку видно, отметка подновляется
+// (touchLastScreen), и обязательно в момент ухода со страницы. Тогда 10 минут считаются
+// от закрытия, как владелец и просил.
 
 export const LAST_SCREEN_KEY = "ts_last_screen";   // личная настройка вида, в базе ей делать нечего
 
@@ -28,7 +37,10 @@ export const LAST_SCREEN_KEY = "ts_last_screen";   // личная настро�
 // намеренно — см. выше.
 export const NAV_SCREENS = ["dashboard", "objects", "calendar", "contracts", "analytics", "finance", "masters", "admin"];
 
-export const MAX_AGE_MS = 12 * 3600 * 1000;
+export const MAX_AGE_MS = 10 * 60 * 1000;
+// Как часто подновлять отметку, пока вкладка открыта. Это запись в localStorage
+// на несколько десятков байт — дешевле некуда, но чаще минуты смысла нет.
+export const TOUCH_EVERY_MS = 60 * 1000;
 
 export function encodeLastScreen({ uid, screen, objectId, objWsTab, financeTab, estimateId, now = Date.now() }) {
   if (!uid) return null;
@@ -61,4 +73,14 @@ export function decodeLastScreen(raw, { uid, now = Date.now(), allowed = NAV_SCR
   }
   if (saved.screen === "finance" && saved.financeTab) out.financeTab = String(saved.financeTab);
   return out;
+}
+
+// Подновить отметку времени, не трогая сам экран. Возвращает новую строку для
+// записи или null, если подновлять нечего (записи нет, она чужая или битая).
+export function touchLastScreen(raw, { uid, now = Date.now() } = {}) {
+  let saved = raw;
+  if (typeof saved === "string") { try { saved = JSON.parse(saved); } catch { return null; } }
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return null;
+  if (!uid || String(saved.uid) !== String(uid)) return null;
+  return JSON.stringify({ ...saved, ts: now });
 }
