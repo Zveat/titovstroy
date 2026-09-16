@@ -65,7 +65,7 @@ export function ClientPhotoReport({ groups = [], ui, expanded, onExpand, onOpen 
       {/* Своего заголовка нет: название и счётчик уже стоят во вкладке, и второй
           раз подряд «Фотоотчёт · 5 фото» читается как ошибка вёрстки. */}
       <div style={{ fontSize: 12, color: FAINT, marginBottom: 14, lineHeight: 1.45 }}>
-        {total} {total === 1 ? "снимок" : total < 5 ? "снимка" : "снимков"} по работам, включая скрытые работы — то, что после отделки уже не увидеть.
+        {total} {total === 1 ? "снимок" : total < 5 ? "снимка" : "снимков"} по работам: как шёл ремонт и что ушло под отделку — этого потом уже не увидеть.
       </div>
       {shown.map((group, index) => {
         const last = index === shown.length - 1;
@@ -78,9 +78,10 @@ export function ClientPhotoReport({ groups = [], ui, expanded, onExpand, onOpen 
               if (!items.length) return null;
               return (
                 <div key={phase.key} style={{ marginBottom: 10 }}>
-                  {/* Подпись клиентская: «В процессе» ему ничего не объясняет —
-                      он не знает, что снимали и зачем. «Скрытые работы» с
-                      расшифровкой говорит ровно то, ради чего снимок и делали. */}
+                  {/* Подпись клиентская, из PHOTO_KINDS: слова прораба («В
+                      процессе») клиенту ничего не объясняют, а одно только
+                      «Скрытые работы» описывает лишь половину того, что под ним
+                      лежит. Поэтому там названы оба смысла — см. model.js. */}
                   <div style={{ marginBottom: 6 }}>
                     <div style={{ fontSize: 10.5, fontWeight: 800, color: BRASS, textTransform: "uppercase", letterSpacing: ".05em" }}>{phase.clientLabel || phase.label}</div>
                     {phase.clientHint && <div style={{ fontSize: 11, color: FAINT, marginTop: 1, lineHeight: 1.35 }}>{phase.clientHint}</div>}
