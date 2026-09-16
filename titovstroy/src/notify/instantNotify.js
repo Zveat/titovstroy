@@ -24,8 +24,15 @@
 // что, событие уже в журнале и уйдёт ближайшим прогоном по расписанию.
 import { auditMessage } from "./notifyModel.js";
 
-export const IDLE_MS = 20_000;
-export const MAX_WAIT_MS = 90_000;
+// СРАЗУ, БЕЗ ПАУЗЫ. Пауза в 20 секунд была нужна, чтобы свернуть пачку правок в
+// одно сообщение. Владелец на неё и указал: «нахуй мне задержка такая, чтобы
+// сразу приходили ВСЕ уведомления». Он прав ещё и по причине, которой я не
+// предусмотрел: пауза означала, что закрытая в эти 20 секунд вкладка НЕ ОТПРАВИТ
+// НИЧЕГО — толчок умирал вместе с ней, и событие ждало часового запасного
+// прогона. Сворачивать пачку продолжает сам прогон: он читает журнал целиком и
+// группирует всё, что накопилось, — от паузы в браузере это не зависело.
+export const IDLE_MS = 0;
+export const MAX_WAIT_MS = 0;
 
 // Стоит ли вообще будить рассылку из-за этой записи журнала.
 //
@@ -40,50 +47,25 @@ export function isNotifiableEntry(entry) {
   try { return !!auditMessage(entry, {}); } catch { return false; }
 }
 
-// Фабрика нужна тестам: там своё время и свои таймеры, без ожидания реальных
-// двадцати секунд.
-export function createInstantNotifier({
-  dispatch,
-  now = Date.now,
-  setTimer = setTimeout,
-  clearTimer = clearTimeout,
-  idleMs = IDLE_MS,
-  maxWaitMs = MAX_WAIT_MS,
-} = {}) {
-  let timer = null;
-  let firstAt = 0;          // когда пришло первое событие текущей пачки
-  let latestTs = 0;         // отметка самой свежей записи — её и предъявляем серверу
-
-  const fire = () => {
-    timer = null;
-    firstAt = 0;
-    const ts = latestTs;
-    latestTs = 0;
-    if (!ts) return;
-    try {
-      Promise.resolve(dispatch(ts)).catch(() => {});
-    } catch { /* фоновая ускорялка молчит при любом сбое */ }
-  };
-
+// Фабрика нужна тестам: там свой счётчик отправок вместо настоящей сети.
+export function createInstantNotifier({ dispatch, now = Date.now } = {}) {
+  // Одна и та же запись не должна уезжать дважды: журнал иногда пишет несколько
+  // строк об одном действии, и толкать прогон на каждую незачем — он всё равно
+  // читает журнал целиком.
+  let lastSent = 0;
   return {
     note(entry) {
       if (!isNotifiableEntry(entry)) return false;
       const ts = Number(entry?.ts) || Number(now());
-      if (ts > latestTs) latestTs = ts;
-      const t = Number(now());
-      if (!firstAt) firstAt = t;
-      if (timer) clearTimer(timer);
-      // Сколько осталось до потолка — чтобы поток правок не отодвигал отправку.
-      const left = Math.max(0, maxWaitMs - (t - firstAt));
-      timer = setTimer(fire, Math.min(idleMs, left));
+      if (ts <= lastSent) return false;
+      lastSent = ts;
+      try {
+        Promise.resolve(dispatch(ts)).catch(() => {});
+      } catch { /* фон молчит при любом сбое: журнал важнее уведомления */ }
       return true;
     },
-    // Уходя со страницы, отправлять уже поздно, но и висящий таймер не нужен.
-    cancel() {
-      if (timer) clearTimer(timer);
-      timer = null; firstAt = 0; latestTs = 0;
-    },
-    pending() { return !!timer; },
+    cancel() { lastSent = 0; },
+    pending() { return false; },      // ждать больше нечего — отправляем сразу
   };
 }
 
@@ -98,6 +80,11 @@ export async function dispatchEventRun(ts, { getToken, fetchImpl = fetch } = {})
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ kind: "event", at: ts }),
+      // Человек удалил смету и закрыл вкладку — запрос всё равно обязан уйти.
+      // Без этого браузер обрывает его вместе со страницей, и событие ждёт
+      // запасного прогона. Ровно так уведомления об удалении смет и опоздали
+      // на шесть часов.
+      keepalive: true,
     });
     let payload = null;
     try { payload = await response.json(); } catch { /* пустой ответ — не беда */ }

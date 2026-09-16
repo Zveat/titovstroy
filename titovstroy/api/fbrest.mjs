@@ -97,5 +97,39 @@ export function createDb({ env = process.env, fetchImpl = globalThis.fetch, now 
       if (!r.ok) throw new Error(`Запись ${key}: HTTP ${r.status}`);
       return true;
     },
+
+    // ОДИН ПРОГОН ЗА РАЗ. Уведомления теперь отправляются в момент события, а
+    // события идут пачками: перевели четыре объекта — четыре запроса почти
+    // одновременно. Serverless-функции выполняются ПАРАЛЛЕЛЬНО, поэтому без
+    // замка два прогона прочитали бы журнал до того, как первый отметит
+    // отправленное, и одно событие ушло бы дважды. Раньше от этого спасала
+    // очередь GitHub Actions; теперь её нет.
+    //
+    // Замок ставим честным CAS: база отдаёт ETag текущего значения, и запись
+    // принимается, только если значение с тех пор не менялось (if-match).
+    // Проиграл гонку — получил 412 и просто не запускаешься. Никаких «прочитал,
+    // подумал, записал», на которых замки и ломаются.
+    //
+    // Держится замок недолго: прогон живёт секунды, а зависший не должен
+    // заблокировать рассылку надолго.
+    async claimRun(key, { ttlMs = 60_000, now: nowFn = now } = {}) {
+      const token = await accessToken();
+      if (!token) throw new Error("Сервисный ключ не настроен");
+      const url = nodeUrl(key, token);
+      const r = await fetchImpl(url, { headers: { "X-Firebase-ETag": "true" } });
+      if (!r.ok) throw new Error(`Чтение ${key}: HTTP ${r.status}`);
+      const etag = r.headers?.get?.("ETag") || "";
+      const state = parse(await r.json().catch(() => null)) || {};
+      const at = Number(nowFn());
+      if (at - (Number(state.runningAt) || 0) < ttlMs) return { ok: false, busy: true };
+      const put = await fetchImpl(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...(etag ? { "if-match": etag } : {}) },
+        body: JSON.stringify(JSON.stringify({ ...state, runningAt: at })),
+      });
+      if (put.status === 412) return { ok: false, busy: true };   // замок взял кто-то другой
+      if (!put.ok) throw new Error(`Замок ${key}: HTTP ${put.status}`);
+      return { ok: true, state: { ...state, runningAt: at } };
+    },
   };
 }

@@ -23,11 +23,12 @@ function recorder() {
 }
 
 // Подставная база: что читается — задаём, что пишется — запоминаем.
-function fakeDb(nodes = {}) {
+function fakeDb(nodes = {}, { busy = false } = {}) {
   const writes = [];
   return {
     writes,
     configured: () => true,
+    async claimRun() { return busy ? { ok: false, busy: true } : { ok: true, state: {} }; },
     async read(key, fallback = null) {
       return key in nodes ? nodes[key] : fallback;
     },
@@ -46,9 +47,9 @@ const LIVE = {
   [MONTH_KEY]: [ENTRY],
 };
 
-function harness({ nodes = LIVE, env = ENV, staffOk = true, journal = [ENTRY] } = {}) {
+function harness({ nodes = LIVE, env = ENV, staffOk = true, journal = [ENTRY], busy = false } = {}) {
   const sent = [];
-  const db = fakeDb(nodes);
+  const db = fakeDb(nodes, { busy });
   const fetchImpl = vi.fn(async (url, init) => {
     const u = String(url);
     if (u.includes("accounts:lookup")) {
@@ -121,6 +122,21 @@ describe("кто может попросить отправку", () => {
     await h.handler(req({ kind: "event", at: ENTRY.ts }), recorder());
     const read = h.fetchImpl.mock.calls.map(c => String(c[0])).find(u => /titovstroy_audit_/.test(u));
     expect(read).toContain("auth=id-token");
+  });
+});
+
+describe("два события разом не дают дубля", () => {
+  // Отправка идёт в момент события, а события приходят пачками: четыре объекта в
+  // «Потерян» — четыре запроса почти одновременно. Serverless-функции работают
+  // параллельно, и без замка каждая прочитала бы журнал раньше, чем соседняя
+  // отметит отправленное. Раньше от этого спасала очередь GitHub Actions.
+  it("проигравший гонку не шлёт ничего и не считает это ошибкой", async () => {
+    const h = harness({ busy: true });
+    const res = recorder();
+    await h.handler(req({ kind: "event", at: ENTRY.ts }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ ok: true, busy: true });
+    expect(h.sent).toHaveLength(0);
   });
 });
 

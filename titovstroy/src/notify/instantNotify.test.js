@@ -8,24 +8,6 @@ const entry = (over = {}) => ({
   by: "Сергей Штанько", ...over,
 });
 
-// Ручные таймеры: ждать по-настоящему двадцать секунд в тесте нельзя.
-function fakeClock() {
-  let t = 0;
-  const jobs = new Map();
-  let id = 0;
-  return {
-    now: () => t,
-    setTimer: (fn, ms) => { const key = ++id; jobs.set(key, { fn, at: t + ms }); return key; },
-    clearTimer: (key) => { jobs.delete(key); },
-    advance(ms) {
-      t += ms;
-      for (const [key, job] of [...jobs]) {
-        if (job.at <= t) { jobs.delete(key); job.fn(); }
-      }
-    },
-  };
-}
-
 describe("что считать поводом разбудить рассылку", () => {
   it("смена статуса объекта — повод", () => {
     expect(isNotifiableEntry(entry())).toBe(true);
@@ -56,81 +38,54 @@ describe("что считать поводом разбудить рассылк
   });
 });
 
-describe("пауза на сворачивание пачки", () => {
-  it("одно событие уходит после тишины, а не мгновенно", () => {
-    const clock = fakeClock();
+describe("отправляем сразу, без паузы", () => {
+  // Владелец: «нахуй мне задержка такая». Пауза в 20 секунд была не только
+  // медленной — закрытая в эти секунды вкладка не отправляла НИЧЕГО, и событие
+  // ждало часового запасного прогона. Ровно так удаление смет опоздало на 6 часов.
+  it("событие уходит в тот же момент, без всяких таймеров", () => {
     const dispatch = vi.fn().mockResolvedValue({ ok: true });
-    const n = createInstantNotifier({ dispatch, ...clock, idleMs: 20_000, maxWaitMs: 90_000 });
-
+    const n = createInstantNotifier({ dispatch });
     n.note(entry());
-    clock.advance(19_000);
-    expect(dispatch).not.toHaveBeenCalled();
-    clock.advance(2_000);
     expect(dispatch).toHaveBeenCalledTimes(1);
-  });
-
-  // Ровно тот случай из сентября: четыре объекта в «Потерян» за полторы минуты.
-  it("пачка из четырёх правок — один запуск, а не четыре", () => {
-    const clock = fakeClock();
-    const dispatch = vi.fn().mockResolvedValue({ ok: true });
-    const n = createInstantNotifier({ dispatch, ...clock, idleMs: 20_000, maxWaitMs: 90_000 });
-
-    for (let i = 0; i < 4; i++) {
-      n.note(entry({ ts: 1_700_000_000_000 + i * 1000, entityId: "o" + i }));
-      clock.advance(10_000);
-    }
-    expect(dispatch).not.toHaveBeenCalled();
-    clock.advance(20_000);
-    expect(dispatch).toHaveBeenCalledTimes(1);
-  });
-
-  it("непрерывный поток правок не откладывает отправку дольше потолка", () => {
-    const clock = fakeClock();
-    const dispatch = vi.fn().mockResolvedValue({ ok: true });
-    const n = createInstantNotifier({ dispatch, ...clock, idleMs: 20_000, maxWaitMs: 90_000 });
-
-    for (let i = 0; i < 30; i++) {
-      n.note(entry({ ts: 1_700_000_000_000 + i * 1000, entityId: "o" + i }));
-      clock.advance(5_000);
-    }
-    expect(dispatch).toHaveBeenCalledTimes(1);
-  });
-
-  it("предъявляем серверу отметку самой свежей записи пачки", () => {
-    const clock = fakeClock();
-    const dispatch = vi.fn().mockResolvedValue({ ok: true });
-    const n = createInstantNotifier({ dispatch, ...clock, idleMs: 20_000, maxWaitMs: 90_000 });
-
-    n.note(entry({ ts: 100 }));
-    n.note(entry({ ts: 900, entityId: "o2" }));
-    n.note(entry({ ts: 500, entityId: "o3" }));
-    clock.advance(20_000);
-    expect(dispatch).toHaveBeenCalledWith(900);
-  });
-
-  it("не-событие таймер не заводит", () => {
-    const clock = fakeClock();
-    const dispatch = vi.fn();
-    const n = createInstantNotifier({ dispatch, ...clock });
-    expect(n.note(entry({ field: "телефон" }))).toBe(false);
+    expect(dispatch).toHaveBeenCalledWith(1_700_000_000_000);
     expect(n.pending()).toBe(false);
-    clock.advance(200_000);
+  });
+
+  // Пачку сворачивает сам прогон: он читает журнал целиком. От браузера это
+  // никогда и не зависело, а замок на стороне сервера не даёт послать дважды.
+  it("пачка из четырёх правок: толкаем на каждую, дублей не боимся", () => {
+    const dispatch = vi.fn().mockResolvedValue({ ok: true });
+    const n = createInstantNotifier({ dispatch });
+    for (let i = 0; i < 4; i++) n.note(entry({ ts: 1_700_000_000_000 + i * 1000, entityId: "o" + i }));
+    expect(dispatch).toHaveBeenCalledTimes(4);
+  });
+
+  it("одна и та же запись дважды не уезжает", () => {
+    const dispatch = vi.fn().mockResolvedValue({ ok: true });
+    const n = createInstantNotifier({ dispatch });
+    expect(n.note(entry())).toBe(true);
+    expect(n.note(entry())).toBe(false);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("не-событие не толкает", () => {
+    const dispatch = vi.fn();
+    const n = createInstantNotifier({ dispatch });
+    expect(n.note(entry({ field: "телефон" }))).toBe(false);
     expect(dispatch).not.toHaveBeenCalled();
   });
 
-  it("сбой запуска не выбрасывается наружу — журнал важнее уведомления", () => {
-    const clock = fakeClock();
+  it("сбой отправки не выбрасывается наружу — журнал важнее уведомления", () => {
     const dispatch = vi.fn(() => { throw new Error("сеть"); });
-    const n = createInstantNotifier({ dispatch, ...clock });
-    n.note(entry());
-    expect(() => clock.advance(20_000)).not.toThrow();
+    const n = createInstantNotifier({ dispatch });
+    expect(() => n.note(entry())).not.toThrow();
   });
 });
 
 describe("запрос на запуск", () => {
   const token = async () => "tok";
 
-  it("уходит с видом заявки «событие» и отметкой времени", async () => {
+  it("уходит с видом заявки «событие», отметкой времени и keepalive", async () => {
     const fetchImpl = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, dispatched: true }) });
     const r = await dispatchEventRun(777, { getToken: token, fetchImpl });
     expect(r.ok).toBe(true);
@@ -138,6 +93,8 @@ describe("запрос на запуск", () => {
     expect(url).toBe("/api/notify-run");
     expect(JSON.parse(init.body)).toEqual({ kind: "event", at: 777 });
     expect(init.headers.Authorization).toBe("Bearer tok");
+    // Без keepalive браузер обрывает запрос вместе с закрываемой страницей.
+    expect(init.keepalive).toBe(true);
   });
 
   it("без токена никуда не ходим", async () => {

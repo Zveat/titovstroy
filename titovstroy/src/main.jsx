@@ -12,6 +12,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 // Раньше клиенты могли зависать на старой версии приложения (разные экраны на
 // ПК/телефоне/иконке). Теперь при каждом запуске проверяем обновление, а когда
 // новая версия готова — активируем её и один раз перезагружаем страницу.
+import { currentEntry } from "./appVersion.js";
+
 if ("serviceWorker" in navigator) {
   let _reloading = false;
   window.addEventListener("load", () => {
@@ -21,7 +23,22 @@ if ("serviceWorker" in navigator) {
       _reloading = true;
       window.location.reload();
     });
-    navigator.serviceWorker.register("/sw.js").then(reg => {
+    // АДРЕС SW НЕСЁТ ОТПЕЧАТОК СБОРКИ, И ЭТО НЕ КОСМЕТИКА.
+    //
+    // Браузер считает, что «вышло обновление», ТОЛЬКО если файл sw.js изменился.
+    // Наш sw.js от сборки к сборке не менялся ни на байт — значит updatefound не
+    // наступал НИКОГДА, и телефон мог неделями крутить старый код, о чём и
+    // написано в appVersion.js. Это не теория: 16 сентября владелец удалил сметы
+    // в 12:52, а уведомления пришли в 18:34, потому что в его вкладке не было
+    // кода быстрой отправки — за сутки от браузера не пришло НИ ОДНОГО запроса.
+    //
+    // Отпечаток берём из имени главного файла страницы (Vite вшивает туда хеш
+    // содержимого): каждая выкатка — новый адрес, браузер видит новый SW,
+    // ставит его, а обработчик ниже просит активироваться немедленно. Дальше
+    // controllerchange перезагружает страницу один раз — и человек уже на новом
+    // коде, ничего не нажимая.
+    const stamp = currentEntry(document).replace(/\D+/g, "").slice(-10);
+    navigator.serviceWorker.register(stamp ? `/sw.js?v=${stamp}` : "/sw.js").then(reg => {
       try { reg.update(); } catch (e) {}
       if (reg.waiting) { try { reg.waiting.postMessage("SKIP_WAITING"); } catch (e) {} }
       reg.addEventListener("updatefound", () => {
