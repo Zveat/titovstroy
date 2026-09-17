@@ -82,18 +82,50 @@ describe("когда сервер говорит «пора»", () => {
 });
 
 describe("сам тик", () => {
+  // Дать микрозадачам провернуться: тик не наслаивает вопросы, и пока
+  // предыдущий не завершился, следующий намеренно пропускается.
+  const settle = () => new Promise(r => setTimeout(r, 0));
   const clock = () => {
     let fn = null;
     return { setTimer: (f) => { fn = f; return 1; }, clearTimer: () => { fn = null; },
       beat: () => fn && fn(), stopped: () => fn === null };
   };
 
-  it("спрашивает по таймеру", async () => {
+  // Открыл CRM в 10:00:05 — сводка должна уйти в 10:00:06, а не через интервал.
+  it("спрашивает СРАЗУ при открытии, не дожидаясь первого тика", () => {
     const c = clock();
     const ask = vi.fn().mockResolvedValue({ ok: true, idle: true });
     startNotifyTicker({ ask, ...c, intervalMs: 1000 });
-    await c.beat();
     expect(ask).toHaveBeenCalledTimes(1);
+  });
+
+  it("и потом по таймеру", async () => {
+    const c = clock();
+    const ask = vi.fn().mockResolvedValue({ ok: true, idle: true });
+    startNotifyTicker({ ask, ...c, intervalMs: 1000 });
+    await settle();                          // первый вопрос должен завершиться
+    await c.beat();
+    expect(ask).toHaveBeenCalledTimes(2);
+  });
+
+  // Телефон разблокировали — спрашиваем, не дожидаясь двух минут.
+  it("спрашивает при возврате на вкладку", async () => {
+    const c = clock();
+    const ask = vi.fn().mockResolvedValue({ ok: true, idle: true });
+    let wake = null;
+    startNotifyTicker({ ask, ...c, onVisible: (beat) => { wake = beat; return () => { wake = null; }; } });
+    expect(ask).toHaveBeenCalledTimes(1);
+    await settle();
+    await wake();
+    expect(ask).toHaveBeenCalledTimes(2);
+  });
+
+  it("остановка отписывает и от возврата на вкладку", () => {
+    const c = clock();
+    let off = false;
+    const stop = startNotifyTicker({ ask: vi.fn(), ...c, onVisible: () => () => { off = true; } });
+    stop();
+    expect(off).toBe(true);
   });
 
   it("невидимую вкладку не спрашивает — ночью экран заблокирован", async () => {
@@ -101,7 +133,7 @@ describe("сам тик", () => {
     const ask = vi.fn();
     startNotifyTicker({ ask, isVisible: () => false, ...c });
     await c.beat();
-    expect(ask).not.toHaveBeenCalled();
+    expect(ask).not.toHaveBeenCalled();     // ни сразу, ни по таймеру
   });
 
   it("вопросы не наслаиваются: прогон идёт — новый не задаём", async () => {

@@ -1943,15 +1943,22 @@ function MainApp({ currentUser, setCurrentUser, editorTab, lockTimedOut = false,
   // РАСПИСАНИЕ УВЕДОМЛЕНИЙ ДЕРЖИТСЯ НА ЭТИХ ЧАСАХ. Раз в минуту спрашиваем
   // сервер «пора?» — и в час сводки ответ становится «да». Подробно, и почему
   // не планировщиком, — в notify/notifyTicker.js.
-  // Спрашивает только вкладка-редактор (иначе пять вкладок задавали бы один и
-  // тот же вопрос впятером) и только на боевой базе: прогон ходит в боевую.
+  // Спрашивает ЛЮБАЯ открытая вкладка (почему — в notifyTicker.js) и только на
+  // боевой базе: прогон ходит в боевую.
   useEffect(() => {
-    if (!editorTab || !currentUser?.id || IS_DEV_ENV) return undefined;
+    if (!currentUser?.id || IS_DEV_ENV) return undefined;
     return startNotifyTicker({
       ask: () => askIfDue({ getToken: _restToken }),
       isVisible: () => typeof document === "undefined" || document.visibilityState === "visible",
+      // Вернулись на вкладку — спрашиваем сразу: телефон разблокировали в 10:00,
+      // и ждать ещё интервал незачем.
+      onVisible: (beat) => {
+        const h = () => { if (document.visibilityState === "visible") beat(); };
+        document.addEventListener("visibilitychange", h);
+        return () => document.removeEventListener("visibilitychange", h);
+      },
     });
-  }, [editorTab, currentUser?.id]);
+  }, [currentUser?.id]);
 
   // 2Б: связать module-scope очередь с App сразу после входа и поднять фоновые команды прошлого
   // запуска. Это работает даже если пользователь ещё не открыл ни одной карточки объекта.

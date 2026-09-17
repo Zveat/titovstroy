@@ -858,10 +858,18 @@ export function buildDayDigest(
 
   if (!moved && !hasToday) return null;
 
+  // ДАТЫ СТОЯТ У КАЖДОГО РАЗДЕЛА, А НЕ ТОЛЬКО В ЗАГОЛОВКЕ.
+  //
+  // Владелец: «не странно ли, что итоги дня приходят за 17 сентября, при том
+  // что сегодня 17 сентября». Странно, и он прав. В заголовке стояла дата
+  // ОТПРАВКИ, а главный блок под ней рассказывал про ВЧЕРА — читатель видел
+  // «17 сентября» и числа, которые к 17-му отношения не имеют. У недельной и
+  // месячной такой путаницы нет: там весь текст про один период.
+  const yst = now - 86400000;
   const lines = [`${meta.icon} <b>${meta.title}</b> · ${localDateLabel(now)}`];
 
   lines.push("");
-  lines.push("<b>Вчера</b>");
+  lines.push(`<b>Вчера, ${localDateLabel(yst)}</b>`);
   if (!moved) {
     lines.push("• По воронке движения не было");
   } else {
@@ -881,7 +889,7 @@ export function buildDayDigest(
 
   if (hasToday) {
     lines.push("");
-    lines.push("<b>Сегодня</b>");
+    lines.push(`<b>Сегодня, ${localDateLabel(now)}</b>`);
     if (starts.length) lines.push(`• Старт работ: <b>${starts.map(esc).join(" · ")}</b>`);
     if (handovers.length) lines.push(`• Сдача по плану: <b>${handovers.map(esc).join(" · ")}</b>`);
     if (burning.length) {

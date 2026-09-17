@@ -78,6 +78,18 @@ describe("ежедневная сводка", () => {
     expect(to - from).toBe(86400000 - 1);
   });
 
+  // Владелец: «не странно ли, что итоги дня приходят за 17 сентября, при том что
+  // сегодня 17 сентября». В заголовке стояла дата ОТПРАВКИ, а главный блок под
+  // ней рассказывал про вчера — числа к этой дате отношения не имели.
+  it("у каждого раздела своя дата, и они разные", () => {
+    const m = buildDayDigest({ yesterday: { sales: SALES }, current: CURRENT,
+      objects: [OBJ()], productions: [CARD()] }, { now: NOW });
+    expect(m.text).toContain("<b>Вчера, 14 сентября</b>");
+    expect(m.text).toContain("<b>Сегодня, 15 сентября</b>");
+    // Заголовок по-прежнему датируется днём отправки — как у недельной и месячной.
+    expect(m.text).toContain("Итоги дня</b> · 15 сентября");
+  });
+
   it("показывает итог вчерашнего дня — то, чего нет в отдельных событиях", () => {
     const m = buildDayDigest({ yesterday: { sales: SALES }, current: CURRENT,
       objects: [], productions: [] }, { now: NOW });
