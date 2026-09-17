@@ -195,8 +195,9 @@ describe("кнопка «Отправить сейчас»", () => {
 
 describe("расписание", () => {
   const cronReq = (over = {}) => ({ method: "GET", headers: { authorization: "Bearer секрет" }, ...over });
+  const NO_SECRET = { TELEGRAM_BOT_TOKEN: "bot:123" };
 
-  it("без секрета не пускает", async () => {
+  it("задан секрет — пускает только по нему", async () => {
     const h = harness();
     const cron = createNotifyCronHandler({ env: ENV, db: h.db, fetchImpl: h.fetchImpl, now: () => NOW });
     const res = recorder();
@@ -204,14 +205,44 @@ describe("расписание", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("секрет не задан — говорим прямо, а не делаем вид, что работает", async () => {
+  // Владелец: «если ноутбук выключен, ничего не будет?» Теперь будет: в свой час
+  // стучится планировщик Vercel, браузер не участвует. Без заданного секрета
+  // пускаем только его — по user-agent, которым он представляется.
+  it("секрета нет — планировщик Vercel всё равно работает", async () => {
     const h = harness();
-    const cron = createNotifyCronHandler({ env: { TELEGRAM_BOT_TOKEN: "b" }, db: h.db,
-      fetchImpl: h.fetchImpl, now: () => NOW });
+    const cron = createNotifyCronHandler({ env: NO_SECRET, db: h.db, fetchImpl: h.fetchImpl, now: () => NOW });
+    const res = recorder();
+    await cron({ method: "GET", headers: { "user-agent": "vercel-cron/1.0" } }, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.ok).toBe(true);
+  });
+
+  it("секрета нет — посторонний без нужного user-agent не пускается", async () => {
+    const h = harness();
+    const cron = createNotifyCronHandler({ env: NO_SECRET, db: h.db, fetchImpl: h.fetchImpl, now: () => NOW });
+    const res = recorder();
+    await cron({ method: "GET", headers: { "user-agent": "curl/8" } }, res);
+    expect(res.statusCode).toBe(401);
+    expect(res.body.code).toBe("cron_caller_unknown");
+    expect(h.sent).toHaveLength(0);
+  });
+
+  // User-agent подделать можно, поэтому в этом режиме наружу не уходит ничего,
+  // кроме «получилось / нет»: ни журнала решений, ни счётчиков.
+  it("пущенному по user-agent не показываем внутренности", async () => {
+    const h = harness();
+    const cron = createNotifyCronHandler({ env: NO_SECRET, db: h.db, fetchImpl: h.fetchImpl, now: () => NOW });
+    const res = recorder();
+    await cron({ method: "GET", headers: { "user-agent": "vercel-cron/1.0" } }, res);
+    expect(Object.keys(res.body)).toEqual(["ok"]);
+  });
+
+  it("а по секрету — показываем, это свой планировщик", async () => {
+    const h = harness();
+    const cron = createNotifyCronHandler({ env: ENV, db: h.db, fetchImpl: h.fetchImpl, now: () => NOW });
     const res = recorder();
     await cron(cronReq(), res);
-    expect(res.statusCode).toBe(503);
-    expect(res.body.code).toBe("cron_not_configured");
+    expect(res.body.log).toBeDefined();
   });
 
   it("по секрету прогон идёт и без токена сотрудника", async () => {

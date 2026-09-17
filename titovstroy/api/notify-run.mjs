@@ -27,9 +27,10 @@
 //     настройки (туда пускают только администратора), потом зовёт сюда. Сама по
 //     себе точка ничего не отправит: заявки нет — работы нет.
 //
-//   kind:"cron" — по расписанию. Сюда пускают только по секрету NOTIFY_CRON_SECRET,
-//     без токена сотрудника. Это единственный повод, который может собрать
-//     сводку дня.
+//   kind:"cron" — по расписанию, БЕЗ БРАУЗЕРА. Приходит из api/notify-cron.mjs,
+//     который и проверяет вызывающего (планировщик Vercel или внешний, с
+//     секретом). Прямой вызов этой точки с kind:"cron" тоже возможен — тогда
+//     проверка по секрету делается здесь.
 //
 // ЗАПИСЬ В БАЗУ. Сервисный ключ обходит правила базы, поэтому вся запись идёт
 // через барьер assertWritable внутри runNotify: разрешены только два узла
@@ -84,11 +85,11 @@ function reply(res, status, body) {
 
 // ЧТО-НИБУДЬ НАЗНАЧЕНО НА СЕЙЧАС?
 //
-// Это ответ на «сводка в 10:00 должна уйти в 10:00». Планировщик, который
-// сходит с секундной точностью, требует либо платного тарифа Vercel, либо
-// настройки руками во внешнем сервисе. Но время знает и само приложение: пока
-// у кого-то открыта вкладка, она раз в минуту спрашивает «пора?», и в 10:00
-// ответ становится «да».
+// Это УСКОРИТЕЛЬ расписания, а не само расписание. Само расписание живёт на
+// сервере (vercel.json → api/notify-cron.mjs) и работает при выключенном
+// ноутбуке — держать часы на открытой вкладке было ошибкой. Но пока вкладка
+// открыта, она спрашивает «пора?» каждые две минуты, и сводка уходит ровно в
+// свой час, не дожидаясь планировщика.
 //
 // Вопрос стоит ДВУХ МАЛЕНЬКИХ ЧТЕНИЙ (настройки и состояние рассылки), поэтому
 // спрашивать хоть каждую минуту не жалко. Тяжёлый прогон поднимается только
@@ -110,6 +111,10 @@ export function whatIsDue({ settings = {}, state = {}, now = Date.now() } = {}) 
 
 export function createNotifyRunHandler({
   env = process.env, db = null, fetchImpl = globalThis.fetch, now = Date.now, dbUrl = null,
+  // Ставит ТОЛЬКО api/notify-cron.mjs, и только после того, как сам проверил
+  // вызывающего. Это не поле запроса и подделать его снаружи нельзя: значение
+  // задаётся при создании обработчика, а не приходит в теле.
+  cronPreAuthorized = false,
 } = {}) {
   const store = db || createDb({ env, fetchImpl });
   const bot = () => String(env.TELEGRAM_BOT_TOKEN || "").trim();
@@ -171,12 +176,15 @@ export function createNotifyRunHandler({
 
     // ── Повод 1: по расписанию. Только по секрету, без сотрудника.
     if (kind === "cron") {
-      // Тот же разбор, что в notify-cron.mjs: своя переменная, а если её не
-      // задали — та, которую Vercel подставляет своему планировщику сам.
-      const secret = String(env.NOTIFY_CRON_SECRET || env.CRON_SECRET || "").trim();
-      const given = String(req.headers?.authorization || "").replace(/^Bearer\s+/i, "").trim();
-      if (!secret) return reply(res, 503, { ok: false, code: "cron_not_configured" });
-      if (given !== secret) return reply(res, 401, { ok: false, code: "bad_cron_secret" });
+      // Обычно сюда приходят через api/notify-cron.mjs, и он вызывающего уже
+      // проверил. Прямой вызов этой точки с kind:"cron" остаётся возможен —
+      // для него та же проверка по секрету.
+      if (!cronPreAuthorized) {
+        const secret = String(env.NOTIFY_CRON_SECRET || env.CRON_SECRET || "").trim();
+        const given = String(req.headers?.authorization || "").replace(/^Bearer\s+/i, "").trim();
+        if (!secret) return reply(res, 503, { ok: false, code: "cron_not_configured" });
+        if (given !== secret) return reply(res, 401, { ok: false, code: "bad_cron_secret" });
+      }
     } else {
       // ── Поводы 2 и 3 приходят из браузера сотрудника.
       const origin = String(req.headers?.origin || "");
