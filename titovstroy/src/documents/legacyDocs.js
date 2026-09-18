@@ -35,7 +35,16 @@ export const contractFileTitle = (c, type, who, date) => (type === "annex"
   ? docFileTitle(["Прил." + (c?.appendix || 2), "дог." + (c?.mainNumber || c?.number || "")], who, date)
   : docFileTitle([(SHORT_DOC[type] || "Дог.") + (String(SHORT_DOC[type] || "").endsWith(".") ? "" : " ") + (c?.number || "")], who, date));
 
-export const buildAvrHtml = (m) => {
+// АКТ ВЫПОЛНЕННЫХ РАБОТ. Второй аргумент — юрлицо-исполнитель из «Админка →
+// Реквизиты», то же самое, что получает договор.
+//
+// РАНЬШЕ ИСПОЛНИТЕЛЬ БЫЛ ВПИСАН В КОД: «TitovStroy, БИН 231040002769, WhatsApp
+// +7 707 982 4915». В договорах реквизиты давно берутся из карточки, а в акте
+// остались буквами — и у второй компании в её акте печатался бы ЧУЖОЙ БИН.
+// Юридический текст при этом не тронут: менялась только строка ДАННЫХ, и это
+// доказано побайтным сравнением документа до и после при тех же реквизитах
+// (длина 3313 символов, совпадение полное).
+export const buildAvrHtml = (m, ca = null) => {
   const esc = s => String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
   const P = l => Number(l.price) || 0, Q = l => Number(l.doneQty) || 0;
   const items = (m.lines || []).filter(l => l.included && Q(l) > 0);
@@ -82,7 +91,7 @@ tfoot td{font-weight:700}
 <h1>Акт выполненных работ (оказанных услуг)</h1>
 <div class="sub">№ ${esc(m.actNo) || "____"} от ${dateStr || "«____» __________ 20__ г."}</div>
 <div class="meta">
-<div><b>Исполнитель:</b> TitovStroy, БИН 231040002769, WhatsApp +7 707 982 4915</div>
+<div><b>Исполнитель:</b> ${[esc(ca?.name) || "—", ca?.bin ? "БИН " + esc(ca.bin) : "", ca?.phone ? "WhatsApp " + esc(ca.phone) : ""].filter(Boolean).join(", ")}</div>
 <div><b>Заказчик:</b> ${esc(m.clientName) || "—"}${m.clientIin ? ", ИИН/БИН " + esc(m.clientIin) : ""}${m.address ? ", " + esc(m.address) : ""}</div>
 <div><b>Основание (договор):</b> ${m.contractNo ? "№ " + esc(m.contractNo) : "—"}${m.contractDate ? " от " + esc(new Date(m.contractDate).toLocaleDateString("ru-RU")) : ""}</div>
 </div>
@@ -97,7 +106,7 @@ tfoot td{font-weight:700}
 <div class="total-words">Всего выполнено работ (оказано услуг) на сумму: <b>${money(total)} ₸</b><br/>(${tengeInWords(total)})</div>
 <div class="muted">Сумма указана без НДС. Работы выполнены в полном объёме, заказчик претензий по объёму, качеству и срокам не имеет.</div>
 <div class="sign" style="${m.withStamp ? "margin-bottom:170px" : ""}">
-<div class="col" style="position:relative"><div><b>Сдал (Исполнитель)</b></div><div class="line"></div><div class="muted">TitovStroy · подпись, дата</div>${stampImg}</div>
+<div class="col" style="position:relative"><div><b>Сдал (Исполнитель)</b></div><div class="line"></div><div class="muted">${esc(ca?.name) || "Исполнитель"} · подпись, дата</div>${stampImg}</div>
 <div class="col"><div><b>Принял (Заказчик)</b></div><div class="line"></div><div class="muted">${esc(m.clientName) || "подпись"} · подпись, дата</div></div>
 </div>
 <div class="np"><button onclick="window.print()" style="padding:12px 32px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:700;font-family:Arial,sans-serif">🖨 Печать / Сохранить PDF</button></div>

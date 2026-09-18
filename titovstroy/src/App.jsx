@@ -4717,6 +4717,22 @@ function MainApp({ currentUser, setCurrentUser, editorTab, lockTimedOut = false,
       return buildContractHtml(c, client, ca, false, "");
     } catch (e) { console.warn("contractToHtml err", e); return null; }
   };
+  // ЮРЛИЦО-ИСПОЛНИТЕЛЬ ДЛЯ АКТА. В договорах оно берётся по c.contragentId, а у
+  // акта своего поля нет — ищем по договору, на который акт ссылается, и только
+  // если не нашли, берём первое юрлицо из «Реквизитов». Раньше здесь ничего не
+  // искалось: исполнитель был вписан в сам шаблон акта буквами, и у второй
+  // компании в её акте печатался бы чужой БИН.
+  const avrContragent = (r) => {
+    const list = contragentsRef.current || [];
+    const num = String(r?.contractNo || "").trim();
+    if (num) {
+      const c = contractsRef.current.find(x => !x.deletedAt && String(x.number || "").trim() === num);
+      const byContract = c && list.find(x => x.id === c.contragentId);
+      if (byContract) return byContract;
+    }
+    return list[0] || null;
+  };
+
   const _contractTitle = (c) => {
     const T = { repair_fiz: "Договор", annex: "Приложение", design: "Дизайн-проект", design_add: "Доп. соглашение", reservation: "Бронь", podryad: "Договор подряда", podryad_annex: "Приложение подряда" };
     const t = c.type || "repair_fiz";
@@ -4795,7 +4811,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     const contracts = cons.map(c => ({ title: _contractTitle(c), html: contractToHtml(c) })).filter(x => x.html);
     const actsOut = acts.map(r => {
       let html = null;
-      try { html = buildAvrHtml({ ...r, lines: (r.lines || []).map(l => ({ ...l, included: true, doneQty: l.doneQty })) }); } catch (e) {}
+      try { html = buildAvrHtml({ ...r, lines: (r.lines || []).map(l => ({ ...l, included: true, doneQty: l.doneQty })) }, avrContragent(r)); } catch (e) {}
       return { title: `Акт №${r.actNo || "б/н"}`, date: r.actDate || r.createdAt || null, total: Number(r.total) || 0, html };
     }).filter(x => x.html);
     // Все сметы объекта (основная + доп.) — клиентские цены, без себестоимости
@@ -5058,7 +5074,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     legacyRenderers: {
       contract: buildContractHtml,
       podryad: buildPodryadHtml,
-      avr: buildAvrHtml,
+      // Движку шаблонов отдаём генератор, уже знающий про реквизиты: сигнатуру
+      // (report, contragent) он вызывает так же, как договор (contract, client, ca).
+      avr: (report, ca = null) => buildAvrHtml(report, ca || avrContragent(report)),
       moneyWords: tengeInWords,
     },
     getData: () => ({
@@ -5074,7 +5092,7 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       pdf: ({ contract, client, contragent, withStamp }) => generateContractPdfLegacy(contract, client, contragent, withStamp ?? true),
       gdoc: ({ contract, client, contragent }) => generateContractGDocLegacy(contract, client, contragent),
       docx: ({ contract, client, contragent }) => generateContractDocxLegacy(contract, client, contragent),
-      report_pdf: ({ report }) => openOrPrintHtml(buildAvrHtml({ ...report, lines:(report.lines||[]).map(line=>({ ...line, included:true, doneQty:line.doneQty })) })),
+      report_pdf: ({ report }) => openOrPrintHtml(buildAvrHtml({ ...report, lines:(report.lines||[]).map(line=>({ ...line, included:true, doneQty:line.doneQty })) }, avrContragent(report))),
     },
     openOrPrintHtml,
     googleClientId: "363473710949-d67codd7dq0uk9g4tfl8lhhgecgcqe98.apps.googleusercontent.com",

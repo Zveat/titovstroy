@@ -58,8 +58,20 @@ describe("юридический текст документов не менял
   it("договор подряда", () => {
     expect(fingerprint(buildPodryadHtml(podryadContractToModel(PODRYAD, WORKERS[0], false), CONTRAGENTS))).toBe("10706:ldas2x");
   });
+  // ОТПЕЧАТОК ПЕРЕСНЯТ ОСОЗНАННО. Исполнитель в акте раньше был вписан в шаблон
+  // буквами («TitovStroy, БИН …»), теперь берётся из карточки реквизитов — иначе
+  // у второй компании в её акте печатался бы чужой БИН. Текст документа при этом
+  // не тронут: акт, собранный старым кодом, и акт, собранный новым с ТЕМИ ЖЕ
+  // реквизитами, совпали побайтно (3313 символов). Отпечаток изменился только
+  // потому, что здесь подставляется другое юрлицо — ТОО "TITOVSTROY" из CONTRAGENTS.
   it("акт выполненных работ (форма Р-1)", () => {
-    expect(fingerprint(buildAvrHtml(REPORT))).toBe("472:1k4egkq");
+    expect(fingerprint(buildAvrHtml(REPORT, CONTRAGENTS[0]))).toBe("481:991239");
+  });
+
+  it("без реквизитов акт собирается, но исполнитель не выдуман", () => {
+    const html = buildAvrHtml(REPORT);
+    expect(html).toContain("<b>Исполнитель:</b> —");
+    expect(html).not.toContain("TitovStroy");
   });
 });
 
