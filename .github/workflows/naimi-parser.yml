@@ -80,6 +80,11 @@ jobs:
   olx:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    # Этот же заход отвечает, нужны ли задания-потоки ниже: он единственный, кто смотрит
+    # в базу раньше них, и его машина уже оплачена. Подробности — в olxparser.mjs,
+    # tellWorkflowAboutShards.
+    outputs:
+      phones: ${{ steps.olx.outputs.phones }}
     defaults:
       run:
         working-directory: titovstroy/naimi-parser
@@ -93,6 +98,7 @@ jobs:
         run: npm install --no-audit --no-fund
 
       - name: Запуск парсера OLX
+        id: olx
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           FB_DB_URL: ${{ vars.FB_DB_URL }}
@@ -101,6 +107,7 @@ jobs:
           OLX_CATEGORY_IDS: ${{ github.event.inputs.olx_category_ids }}
           OLX_PHONES_PER_RUN: ${{ github.event.inputs.olx_phones_per_run }}
           OLX_PHONES_OFF: "1"          # номера собирает задание ниже, тремя потоками
+          OLX_PHONE_SHARDS: "3"        # сколько потоков спрашивать — столько же, сколько в matrix ниже
         run: npm run scrape-olx
 
   # ── НОМЕРА OLX В ТРИ ПОТОКА ────────────────────────────────────────────────
@@ -114,7 +121,17 @@ jobs:
   # деления, куски не пересекаются; собранное пишется по одному узлу на мастера, поэтому
   # потоки друг друга не затирают. Больше трёх ставить не стоит без замера: адреса раннеров
   # живут в одних диапазонах, и OLX может считать лимит шире, чем по одному IP.
+  #
+  # ПОДНИМАЕМСЯ НЕ ВСЕГДА, А КОГДА ЕСТЬ ЧТО СОБИРАТЬ. GitHub считает каждое задание по
+  # целой минуте, даже если оно прожило секунду. Замер 21 сентября: OLX отдавал 403 на
+  # первом же запросе, три задания выходили мгновенно и стоили три минуты с КАЖДОГО
+  # прогона — около 630 минут в месяц за ноль номеров (последние собраны 9 сентября).
+  # Поэтому заход-обходчик выше сперва смотрит очередь и отметки потоков и отвечает,
+  # стоит ли нас будить; сами потоки тот же карантин соблюдают и внутри.
+  # Ответа нет (обходчик упал, старая база) — поднимаемся: экономия не смеет мешать сбору.
   olx_phones:
+    needs: olx
+    if: ${{ always() && needs.olx.result != 'cancelled' && needs.olx.outputs.phones != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:

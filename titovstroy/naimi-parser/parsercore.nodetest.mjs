@@ -9,6 +9,9 @@ import {
   encodePhoneResults,
   overlayPhoneResults,
   shardRows,
+  nextPhoneZeroStreak,
+  phoneRunDueAt,
+  phoneShardsDue,
   assertWritableSize,
   buildPhoneQueue,
   lastAttemptAt,
@@ -332,4 +335,68 @@ test("состояние попытки доходит до выбора кан�
   );
   const picked = selectPhoneTargets(rows.map(queueRowToTarget), { limit: 10, now });
   assert.deepEqual(picked.map((t) => t.key), ["olx:2"], "проверенного час назад пропускаем");
+});
+
+// ── КАРАНТИН ТЕЛЕФОННЫХ ПОТОКОВ ───────────────────────────────────────────────
+// Ради чего всё: 21 сентября замер показал три задания, которые двенадцать суток подряд
+// получали от OLX отказ на первом запросе, выходили за секунду и стоили по минуте каждое.
+
+const GAP = { drainGapMs: 15 * 60e3, blockGiveUp: 3, blockCooldownMs: 6 * 3600e3 };
+
+test("счёт отказов: растёт только на отказах, любой номер обнуляет", () => {
+  assert.equal(nextPhoneZeroStreak({ zero: 2 }, { got: 0, blocked: true }), 3, "отказ — плюс один");
+  assert.equal(nextPhoneZeroStreak({ zero: 2 }, { got: 0, blocked: false }), 2,
+    "пусто без отказа — это выбранная очередь, не наказываем");
+  assert.equal(nextPhoneZeroStreak({ zero: 5 }, { got: 1, blocked: true }), 0,
+    "хоть один номер — карантин снят, даже если по дороге отказывали");
+  assert.equal(nextPhoneZeroStreak(null, { got: 0, blocked: true }), 1, "первая отметка");
+  assert.equal(nextPhoneZeroStreak({ zero: "мусор" }, { got: 0, blocked: true }), 1);
+});
+
+test("когда потоку можно идти: обычный зазор против карантина", () => {
+  const at = Date.parse("2026-09-21T06:00:00.000Z");
+  assert.equal(phoneRunDueAt(null, GAP), 0, "ни разу не ходили — прямо сейчас");
+  assert.equal(phoneRunDueAt({ at, zero: 0 }, GAP), at + 15 * 60e3, "без отказов — четверть часа");
+  assert.equal(phoneRunDueAt({ at, zero: 2 }, GAP), at + 15 * 60e3, "двух отказов мало для карантина");
+  assert.equal(phoneRunDueAt({ at, zero: 3 }, GAP), at + 6 * 3600e3, "третий отказ — шесть часов");
+});
+
+test("поднимать ли потоки: очередь, готовность и общий карантин", () => {
+  const now = Date.parse("2026-09-21T09:00:00.000Z");
+  const long = { at: Date.parse("2026-09-21T06:00:00.000Z"), zero: 4 };   // в карантине до 12:00
+  const ready = { at: Date.parse("2026-09-21T08:00:00.000Z"), zero: 0 };  // зазор давно вышел
+
+  assert.equal(phoneShardsDue({ 0: long, 1: long, 2: long },
+    { shards: 3, pending: 3749, minPending: 30, now, ...GAP }), false,
+    "все три в карантине — будить некого");
+  assert.equal(phoneShardsDue({ 0: long, 1: ready, 2: long },
+    { shards: 3, pending: 3749, minPending: 30, now, ...GAP }), true,
+    "один готов — поднимаем всех, matrix делится не по одному");
+  assert.equal(phoneShardsDue({ 0: long, 1: long },
+    { shards: 3, pending: 3749, minPending: 30, now, ...GAP }), true,
+    "третий ни разу не ходил — отметки нет, значит ему пора");
+  assert.equal(phoneShardsDue({ 0: ready, 1: ready, 2: ready },
+    { shards: 3, pending: 10, minPending: 30, now, ...GAP }), false,
+    "очередь пуста — собирать нечего, хоть все и готовы");
+  assert.equal(phoneShardsDue(null,
+    { shards: 3, pending: 3749, minPending: 30, now, ...GAP }), true,
+    "отметок нет вовсе — поднимаем");
+});
+
+test("настоящая картина боевой на 21 сентября: три отказа подряд гасят потоки", () => {
+  // Слепок узла …-phoneruns, как он лежал в базе: три потока, «OLX ограничил темп (403)».
+  const at = Date.parse("2026-09-21T06:09:58.000Z");
+  const live = {
+    0: { at, got: 0, zero: 0, err: "OLX ограничил темп (HTTP 403)" },
+    1: { at, got: 0, zero: 0, err: "OLX ограничил темп (HTTP 403)" },
+    2: { at, got: 0, zero: 0, err: "OLX ограничил темп (HTTP 403)" },
+  };
+  const opts = { shards: 3, pending: 3749, minPending: 30, ...GAP };
+  // Пока счёт не набрался, ведём себя как раньше — через четверть часа снова пробуем.
+  assert.equal(phoneShardsDue(live, { ...opts, now: at + 20 * 60e3 }), true, "первый отказ прощаем");
+  // Три захода спустя все три потока в карантине.
+  const blocked = Object.fromEntries(Object.entries(live)
+    .map(([k, m]) => [k, { ...m, zero: 3 }]));
+  assert.equal(phoneShardsDue(blocked, { ...opts, now: at + 20 * 60e3 }), false, "через 20 минут — не будим");
+  assert.equal(phoneShardsDue(blocked, { ...opts, now: at + 7 * 3600e3 }), true, "через семь часов — пробуем снова");
 });

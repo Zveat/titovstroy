@@ -133,6 +133,50 @@ export function parseStoredJson(value, { key = "данные", empty = null } = 
 export const lastAttemptAt = (cfg) =>
   Math.max(Number(cfg?.lastRunAt) || 0, Number(cfg?.lastTryAt) || 0);
 
+// ── КОГДА ТЕЛЕФОННОМУ ЗАХОДУ НЕ СТОИТ ДАЖЕ ПОДНИМАТЬСЯ ───────────────────────
+//
+// Замер на боевой 21 сентября: три задания «добор номеров OLX» поднимались при каждом
+// прогоне, получали от OLX 403 на первом же запросе и выходили за СЕКУНДУ. Последний раз
+// они собрали хоть что-то 9 сентября — двенадцать суток назад. При этом GitHub считает
+// любое задание по целой минуте, и три пустых задания стоили три минуты с каждого
+// прогона: около 630 минут в месяц за работу, которой не было.
+//
+// ПОЭТОМУ ПОВТОРНЫЙ ОТКАЗ ЗАПОМИНАЕТСЯ. Раз отказали — подождём обычный зазор, вдруг
+// это минутный всплеск. Отказали подряд blockGiveUp раз — источник закрыт всерьёз, и
+// следующую попытку откладываем надолго (blockCooldownMs). Отметка у каждого потока
+// своя (узел …-phoneruns/<номер>), поэтому три задания не затирают счёт друг другу.
+//
+// СЧИТАЕМ ТОЛЬКО ОТКАЗЫ. Пустой заход без отказа — это «в моём куске очереди никого»,
+// совершенно здоровое состояние, и наказывать за него нельзя: иначе выбранная досуха
+// очередь навсегда усыпила бы поток, который завтра снова понадобится.
+export function nextPhoneZeroStreak(prev, { got = 0, blocked = false } = {}) {
+  if (Number(got) > 0) return 0;                       // что-то собрали — счёт обнулён
+  const was = Number(prev?.zero) || 0;
+  return blocked ? was + 1 : was;
+}
+
+// Когда этому потоку можно идти снова. Ни разу не ходил — прямо сейчас.
+export function phoneRunDueAt(marker, { drainGapMs = 0, blockGiveUp = 3, blockCooldownMs = 0 } = {}) {
+  const at = Number(marker?.at) || 0;
+  if (!at) return 0;
+  const zero = Number(marker?.zero) || 0;
+  return at + (zero >= blockGiveUp ? blockCooldownMs : drainGapMs);
+}
+
+// Стоит ли воркфлоу вообще поднимать задания-потоки. Решает ОДИН заход (обход каталога),
+// у которого машина и так уже занята, и отдаёт ответ воркфлоу — тот по нему решает,
+// заводить ли ещё три. Пустая очередь или общий карантин — не заводить.
+export function phoneShardsDue(markers, {
+  shards = 1, pending = 0, minPending = 0, now = Date.now(), ...gap
+} = {}) {
+  if (!(Number(pending) > Number(minPending))) return false;
+  const by = markers && typeof markers === "object" ? markers : {};
+  for (let i = 0; i < Math.max(1, Number(shards) || 1); i++) {
+    if (phoneRunDueAt(by[i], gap) <= now) return true;
+  }
+  return false;
+}
+
 // ── ПРЕДЕЛ ОДНОГО ЗНАЧЕНИЯ В FIREBASE ─────────────────────────────────────────
 //
 // Список мастеров лежит в базе ОДНОЙ строкой JSON, а на одно значение Firebase даёт 10 МиБ.

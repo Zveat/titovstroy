@@ -22,6 +22,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import admin from "firebase-admin";
+import { appendFileSync } from "node:fs";
 import {
   OLX_REPAIR_CATEGORIES,
   applyPhoneAttempt,
@@ -38,6 +39,9 @@ import {
   encodePhoneResults,
   overlayPhoneResults,
   shardRows,
+  nextPhoneZeroStreak,
+  phoneRunDueAt,
+  phoneShardsDue,
 } from "./parsercore.mjs";
 import {
   buildInfo,
@@ -126,6 +130,15 @@ const PHONE_THROTTLE_BACKOFF_MS = num("OLX_PHONE_BACKOFF_MS", 150000); // тих
 // уже с другого раннера, то есть с другого адреса.
 const PHONE_THROTTLE_GIVEUP = num("OLX_PHONE_GIVEUP", 1);
 const PHONE_SAVE_EVERY = 12;
+// КАРАНТИН ПОСЛЕ ПОДРЯД ОТКАЗОВ. Выше описан бан на один заход: мастер не помечается и
+// достаётся следующему прогону с другого адреса. Это верно, пока OLX банит адреса
+// поодиночке. Но 9 сентября он закрылся для раннеров GitHub целиком, и «следующий заход с
+// другого адреса» перестал помогать: три задания двенадцать суток подряд получали отказ на
+// первом же запросе и выходили за секунду — по минуте к оплате каждое, ноль номеров.
+// Три отказа подряд — ждём шесть часов, а не пятнадцать минут. Источник закрыт всерьёз,
+// и чаще к нему стучаться не за чем; один успешный номер обнуляет счёт.
+const PHONE_BLOCK_GIVEUP = num("OLX_PHONE_BLOCK_GIVEUP", 3);
+const PHONE_BLOCK_COOLDOWN_MS = num("OLX_PHONE_BLOCK_COOLDOWN_MS", 6 * 3600e3);
 
 // Карта категорий OLX «Услуги» → название специальности (чтобы видеть, кто что делает).
 // Ключи — id листовых подкатегорий; парсер берёт offer.category.id и подписывает мастера.
@@ -326,8 +339,54 @@ async function readPhoneRun() {
   const raw = (await phoneRunRef().get()).val();
   return parseStoredJson(raw, { key: PHONE_RUNS_KEY, empty: {} }) || {};
 }
-const markPhoneRun = (got, err) =>
-  phoneRunRef().set(JSON.stringify({ at: Date.now(), got, err: String(err || "").slice(0, 200) }));
+// zero — сколько отказов подряд получил ИМЕННО этот поток (см. nextPhoneZeroStreak).
+// По нему решается, идти через обычный зазор или отлежаться в карантине.
+const markPhoneRun = (got, err, zero = 0) =>
+  phoneRunRef().set(JSON.stringify({
+    at: Date.now(), got, zero, err: String(err || "").slice(0, 200),
+  }));
+
+// Все отметки потоков разом — нужны заходу-обходчику, чтобы сказать воркфлоу,
+// поднимать ли задания-потоки вообще.
+async function readPhoneRuns() {
+  const raw = (await admin.database().ref(fbKey(PHONE_RUNS_KEY)).get()).val();
+  const src = raw && typeof raw === "object" ? raw : {};
+  const out = {};
+  for (const [k, v] of Object.entries(src)) {
+    out[k] = typeof v === "string" ? (parseStoredJson(v, { key: PHONE_RUNS_KEY, empty: {} }) || {}) : (v || {});
+  }
+  return out;
+}
+
+// ── ОТВЕТ ВОРКФЛОУ: ПОДНИМАТЬ ЛИ ПОТОКИ ──────────────────────────────────────
+// GitHub считает КАЖДОЕ задание по целой минуте, даже если оно прожило секунду. Значит
+// экономить надо не внутри задания, а до его рождения — а решить «надо ли» может только
+// тот, кто видит базу. Видит её этот заход, и машина под ним уже оплачена.
+// Ответ уезжает в $GITHUB_OUTPUT, а условие на заданиях-потоках стоит в самом воркфлоу.
+// Молчим при любой беде: нет файла, нет прав, не та среда — тогда воркфлоу поступит
+// по-старому и поднимет потоки. Экономия не смеет ломать сбор номеров.
+async function tellWorkflowAboutShards(cfg) {
+  const out = process.env.GITHUB_OUTPUT;
+  if (!out) return;
+  let due = true, why = "не удалось посмотреть — поднимаем на всякий случай";
+  try {
+    const markers = await readPhoneRuns();
+    const pending = Number(cfg?.lastPendingPhone) || 0;
+    due = phoneShardsDue(markers, {
+      shards: Math.max(1, PHONE_SHARDS), pending, minPending: DRAIN_MIN_PENDING,
+      drainGapMs: DRAIN_GAP_MS, blockGiveUp: PHONE_BLOCK_GIVEUP, blockCooldownMs: PHONE_BLOCK_COOLDOWN_MS,
+    });
+    const worst = Math.max(...Object.values(markers).map(m => Number(m?.zero) || 0), 0);
+    why = pending <= DRAIN_MIN_PENDING ? `в очереди ${pending} — собирать нечего`
+      : due ? `в очереди ${pending}, хотя бы один поток готов`
+      : `в очереди ${pending}, но все потоки в карантине (отказов подряд до ${worst})`;
+  } catch (e) {
+    console.warn("не удалось посчитать нужду в потоках:", e.message);
+  }
+  console.log(`потоки номеров: ${due ? "ПОДНИМАЕМ" : "не поднимаем"} — ${why}`);
+  try { appendFileSync(out, `phones=${due ? 1 : 0}\n`); }
+  catch (e) { console.warn("не удалось передать ответ воркфлоу:", e.message); }
+}
 
 // СОБРАННЫЕ НОМЕРА — ПО ОДНОМУ УЗЛУ НА МАСТЕРА. Одной строкой три потока затёрли бы друг
 // друга: каждый записал бы целиком свою картину, осталась бы картина последнего.
@@ -467,11 +526,18 @@ async function collectPhones(targets, save) {
   // Заход-поток решает за себя сам: у него свой зазор и своя отметка. Расписание полного
   // обхода и кнопка «Обновить сейчас» его не касаются — он только добирает номера.
   let decision;
+  let myRun = {};                       // отметка ЭТОГО потока: нужна и для решения, и для счёта отказов
   if (IS_SHARD) {
-    const since = Date.now() - (Number((await readPhoneRun()).at) || 0);
-    decision = since >= DRAIN_GAP_MS
+    myRun = await readPhoneRun();
+    const gap = { drainGapMs: DRAIN_GAP_MS, blockGiveUp: PHONE_BLOCK_GIVEUP, blockCooldownMs: PHONE_BLOCK_COOLDOWN_MS };
+    const dueAt = phoneRunDueAt(myRun, gap);
+    const zero = Number(myRun.zero) || 0;
+    decision = dueAt <= Date.now()
       ? { run: true, mode: "phones", reason: `поток ${PHONE_SHARD + 1} из ${PHONE_SHARDS} — добор номеров`, runNow: 0 }
-      : { run: false, mode: "skip", reason: `поток ${PHONE_SHARD + 1}: прошло ${Math.round(since / 60e3)} мин из ${Math.round(DRAIN_GAP_MS / 60e3)}`, runNow: 0 };
+      : { run: false, mode: "skip", runNow: 0,
+          reason: zero >= PHONE_BLOCK_GIVEUP
+            ? `поток ${PHONE_SHARD + 1}: ${zero} отказов подряд, карантин ещё ${Math.round((dueAt - Date.now()) / 60e3)} мин`
+            : `поток ${PHONE_SHARD + 1}: ждём зазор, осталось ${Math.round((dueAt - Date.now()) / 60e3)} мин` };
   } else {
     decision = decideRun(cfg);
     // Когда номера собирают отдельные потоки, обычный заход за ними не идёт: иначе он
@@ -479,6 +545,10 @@ async function collectPhones(targets, save) {
     if (PHONES_OFF && decision.mode === "phones") {
       decision = { ...decision, run: false, mode: "skip", reason: "номера собирают отдельные потоки" };
     }
+    // ОТВЕТ ВОРКФЛОУ: заводить ли три задания-потока. Считаем здесь, потому что машина под
+    // этим заходом уже оплачена, а отдельное задание «сходить и посмотреть» стоило бы ровно
+    // столько же, сколько одно из тех, что оно должно было сэкономить.
+    await tellWorkflowAboutShards(cfg);
   }
   console.log(`OLX · freq=${cfg.frequency || "—"}, lastRunAt=${cfg.lastRunAt || 0}, runNow=${decision.runNow}/${cfg.lastRunNow || 0}`);
   console.log(`решение: ${decision.run ? "ЗАПУСК" : "ПРОПУСК"} — ${decision.reason}`);
@@ -507,6 +577,9 @@ async function collectPhones(targets, save) {
   // читается вместе с ним (overlayPhoneResults): у кого номер уже есть — тот выбывает,
   // остальным подставляется последняя попытка. Пересобирает очередь только полный обход.
   if (decision.mode === "phones") {
+    // Обычный заход тоже ведёт свой счёт отказов (отметка «main»): когда потоки выключены,
+    // номера добирает он, и упереться в закрытый OLX может ровно так же.
+    if (!IS_SHARD) myRun = await readPhoneRun();
     const queueRaw = await readJson(PHONE_QUEUE_KEY, []);
     const stored = Array.isArray(queueRaw) ? queueRaw : [];
     const known = await readPhoneResults();
@@ -516,7 +589,8 @@ async function collectPhones(targets, save) {
       // Очереди нет (первый запуск после обновления) — ждём ближайшего полного обхода,
       // он её и выложит. Отмечаемся, чтобы не долбиться каждые полчаса впустую.
       console.log(rows.length ? "в моём куске очереди пусто" : "очередь номеров пуста — ждём полного обхода, он её соберёт");
-      await markPhoneRun(0, "");
+      // Пусто — но это не отказ, а выбранная очередь. Счёт отказов не трогаем.
+      await markPhoneRun(0, "", nextPhoneZeroStreak(myRun, { got: 0, blocked: false }));
       await admin.app().delete();
       return;
     }
@@ -546,7 +620,10 @@ async function collectPhones(targets, save) {
     await savePhoneResults(results);
     const left = rows.filter(r => !results[r.k]?.phone).length;
     console.log(`✔ добор закончен: номеров ${run.gotPhones}, в очереди осталось ~${left}`);
-    await markPhoneRun(run.gotPhones, run.lastPhoneError);
+    // Отказом считаем ровно троттлинг OLX: «ничего не нашлось» и временная ошибка сети —
+    // не повод отправлять поток в карантин, их лечит следующий заход.
+    await markPhoneRun(run.gotPhones, run.lastPhoneError,
+      nextPhoneZeroStreak(myRun, { got: run.gotPhones, blocked: run.throttleHits > 0 }));
     // Общие счётчики трогает только обычный заход: потоки писали бы их одновременно и
     // затирали друг друга, а по затёртому «собрано 0» drain-режим остановился бы весь.
     if (!IS_SHARD) {
