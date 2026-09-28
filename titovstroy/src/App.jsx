@@ -70,7 +70,7 @@ import { buildAvrHtml, buildContractHtml as _buildContractHtml, buildPodryadHtml
   docFileTitle, podryadContractToModel } from "./documents/legacyDocs.js";
 import { migrateRowsToCodeKeys } from "./estimate/rowKeys.js";
 import { BalanceSheet } from "./finance/BalanceSheet.jsx";
-import { _auditYM, _ts, downloadCSV, fmt, fmtDate, genId, kpStatusText, openOrPrintHtml, today } from "./format.js";
+import { _auditYM, _ts, downloadCSV, fmt, fmtDate, genId, isStandaloneApp, kpStatusText, openOrPrintHtml, today } from "./format.js";
 import { KPContent } from "./kp/KPContent.jsx";
 import { PublicKP } from "./kp/PublicKP.jsx";
 import { MastersSection } from "./masters/MastersSection.jsx";
@@ -5118,6 +5118,19 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     if (snapshot) setDocumentInstanceSnapshot(snapshot);
   };
   const runContractExport = async (format, contract, client, contragent, withStamp) => {
+    // GOOGLE DOC ИЗ ПРИЛОЖЕНИЯ С ИКОНКИ НЕ РАБОТАЕТ, И ЛУЧШЕ СКАЗАТЬ ЭТО СРАЗУ.
+    // Вход в Google открывает своё окно; у приложения, запущенного с домашнего экрана,
+    // оно уезжает в Safari и вернуться обратно не может — ответ с ключом доступа не
+    // приходит НИКОГДА. Код в этом месте просто ждёт, поэтому раньше не появлялось даже
+    // ошибки: владелец жал кнопку, и ничего не происходило. Запасной (старый) генератор
+    // тут не помощник — он ходит в Google тем же путём.
+    if (format === "gdoc" && isStandaloneApp()) {
+      alert("Google Doc не получится сделать из приложения, запущенного с иконки: "
+        + "Google открывает окно входа в Safari и не может вернуть ответ обратно.\n\n"
+        + "Откройте erp.titovstroy.kz в самом Safari и нажмите «Google Doc» там.\n\n"
+        + "Либо возьмите PDF — он теперь открывается прямо здесь.");
+      return;
+    }
     try {
       const result = await documentTemplateRuntime.exportContract(format, { contract, client, contragent, withStamp });
       if (result?.ok === false && !result?.canUseLegacy) alert(`Не удалось создать документ: ${result.reason || "неизвестная ошибка"}`);

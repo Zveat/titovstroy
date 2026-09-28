@@ -1,5 +1,6 @@
 import { snapshotContent } from "./documentSnapshots.js";
 import { normalizeLegalText, renderTemplateToCanonicalHtml } from "./templateRender.js";
+import { openUrlOrShowLink } from "../format.js";
 
 const money = value => Math.round(Number(value) || 0).toLocaleString("ru-RU");
 
@@ -114,11 +115,23 @@ export function createBrowserGoogleUploader({ clientId, browserWindow, browserDo
         doc.head.appendChild(script);
       });
     }
+    // ОЖИДАНИЕ ВХОДА — СО СРОКОМ. Google зовёт callback только при ответе: если его окно
+    // не открылось (телефон погасил всплывающее окно) или человек закрыл его крестиком,
+    // не ответит НИКТО и ждать можно вечно. Раньше так и было — кнопка просто ничего не
+    // делала, без единого слова. Минута, и говорим, что произошло.
     const token = await new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("Google не ответил: окно входа не открылось или было закрыто. "
+          + "На телефоне это обычно значит, что браузер погасил окно Google.")),
+        60000,
+      );
+      const done = (fn) => (value) => { clearTimeout(timer); fn(value); };
       const client = win.google.accounts.oauth2.initTokenClient({
         client_id: clientId,
         scope: "https://www.googleapis.com/auth/drive.file",
-        callback: response => response.error ? reject(new Error(`Ошибка авторизации: ${response.error}`)) : resolve(response.access_token),
+        callback: response => response.error
+          ? done(reject)(new Error(`Ошибка авторизации: ${response.error}`))
+          : done(resolve)(response.access_token),
       });
       client.requestAccessToken({ prompt: "" });
     });
@@ -141,7 +154,11 @@ export function createBrowserGoogleUploader({ clientId, browserWindow, browserDo
     });
     if (!response.ok) throw new Error(`Drive API ошибка ${response.status}: ${await response.text()}`);
     const value = await response.json();
-    win.open(`https://docs.google.com/document/d/${value.id}/edit`, "_blank");
+    // Документ уже создан. Если окно открыть не дали — показываем ссылку, а не теряем его.
+    openUrlOrShowLink(`https://docs.google.com/document/d/${value.id}/edit`, {
+      title: "Google Doc создан",
+      note: "Браузер не дал открыть вкладку сам — нажмите ссылку ниже.",
+    });
     return value;
   };
 }
