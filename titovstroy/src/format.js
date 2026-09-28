@@ -45,90 +45,98 @@ const docTitleOf = (html) => {
 
 export const showHtmlDocumentInApp = (html) => {
   const title = docTitleOf(html);
-  const safeName = title.replace(/[<>:"/\\|?*]/g, "_");
   const prevOverflow = document.body.style.overflow;
 
   const wrap = document.createElement("div");
   wrap.setAttribute("data-document-viewer", "1");
-  wrap.style.cssText = "position:fixed;inset:0;z-index:99999;background:#0f172a;display:flex;flex-direction:column";
+  wrap.style.cssText = "position:fixed;inset:0;z-index:99999;background:#334155;display:flex;flex-direction:column";
 
   const bar = document.createElement("div");
-  bar.style.cssText = "flex:0 0 auto;display:flex;gap:8px;align-items:center;padding:10px 12px;"
-    + "padding-top:calc(10px + env(safe-area-inset-top));background:#1e293b;color:#fff;"
+  bar.style.cssText = "flex:0 0 auto;display:flex;gap:8px;align-items:center;padding:9px 12px;"
+    + "padding-top:calc(9px + env(safe-area-inset-top));background:#1e293b;color:#fff;"
     + "font:600 13px/1.2 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif";
 
   const name = document.createElement("div");
   name.textContent = title;
-  name.style.cssText = "flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+  name.style.cssText = "flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#cbd5e1";
 
-  const mkBtn = (label) => {
+  const mkBtn = (label, main) => {
     const b = document.createElement("button");
     b.type = "button";
     b.textContent = label;
-    b.style.cssText = "flex:0 0 auto;border:0;border-radius:8px;padding:9px 13px;background:#334155;"
-      + "color:#fff;font:600 13px/1 inherit;cursor:pointer;-webkit-appearance:none";
+    b.style.cssText = "flex:0 0 auto;border:0;border-radius:9px;padding:10px 14px;"
+      + `background:${main ? "#2563eb" : "#475569"};color:#fff;font:700 13px/1 inherit;`
+      + "cursor:pointer;-webkit-appearance:none";
     return b;
   };
 
+  // СТРАНИЦА ПОКАЗЫВАЕТСЯ ЦЕЛИКОМ, А НЕ ВТИСКИВАЕТСЯ В ШИРИНУ ТЕЛЕФОНА.
+  // Первая попытка отдала кадру ширину экрана — и договор поехал: текст по ширине
+  // расползся дырами между словами, «г. Караганда» обрезалось справа. Документы свёрстаны
+  // под А4 (@page{size:A4} в legacyDocs.js), поэтому кадр и держим шириной ровно в А4,
+  // а к экрану подгоняем МАСШТАБОМ. Тогда на телефоне видно ту же страницу, что выйдет
+  // из принтера, только меньше. Сам документ при этом не трогаем ни на символ.
+  const A4_W = 794;          // 210 мм при 96 точках на дюйм
+  const A4_H = 1123;         // 297 мм — пока не измерили настоящую высоту
+  const stage = document.createElement("div");
+  stage.style.cssText = "flex:1 1 auto;overflow:auto;-webkit-overflow-scrolling:touch;padding:10px 0";
+  const holder = document.createElement("div");
+  holder.style.cssText = "transform-origin:top left;margin:0 auto";
   const frame = document.createElement("iframe");
   frame.setAttribute("title", title);
-  frame.style.cssText = "flex:1 1 auto;width:100%;border:0;background:#fff";
+  frame.style.cssText = `width:${A4_W}px;height:${A4_H}px;border:0;background:#fff;display:block;`
+    + "box-shadow:0 2px 14px rgba(0,0,0,.35)";
+  holder.append(frame);
+  stage.append(holder);
 
-  // Подсказка вместо тишины: если способ не сработал, человек должен это увидеть.
+  const fit = () => {
+    let h = A4_H;
+    try { h = Math.max(frame.contentDocument.documentElement.scrollHeight, A4_H); } catch { /* ещё не готов */ }
+    frame.style.height = `${h}px`;
+    const k = Math.min(1, (stage.clientWidth - 20) / A4_W);
+    holder.style.transform = `scale(${k})`;
+    holder.style.width = `${A4_W * k}px`;
+    holder.style.height = `${h * k}px`;
+  };
+
   const hint = document.createElement("div");
-  hint.style.cssText = "flex:0 0 auto;padding:8px 12px;padding-bottom:calc(8px + env(safe-area-inset-bottom));"
-    + "background:#1e293b;color:#cbd5e1;font:500 11px/1.35 inherit;text-align:center";
-  hint.textContent = isStandaloneApp() && isIOS()
-    ? "Сохраните файл или отправьте через «Поделиться» — печать из приложения с иконки iPhone не открывается."
-    : "Печать создаёт PDF: в окне печати выберите «Сохранить как PDF».";
+  hint.style.cssText = "flex:0 0 auto;padding:9px 12px;padding-bottom:calc(9px + env(safe-area-inset-bottom));"
+    + "background:#1e293b;color:#cbd5e1;font:500 11.5px/1.35 inherit;text-align:center";
+  hint.textContent = "«Печать» → в окне печати нажмите «Поделиться» и сохраните PDF.";
 
   const close = () => {
     try { document.body.removeChild(wrap); } catch { /* уже закрыт */ }
+    window.removeEventListener("resize", fit);
     document.body.style.overflow = prevOverflow;
   };
 
-  const btnPrint = mkBtn("Печать");
+  // PDF НА АЙФОНЕ ДЕЛАЕТ САМА ПЕЧАТЬ. Своего построителя PDF у нас нет, а собирать
+  // договор картинкой (единственное, что дают такие библиотеки) — значит получить
+  // нечитаемый и невыделяемый текст на десять мегабайт. Системное окно печати умеет
+  // ровно то, что нужно: «Поделиться» → PDF. Главное, чтобы печать звали НАЖАТИЕМ —
+  // из-за того, что раньше её звали после загрузки данных, она и перестала открываться.
+  const btnPrint = mkBtn("Печать · PDF", true);
   btnPrint.onclick = () => {
     try { frame.contentWindow.focus(); frame.contentWindow.print(); }
-    catch { hint.textContent = "Печать в этом браузере недоступна — сохраните файл или отправьте через «Поделиться»."; }
-  };
-
-  const blobOf = () => new Blob([html], { type: "text/html" });
-  const btnSave = mkBtn("Сохранить");
-  btnSave.onclick = () => {
-    const url = URL.createObjectURL(blobOf());
-    const a = document.createElement("a");
-    a.href = url; a.download = `${safeName}.html`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    catch { hint.textContent = "Печать в этом браузере недоступна — откройте сервис в Safari."; }
   };
 
   const btnClose = mkBtn("Закрыть");
-  btnClose.style.background = "#475569";
   btnClose.onclick = close;
 
-  bar.append(name, btnPrint, btnSave);
-  // «Поделиться» показываем, только если телефон действительно умеет отдавать файл:
-  // кнопка, которая ничего не делает, — ровно та беда, из-за которой всё это и писалось.
-  try {
-    const probe = new File([blobOf()], `${safeName}.html`, { type: "text/html" });
-    if (navigator.canShare && navigator.canShare({ files: [probe] })) {
-      const btnShare = mkBtn("Поделиться");
-      btnShare.onclick = () => {
-        navigator.share({ files: [new File([blobOf()], `${safeName}.html`, { type: "text/html" })], title })
-          .catch(() => { /* человек закрыл меню — это не ошибка */ });
-      };
-      bar.append(btnShare);
-    }
-  } catch { /* File/canShare нет — обойдёмся без кнопки */ }
-  bar.append(btnClose);
-
-  wrap.append(bar, frame, hint);
+  bar.append(name, btnPrint, btnClose);
+  wrap.append(bar, stage, hint);
   document.body.appendChild(wrap);
   document.body.style.overflow = "hidden";
   // Пишем после вставки в дерево: у кадра вне документа нет contentWindow.
   const d = frame.contentWindow.document;
   d.open(); d.write(html); d.close();
+  fit();
+  // Картинки (печать, логотип) приезжают позже и меняют высоту — подгоняем ещё раз.
+  frame.contentWindow.addEventListener?.("load", fit);
+  setTimeout(fit, 350);
+  setTimeout(fit, 1200);
+  window.addEventListener("resize", fit);
   return close;
 };
 
