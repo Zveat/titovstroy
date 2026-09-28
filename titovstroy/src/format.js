@@ -38,6 +38,16 @@ export const isStandaloneApp = () => typeof window !== "undefined"
   && ((window.matchMedia && window.matchMedia("(display-mode: standalone)").matches)
     || window.navigator.standalone === true);
 
+// КТО ДЕЛАЕТ PDF. Сам файл рисует сервер (api/pdf.mjs), а просит его
+// documents/pdfService.js — но тот тянет за собой облако, а облако тянет этот файл.
+// Чтобы не замкнуть импорты в кольцо, приложение подставляет готовые функции сюда
+// один раз при запуске. Не подставили (тесты, публичные страницы) — остаётся печать
+// браузера, как было.
+let _pdfTools = null;
+export const setDocumentPdfTools = (tools) => {
+  _pdfTools = (tools && typeof tools.request === "function" && typeof tools.deliver === "function") ? tools : null;
+};
+
 const docTitleOf = (html) => {
   const m = String(html).match(/<title>([\s\S]*?)<\/title>/i);
   return (m ? m[1].trim() : "") || "Документ";
@@ -102,7 +112,7 @@ export const showHtmlDocumentInApp = (html) => {
   const hint = document.createElement("div");
   hint.style.cssText = "flex:0 0 auto;padding:9px 12px;padding-bottom:calc(9px + env(safe-area-inset-bottom));"
     + "background:#1e293b;color:#cbd5e1;font:500 11.5px/1.35 inherit;text-align:center";
-  hint.textContent = "«Печать» → в окне печати нажмите «Поделиться» и сохраните PDF.";
+  hint.textContent = "«PDF» — сервер напечатает документ и отдаст файл: сохраните или отправьте клиенту.";
 
   const close = () => {
     try { document.body.removeChild(wrap); } catch { /* уже закрыт */ }
@@ -110,15 +120,47 @@ export const showHtmlDocumentInApp = (html) => {
     document.body.style.overflow = prevOverflow;
   };
 
-  // PDF НА АЙФОНЕ ДЕЛАЕТ САМА ПЕЧАТЬ. Своего построителя PDF у нас нет, а собирать
-  // договор картинкой (единственное, что дают такие библиотеки) — значит получить
-  // нечитаемый и невыделяемый текст на десять мегабайт. Системное окно печати умеет
-  // ровно то, что нужно: «Поделиться» → PDF. Главное, чтобы печать звали НАЖАТИЕМ —
-  // из-за того, что раньше её звали после загрузки данных, она и перестала открываться.
-  const btnPrint = mkBtn("Печать · PDF", true);
-  btnPrint.onclick = () => {
-    try { frame.contentWindow.focus(); frame.contentWindow.print(); }
-    catch { hint.textContent = "Печать в этом браузере недоступна — откройте сервис в Safari."; }
+  // ОДНА КНОПКА, ДВА НАЖАТИЯ. Первое заказывает PDF у сервера, второе — по уже
+  // готовому файлу — отдаёт его телефону. Делить пришлось потому, что и меню
+  // «Поделиться», и сохранение файла на iOS требуют ЖИВОГО нажатия: пока сервер рисует
+  // документ, проходят секунды, и разрешение сгорает — ровно та беда, из-за которой
+  // молчали и печать, и вход в Google. Один лишний тык честнее любого молчания.
+  const printInBrowser = () => {
+    try { frame.contentWindow.focus(); frame.contentWindow.print(); return true; }
+    catch { return false; }
+  };
+  const btnPrint = mkBtn("PDF", true);
+  let ready = null;                    // готовый файл ждёт второго нажатия
+  const say = (text) => { hint.textContent = text; };
+  btnPrint.onclick = async () => {
+    if (ready) {                       // второе нажатие: отдаём файл системе
+      const out = await _pdfTools.deliver(ready.blob, ready.name);
+      say(out.ok
+        ? (out.how === "download" ? "Файл сохранён." : "Готово.")
+        : `${out.reason}. Попробуйте ещё раз.`);
+      return;
+    }
+    if (!_pdfTools) {                  // на компьютере хватает обычной печати
+      if (!printInBrowser()) say("Печать в этом браузере недоступна.");
+      return;
+    }
+    const wasLabel = btnPrint.textContent;
+    btnPrint.textContent = "Готовлю…";
+    btnPrint.disabled = true;
+    say("Сервер печатает документ, это занимает несколько секунд…");
+    const result = await _pdfTools.request({ html, title });
+    btnPrint.disabled = false;
+    if (!result.ok) {
+      btnPrint.textContent = wasLabel;
+      // Сервер не смог — пусть попробует браузер, вдруг здесь печать работает.
+      say(`${result.reason}. Пробую печать браузера…`);
+      if (!printInBrowser()) say(`${result.reason}. Печать в этом браузере тоже недоступна.`);
+      return;
+    }
+    ready = result;
+    btnPrint.textContent = "Сохранить PDF";
+    btnPrint.style.background = "#16a34a";
+    say("PDF готов — нажмите «Сохранить PDF».");
   };
 
   const btnClose = mkBtn("Закрыть");

@@ -27,6 +27,7 @@ import { buildAnalytics, makeManagerResolver, REFUSE_REASONS } from "./analytics
 import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restoreDocumentTemplateSections } from "./documents/documentTemplateBackup.js";
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
+import { deliverPdf, requestServerPdf } from "./documents/pdfService.js";
 import { getAuth, signInAnonymously, signInWithCustomToken, signOut, onAuthStateChanged } from "firebase/auth";
 import { clientPhotosByStage, stageReportsKey, normalizeStageReports } from "./stage-reports/model.js";
 import { requestServerLogin, lockoutMessage } from "./auth/loginClient.js";
@@ -70,7 +71,7 @@ import { buildAvrHtml, buildContractHtml as _buildContractHtml, buildPodryadHtml
   docFileTitle, podryadContractToModel } from "./documents/legacyDocs.js";
 import { migrateRowsToCodeKeys } from "./estimate/rowKeys.js";
 import { BalanceSheet } from "./finance/BalanceSheet.jsx";
-import { _auditYM, _ts, downloadCSV, fmt, fmtDate, genId, kpStatusText, openOrPrintHtml, today } from "./format.js";
+import { _auditYM, _ts, downloadCSV, fmt, fmtDate, genId, kpStatusText, openOrPrintHtml, setDocumentPdfTools, today } from "./format.js";
 import { KPContent } from "./kp/KPContent.jsx";
 import { PublicKP } from "./kp/PublicKP.jsx";
 import { MastersSection } from "./masters/MastersSection.jsx";
@@ -5121,6 +5122,14 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
   useEffect(() => {
     const id = setTimeout(() => { try { documentTemplateRuntime.prewarmGoogle?.(); } catch { /* фон молчит */ } }, 4000);
     return () => clearTimeout(id);
+  }, []);
+  // КТО ПЕЧАТАЕТ PDF В ПРОСМОТРЩИКЕ ДОКУМЕНТА. Сам просмотрщик живёт в format.js и
+  // про облако ничего не знает — иначе импорты замкнулись бы в кольцо (облако уже
+  // берёт format.js). Поэтому подставляем ему готовые руки: попросить файл у сервера
+  // и отдать его телефону.
+  useEffect(() => {
+    setDocumentPdfTools({ request: requestServerPdf, deliver: deliverPdf });
+    return () => setDocumentPdfTools(null);
   }, []);
   const openDocumentInstance = contract => {
     const snapshot = documentSnapshotsById.get(`contract:${contract?.id || ""}`);
