@@ -8,6 +8,7 @@
 // Эти же функции движок «Шаблонов документов» получает как legacyRenderers /
 // legacyExports, поэтому их сигнатуры и поведение обязаны остаться прежними.
 import { lineTotal, tengeInWords } from "../utils.js";
+import { googleAccessToken } from "./googleAuth.js";
 
 // ИМЯ ФАЙЛА ПРИ СОХРАНЕНИИ В PDF. Браузер берёт его из заголовка страницы и УКОРАЧИВАЕТ:
 // на боевой из 69 символов в окне сохранения оставалось 29 — «Приложение №3 Четверикова Таи».
@@ -1288,32 +1289,12 @@ export const generateContractGDocLegacy = async (c, client, ca, workers = [], co
     ? buildPodryadHtml(podryadContractToModel(c, workers.find(w=>w.id===c.workerId)||null, false), contragents)
     : buildContractHtml(c, client, ca, true, "");
 
-  // Загружаем Google Identity Services если ещё нет
-  const loadGIS = () => new Promise((res, rej) => {
-    if (window.google?.accounts?.oauth2) { res(); return; }
-    const s = document.createElement("script");
-    s.src = "https://accounts.google.com/gsi/client";
-    s.onload = () => res();
-    s.onerror = () => rej(new Error("Не удалось загрузить сервис Google (accounts.google.com недоступен). Проверьте интернет-соединение и попробуйте ещё раз, либо воспользуйтесь кнопкой 📄 PDF."));
-    document.head.appendChild(s);
-  });
-
-  // Получаем access token
-  const getToken = () => new Promise((res, rej) => {
-    const tc = window.google.accounts.oauth2.initTokenClient({
-      client_id: GDOC_CLIENT_ID,
-      scope: "https://www.googleapis.com/auth/drive.file",
-      callback: (resp) => {
-        if (resp.error) rej(new Error("Ошибка авторизации: "+resp.error));
-        else res(resp.access_token);
-      },
-    });
-    tc.requestAccessToken({ prompt: "" });
-  });
-
+  // ВХОД В GOOGLE ЗДЕСЬ БОЛЬШЕ НЕ СВОЙ. Раньше этот генератор сам грузил библиотеку и
+  // сам просил доступ — уже ПОСЛЕ подготовки документа. На телефоне к этому моменту
+  // браузер отбирал право открыть окно Google, и кнопка молчала. Теперь вход общий с
+  // новым генератором и спрашивается прямо в нажатии: см. googleAuth.js.
   try {
-    await loadGIS();
-    const token = await getToken();
+    const token = await googleAccessToken({ clientId: GDOC_CLIENT_ID });
 
     // Создаём Google Doc через Drive API (multipart upload с HTML контентом)
     const boundary = "titov_boundary_gdoc";

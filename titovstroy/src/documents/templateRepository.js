@@ -29,7 +29,31 @@ export function createTemplateRepository({
 } = {}) {
   if (!storage?.getResult || !storage?.mutateTransaction) throw new Error("Для шаблонов требуется storage с getResult и mutateTransaction");
 
-  async function loadTemplates() {
+  // СКЛАД ШАБЛОНОВ ЧИТАЕТСЯ НЕ НА КАЖДОЕ НАЖАТИЕ. Замер на боевой 28 сентября: узел
+  // весит 1,83 МБ (одни черновики, опубликован ровно один шаблон), и каждое нажатие
+  // «PDF» или «Google Doc» тянуло его целиком — чтобы выяснить, что шаблона нет, и
+  // отдать документ старому генератору. На компьютере это доли секунды, на телефоне по
+  // мобильной сети — секунды, и за эти секунды iOS успевает отобрать у нажатия право
+  // открыть окно: и печать, и вход в Google гасли МОЛЧА. Отсюда «раньше работало» —
+  // пока склад был маленьким, всё успевало.
+  //
+  // Поэтому у чтения появился срок годности, и просит его ТОЛЬКО экспорт: редактору
+  // шаблонов свежесть важнее, он читает как раньше, без срока. Любая запись склада
+  // сбрасывает запомненное, так что своя же правка не потеряется.
+  let memo = null;                       // { at, value }
+  const forgetTemplates = () => { memo = null; };
+
+  async function loadTemplates({ maxAgeMs = 0 } = {}) {
+    const age = Number(maxAgeMs) || 0;
+    if (memo && age > 0 && Date.now() - memo.at < age) return memo.value;
+    const value = await readTemplates();
+    // Запоминаем только целое и прочитанное: «недоступно» и «испорчено» кешировать
+    // нельзя — иначе одна неудачная секунда связи заморозила бы экспорт на весь срок.
+    if (value.status === "found") memo = { at: Date.now(), value };
+    return value;
+  }
+
+  async function readTemplates() {
     const result = await storage.getResult(templatesKey);
     if (result?.status !== "found") {
       return { status: result?.status || "unavailable", store: emptyTemplateStore() };
@@ -53,10 +77,12 @@ export function createTemplateRepository({
 
   async function transactTemplates(command) {
     let outcome = { ok: false, reason: "not-run" };
+    forgetTemplates();                   // правим склад — запомненное больше не годится
     const transaction = await storage.mutateTransaction(templatesKey, list => {
       outcome = command(normalizeTemplateStore(list?.[0]));
       return outcome.ok ? [outcome.store] : undefined;
     });
+    forgetTemplates();                   // и после записи тоже: в памяти уже новая версия
     return transaction?.committed && outcome.ok
       ? { ...outcome, committed: true }
       : { ok: false, committed: false, reason: outcome.reason === "not-run" ? (transaction?.reason || "transaction-failed") : (outcome.reason || transaction?.reason || "transaction-failed") };

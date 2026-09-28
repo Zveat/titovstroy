@@ -70,7 +70,7 @@ import { buildAvrHtml, buildContractHtml as _buildContractHtml, buildPodryadHtml
   docFileTitle, podryadContractToModel } from "./documents/legacyDocs.js";
 import { migrateRowsToCodeKeys } from "./estimate/rowKeys.js";
 import { BalanceSheet } from "./finance/BalanceSheet.jsx";
-import { _auditYM, _ts, downloadCSV, fmt, fmtDate, genId, isStandaloneApp, kpStatusText, openOrPrintHtml, today } from "./format.js";
+import { _auditYM, _ts, downloadCSV, fmt, fmtDate, genId, kpStatusText, openOrPrintHtml, today } from "./format.js";
 import { KPContent } from "./kp/KPContent.jsx";
 import { PublicKP } from "./kp/PublicKP.jsx";
 import { MastersSection } from "./masters/MastersSection.jsx";
@@ -5113,24 +5113,26 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     setDocumentSnapshotsById(new Map((loaded.snapshots || []).filter(item => item?.documentId).map(item => [item.documentId, item])));
   }, [currentUser.id]);
   useEffect(() => { refreshDocumentSnapshots(); }, [refreshDocumentSnapshots]);
+  // БИБЛИОТЕКУ GOOGLE ТЯНЕМ ЗАРАНЕЕ, А НЕ В МОМЕНТ НАЖАТИЯ. Её загрузка занимает своё
+  // время, и если начинать её по нажатию, к моменту запроса доступа браузер уже отберёт
+  // право открыть окно Google — ровно то, из-за чего «Google Doc» перестал работать на
+  // телефоне. Грузим с задержкой, чтобы не мешать первой отрисовке; не вышло — не беда,
+  // загрузчик попробует ещё раз сам.
+  useEffect(() => {
+    const id = setTimeout(() => { try { documentTemplateRuntime.prewarmGoogle?.(); } catch { /* фон молчит */ } }, 4000);
+    return () => clearTimeout(id);
+  }, []);
   const openDocumentInstance = contract => {
     const snapshot = documentSnapshotsById.get(`contract:${contract?.id || ""}`);
     if (snapshot) setDocumentInstanceSnapshot(snapshot);
   };
   const runContractExport = async (format, contract, client, contragent, withStamp) => {
-    // GOOGLE DOC ИЗ ПРИЛОЖЕНИЯ С ИКОНКИ НЕ РАБОТАЕТ, И ЛУЧШЕ СКАЗАТЬ ЭТО СРАЗУ.
-    // Вход в Google открывает своё окно; у приложения, запущенного с домашнего экрана,
-    // оно уезжает в Safari и вернуться обратно не может — ответ с ключом доступа не
-    // приходит НИКОГДА. Код в этом месте просто ждёт, поэтому раньше не появлялось даже
-    // ошибки: владелец жал кнопку, и ничего не происходило. Запасной (старый) генератор
-    // тут не помощник — он ходит в Google тем же путём.
-    if (format === "gdoc" && isStandaloneApp()) {
-      alert("Google Doc не получится сделать из приложения, запущенного с иконки: "
-        + "Google открывает окно входа в Safari и не может вернуть ответ обратно.\n\n"
-        + "Откройте erp.titovstroy.kz в самом Safari и нажмите «Google Doc» там.\n\n"
-        + "Либо возьмите PDF — он теперь открывается прямо здесь.");
-      return;
-    }
+    // ДОСТУП К GOOGLE ПРОСИМ ПЕРВОЙ СТРОКОЙ, ПОКА НАЖАТИЕ ЕЩЁ «ЖИВОЕ».
+    // Эта строка выполняется синхронно, прямо внутри клика, — а всё, что ниже, уже
+    // ждёт облако. Раньше вход спрашивали ПОСЛЕ подготовки документа, и к тому моменту
+    // браузер отбирал право открыть окно Google: на телефоне кнопка просто молчала.
+    // Обещание с доступом подхватит загрузчик, когда документ будет готов.
+    if (format === "gdoc") { try { documentTemplateRuntime.beginGoogleAuth?.(); } catch { /* спросим позже */ } }
     try {
       const result = await documentTemplateRuntime.exportContract(format, { contract, client, contragent, withStamp });
       if (result?.ok === false && !result?.canUseLegacy) alert(`Не удалось создать документ: ${result.reason || "неизвестная ошибка"}`);

@@ -181,4 +181,59 @@ describe("transactional document template repository", () => {
     expect((await service.getSnapshot("contract:contract-1")).snapshot.instanceVersions).toHaveLength(1);
     expect((await service.loadTemplates()).status).toBe("empty");
   });
+
+  // ЗАЧЕМ СРОК ГОДНОСТИ У ЧТЕНИЯ. На боевой склад шаблонов весит 1,83 МБ, и каждое
+  // нажатие «PDF» тянуло его целиком. На телефоне это секунды, а за секунды iOS
+  // отбирает у нажатия право открыть окно — и печать с входом в Google гасли молча.
+  it("экспорт читает склад один раз в срок, редактор шаблонов — всегда свежий", async () => {
+    const storage = fakeStorage();
+    let reads = 0;
+    const counted = { ...storage, getResult: async (key) => { reads += 1; return storage.getResult(key); } };
+    const repository = createTemplateRepository({ storage: counted, templatesKey: "templates", snapshotsKey: "snapshots" });
+
+    await repository.createTemplate({ id: "repair", type: "repair_fiz", name: "Договор" }, ACTOR);
+    reads = 0;
+
+    expect((await repository.loadTemplates({ maxAgeMs: 60000 })).status).toBe("found");
+    expect(reads).toBe(1);
+    await repository.loadTemplates({ maxAgeMs: 60000 });
+    await repository.loadTemplates({ maxAgeMs: 60000 });
+    expect(reads).toBe(1);                       // второе и третье нажатие склад не тянут
+
+    await repository.loadTemplates();            // редактор шаблонов — без срока
+    expect(reads).toBe(2);
+
+    await repository.loadTemplates({ maxAgeMs: 0 });
+    expect(reads).toBe(3);
+  });
+
+  it("правка шаблона сбрасывает запомненное — своя же работа не теряется", async () => {
+    const storage = fakeStorage();
+    let reads = 0;
+    const counted = { ...storage, getResult: async (key) => { reads += 1; return storage.getResult(key); } };
+    const repository = createTemplateRepository({ storage: counted, templatesKey: "templates", snapshotsKey: "snapshots" });
+
+    await repository.createTemplate({ id: "repair", type: "repair_fiz", name: "Договор" }, ACTOR);
+    const before = await repository.loadTemplates({ maxAgeMs: 60000 });
+    expect(before.store.templates).toHaveLength(1);
+
+    await repository.createTemplate({ id: "avr", type: "avr_r1", name: "Акт" }, ACTOR);
+    reads = 0;
+    const after = await repository.loadTemplates({ maxAgeMs: 60000 });
+    expect(reads).toBe(1);                       // запомненное выброшено записью
+    expect(after.store.templates).toHaveLength(2);
+  });
+
+  it("недоступный склад не запоминается: одна плохая секунда связи не морозит экспорт", async () => {
+    let fail = true;
+    const good = fakeStorage();
+    const flaky = {
+      ...good,
+      getResult: async (key) => (fail ? { status: "unavailable", value: null } : good.getResult(key)),
+    };
+    const repository = createTemplateRepository({ storage: flaky, templatesKey: "templates", snapshotsKey: "snapshots" });
+    expect((await repository.loadTemplates({ maxAgeMs: 60000 })).status).toBe("unavailable");
+    fail = false;
+    expect((await repository.loadTemplates({ maxAgeMs: 60000 })).status).toBe("empty");
+  });
 });

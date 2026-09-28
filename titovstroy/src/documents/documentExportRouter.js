@@ -80,6 +80,11 @@ const withSampleMark = html => {
   return /<body[^>]*>/i.test(body) ? body.replace(/<body([^>]*)>/i, `<body$1>${mark}${notice}`) : `${mark}${notice}${body}`;
 };
 
+// Сколько экспорт готов доверять уже прочитанному складу шаблонов. Пять минут: за это
+// время человек успевает напечатать пачку документов одним заходом, а правку шаблона
+// ждать не придётся вовсе — запись склада сбрасывает запомненное сама.
+const TEMPLATES_FRESH_MS = 5 * 60 * 1000;
+
 export function createDocumentExportRouter({ enabled = false, service, getData = () => ({}), exportLegacy, exportCanonical, confirmLegacy } = {}) {
   const legacy = (format, payload) => exportLegacy(format, payload);
   const safeLegacy = async (reason, format, payload) => {
@@ -105,7 +110,7 @@ export function createDocumentExportRouter({ enabled = false, service, getData =
       }
       if (existing?.status === "unavailable" || existing?.status === "corrupt") return safeLegacy("Снимок недоступен", format, payload);
 
-      const loaded = await service.loadTemplates();
+      const loaded = await service.loadTemplates({ maxAgeMs: TEMPLATES_FRESH_MS });
       if (loaded?.status !== "found") return safeLegacy("Опубликованные шаблоны недоступны", format, payload);
       const version = getActiveTemplateVersion(loaded.store, type);
       if (!version || !isTemplateEligible(source, version)) return legacy(format, payload);
@@ -138,7 +143,7 @@ export function createDocumentExportRouter({ enabled = false, service, getData =
       if (format !== "pdf") return { ok: false, reason: "Образец доступен только в PDF" };
       if (!enabled || !definition || !service?.loadTemplates) return { ok: false, reason: "Опубликованный шаблон недоступен" };
       try {
-        const loaded = await service.loadTemplates();
+        const loaded = await service.loadTemplates({ maxAgeMs: TEMPLATES_FRESH_MS });
         if (loaded?.status !== "found") return { ok: false, reason: "Опубликованные шаблоны недоступны" };
         const version = getActiveTemplateVersion(loaded.store, type);
         if (!version) return { ok: false, reason: "Сначала опубликуйте шаблон этого документа" };

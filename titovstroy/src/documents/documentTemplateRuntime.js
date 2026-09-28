@@ -1,4 +1,5 @@
 import { createDocumentExportRouter } from "./documentExportRouter.js";
+import { beginGoogleAuth, prewarmGoogleAuth } from "./googleAuth.js";
 import { DOCUMENT_TEMPLATE_CENTER_ENABLED, REPAIR_TEMPLATE_EXPORT_ENABLED } from "./documentTemplateKeys.js";
 import { createDocumentTemplateService } from "./documentTemplateService.js";
 import {
@@ -69,5 +70,10 @@ export function createDocumentTemplateRuntime({
     exportContract: router.exportContract,
     exportContractSample: router.exportContractSample,
     exportReport: router.exportReport,
+    // Подгрузить библиотеку Google заранее и спросить доступ ПРЯМО В НАЖАТИИ —
+    // почему именно так и почему вход общий с прежним генератором, написано
+    // в googleAuth.js.
+    prewarmGoogle: prewarmGoogleAuth,
+    beginGoogleAuth,
   };
 }

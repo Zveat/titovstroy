@@ -1,6 +1,7 @@
 import { snapshotContent } from "./documentSnapshots.js";
 import { normalizeLegalText, renderTemplateToCanonicalHtml } from "./templateRender.js";
 import { openUrlOrShowLink } from "../format.js";
+import { googleAccessToken } from "./googleAuth.js";
 
 const money = value => Math.round(Number(value) || 0).toLocaleString("ru-RU");
 
@@ -100,41 +101,13 @@ export async function uploadGoogleDocFromCanonical(exportDoc, googleDeps = {}) {
   return { ok: true, value, normalizedText: exportDoc.normalizedText };
 }
 
-export function createBrowserGoogleUploader({ clientId, browserWindow, browserDocument, fetchFn } = {}) {
-  const win = browserWindow || (typeof window !== "undefined" ? window : null);
-  const doc = browserDocument || (typeof document !== "undefined" ? document : null);
+// Загрузчик в Google Drive. Сам вход живёт в googleAuth.js — один на оба генератора,
+// и спрашивается он ПРЯМО В НАЖАТИИ (см. там же, почему это решает всё).
+export function createBrowserGoogleUploader({ clientId, fetchFn } = {}) {
   const request = fetchFn || (typeof fetch !== "undefined" ? fetch : null);
-  return async ({ title, html }) => {
-    if (!win || !doc || !request || !clientId) throw new Error("Google Docs недоступен");
-    if (!win.google?.accounts?.oauth2) {
-      await new Promise((resolve, reject) => {
-        const script = doc.createElement("script");
-        script.src = "https://accounts.google.com/gsi/client";
-        script.onload = resolve;
-        script.onerror = () => reject(new Error("Не удалось загрузить сервис Google"));
-        doc.head.appendChild(script);
-      });
-    }
-    // ОЖИДАНИЕ ВХОДА — СО СРОКОМ. Google зовёт callback только при ответе: если его окно
-    // не открылось (телефон погасил всплывающее окно) или человек закрыл его крестиком,
-    // не ответит НИКТО и ждать можно вечно. Раньше так и было — кнопка просто ничего не
-    // делала, без единого слова. Минута, и говорим, что произошло.
-    const token = await new Promise((resolve, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error("Google не ответил: окно входа не открылось или было закрыто. "
-          + "На телефоне это обычно значит, что браузер погасил окно Google.")),
-        60000,
-      );
-      const done = (fn) => (value) => { clearTimeout(timer); fn(value); };
-      const client = win.google.accounts.oauth2.initTokenClient({
-        client_id: clientId,
-        scope: "https://www.googleapis.com/auth/drive.file",
-        callback: response => response.error
-          ? done(reject)(new Error(`Ошибка авторизации: ${response.error}`))
-          : done(resolve)(response.access_token),
-      });
-      client.requestAccessToken({ prompt: "" });
-    });
+  const upload = async ({ title, html }) => {
+    if (!request) throw new Error("Google Docs недоступен");
+    const token = await googleAccessToken(clientId ? { clientId } : {});
     const boundary = "titov_boundary_gdoc";
     const body = [
       `--${boundary}`,
@@ -161,6 +134,7 @@ export function createBrowserGoogleUploader({ clientId, browserWindow, browserDo
     });
     return value;
   };
+  return upload;
 }
 
 export function downloadBlobFile(blob, filename, { browserDocument, browserUrl } = {}) {
