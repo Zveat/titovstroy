@@ -114,10 +114,17 @@ export function createPdfHandler({
       const pdf = await renderPdf(withBase(html, origin));
       const name = fileName(body.title);
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="${name}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+      // ЗАГОЛОВОК HTTP КИРИЛЛИЦУ НЕ ВЕЗЁТ. Первый боевой прогон упал ровно на этом:
+      // «Invalid character in header content». Документ к тому моменту был уже
+      // напечатан — то есть ломалась не печать, а подпись к ней. Поэтому в обычное
+      // filename кладём безопасный слепок, а настоящее имя едет в filename* в
+      // процентной записи: её понимают все браузеры, и она заведомо из одних букв ASCII.
+      res.setHeader("Content-Disposition",
+        `attachment; filename="${asciiName(name)}"; filename*=UTF-8''${encodeURIComponent(name)}`);
       return res.status(200).send(Buffer.from(pdf));
     } catch (error) {
       // Молчать здесь нельзя: именно молчание и довело до этой правки.
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
       return res.status(500).json({ ok: false, code: "render_failed", error: String(error?.message || error) });
     }
   };
@@ -128,6 +135,19 @@ function safeJson(raw) { try { return JSON.parse(raw); } catch { return {}; } }
 export function fileName(title) {
   const clean = String(title || "Документ").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").trim();
   return `${clean.slice(0, 90) || "Документ"}.pdf`;
+}
+
+// Запасное имя из одних букв ASCII — только чтобы заголовок был законным. Настоящее
+// имя, с фамилией и номером, браузер возьмёт из filename* рядом.
+export function asciiName(name) {
+  const base = String(name).replace(/\.pdf$/i, "");
+  const plain = base
+    .replace(/[^\x20-\x7e]/g, "")          // всё, чего заголовок не увезёт
+    .replace(/["\\]/g, "")                 // кавычки порвали бы сам заголовок
+    .replace(/\s+/g, " ")
+    .replace(/^[.\s]+|[.\s]+$/g, "")
+    .trim();
+  return plain ? `${plain}.pdf` : "document.pdf";
 }
 
 export default createPdfHandler();

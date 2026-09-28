@@ -41,7 +41,12 @@ export async function requestServerPdf({ html, title }, { fetchImpl = fetch, get
       html_too_big: "Документ слишком большой для печати",
       render_failed: "Сервер не смог напечатать документ",
     };
-    return { ok: false, reason: codes[payload?.code] || `Сервер ответил ${response.status}` };
+    // ПРИЧИНУ ПОКАЗЫВАЕМ, А НЕ ПРЯЧЕМ. Первый боевой отказ звучал «сервер не смог
+    // напечатать» — и это не сказало ничего ни владельцу, ни мне: настоящая причина
+    // («недопустимый символ в заголовке») приехала в ответе и была выброшена здесь.
+    const detail = String(payload?.error || "").slice(0, 160);
+    const head = codes[payload?.code] || `Сервер ответил ${response.status}`;
+    return { ok: false, reason: detail ? `${head}: ${detail}` : head };
   }
   const blob = await response.blob();
   if (!blob || !blob.size) return { ok: false, reason: "Сервер вернул пустой файл" };

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createPdfHandler, fileName } from "./pdf.mjs";
+import { asciiName, createPdfHandler, fileName } from "./pdf.mjs";
 
 // Сюда уезжает договор с паспортными данными клиента, поэтому проверяется не только
 // «печатает ли», но и КОГО пускаем. Браузер в тестах не поднимается: печать подменена.
@@ -43,7 +43,10 @@ describe("печать документа на сервере", () => {
 
     expect(out.status).toBe(200);
     expect(out.headers["Content-Type"]).toBe("application/pdf");
-    expect(out.headers["Content-Disposition"]).toContain('filename="Договор №1.pdf"');
+    // Кириллицу заголовок HTTP не везёт — на этом и упал первый боевой прогон.
+    const disposition = out.headers["Content-Disposition"];
+    expect(disposition).toMatch(/^[\x20-\x7e]*$/);          // одни буквы ASCII, иначе 500
+    expect(disposition).toContain(`filename*=UTF-8''${encodeURIComponent("Договор №1.pdf")}`);
     expect(out.body.toString()).toContain("%PDF");
     // Лист и поля берутся из самого документа: добавить их здесь значило бы сдвинуть
     // вёрстку, которая годами печаталась с компьютера именно так.
@@ -132,6 +135,18 @@ describe("печать документа на сервере", () => {
     const { res, out } = fakeRes();
     await handler(request({ headers: { origin: "https://crm.drugaya.kz" } }), res);
     expect(out.status).toBe(200);
+  });
+
+  it("запасное имя годится для заголовка, даже если в названии одна кириллица", () => {
+    expect(asciiName("Договор №1.pdf")).toBe("1.pdf");
+    expect(asciiName("Дог.1045 Запорожец.pdf")).toBe("1045.pdf");
+    expect(asciiName("Договор.pdf")).toBe("document.pdf");   // ничего латинского не осталось
+    expect(asciiName("Счёт")).toBe("document.pdf");
+    expect(asciiName('Акт "номер 7".pdf')).toBe("7.pdf");    // кавычки порвали бы заголовок
+    // Главное свойство: результат всегда можно положить в заголовок HTTP.
+    for (const name of ["Договор №1.pdf", "Дог.1045 Запорожец.pdf", "Счёт", '"кавычки"', "", "\\обратный слэш"]) {
+      expect(asciiName(name)).toMatch(/^[\x20-\x7e]+$/);
+    }
   });
 
   it("имя файла не ломает файловую систему и не растёт без предела", () => {
