@@ -28,6 +28,8 @@ import { DOCUMENT_TEMPLATE_BACKUP_SECTIONS, documentTemplateBackupSpecs, restore
 import { createDocumentTemplateFeaturePolicy } from "./documents/documentTemplateKeys.js";
 import { createDocumentTemplateRuntime } from "./documents/documentTemplateRuntime.js";
 import { deliverPdf, requestServerPdf } from "./documents/pdfService.js";
+import { startGoogleRedirect, takeGoogleRedirectResult } from "./documents/googleRedirectAuth.js";
+import { setGoogleAccessToken } from "./documents/googleAuth.js";
 import { getAuth, signInAnonymously, signInWithCustomToken, signOut, onAuthStateChanged } from "firebase/auth";
 import { clientPhotosByStage, stageReportsKey, normalizeStageReports } from "./stage-reports/model.js";
 import { requestServerLogin, lockoutMessage } from "./auth/loginClient.js";
@@ -71,7 +73,7 @@ import { buildAvrHtml, buildContractHtml as _buildContractHtml, buildPodryadHtml
   docFileTitle, podryadContractToModel } from "./documents/legacyDocs.js";
 import { migrateRowsToCodeKeys } from "./estimate/rowKeys.js";
 import { BalanceSheet } from "./finance/BalanceSheet.jsx";
-import { _auditYM, _ts, downloadCSV, fmt, fmtDate, genId, kpStatusText, openOrPrintHtml, setDocumentPdfTools, today } from "./format.js";
+import { _auditYM, _ts, downloadCSV, fmt, fmtDate, genId, isStandaloneApp, kpStatusText, openOrPrintHtml, setDocumentPdfTools, today } from "./format.js";
 import { KPContent } from "./kp/KPContent.jsx";
 import { PublicKP } from "./kp/PublicKP.jsx";
 import { MastersSection } from "./masters/MastersSection.jsx";
@@ -5131,11 +5133,39 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     setDocumentPdfTools({ request: requestServerPdf, deliver: deliverPdf });
     return () => setDocumentPdfTools(null);
   }, []);
+
+  // ВЕРНУЛИСЬ ОТ GOOGLE — ДОДЕЛЫВАЕМ ТО, ЧТО ЗАДУМЫВАЛИ. Хвост ссылки читается один
+  // раз при запуске и тут же вычищается, чтобы ключ не остался в адресной строке и в
+  // истории. Сам документ ждёт, пока догрузятся договоры: сразу после перезагрузки их
+  // ещё нет, поэтому эффект зависит от loadedTick (см. «гонка первичной загрузки»).
+  const gdocReturnRef = useRef(undefined);
+  if (gdocReturnRef.current === undefined) gdocReturnRef.current = takeGoogleRedirectResult();
+  useEffect(() => {
+    const back = gdocReturnRef.current;
+    if (!back) return;
+    if (!back.ok) { gdocReturnRef.current = null; alert(`Google Doc не получился: ${back.reason}`); return; }
+    const wanted = String(back.job?.id || "");
+    const contract = contractsRef.current.find(x => String(x.id) === wanted && !x.deletedAt);
+    if (!contract) return;                        // договоры ещё не доехали — подождём
+    gdocReturnRef.current = null;
+    setGoogleAccessToken(back.token);
+    const cl = clientsRef.current.find(x => x.id === contract.clientId);
+    const ca = contragentsRef.current.find(x => x.id === contract.contragentId);
+    generateContractGDoc(contract, cl, ca);
+  }, [loadedTick, contracts]);
   const openDocumentInstance = contract => {
     const snapshot = documentSnapshotsById.get(`contract:${contract?.id || ""}`);
     if (snapshot) setDocumentInstanceSnapshot(snapshot);
   };
   const runContractExport = async (format, contract, client, contragent, withStamp) => {
+    // В ПРИЛОЖЕНИИ С ИКОНКИ ИДЁМ К GOOGLE ПЕРЕХОДОМ, А НЕ ОКНОМ. Окно там открывается
+    // встроенным Safari поверх приложения, и ответить ему некуда — проверено дважды на
+    // боевой. Обычный переход остаётся внутри приложения, и возврат тоже. Подробности и
+    // разовая настройка адреса возврата — в googleRedirectAuth.js.
+    if (format === "gdoc" && isStandaloneApp() && contract?.id) {
+      if (startGoogleRedirect({ kind: "contract", id: String(contract.id) })) return;
+      // Уйти не вышло — работаем как прежде, через окно.
+    }
     // КНОПКУ «GOOGLE DOC» НЕ ЗАПРЕЩАЕМ. Я делал это дважды и дважды был неправ.
     // Пока разрешение на Диск у Google есть, ключ выдаётся ТИХО, без всякого окна —
     // и на телефоне это работает ровно так же, как работало раньше. Окно появляется

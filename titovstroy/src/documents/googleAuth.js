@@ -39,6 +39,7 @@ const NEEDS_CONSENT = "Google просит подтвердить доступ �
 
 let libraryPromise = null;
 let pending = null;
+let granted = null;
 
 const gis = () => (typeof window !== "undefined" ? window.google?.accounts?.oauth2 : null);
 
@@ -125,7 +126,15 @@ export function beginGoogleAuth({ clientId = GOOGLE_DRIVE_CLIENT_ID, scope = GOO
   return pending;
 }
 
+// Ключ, привезённый переходом и возвратом (googleRedirectAuth.js). Пока он есть,
+// спрашивать Google не нужно вообще — ни окном, ни скрытым кадром. Живёт в памяти
+// вкладки, не записывается никуда и тратится на один документ.
+export function setGoogleAccessToken(token) {
+  granted = token ? String(token) : null;
+}
+
 export async function googleAccessToken({ clientId = GOOGLE_DRIVE_CLIENT_ID, scope = GOOGLE_DRIVE_SCOPE } = {}) {
+  if (granted) { const token = granted; granted = null; return token; }
   const waiting = pending;
   pending = null;                       // следующий документ спросит заново
   if (waiting) return waiting;
@@ -134,4 +143,4 @@ export async function googleAccessToken({ clientId = GOOGLE_DRIVE_CLIENT_ID, sco
 }
 
 // Только для тестов: вернуть модуль в исходное состояние.
-export function _resetGoogleAuth() { libraryPromise = null; pending = null; }
+export function _resetGoogleAuth() { libraryPromise = null; pending = null; granted = null; }
