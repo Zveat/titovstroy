@@ -6,7 +6,7 @@ import { fmt } from "../format.js";
 import { SearchSelect } from "../ui/Inputs.jsx";
 import { lineTotal } from "../utils.js";
 
-export function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onSamplePdf, onGDoc, canExport=true, onAddClientFromEstimate, onUpdateClient, onCreateClient, workers=[], onCreateWorker, importObjects=[], getObjectWorks, currentUserRole, fmt }) {
+export function ContractEditor({ contract, clients, contragents, onUpdate, onBack, onSave, onPdf, onSamplePdf, onGDoc, onDocx, canExport=true, onAddClientFromEstimate, onUpdateClient, onCreateClient, workers=[], onCreateWorker, importObjects=[], getObjectWorks, currentUserRole, fmt }) {
   const [withStamp, setWithStamp] = useState(true);
   const [showClientForm, setShowClientForm] = useState(false);
   const [showNewClientForm, setShowNewClientForm] = useState(false);
@@ -525,6 +525,17 @@ export function ContractEditor({ contract, clients, contragents, onUpdate, onBac
         </div>
         {canExport && <button onClick={onGDoc} className="btn btn-o" style={{flex:1}}>
           📋 Google Doc
+        </button>}
+        {/* WORD-ФАЙЛ — ЕДИНСТВЕННЫЙ РЕДАКТИРУЕМЫЙ ДОКУМЕНТ, КОТОРЫЙ БЕРЁТ ТЕЛЕФОН.
+            Вход в Google из приложения, запущенного с иконки, ответить не может: его
+            окно открывается ВНУТРИ приложения и связи с вызвавшей страницей у него нет
+            (проверено на живом договоре — окно открылось, написало «Подождите…» и
+            закрылось ни с чем). А этот файл просто скачивается, и из «Файлов» он
+            открывается прямо в «Google Документах» — тот же редактируемый документ,
+            только без похода в Google из CRM. Выгрузка была в коде давно, кнопки на
+            неё не было. */}
+        {canExport && onDocx && <button onClick={onDocx} className="btn btn-o" style={{flex:1}}>
+          📝 Word · DOCX
         </button>}
         {canExport && <button onClick={onSamplePdf} className="btn btn-o" style={{flex:1,color:"#b45309",borderColor:"#fcd34d",background:"#fffbeb"}}
           title="PDF без данных клиента; не сохраняется как официальный документ">
