@@ -31,6 +31,11 @@ const LOAD_FAILED = "Не удалось загрузить сервис Google 
 const NO_ANSWER = "Google не ответил: окно входа не открылось или было закрыто. "
   + "На телефоне это обычно значит, что браузер погасил окно Google.";
 const ANSWER_WAIT_MS = 90000;
+// Разрешение протухло, и Google просит подтвердить его заново. Из приложения с иконки
+// подтвердить нельзя — но это делается один раз в любом браузере, и дальше снова тихо.
+const NEEDS_CONSENT = "Google просит подтвердить доступ заново, а окно подтверждения "
+  + "из приложения с иконки ответить не может. Подтвердите один раз в Safari или на "
+  + "компьютере — дальше «Google Doc» снова будет работать и отсюда.";
 
 let libraryPromise = null;
 let pending = null;
@@ -54,12 +59,49 @@ function loadLibrary() {
   return libraryPromise;
 }
 
+// ДВА РАЗНЫХ СЛУЧАЯ, И ИХ ВАЖНО РАЗЛИЧАТЬ.
+//
+// Владелец говорит: «раньше всё работало» — и это правда, тут нет противоречия.
+// Пока разрешение на Диск у Google уже есть, requestAccessToken отдаёт ключ ТИХО,
+// скрытым кадром, без всякого окна: работает везде, и в приложении с иконки тоже.
+// Окно Google появляется только тогда, когда разрешение нужно подтвердить заново —
+// и вот ЭТО из приложения с иконки не возвращается: окно открывается встроенным
+// Safari внутри приложения, у него нет связи с вызвавшей страницей (снимок владельца:
+// открылось, «Подождите…», закрылось ни с чем).
+//
+// Поэтому кнопку мы не запрещаем НИКОГДА — в обычном случае она просто работает, как
+// и работала. А если Google всё же попросил подтверждение, мы узнаём об этом сразу:
+// приложение на время уходит в фон и возвращается без ответа. Тогда говорим, что
+// именно случилось и что сделать, а не заставляем ждать полторы минуты впустую.
 function askAccess(clientId, scope) {
   return new Promise((resolve, reject) => {
     const oauth2 = gis();
     if (!oauth2) { reject(new Error(LOAD_FAILED)); return; }
-    const timer = setTimeout(() => reject(new Error(NO_ANSWER)), ANSWER_WAIT_MS);
-    const finish = (fn) => (value) => { clearTimeout(timer); fn(value); };
+    const doc = typeof document !== "undefined" ? document : null;
+    let settled = false;
+    let wentAway = false;
+    let watchdog = null;
+
+    const stop = () => {
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(watchdog);
+      doc?.removeEventListener("visibilitychange", onVisible);
+    };
+    const finish = (fn) => (value) => { stop(); fn(value); };
+
+    function onVisible() {
+      if (settled) return;
+      if (doc.visibilityState === "hidden") { wentAway = true; return; }
+      if (!wentAway) return;
+      // Вернулись из окна Google. Ответ, если он есть, приходит своим путём и обгоняет
+      // эту паузу; прошла пауза, а ответа нет — значит окну некуда было его отдать.
+      watchdog = setTimeout(() => { if (!settled) finish(reject)(new Error(NEEDS_CONSENT)); }, 1500);
+    }
+
+    const timer = setTimeout(() => { if (!settled) finish(reject)(new Error(NO_ANSWER)); }, ANSWER_WAIT_MS);
+    doc?.addEventListener("visibilitychange", onVisible);
+
     const client = oauth2.initTokenClient({
       client_id: clientId,
       scope,

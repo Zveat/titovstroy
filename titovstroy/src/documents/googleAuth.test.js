@@ -23,7 +23,19 @@ function fakeGoogle() {
   };
 }
 
-afterEach(() => { _resetGoogleAuth(); delete globalThis.window; });
+// Поддельный документ: нужен, чтобы разыграть уход в окно Google и возврат из него.
+function fakeDoc() {
+  const listeners = new Set();
+  globalThis.document = {
+    visibilityState: "visible",
+    addEventListener: (type, fn) => { if (type === "visibilitychange") listeners.add(fn); },
+    removeEventListener: (type, fn) => { listeners.delete(fn); },
+  };
+  const go = (state) => { globalThis.document.visibilityState = state; listeners.forEach(fn => fn()); };
+  return { away: () => go("hidden"), back: () => go("visible"), watching: () => listeners.size };
+}
+
+afterEach(() => { _resetGoogleAuth(); delete globalThis.window; delete globalThis.document; });
 
 describe("вход в Google", () => {
   it("спрашивает доступ сразу в нажатии, а не после подготовки документа", () => {
@@ -77,5 +89,59 @@ describe("вход в Google", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("тихий ключ приезжает без всякого окна — так это и работало раньше", async () => {
+    const google = fakeGoogle();
+    const doc = fakeDoc();
+    beginGoogleAuth();
+    const waiting = googleAccessToken();
+    google.reply({ access_token: "ключ" });                 // окно не открывалось вовсе
+    await expect(waiting).resolves.toBe("ключ");
+    expect(doc.watching()).toBe(0);                          // за видимостью больше не следим
+  });
+
+  it("вернулись из окна Google без ответа — объясняем, а не ждём полторы минуты", async () => {
+    vi.useFakeTimers();
+    try {
+      fakeGoogle();
+      const doc = fakeDoc();
+      beginGoogleAuth();
+      const caught = googleAccessToken().catch(error => error.message);
+      doc.away();                                            // ушли в окно Google
+      doc.back();                                            // оно закрылось ни с чем
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(await caught).toMatch(/подтвердить доступ заново/);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("ответ, пришедший сразу после возврата, побеждает — ложной тревоги нет", async () => {
+    vi.useFakeTimers();
+    try {
+      const google = fakeGoogle();
+      const doc = fakeDoc();
+      beginGoogleAuth();
+      const waiting = googleAccessToken();
+      doc.away();
+      doc.back();
+      await vi.advanceTimersByTimeAsync(300);                // ответ обогнал паузу
+      google.reply({ access_token: "ключ-после-окна" });
+      await vi.advanceTimersByTimeAsync(3000);
+      await expect(waiting).resolves.toBe("ключ-после-окна");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("уход в фон без возврата ничего не ломает — человек просто свернул приложение", async () => {
+    vi.useFakeTimers();
+    try {
+      const google = fakeGoogle();
+      const doc = fakeDoc();
+      beginGoogleAuth();
+      const waiting = googleAccessToken();
+      doc.away();
+      await vi.advanceTimersByTimeAsync(5000);
+      google.reply({ access_token: "ключ" });
+      await expect(waiting).resolves.toBe("ключ");
+    } finally { vi.useRealTimers(); }
   });
 });

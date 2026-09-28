@@ -71,7 +71,7 @@ import { buildAvrHtml, buildContractHtml as _buildContractHtml, buildPodryadHtml
   docFileTitle, podryadContractToModel } from "./documents/legacyDocs.js";
 import { migrateRowsToCodeKeys } from "./estimate/rowKeys.js";
 import { BalanceSheet } from "./finance/BalanceSheet.jsx";
-import { _auditYM, _ts, downloadCSV, fmt, fmtDate, genId, isStandaloneApp, kpStatusText, openOrPrintHtml, setDocumentPdfTools, today } from "./format.js";
+import { _auditYM, _ts, downloadCSV, fmt, fmtDate, genId, kpStatusText, openOrPrintHtml, setDocumentPdfTools, today } from "./format.js";
 import { KPContent } from "./kp/KPContent.jsx";
 import { PublicKP } from "./kp/PublicKP.jsx";
 import { MastersSection } from "./masters/MastersSection.jsx";
@@ -5136,24 +5136,11 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
     if (snapshot) setDocumentInstanceSnapshot(snapshot);
   };
   const runContractExport = async (format, contract, client, contragent, withStamp) => {
-    // ВХОД GOOGLE ИЗ ПРИЛОЖЕНИЯ С ИКОНКИ ВЕРНУТЬСЯ НЕ МОЖЕТ — ТЕПЕРЬ ЭТО ПРОВЕРЕНО.
-    // Раньше я запретил эту кнопку по догадке и был отчитан справедливо. Теперь есть
-    // снимок с боевого: окно Google ОТКРЫВАЕТСЯ (порядок запроса мы починили), пишет
-    // «Подождите…» и закрывается, не создав документа. Причина в том, КАК оно
-    // открывается: не отдельной вкладкой, а встроенным окном Safari внутри приложения.
-    // У такого окна нет связи с вызвавшей страницей, поэтому ответу Google просто
-    // некуда приехать. Настройками это не лечится — лечится только переносом создания
-    // документа на сервер (нужен ключ из Google-консоли владельца).
-    // Поэтому здесь: не мучаем человека пустым ожиданием, а называем причину и
-    // показываем рабочий путь — Word-файл открывается в «Google Документах».
-    if (format === "gdoc" && isStandaloneApp()) {
-      alert("Google Doc из приложения с иконки не получится: окно входа Google "
-        + "открывается ВНУТРИ приложения и ответить ему некуда — оно закрывается ни с чем.\n\n"
-        + "Рядом есть кнопка «Word · DOCX»: файл скачается, и из «Файлов» открывается "
-        + "прямо в «Google Документах» — тот же редактируемый документ.\n\n"
-        + "А в Safari и на компьютере «Google Doc» работает как прежде.");
-      return;
-    }
+    // КНОПКУ «GOOGLE DOC» НЕ ЗАПРЕЩАЕМ. Я делал это дважды и дважды был неправ.
+    // Пока разрешение на Диск у Google есть, ключ выдаётся ТИХО, без всякого окна —
+    // и на телефоне это работает ровно так же, как работало раньше. Окно появляется
+    // только если разрешение нужно подтвердить заново; этот случай ловится отдельно
+    // и объясняется словами (см. googleAuth.js), а не запретом на всю кнопку.
     // ДОСТУП К GOOGLE ПРОСИМ ПЕРВОЙ СТРОКОЙ, ПОКА НАЖАТИЕ ЕЩЁ «ЖИВОЕ».
     // Эта строка выполняется синхронно, прямо внутри клика, — а всё, что ниже, уже
     // ждёт облако. Раньше вход спрашивали ПОСЛЕ подготовки документа, и к тому моменту
