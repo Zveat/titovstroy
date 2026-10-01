@@ -371,8 +371,15 @@ function eventExtras(msg, entry, ctx) {
   // она придёт отдельным сообщением (см. правило «Причина потери»). Но если она уже
   // стоит — скажем сразу; а если нет, напомним, что без неё аналитика слепа: на
   // боевой из 43 отказов причина заполнена у 25.
-  if (ctx.reasonBy && /^Клиент потерян/.test(S(msg.title))) {
-    const reason = trim(ctx.reasonBy.get(msg.objectId));
+  // АДРЕС — К ЛЮБОМУ СОБЫТИЮ ПО ОБЪЕКТУ. В заголовке стоит имя клиента, а объектов
+  // у клиента бывает несколько, и по имени не понять, о каком речь и куда ехать.
+  // Адрес не повторяем, когда он и есть заголовок (у объекта без имени клиента).
+  const info = ctx.infoBy?.get(msg.objectId);
+  const where = trim(info?.address);
+  if (where && !S(msg.title).includes(where)) rows.push(esc(where));
+
+  if (ctx.infoBy && /^Клиент потерян/.test(S(msg.title))) {
+    const reason = trim(info?.reason);
     rows.push(reason && !/не указана/i.test(reason)
       ? `причина: <b>${esc(reason)}</b>`
       : "<i>причина не указана — отметьте её в карточке объекта</i>");
@@ -424,9 +431,12 @@ export function buildEventMessages(entries = [], { sinceTs = 0, sentIds = {}, se
 // действительно случилось (см. send.mjs). Здесь суммы просто раскладываются по объекту.
 // Берём договор, если он есть: подписали именно его. Нет договора — сумма смет по
 // объекту, это то же число, из которого договор и собирают.
-export function makeEventContext({ productions = [], sumsByObject = null, reasonsByObject = null } = {}) {
-  const reasonBy = reasonsByObject instanceof Map ? reasonsByObject
-    : reasonsByObject ? new Map(Object.entries(reasonsByObject)) : null;
+export function makeEventContext({ productions = [], sumsByObject = null, objectInfo = null } = {}) {
+  // Справочник по объекту: адрес и причина отказа. Оба поля нужны СООБЩЕНИЮ, а не
+  // расчёту: заголовок события — это имя клиента, и у одного клиента объектов может
+  // быть несколько. Без адреса «Объект в работе — Абай» не говорит, о каком именно.
+  const infoBy = objectInfo instanceof Map ? objectInfo
+    : objectInfo ? new Map(Object.entries(objectInfo)) : null;
   const prodBy = new Map();
   for (const p of productions || []) if (p && p.objectId) prodBy.set(p.objectId, p);
   const sumBy = new Map();
@@ -434,7 +444,7 @@ export function makeEventContext({ productions = [], sumsByObject = null, reason
     const n = Number(sum);
     if (objectId && Number.isFinite(n) && n > 0) sumBy.set(objectId, n);
   }
-  return { prodBy, sumBy, reasonBy };
+  return { prodBy, sumBy, infoBy };
 }
 
 export function renderEvent(msg) {
@@ -919,6 +929,25 @@ export function digestWindow(digest, now = Date.now()) {
 // ничего не стартует, не сдаётся и не горит. Сообщение «сегодня ничего», если
 // слать его каждое утро, ровно за неделю превращает сводку в шум, который
 // пролистывают не читая, — а вместе с ней и всё остальное от бота.
+// Три самых запущенных по имени, остальные числом. Список уже отсортирован по
+// days — берём начало. Имя у этапа составное («Черновые · Абай»), у объекта это
+// клиент; и там и там читается как строка, за которой понятно, куда смотреть.
+const DIGEST_NAMES = 3;
+const DIGEST_NAME_MAX = 44;
+// Названия этапов пишут свободным текстом, и на боевой попалось имя в 150 символов.
+// В строке сводки такое съедает всё остальное, поэтому берём objectName (клиента),
+// если он есть, а длинное всё равно подрезаем — сводка обязана читаться с телефона.
+function shortName(x) {
+  const raw = trim(x?.objectName) || trim(x?.name);
+  return raw.length > DIGEST_NAME_MAX ? `${raw.slice(0, DIGEST_NAME_MAX - 1).trimEnd()}…` : raw;
+}
+function topNames(list) {
+  const rows = (list || []).slice(0, DIGEST_NAMES)
+    .map(x => `${esc(shortName(x))} (${daysWord(Number(x?.days) || 0)})`);
+  const rest = (list || []).length - rows.length;
+  return rows.join(", ") + (rest > 0 ? ` и ещё ${rest}` : "");
+}
+
 export function buildDayDigest(
   { yesterday = {}, current = {}, objects = [], productions = [] } = {},
   { now = Date.now(), settings = {} } = {},
@@ -948,8 +977,11 @@ export function buildDayDigest(
     const status = trim(card.prodStatus) || trim(o.status);
     if (DEAD_STATUS.has(status)) continue;
     const name = trim(o.clientName) || trim(o.address) || "Без названия";
-    if (daysUntil(card.startDate, now) === 0) starts.push(name);
-    if (daysUntil(card.planEndDate, now) === 0) handovers.push(name);
+    // Адрес рядом с именем — по той же причине, что и в напоминании о старте:
+    // сегодня туда едут, а по имени клиента ехать некуда.
+    const where = trim(o.address) && trim(o.address) !== name ? `${name}, ${trim(o.address)}` : name;
+    if (daysUntil(card.startDate, now) === 0) starts.push(where);
+    if (daysUntil(card.planEndDate, now) === 0) handovers.push(where);
   }
   const burning = (prod.overdueStageList || []).filter(x => objectAllowed(x.objectId || x.id, settings));
   const stale = (prod.staleObjects || []).filter(x => objectAllowed(x.objectId || x.id, settings));
@@ -991,11 +1023,13 @@ export function buildDayDigest(
     lines.push(`<b>Сегодня, ${localDateLabel(now)}</b>`);
     if (starts.length) lines.push(`• Старт работ: <b>${starts.map(esc).join(" · ")}</b>`);
     if (handovers.length) lines.push(`• Сдача по плану: <b>${handovers.map(esc).join(" · ")}</b>`);
-    if (burning.length) {
-      lines.push(`• Просрочено этапов: <b>${burning.length}</b>`
-        + ` (дольше всех — ${daysWord(Math.max(...burning.map(x => Number(x.days) || 0)))})`);
-    }
-    if (stale.length) lines.push(`• Объектов без движения: <b>${stale.length}</b>`);
+    // СЧЁТЧИК БЕЗ ИМЁН НИЧЕГО НЕ РЕШАЕТ. «Просрочено этапов: 1 (дольше всех — 6 дней)»
+    // и «Объектов без движения: 13» — это повод открыть сервис и искать, кто именно.
+    // Владелец: «нужно информационно улучшить». Называем поимённо, но не вываливаем
+    // весь список: три самых старых и «ещё N» — остальные и так придут отдельными
+    // напоминаниями «Просроченные этапы» и «Объекты без движения».
+    if (burning.length) lines.push(`• Просрочено этапов: <b>${burning.length}</b> — ${topNames(burning)}`);
+    if (stale.length) lines.push(`• Объектов без движения: <b>${stale.length}</b> — ${topNames(stale)}`);
   }
 
   return {

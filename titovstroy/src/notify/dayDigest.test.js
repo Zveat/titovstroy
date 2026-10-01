@@ -114,18 +114,34 @@ describe("ежедневная сводка", () => {
   // тест этого не ловил, потому что был написан из того же неверного
   // предположения. Поймали настоящие данные. Поэтому здесь backlog НЕ передаём
   // вовсе: если кто-то снова уведёт чтение туда, тест упадёт.
-  it("считает горящее, но не пересказывает его списком — на это есть напоминания", () => {
+  // Было: голые счётчики «Просрочено этапов: 2 (дольше всех — 5 дней)». Владелец:
+  // «нужно информационно улучшить». Счётчик без имён — это повод открыть сервис и
+  // искать, кто именно. Называем самых запущенных, но список целиком не пересказываем:
+  // на это есть отдельные напоминания «Просроченные этапы» и «Объекты без движения».
+  it("горящее называет поимённо, но не вываливает весь список", () => {
     const m = buildDayDigest({
       yesterday: { sales: SALES },
       current: { production: {
-        overdueStageList: [{ objectId: "o1", days: 5 }, { objectId: "o2", days: 2 }],
-        staleObjects: [{ objectId: "o3", days: 12 }],
+        overdueStageList: [
+          { objectId: "o1", name: "Черновые · Абай", objectName: "Абай", days: 5 },
+          { objectId: "o2", name: "Плитка · Вера", objectName: "Вера", days: 2 },
+        ],
+        staleObjects: [{ objectId: "o3", name: "Николай", days: 12 }],
       } },
       objects: [], productions: [],
     }, { now: NOW });
-    expect(m.text).toContain("Просрочено этапов: <b>2</b>");
-    expect(m.text).toContain("дольше всех — 5 дней");
-    expect(m.text).toContain("Объектов без движения: <b>1</b>");
+    expect(m.text).toContain("Просрочено этапов: <b>2</b> — Абай (5 дней), Вера (2 дня)");
+    expect(m.text).toContain("Объектов без движения: <b>1</b> — Николай (12 дней)");
+  });
+
+  it("длинный список обрывается на трёх именах и считает остальных", () => {
+    const many = Array.from({ length: 7 }, (_, i) => ({ objectId: `s${i}`, name: `Объект ${i + 1}`, days: 30 - i }));
+    const m = buildDayDigest({
+      yesterday: { sales: SALES },
+      current: { production: { staleObjects: many, overdueStageList: [] } },
+      objects: [], productions: [],
+    }, { now: NOW });
+    expect(m.text).toContain("Объектов без движения: <b>7</b> — Объект 1 (30 дней), Объект 2 (29 дней), Объект 3 (28 дней) и ещё 4");
   });
 
   // Сводка «сегодня ничего», приходящая каждое утро, за неделю приучает её не читать.
@@ -175,5 +191,22 @@ describe("ежедневная сводка", () => {
     const a = buildDayDigest({ yesterday: { sales: SALES }, current: CURRENT, objects: [], productions: [] }, { now: NOW });
     const b = buildDayDigest({ yesterday: { sales: SALES }, current: CURRENT, objects: [], productions: [] }, { now: NOW + 3600_000 });
     expect(a.id).toBe(b.id);
+  });
+
+  // На боевой попалось название этапа в 150 символов — в строке сводки оно съедало
+  // всё остальное. Берём объект, а слишком длинное всё равно подрезаем.
+  it("непомерно длинное название не ломает строку", () => {
+    const m = buildDayDigest({
+      yesterday: { sales: SALES },
+      current: { production: { overdueStageList: [{
+        objectId: "o1", days: 6,
+        name: "Демонтажно-подготовительные работы, снятие плитки, гкл конструкций · Казарин",
+        objectName: "Казарин Артем Александрович",
+      }], staleObjects: [] } },
+      objects: [], productions: [],
+    }, { now: NOW });
+    const line = m.text.split("\n").find(l => l.includes("Просрочено"));
+    expect(line).toContain("Казарин Артем Александрович (6 дней)");
+    expect(line.replace(/<[^>]+>/g, "").length).toBeLessThan(90);
   });
 });

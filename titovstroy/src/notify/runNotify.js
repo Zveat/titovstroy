@@ -149,21 +149,21 @@ export async function runNotify(io, { now = Date.now(), forceDigest = false } = 
     sumsByObject = buildObjectSums(contracts || [], estimates || []);
     log(`Подписание в журнале — читаю суммы: объектов с суммой ${Object.keys(sumsByObject).length}`);
   }
-  // ПРИЧИНЫ ОТКАЗА — ТОЛЬКО КОГДА КОГО-ТО ДЕЙСТВИТЕЛЬНО ПОТЕРЯЛИ. Узел объектов на
-  // боевой весит 43 КБ: читать его на каждый чих нельзя, а на потерю — можно, их
-  // считанные штуки в месяц.
-  let reasonsByObject = null;
-  if (events.some(m => /^Клиент потерян/.test(String(m.title || "")))) {
-    const objects = (await read(K.objects, [])) || [];
-    reasonsByObject = new Map(objects
-      .filter(o => o?.id && o.refuseReason)
-      .map(o => [o.id, refuseReasonLabel(o.refuseReason)]));
-    log(`Потеря в журнале — читаю объекты: с указанной причиной ${reasonsByObject.size}`);
-  }
+  // СПРАВОЧНИК ОБЪЕКТОВ ДЛЯ ТЕКСТА СООБЩЕНИЙ: адрес и причина отказа. Заголовок
+  // события — имя клиента, а объектов у клиента бывает несколько: без адреса
+  // «Объект в работе — Абай» не говорит, о каком именно и куда ехать. Узел весит
+  // 43 КБ на фоне карточек производства (421 КБ), прочитанных строкой выше, —
+  // то есть прибавка десятая часть к тому, что и так уже взято.
+  let objectInfo = null;
   if (events.length) {
+    const objects = (await read(K.objects, [])) || [];
+    objectInfo = new Map(objects.filter(o => o?.id).map(o => [o.id, {
+      address: o.address && o.address !== o.clientName ? o.address : "",
+      reason: o.refuseReason ? refuseReasonLabel(o.refuseReason) : "",
+    }]));
     events = buildEventMessages(entries, {
       sinceTs, sentIds, settings,
-      context: makeEventContext({ productions, sumsByObject, reasonsByObject }),
+      context: makeEventContext({ productions, sumsByObject, objectInfo }),
     });
   }
   log(`Журнал: записей ${entries.length}, к отправке событий ${events.length}`);

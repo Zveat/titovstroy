@@ -55,14 +55,14 @@ describe("причина потери", () => {
   it("известная причина едет в том же сообщении", () => {
     const [msg] = buildEventMessages([lostEntry], {
       sinceTs: 0, settings: {},
-      context: makeEventContext({ reasonsByObject: { o1: "Дорого" } }),
+      context: makeEventContext({ objectInfo: { o1: { reason: "Дорого" } } }),
     });
     expect(plain(renderEvent(msg))).toContain("причина: Дорого");
   });
 
   it("причины нет — сообщение само просит её отметить", () => {
     const [msg] = buildEventMessages([lostEntry], {
-      sinceTs: 0, settings: {}, context: makeEventContext({ reasonsByObject: {} }),
+      sinceTs: 0, settings: {}, context: makeEventContext({ objectInfo: { o1: {} } }),
     });
     expect(plain(renderEvent(msg))).toContain("причина не указана");
   });

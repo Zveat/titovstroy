@@ -628,6 +628,12 @@ function buildProduction(idx, { from, to, now }) {
           id: `${o.id}:${st.id || st.name}`,
           stageTab: "stages",
           name: `${st.name || "Этап"} · ${o.clientName || o.address || "объект"}`,
+          // Объект отдельным полем: в сводке дня для строки «Просрочено этапов»
+          // нужен ИМЕННО он. Названия этапов люди пишут свободно, и на боевой
+          // попалось имя в 150 символов («Демонтажно-подготовительные работы,
+          // снятие плитки…») — в составном name оно вытесняет клиента целиком.
+          objectName: o.clientName || o.address || "объект",
+          stageName: st.name || "Этап",
           createdAt: ts(st.planEnd),
           manager: st.responsible || prod.responsible || "",
           value: num(st.priceClient),
