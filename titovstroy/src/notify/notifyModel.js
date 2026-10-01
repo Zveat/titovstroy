@@ -134,6 +134,23 @@ const RULES = [
     group: (e) => `object|статус|${trim(e?.by)}|${trim(e?.new)}`,
     groupWord: ["переведён", "переведено", "объект", "объекта", "объектов"] },
 
+  // ПРИЧИНА ПОТЕРИ — ОТДЕЛЬНЫМ СОБЫТИЕМ, И ИНАЧЕ НЕ ВЫХОДИТ.
+  //
+  // Владелец: «причину потери нужно указать, а не просто потерян». Приписать её к
+  // сообщению о статусе нельзя: выпадающий список причин появляется в карточке
+  // ТОЛЬКО после того, как объект уже стал потерянным, то есть причину выбирают
+  // ВТОРЫМ действием, через минуту-другую. В момент «Клиент потерян» её ещё нет.
+  //
+  // Ключ намеренно тот же, что у смены статуса: это продолжение той же новости, и
+  // новая галочка в Админке никому не нужна — её пришлось бы идти и включать, а
+  // новые галочки по умолчанию выключены (на этом уже обжигались со сводкой дня).
+  { key: "object_status", entity: "object", field: /причина отказа/, topic: "objects", icon: "💔",
+    when: (e) => { const v = trim(e?.new); return v && v !== "—" && !/не указана/i.test(v); },
+    title: (e) => `Причина потери — ${nameOf(e)}`,
+    body: (e) => `<b>${esc(e.new)}</b>`,
+    group: (e) => `object|причина|${trim(e?.by)}`,
+    groupWord: ["причина", "причины", "объект", "объекта", "объектов"] },
+
   // Факт сдачи. Поле не только заполняют, но и чистят — в журнале это выглядит как
   // «30.09.2026 → —», и такое сообщением быть не должно. Шлём, только когда дату ПОСТАВИЛИ.
   { key: "object_done", entity: "object", field: /факт сдачи/, topic: "objects", icon: "🏁",
@@ -197,7 +214,8 @@ export const NOTIFY_EVENTS = Object.freeze([
   { key: "object_status", icon: "🔁", topic: "objects", kind: "event",
     label: "Статус объекта сменили",
     when: "любая смена статуса, КРОМЕ подписания договора — оно строкой выше",
-    what: "объект, было → стало и кто перевёл; «Потерян», «Приостановлен» и «В работе» приходят со своим значком" },
+    what: "объект, было → стало и кто перевёл; «Потерян», «Приостановлен» и «В работе» приходят "
+      + "со своим значком. Причину потери выбирают следом за статусом — она придёт отдельной строкой" },
   { key: "object_done", icon: "🏁", topic: "objects", kind: "event",
     label: "Объект сдан",
     when: "когда в карточке проставили фактическую дату сдачи",
@@ -349,6 +367,16 @@ function eventExtras(msg, entry, ctx) {
     const sum = ctx.sumBy?.get(msg.objectId);
     if (sum) rows.push(`сумма: <b>${esc(tenge(sum))}</b>`);
   }
+  // ПОТЕРЯ БЕЗ ПРИЧИНЫ — ПОЛОВИНА НОВОСТИ. Обычно причину выбирают следом, и тогда
+  // она придёт отдельным сообщением (см. правило «Причина потери»). Но если она уже
+  // стоит — скажем сразу; а если нет, напомним, что без неё аналитика слепа: на
+  // боевой из 43 отказов причина заполнена у 25.
+  if (ctx.reasonBy && /^Клиент потерян/.test(S(msg.title))) {
+    const reason = trim(ctx.reasonBy.get(msg.objectId));
+    rows.push(reason && !/не указана/i.test(reason)
+      ? `причина: <b>${esc(reason)}</b>`
+      : "<i>причина не указана — отметьте её в карточке объекта</i>");
+  }
   const prod = ctx.prodBy?.get(msg.objectId);
   if (!prod) return rows.length ? "\n" + rows.join("\n") : "";
   if (msg.key === "contract_signed") {
@@ -396,7 +424,9 @@ export function buildEventMessages(entries = [], { sinceTs = 0, sentIds = {}, se
 // действительно случилось (см. send.mjs). Здесь суммы просто раскладываются по объекту.
 // Берём договор, если он есть: подписали именно его. Нет договора — сумма смет по
 // объекту, это то же число, из которого договор и собирают.
-export function makeEventContext({ productions = [], sumsByObject = null } = {}) {
+export function makeEventContext({ productions = [], sumsByObject = null, reasonsByObject = null } = {}) {
+  const reasonBy = reasonsByObject instanceof Map ? reasonsByObject
+    : reasonsByObject ? new Map(Object.entries(reasonsByObject)) : null;
   const prodBy = new Map();
   for (const p of productions || []) if (p && p.objectId) prodBy.set(p.objectId, p);
   const sumBy = new Map();
@@ -404,7 +434,7 @@ export function makeEventContext({ productions = [], sumsByObject = null } = {})
     const n = Number(sum);
     if (objectId && Number.isFinite(n) && n > 0) sumBy.set(objectId, n);
   }
-  return { prodBy, sumBy };
+  return { prodBy, sumBy, reasonBy };
 }
 
 export function renderEvent(msg) {
@@ -621,14 +651,23 @@ export function buildDateReminders({ objects = [], productions = [] } = {}, { no
       hits.push({
         objectId: o.id,
         name: trim(o.clientName) || trim(o.address) || "Без названия",
+        address: trim(o.address),
         manager: trim(prod.responsible) || trim(o.manager),
         left,
       });
     }
     if (!hits.length) continue;
     hits.sort((a, b) => a.left - b.left);
-    const line = (x) => `• ${esc(x.name)} — ${x.left === 0 ? "<b>сегодня</b>"
-      : x.left === 1 ? "<b>завтра</b>" : `через <b>${daysWord(x.left)}</b>`}`;
+    // АДРЕС В СТРОКЕ. Владелец: «адрес добавлять нужно». По одному имени клиента
+    // ехать некуда, а напоминание как раз о том, чтобы выехать: «через 2 дня» без
+    // адреса заставляет лезть в сервис за тем же самым. Адрес не повторяем, когда
+    // он и есть название (у объекта без имени клиента name берётся из адреса).
+    const line = (x) => {
+      const where = x.address && x.address !== x.name ? `, ${esc(x.address)}` : "";
+      const when = x.left === 0 ? "<b>сегодня</b>"
+        : x.left === 1 ? "<b>завтра</b>" : `через <b>${daysWord(x.left)}</b>`;
+      return `• ${esc(x.name)}${where} — ${when}`;
+    };
     out.push({
       id: `${rule.key}~${fingerprint(hits.map(x => `${x.objectId}:${x.left}`))}`,
       key: rule.key, topic: rule.topic, kind: "reminder", person: null,

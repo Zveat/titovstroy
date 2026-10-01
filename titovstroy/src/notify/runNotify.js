@@ -149,9 +149,21 @@ export async function runNotify(io, { now = Date.now(), forceDigest = false } = 
     sumsByObject = buildObjectSums(contracts || [], estimates || []);
     log(`Подписание в журнале — читаю суммы: объектов с суммой ${Object.keys(sumsByObject).length}`);
   }
+  // ПРИЧИНЫ ОТКАЗА — ТОЛЬКО КОГДА КОГО-ТО ДЕЙСТВИТЕЛЬНО ПОТЕРЯЛИ. Узел объектов на
+  // боевой весит 43 КБ: читать его на каждый чих нельзя, а на потерю — можно, их
+  // считанные штуки в месяц.
+  let reasonsByObject = null;
+  if (events.some(m => /^Клиент потерян/.test(String(m.title || "")))) {
+    const objects = (await read(K.objects, [])) || [];
+    reasonsByObject = new Map(objects
+      .filter(o => o?.id && o.refuseReason)
+      .map(o => [o.id, refuseReasonLabel(o.refuseReason)]));
+    log(`Потеря в журнале — читаю объекты: с указанной причиной ${reasonsByObject.size}`);
+  }
   if (events.length) {
     events = buildEventMessages(entries, {
-      sinceTs, sentIds, settings, context: makeEventContext({ productions, sumsByObject }),
+      sinceTs, sentIds, settings,
+      context: makeEventContext({ productions, sumsByObject, reasonsByObject }),
     });
   }
   log(`Журнал: записей ${entries.length}, к отправке событий ${events.length}`);

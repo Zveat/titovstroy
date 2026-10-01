@@ -1,6 +1,7 @@
 // Журнал изменений: помесячное хранение + обёртки логирования по сущностям.
 // Перенос из App.jsx без изменения логики.
 import { IS_DEV_ENV } from "../appConfig.js";
+import { refuseReasonLabel } from "../analytics/analyticsModel.js";
 import { CONTRACT_STATUSES, DEAL_STATUSES } from "../constants.js";
 import { _auditYM, fmt } from "../format.js";
 import { createInstantNotifier, dispatchEventRun } from "../notify/instantNotify.js";
@@ -109,6 +110,14 @@ export const writeAudit = (user, action, entity, entityId, detail = "") =>
 // Человекочитаемые поля объекта для журнала (форматируем «было/стало»)
 export const OBJ_FIELD_META = {
   status:      { label: "статус",        fmt: (v) => (DEAL_STATUSES.find(s => s.key === v) || {}).label || v || "—" },
+  // ПРИЧИНА ОТКАЗА В ЖУРНАЛ НЕ ПОПАДАЛА ВООБЩЕ — поля здесь просто не было, и
+  // logObjChange молча пропускал его (неизвестное поле не логируется). Из-за этого
+  // «Клиент потерян» приходило без причины и узнать её постфактум было негде:
+  // в журнале за сентябрь ноль записей о причинах при 43 отказах в базе.
+  // Выбор причины — отдельное действие ПОСЛЕ смены статуса (выпадающий список
+  // появляется только у потерянного объекта), поэтому и в журнале, и в уведомлении
+  // это отдельное событие, а не приписка к смене статуса.
+  refuseReason:{ label: "причина отказа", fmt: (v) => refuseReasonLabel(v) },
   clientName:  { label: "клиент",        fmt: (v) => v || "—" },
   address:     { label: "адрес",         fmt: (v) => v || "—" },
   objType:     { label: "тип объекта",   fmt: (v) => v || "—" },
