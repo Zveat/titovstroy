@@ -151,6 +151,15 @@ const RULES = [
     group: (e) => `object|причина|${trim(e?.by)}`,
     groupWord: ["причина", "причины", "объект", "объекта", "объектов"] },
 
+  // КП УШЛО КЛИЕНТУ. Для продаж это точка отсчёта: смету посчитали и отдали, дальше
+  // либо сделка, либо тишина. Раньше публикация ссылки не писалась в журнал вовсе,
+  // поэтому и уведомления про неё быть не могло.
+  { key: "kp_sent", entity: "estimate", field: /кп клиенту/, topic: "objects", icon: "📨",
+    title: (e) => `КП отправлено — ${nameOf(e)}`,
+    body: (e) => (/уже отправляли/i.test(S(e?.old)) ? `${esc(e.new)} · отправлено повторно` : esc(e.new)),
+    group: (e) => `estimate|кп|${trim(e?.by)}`,
+    groupWord: ["отправлено", "отправлено", "КП", "КП", "КП"] },
+
   // Факт сдачи. Поле не только заполняют, но и чистят — в журнале это выглядит как
   // «30.09.2026 → —», и такое сообщением быть не должно. Шлём, только когда дату ПОСТАВИЛИ.
   { key: "object_done", entity: "object", field: /факт сдачи/, topic: "objects", icon: "🏁",
@@ -216,6 +225,10 @@ export const NOTIFY_EVENTS = Object.freeze([
     when: "любая смена статуса, КРОМЕ подписания договора — оно строкой выше",
     what: "объект, было → стало и кто перевёл; «Потерян», «Приостановлен» и «В работе» приходят "
       + "со своим значком. Причину потери выбирают следом за статусом — она придёт отдельной строкой" },
+  { key: "kp_sent", icon: "📨", topic: "objects", kind: "event", def: true,
+    label: "КП отправлено клиенту",
+    when: "как только нажали «Ссылка клиенту» на смете — и при повторной отправке тоже",
+    what: "клиент, адрес и сумма КП; видно, что это переотправка" },
   { key: "object_done", icon: "🏁", topic: "objects", kind: "event",
     label: "Объект сдан",
     when: "когда в карточке проставили фактическую дату сдачи",
@@ -855,6 +868,17 @@ export function buildDigestMessage(analytics = {}, { key, now = Date.now(), reas
     } else {
       lines.push("• Движения денег за период не было — в «Финансы» ничего не заносили");
     }
+    // ЖДЁМ ОПЛАТУ — ОТ КОГО ИМЕННО. «Выручка 0 ₸» и «просрочено столько-то» не
+    // говорят, кому звонить. Дебиторка по объектам уже посчитана (receivableList),
+    // и это ровно тот список, ради которого сводку с деньгами и читают. Показываем
+    // и тогда, когда движения не было: особенно тогда.
+    const debts = Array.isArray(fin.receivableList) ? fin.receivableList : [];
+    if (debts.length) {
+      const total = debts.reduce((sum, x) => sum + (Number(x?.value) || 0), 0);
+      lines.push(`• Ждём оплату: <b>${debts.length}</b> на <b>${tenge(total)}</b>`);
+      const who = whoLine(debts.map(x => ({ name: x.name, sum: x.value })));
+      if (who) lines.push(`   ${who}`);
+    }
   }
 
   lines.push("");
@@ -1002,6 +1026,23 @@ function topNames(list) {
   return rows.join(", ") + (rest > 0 ? ` и ещё ${rest}` : "");
 }
 
+// Что из сегодняшнего важнее всего. Порядок не случайный: просроченный этап уже
+// стоит денег, старт и сдача случатся сегодня и их не сдвинуть, а молчащий объект
+// терпит ещё день. Возвращает одну фразу или пустую строку, если выбирать не из чего.
+function mainThing({ burning = [], starts = [], handovers = [], stale = [] } = {}) {
+  if (burning.length) {
+    const x = burning[0];
+    return `горит этап у ${esc(shortName(x))} — <b>${daysWord(Number(x?.days) || 0)}</b> просрочки`;
+  }
+  if (handovers.length) return `сдаём ${esc(handovers[0])}`;
+  if (starts.length) return `выходим на ${esc(starts[0])}`;
+  if (stale.length) {
+    const x = stale[0];
+    return `дольше всех молчит ${esc(shortName(x))} — <b>${daysWord(Number(x?.days) || 0)}</b>`;
+  }
+  return "";
+}
+
 export function buildDayDigest(
   { yesterday = {}, current = {}, objects = [], productions = [] } = {},
   { now = Date.now(), settings = {} } = {},
@@ -1078,6 +1119,12 @@ export function buildDayDigest(
   if (hasToday) {
     lines.push("");
     lines.push(`<b>Сегодня, ${localDateLabel(now)}</b>`);
+    // ГЛАВНОЕ ВЫНЕСЕНО ВВЕРХ. Ниже три-четыре равнозначных пункта, и утром на
+    // планёрке приходится выбирать из них самому. Выбор при этом очевиден и
+    // всегда один и тот же: сначала то, что уже горит, потом то, что случится
+    // сегодня, потом то, что молчит дольше всех. Эту же очередь и пишем строкой.
+    const head = mainThing({ burning, starts, handovers, stale });
+    if (head) lines.push(`• <b>Главное:</b> ${head}`);
     if (starts.length) lines.push(`• Старт работ: <b>${starts.map(esc).join(" · ")}</b>`);
     if (handovers.length) lines.push(`• Сдача по плану: <b>${handovers.map(esc).join(" · ")}</b>`);
     // СЧЁТЧИК БЕЗ ИМЁН НИЧЕГО НЕ РЕШАЕТ. «Просрочено этапов: 1 (дольше всех — 6 дней)»
@@ -1196,7 +1243,21 @@ export function subsOf(holder) {
 export function isSubscribed(holder, key, topics = null) {
   const subs = subsOf(holder);
   if (subs && Object.prototype.hasOwnProperty.call(subs, key)) return !!subs[key];
-  if (subs) return false;                       // поштучная настройка есть — она и решает
+  // КЛЮЧА В НАСТРОЙКЕ НЕТ — ЗНАЧИТ ЕГО НЕ БЫЛО, КОГДА ЧЕЛОВЕК НАСТРАИВАЛ.
+  //
+  // Раньше здесь стояло «нет ключа — значит нет», и это тихо ломало каждое новое
+  // уведомление: оно не приходило НИКОМУ, пока все вручную не сходят в Админку и не
+  // отметят новую галочку. Так уже случилось со сводкой дня — её пришлось включать
+  // руками, и до этого она просто молчала.
+  //
+  // Отсутствие ключа и явное «выключено» — разные вещи. Явное лежит в настройке
+  // значением false и дальше решает само (строка выше). Отсутствие значит только то,
+  // что такого уведомления тогда ещё не существовало, — и честный ответ на него тот
+  // же, что для нового сотрудника: как заведено в каталоге.
+  // Пустая настройка — это НЕ «ещё не настраивали», а «сняли всё»: Админка пишет и
+  // галочки, и снятые галочки (на боевой есть человек с семью явными false). Поэтому
+  // пустому списку отвечаем тишиной, как и раньше.
+  if (subs) return Object.keys(subs).length ? !!NOTIFY_BY_KEY[key]?.def : false;
   const list = topics || (holder?.tg ? userTopics(holder) : []);
   const meta = NOTIFY_BY_KEY[key];
   if (!meta || !list.length) return false;

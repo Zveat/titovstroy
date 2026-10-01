@@ -7,6 +7,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { auditMonthKeys, createNotifyRunHandler } from "./notify-run.mjs";
 import { createNotifyCronHandler } from "./notify-cron.mjs";
+import { NOTIFY_CATALOG } from "../src/notify/notifyModel.js";
 
 const NOW = 1_789_400_000_000;
 const ENV = { TELEGRAM_BOT_TOKEN: "bot:123", NOTIFY_CRON_SECRET: "секрет" };
@@ -43,7 +44,11 @@ const LIVE = {
   "titovstroy-tg-settings": { on: true, quietFrom: 23, quietTo: 7 },
   "titovstroy-tg-state": { lastTs: ENTRY.ts - 60_000 },
   "titovstroy-tg-links": { u1: { chatId: "555", ts: 1 } },
-  "titovstroy-users": [{ id: "u1", name: "Пётр", tg: { subs: { object_status: true } } }],
+  // Набор пишем ЦЕЛИКОМ, как это делает Админка: отмеченное и снятое. Иначе тест
+  // проверял бы несуществующий случай — отсутствие ключа теперь значит «такого
+  // уведомления тогда ещё не было», и отвечает за него каталог.
+  "titovstroy-users": [{ id: "u1", name: "Пётр", tg: { subs: Object.fromEntries(
+    NOTIFY_CATALOG.map(item => [item.key, item.key === "object_status"])) } }],
   [MONTH_KEY]: [ENTRY],
 };
 

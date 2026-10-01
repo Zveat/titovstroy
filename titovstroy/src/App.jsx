@@ -7282,6 +7282,22 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                     setKpLink(link);
                     try { await navigator.clipboard.writeText(link); } catch {}
                     setKpMsg(res && res.fbOk===false ? "⚠ Опубликовано локально (облако недоступно)" : "✓ Ссылка скопирована");
+                    // ОТПРАВКА КП В ЖУРНАЛ — РАНЬШЕ ЭТОГО НЕ БЫЛО ВООБЩЕ. Публикация
+                    // ссылки клиенту ничего не записывала, поэтому ни журнал, ни
+                    // уведомления про неё не знали. А для продаж это момент, с
+                    // которого начинается отсчёт ожидания ответа: смету посчитали и
+                    // отдали, дальше — тишина или сделка. Повторную отправку тоже
+                    // пишем: «переслал ещё раз» — это тоже новость.
+                    try {
+                      const obj = objects.find(o => o.id === proj?.objectId) || null;
+                      logChange(currentUser, {
+                        entity: "estimate", entityId: currentId, objectId: proj?.objectId || "",
+                        label: obj ? _objLabel(obj) : (proj?.client || "Клиент"),
+                        field: "КП клиенту", action: "отправил",
+                        old: prev.publishedAt ? "уже отправляли" : "—",
+                        new: final ? fmt(final) + " ₸" : "ссылка отправлена",
+                      });
+                    } catch (e) { console.warn("kp publish log failed", e); }
                     setKpStale(false);
                     if (prev.viewCount || prev.acceptedAt) setKpStat(kpStatusText(prev));
                   } catch(e) { setKpMsg("Ошибка публикации — проверьте интернет"); }

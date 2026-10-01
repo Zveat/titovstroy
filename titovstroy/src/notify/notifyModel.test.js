@@ -42,13 +42,20 @@ const REPORT_DELETED = { ts: 1788981013773, userId: "1", by: "P.Zveat", entity: 
   entityId: "mtubddeitb80", label: "avr", objectId: "", field: "запись", action: "удалил",
   old: "avr", new: "—", detail: "", source: "manual" };
 
+// Админка сохраняет ВЕСЬ набор ключей — и отмеченные, и снятые (на боевой есть
+// человек с семью явными false). Фикстуры повторяют это, иначе они проверяли бы
+// поведение, которого в жизни не бывает: отсутствие ключа теперь значит «такого
+// уведомления тогда ещё не было», и отвечает за него каталог.
+const onlySubs = (...on) => Object.fromEntries(
+  NOTIFY_CATALOG.map(item => [item.key, on.includes(item.key)]));
+
 describe("состав: ровно то, что просил владелец", () => {
-  it("тринадцать уведомлений, не больше", () => {
-    expect(NOTIFY_CATALOG).toHaveLength(13);
+  it("каталог закрыт списком — ничего не заводится мимо него", () => {
+    expect(NOTIFY_CATALOG).toHaveLength(14);
     expect(NOTIFY_CATALOG.map(n => n.key).sort()).toEqual([
       "contract_signed", "deleted", "digest_day", "digest_month", "digest_sales_month",
-      "digest_sales_week", "digest_week", "handover_soon", "object_done", "object_status",
-      "stages", "stale", "start_soon",
+      "digest_sales_week", "digest_week", "handover_soon", "kp_sent", "object_done",
+      "object_status", "stages", "stale", "start_soon",
     ]);
   });
 
@@ -439,8 +446,8 @@ describe("кому что уходит", () => {
 
   it("человек получает ровно отмеченное ему", () => {
     const users = [
-      { id: "1", name: "Директор", tg: { subs: { digest_week: true, contract_signed: true } } },
-      { id: "2", name: "Прораб", tg: { subs: { start_soon: true, handover_soon: true } } },
+      { id: "1", name: "Директор", tg: { subs: onlySubs("digest_week", "contract_signed") } },
+      { id: "2", name: "Прораб", tg: { subs: onlySubs("start_soon", "handover_soon") } },
     ];
     const to = (k) => routeMessages([msg(k)], { users, links, settings: {} }).map(s => s.chatId).sort();
     expect(to("digest_week")).toEqual(["111"]);
@@ -450,7 +457,7 @@ describe("кому что уходит", () => {
   });
 
   it("общий чат подписывается отдельно от людей", () => {
-    const users = [{ id: "1", name: "Директор", tg: { subs: { digest_week: true } } }];
+    const users = [{ id: "1", name: "Директор", tg: { subs: onlySubs("digest_week") } }];
     const settings = { groupChatId: "-100", groupSubs: { contract_signed: true, digest_week: false } };
     expect(routeMessages([msg("contract_signed")], { users, links, settings }).map(s => s.chatId))
       .toEqual(["-100"]);
@@ -459,7 +466,7 @@ describe("кому что уходит", () => {
   });
 
   it("одно уведомление можно и в чат, и лично", () => {
-    const users = [{ id: "1", name: "Директор", tg: { subs: { digest_month: true } } }];
+    const users = [{ id: "1", name: "Директор", tg: { subs: onlySubs("digest_month") } }];
     const settings = { groupChatId: "-100", groupSubs: { digest_month: true } };
     expect(routeMessages([msg("digest_month")], { users, links, settings })
       .map(s => s.chatId).sort()).toEqual(["-100", "111"]);
@@ -480,12 +487,12 @@ describe("кому что уходит", () => {
   });
 
   it("непривязанный сотрудник не получает ничего", () => {
-    const users = [{ id: "9", name: "Без телеграма", tg: { subs: { digest_week: true } } }];
+    const users = [{ id: "9", name: "Без телеграма", tg: { subs: onlySubs("digest_week") } }];
     expect(routeMessages([msg("digest_week")], { users, links, settings: {} })).toEqual([]);
   });
 
   it("одно и то же в один чат дважды не уходит", () => {
-    const users = [{ id: "1", name: "Д", tg: { subs: { digest_week: true } } }];
+    const users = [{ id: "1", name: "Д", tg: { subs: onlySubs("digest_week") } }];
     const m = msg("digest_week");
     expect(routeMessages([m, m], { users, links, settings: {} })).toHaveLength(1);
   });
@@ -643,7 +650,7 @@ describe("мелочи, на которых легко обжечься", () => 
 // поэтому проверяется поштучно.
 describe("команды бота", () => {
   const USERS = [
-    { id: "1", name: "Пётр", login: "p", tg: { code: "abc123", subs: { contract_signed: true, stages: true } } },
+    { id: "1", name: "Пётр", login: "p", tg: { code: "abc123", subs: onlySubs("contract_signed", "stages") } },
     { id: "2", name: "Сергей", login: "s", tg: { code: "zzz999", subs: {} } },
   ];
 
@@ -706,7 +713,7 @@ describe("список подписок и его изменения", () => {
   });
 
   it("/menu показывает текущий список подключённому чату", () => {
-    const users = [withSubs({ contract_signed: true, stages: true })];
+    const users = [withSubs(onlySubs("contract_signed", "stages"))];
     const out = handleBotCommand({ text: "/menu", chatId: 555, users,
       links: { "1": { chatId: "555" } } });
     expect(out.kind).toBe("menu");
@@ -723,7 +730,7 @@ describe("список подписок и его изменения", () => {
   });
 
   it("первый прогон только запоминает набор и молчит", () => {
-    const users = [withSubs({ contract_signed: true })];
+    const users = [withSubs(onlySubs("contract_signed"))];
     const links = { "1": { chatId: "555" } };
     const out = buildSubsChangeMessages({ users, links, sent: {} });
     expect(out.messages).toHaveLength(0);
@@ -734,7 +741,7 @@ describe("список подписок и его изменения", () => {
     const links = { "1": { chatId: "555" } };
     const before = buildSubsChangeMessages({ users: [withSubs({})], links, sent: {} });
     const after = buildSubsChangeMessages({
-      users: [withSubs({ contract_signed: true, digest_week: true })], links,
+      users: [withSubs(onlySubs("contract_signed", "digest_week"))], links,
       sent: before.fingerprints });
     expect(after.messages).toHaveLength(1);
     expect(after.messages[0].chatId).toBe("555");
