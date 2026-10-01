@@ -723,14 +723,15 @@ export function isDigestDue(digest, { now = Date.now(), force = false } = {}) {
   return false;
 }
 
-export function buildDigestMessage(analytics = {}, { key, now = Date.now(), reasonLabel = (k) => k } = {}) {
+export function buildDigestMessage(analytics = {}, { key, now = Date.now(), reasonLabel = (k) => k, periodLabel = "" } = {}) {
   const meta = DIGESTS.find(d => d.key === key);
   if (!meta) return null;
   const sales = analytics.sales || {};
   const fin = analytics.finance || {};
   const lines = [];
 
-  lines.push(`${meta.icon} <b>${meta.title}</b> · ${localDateLabel(now)}`);
+  // В заголовке — ПЕРИОД, а не день отправки: «Итоги месяца · сентябрь».
+  lines.push(`${meta.icon} <b>${meta.title}</b> · ${periodLabel || localDateLabel(now)}`);
 
   // ДЕНЬГИ ИДУТ ПЕРВЫМИ И ПОКАЗЫВАЮТСЯ ВСЕГДА.
   //
@@ -812,6 +813,65 @@ export function buildDigestMessage(analytics = {}, { key, now = Date.now(), reas
 export function yesterdayBounds(now = Date.now(), offsetMin = TZ_OFFSET_MIN) {
   const start = dayStart(now, offsetMin);
   return { from: start - 86400000, to: start - 1 };
+}
+
+// ИТОГИ ПЕРИОДА СЧИТАЮТСЯ ПО ЗАКРЫТОМУ ПЕРИОДУ, А НЕ ПО ТЕКУЩЕМУ.
+//
+// Владелец 1 октября получил «Итоги месяца» со сплошными нулями: зашло 0,
+// посчитано 0, подписано 0, движения денег не было. Выглядело как поломка, а было
+// арифметикой: сводка приходит 1-го числа и считала ТЕКУЩИЙ месяц — то есть первые
+// десять часов октября. Разумеется, в них ничего и не было.
+//
+// В каталоге про эту сводку с самого начала написано «за прошедший месяц» — просто
+// границы брались не те. Теперь берутся те: 1 октября приходят итоги СЕНТЯБРЯ, в
+// понедельник — итоги прошедшей недели (понедельник-воскресенье), ровно как
+// ежедневная сводка рассказывает про вчера, а не про текущие полчаса.
+//
+// Заодно в заголовке теперь написано, ЗА ЧТО сводка: «Итоги месяца · сентябрь», а
+// не «· 1 октября». Дата отправки и период — разные вещи, и путать их не надо.
+export function closedMonthBounds(now = Date.now(), offsetMin = TZ_OFFSET_MIN) {
+  const p = localParts(now, offsetMin);
+  const startOfThis = Date.UTC(p.y, p.m - 1, 1) - offsetMin * 60000;
+  const startOfPrev = Date.UTC(p.y, p.m - 2, 1) - offsetMin * 60000;
+  return { from: startOfPrev, to: startOfThis - 1 };
+}
+
+export function closedWeekBounds(now = Date.now(), offsetMin = TZ_OFFSET_MIN) {
+  const p = localParts(now, offsetMin);
+  const dow = new Date(Date.UTC(p.y, p.m - 1, p.d)).getUTCDay();   // 0 — воскресенье
+  const sinceMonday = (dow + 6) % 7;
+  const thisMonday = dayStart(now, offsetMin) - sinceMonday * 86400000;
+  return { from: thisMonday - 7 * 86400000, to: thisMonday - 1 };
+}
+
+const MONTHS_RU_NOM = ["январь","февраль","март","апрель","май","июнь",
+  "июль","август","сентябрь","октябрь","ноябрь","декабрь"];
+
+export function monthLabel(ts, offsetMin = TZ_OFFSET_MIN) {
+  const p = localParts(ts, offsetMin);
+  return MONTHS_RU_NOM[p.m - 1];
+}
+
+export function rangeLabel(from, to, offsetMin = TZ_OFFSET_MIN) {
+  const a = localParts(from, offsetMin);
+  const b = localParts(to, offsetMin);
+  return a.m === b.m
+    ? `${a.d}–${b.d} ${MONTHS_RU[b.m - 1]}`
+    : `${a.d} ${MONTHS_RU[a.m - 1]} — ${b.d} ${MONTHS_RU[b.m - 1]}`;
+}
+
+// Одно место, где решается, какой кусок времени показывает сводка и как он
+// называется. Нужно и прогону, и тестам: разъедутся — вернётся тот же нуль.
+export function digestWindow(digest, now = Date.now()) {
+  if (digest?.period === "month") {
+    const b = closedMonthBounds(now);
+    return { ...b, label: monthLabel(b.from) };
+  }
+  if (digest?.period === "week") {
+    const b = closedWeekBounds(now);
+    return { ...b, label: rangeLabel(b.from, b.to) };
+  }
+  return null;                       // ежедневная считает себя сама
 }
 
 // ЕЖЕДНЕВНАЯ СВОДКА. Что было вчера и что сегодня — см. комментарий у digest_day.

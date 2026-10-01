@@ -24,7 +24,7 @@ import { buildAnalytics, refuseReasonLabel } from "../analytics/analyticsModel.j
 import { buildObjectSums } from "./objectSums.js";
 import {
   DIGESTS, assertWritable, buildDateReminders, buildDayDigest, buildDigestMessage,
-  buildEventMessages, buildReminderMessages, buildSubsChangeMessages, inQuietHours,
+  buildEventMessages, buildReminderMessages, buildSubsChangeMessages, digestWindow, inQuietHours,
   isDigestDue, localDayKey, localParts, makeEventContext, markSendNowDone, nextCursor,
   pendingSendNow, pruneSent, routeMessages, yesterdayBounds,
 } from "./notifyModel.js";
@@ -204,8 +204,17 @@ export async function runNotify(io, { now = Date.now(), forceDigest = false } = 
           current: analytics, objects: data.objects, productions,
         }, { now, settings });
       } else {
-        const periodAnalytics = buildAnalytics(data, { period: d.period, users, now });
-        msg = buildDigestMessage(periodAnalytics, { key: d.key, now, reasonLabel: refuseReasonLabel });
+        // ЗАКРЫТЫЙ ПЕРИОД, А НЕ ТЕКУЩИЙ. 1 октября «Итоги месяца» считали октябрь —
+        // то есть десять часов, прошедшие с полуночи, — и приходили со сплошными
+        // нулями. Теперь 1-го числа приходят итоги сентября, в понедельник — итоги
+        // прошедшей недели. Подробности у digestWindow в notifyModel.js.
+        const win = digestWindow(d, now);
+        const periodAnalytics = win
+          ? buildAnalytics(data, { period: "custom", from: win.from, to: win.to, users, now })
+          : buildAnalytics(data, { period: d.period, users, now });
+        msg = buildDigestMessage(periodAnalytics, {
+          key: d.key, now, reasonLabel: refuseReasonLabel, periodLabel: win?.label || "",
+        });
       }
       // ПО КНОПКЕ «УЖЕ ОТПРАВЛЯЛИ» НЕ ДЕЙСТВУЕТ. У напоминаний защиту сняли
       // сразу, а у сводок она осталась — и нажатие на сводку, которая сегодня
