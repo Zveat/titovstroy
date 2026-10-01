@@ -386,6 +386,26 @@ function eventExtras(msg, entry, ctx) {
   }
   const prod = ctx.prodBy?.get(msg.objectId);
   if (!prod) return rows.length ? "\n" + rows.join("\n") : "";
+  // «ОБЪЕКТ СДАН» БЕЗ ЦИФР — ЭТО ПРОСТО ГАЛОЧКА. А сдача это итог: за сколько
+  // сделали и сколько он стоил. Обе величины уже под рукой — даты в карточке
+  // производства, сумма в том же справочнике, что у подписания.
+  if (msg.key === "object_done") {
+    const sum = ctx.sumBy?.get(msg.objectId);
+    if (sum) rows.push(`сумма: <b>${esc(tenge(sum))}</b>`);
+    const built = spanDays(prod.startDate, prod.factEndDate);
+    if (built !== null) {
+      const plan = spanDays(prod.startDate, prod.planEndDate);
+      // План показываем, только когда с ним разошлись: совпало — лишняя строка.
+      const diff = plan === null ? null : built - plan;
+      rows.push(`стройка шла <b>${daysWord(built)}</b>`
+        + (diff === null || diff === 0 ? ""
+          : diff > 0 ? ` — на ${daysWord(diff)} дольше плана`
+          : ` — на ${daysWord(-diff)} быстрее плана`));
+    }
+    if (prod.responsible && trim(prod.responsible) !== trim(msg.by)) {
+      rows.push(`прораб: ${esc(prod.responsible)}`);
+    }
+  }
   if (msg.key === "contract_signed") {
     // Счётчик дат отдельный: проверять по длине rows нельзя — там уже может лежать
     // сумма, и тогда «даты не заполнены» молча пропадало бы.
@@ -402,6 +422,15 @@ function eventExtras(msg, entry, ctx) {
   }
   return rows.length ? "\n" + rows.join("\n") : "";
 }
+// Сколько календарных дней между двумя датами карточки. null — если хотя бы одной
+// нет: «стройка шла 0 дней» читалось бы как поломка, а это просто незаполненное поле.
+export function spanDays(from, to) {
+  const a = from ? new Date(from).getTime() : NaN;
+  const b = to ? new Date(to).getTime() : NaN;
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return null;
+  return Math.round((b - a) / 86400000);
+}
+
 export function dateRu(v) {
   const t = v ? new Date(v).getTime() : NaN;
   if (!Number.isFinite(t)) return S(v);
@@ -772,6 +801,25 @@ export function isDigestDue(digest, { now = Date.now(), force = false } = {}) {
   return false;
 }
 
+// КТО ИМЕННО. «Подписано договоров: 2» — это половина новости: вторая половина в
+// том, кого подписали и на сколько. Владелец про это и сказал: улучшить текстом.
+// Три имени, остальные числом — сводку читают с телефона, а полный список лежит в
+// сервисе. Сумма в скобках только там, где она известна: ноль у объекта без сметы
+// и договора означает «данных нет», а не «бесплатно».
+const DIGEST_PEOPLE = 3;
+function whoLine(list, { withReason = false } = {}) {
+  const rows = (list || []).slice(0, DIGEST_PEOPLE).map(x => {
+    const tail = [
+      Number(x?.sum) > 0 ? tenge(x.sum) : "",
+      withReason && trim(x?.reason) ? trim(x.reason) : "",
+    ].filter(Boolean).join(", ");
+    return `${esc(trim(x?.name))}${tail ? ` (${esc(tail)})` : ""}`;
+  });
+  if (!rows.length) return "";
+  const rest = (list || []).length - rows.length;
+  return rows.join(", ") + (rest > 0 ? ` и ещё ${rest}` : "");
+}
+
 export function buildDigestMessage(analytics = {}, { key, now = Date.now(), reasonLabel = (k) => k, periodLabel = "" } = {}) {
   const meta = DIGESTS.find(d => d.key === key);
   if (!meta) return null;
@@ -816,6 +864,8 @@ export function buildDigestMessage(analytics = {}, { key, now = Date.now(), reas
     + (sales.estimatedSum ? ` на ${tenge(sales.estimatedSum)}` : ""));
   lines.push(`• Подписано договоров: <b>${numText(sales.signedCount)}</b>`
     + (sales.signedSum ? ` на <b>${tenge(sales.signedSum)}</b>` : ""));
+  const who = whoLine(sales.signedList);
+  if (who) lines.push(`   ${who}`);
   if (sales.avgCheck) lines.push(`• Средний чек: <b>${tenge(sales.avgCheck)}</b>`);
   lines.push(`• Конверсия: смета ${pctText(sales.convToEstimate)}`
     + ` · договор ${pctText(sales.convToSigned)} · итог <b>${pctText(sales.convTotal)}</b>`);
@@ -830,6 +880,10 @@ export function buildDigestMessage(analytics = {}, { key, now = Date.now(), reas
       lines.push(`• ${esc(rk === "unknown" ? "Причина не указана" : reasonLabel(rk))} — ${v.count}`
         + (v.sum ? ` (${tenge(v.sum)})` : ""));
     }
+    // Разбивка по причинам отвечает «почему», но не «кого» — а звонить придётся
+    // конкретным людям. Имена с суммой и причиной идут отдельной строкой.
+    const whoLost = whoLine(sales.lostList, { withReason: true });
+    if (whoLost) lines.push(`   ${whoLost}`);
   }
 
   // РАЗРЕЗ ПО МЕНЕДЖЕРАМ — только в сводке отдела продаж: в общем чате именно
@@ -1011,10 +1065,13 @@ export function buildDayDigest(
     }
     if (signed) {
       lines.push(`• Подписано договоров: <b>${signed}</b>`
-        + (sales.signedSum ? ` на <b>${tenge(sales.signedSum)}</b>` : ""));
+        + (sales.signedSum ? ` на <b>${tenge(sales.signedSum)}</b>` : "")
+        + (whoLine(sales.signedList) ? ` — ${whoLine(sales.signedList)}` : ""));
     }
     if (lost) {
-      lines.push(`• Потеряли: <b>${lost}</b>${sales.lostSum ? ` на ${tenge(sales.lostSum)}` : ""}`);
+      lines.push(`• Потеряли: <b>${lost}</b>${sales.lostSum ? ` на ${tenge(sales.lostSum)}` : ""}`
+        + (whoLine(sales.lostList, { withReason: true })
+          ? ` — ${whoLine(sales.lostList, { withReason: true })}` : ""));
     }
   }
 

@@ -465,6 +465,21 @@ function buildSales(idx, { from, to }, manager, period, resolveManager = (v) => 
     avgDealDaysSample: dealDays.length,
     lostCount: lost.length,
     lostSum,
+    // ИМЕНА, А НЕ ТОЛЬКО ЧИСЛА. Нужны сводке в Telegram: «подписано 2» не говорит
+    // ничего, пока не откроешь сервис и не посмотришь, кого именно. Экран аналитики
+    // этими полями не пользуется — он и так показывает таблицы; здесь компактные
+    // списки, по которым сводка собирает строку из двух-трёх имён.
+    signedList: signed.map(o => ({
+      id: o.id,
+      name: o.clientName || o.address || "Без названия",
+      sum: dealValue(o),
+    })).sort((a, b) => b.sum - a.sum),
+    lostList: lost.map(o => ({
+      id: o.id,
+      name: o.clientName || o.address || "Без названия",
+      sum: objectValue(o),
+      reason: refuseReasonLabel(o.refuseReason),
+    })).sort((a, b) => b.sum - a.sum),
     cancelledCount: cancelled.length,
     lostByReason,
     // Площадь заполняют не всегда. Пустая выборка — это «—», а не «0 ₸ за м²»:

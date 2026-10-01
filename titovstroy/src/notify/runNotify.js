@@ -142,7 +142,10 @@ export async function runNotify(io, { now = Date.now(), forceDigest = false } = 
   // СУММЫ — ТОЛЬКО ЕСЛИ ДОГОВОР ДЕЙСТВИТЕЛЬНО ПОДПИСАЛИ. Договоры и сметы вместе
   // весят 374 КБ, а подписаний — три в месяц.
   let sumsByObject = null;
-  if (events.some(m => (m.key || m.event) === "contract_signed")) {
+  // Суммы нужны не только подписанию, но и сдаче: «объект сдан» без цифры — просто
+  // галочка. Сдач и подписаний вместе — единицы в месяц, так что условие по-прежнему
+  // бережёт 374 КБ договоров и смет на всех остальных заходах.
+  if (events.some(m => ["contract_signed", "object_done"].includes(m.key || m.event))) {
     const [contracts, estimates] = await Promise.all([
       read(K.contracts, []), read(K.estimates, []),
     ]);
