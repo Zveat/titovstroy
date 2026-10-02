@@ -5671,6 +5671,18 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
           .float-fab{bottom:calc(80px + env(safe-area-inset-bottom,0px))!important;right:16px!important}
           .save-strip{left:0!important;bottom:calc(68px + env(safe-area-inset-bottom,0px))!important}
         }
+        /* ПОДЛОЖКА МОДАЛЬНОГО ОКНА и вырез экрана. Отступ был ровно 16px со всех
+           сторон, и высокое окно (акт, импорт, финоперация) начиналось в 34px от
+           верха — то есть ПОД полосой статуса, где часы и батарея. Айфон накрывает
+           эту полосу полупрозрачной вуалью: заголовок окна и крестик под ней
+           выцветают и читаются с трудом. Поймано на боевом (акт Р-1, iPhone):
+           «Акт выполненных работ (Р-1)» был размыт до нечитаемости.
+           Берём вырез устройства плюс небольшой зазор; на десктопе и в Android
+           env() = 0, и остаются прежние 16px — то есть ничего не меняется. */
+        .modal-sheet{
+          padding-top:max(16px,calc(env(safe-area-inset-top,0px) + 10px))!important;
+          padding-bottom:max(16px,calc(env(safe-area-inset-bottom,0px) + 10px))!important;
+        }
         /* Панель редактора сметы на телефоне. Кнопки были разной высоты,
            «Финансы вкл» переносилось на две строки, а значок сохранения стоял
            дважды — в начале ряда и в конце. Дубль убран, кнопки приведены
@@ -7226,9 +7238,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       )}
 
       {importModal && (
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:320,padding:16}}
+        <div className="modal-sheet" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:320,padding:16}}
           onClick={()=>!importBusy && setImportModal(false)}>
-          <div style={{background:"#fff",borderRadius:10,padding:"20px 22px",maxWidth:560,width:"100%",maxHeight:"85vh",overflowY:"auto"}}
+          <div style={{background:"#fff",borderRadius:10,padding:"20px 22px",maxWidth:560,width:"100%",maxHeight:"min(85vh,100%)",overflowY:"auto"}}
             onClick={e=>e.stopPropagation()}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
               <div style={{fontWeight:800,fontSize:16,color:"#0f172a"}}>⬆ Импорт смет из JSON</div>
@@ -7254,9 +7266,9 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
       {showKP&&(
         <>
           {/* Overlay + modal для экрана */}
-          <div className="kp-no-print" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.78)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:16}}
+          <div className="kp-no-print modal-sheet" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.78)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:16}}
             onClick={()=>{ setShowKP(false); setKpLink(""); setKpStat(""); setKpMsg(""); setKpStale(false); }}>
-            <div style={{background:"#ffffff",color:"#0f172a",borderRadius:8,padding:"24px 28px",maxWidth:700,width:"100%",maxHeight:"90vh",overflowY:"auto",fontFamily:"'Inter','Segoe UI',sans-serif"}}
+            <div style={{background:"#ffffff",color:"#0f172a",borderRadius:8,padding:"24px 28px",maxWidth:700,width:"100%",maxHeight:"min(90vh,100%)",overflowY:"auto",fontFamily:"'Inter','Segoe UI',sans-serif"}}
               onClick={e=>e.stopPropagation()}>
               <KPContent proj={proj} kpItems={kpItems} fromItems={kpFromItems} discount={discount} discAmt={discAmt} final={final} note={note} contragent={kpContragent}/>
               <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:20,flexWrap:"wrap"}}>
@@ -8750,8 +8762,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                       setFinProjModal(null);
                     };
                     return (
-                      <div onClick={()=>setFinProjModal(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.55)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-                        <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:16,padding:"22px 24px",width:"100%",maxWidth:720,maxHeight:"92vh",overflowY:"auto",overflowX:"hidden",boxSizing:"border-box",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+                      <div onClick={()=>setFinProjModal(null)} className="modal-sheet" style={{position:"fixed",inset:0,background:"rgba(15,23,42,.55)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+                        <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:16,padding:"22px 24px",width:"100%",maxWidth:720,maxHeight:"min(92vh,100%)",overflowY:"auto",overflowX:"hidden",boxSizing:"border-box",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
                             <h3 style={{margin:0,fontSize:17,fontWeight:800,color:"#0f172a"}}>{mp.id?"Редактировать":"Новый"} проект</h3>
                             <button onClick={()=>setFinProjModal(null)} style={{background:"none",border:"none",fontSize:20,color:"#94a3b8",cursor:"pointer"}}>✕</button>
@@ -8967,8 +8979,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
 
             {/* ───── КОРЗИНА ОПЕРАЦИЙ ───── */}
             {finTxTrash && (
-              <div onClick={()=>setFinTxTrash(false)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.55)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-                <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:16,padding:"22px 24px",width:"100%",maxWidth:520,maxHeight:"85vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+              <div onClick={()=>setFinTxTrash(false)} className="modal-sheet" style={{position:"fixed",inset:0,background:"rgba(15,23,42,.55)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+                <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:16,padding:"22px 24px",width:"100%",maxWidth:520,maxHeight:"min(85vh,100%)",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
                     <h3 style={{margin:0,fontSize:16,fontWeight:800,color:"#0f172a"}}>🗑 Корзина операций</h3>
                     <button onClick={()=>setFinTxTrash(false)} style={{background:"none",border:"none",fontSize:20,color:"#94a3b8",cursor:"pointer"}}>✕</button>
@@ -9066,8 +9078,8 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 logChange(currentUser, { entity:"finance_tx", entityId:m.id, objectId:_doid, label:`${_dtl}${ex.category?` · ${ex.category}`:""}`, action:"удалил операцию", old:_tng(ex.amount) });
               };
               return (
-                <div onClick={()=>{setFinCatOpen(false);setFinTxModal(null);}} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.55)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-                  <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:16,padding:"22px 24px",width:"100%",maxWidth:440,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+                <div onClick={()=>{setFinCatOpen(false);setFinTxModal(null);}} className="modal-sheet" style={{position:"fixed",inset:0,background:"rgba(15,23,42,.55)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+                  <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:16,padding:"22px 24px",width:"100%",maxWidth:440,maxHeight:"min(90vh,100%)",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
                       <h3 style={{margin:0,fontSize:17,fontWeight:800,color:"#0f172a"}}>{m.id?"Изменить":"Новая"} операция</h3>
                       <button onClick={()=>setFinTxModal(null)} style={{background:"none",border:"none",fontSize:20,color:"#94a3b8",cursor:"pointer"}}>✕</button>
@@ -11206,8 +11218,11 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
         // Новая строка не совпадёт с фильтром и визуально «не добавится» — поэтому поиск сбрасываем.
         const addLine = ()=>{ setAvrSearch(""); setAvrModal(p=>({...p, lines:[...p.lines, {cat:"",name:"",unit:"",qty:0,price:0,included:true,doneQty:1}]})); };
         return (
-        <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setAvrModal(null)}>
-          <div style={{background:"#fff",borderRadius:14,width:"100%",maxWidth:760,maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 24px 70px rgba(0,0,0,.3)",overflow:"hidden"}} onClick={e=>e.stopPropagation()}>
+        <div className="modal-sheet" style={{position:"fixed",inset:0,background:"rgba(15,23,42,.6)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setAvrModal(null)}>
+          {/* min(…,100%): «92vh» не знает про вырез экрана, и на айфоне окно вылезало
+              за отступ подложки обратно под полосу статуса. 100% — это высота уже с
+              учётом выреза, и окно остаётся внутри. */}
+          <div style={{background:"#fff",borderRadius:14,width:"100%",maxWidth:760,maxHeight:"min(92vh,100%)",display:"flex",flexDirection:"column",boxShadow:"0 24px 70px rgba(0,0,0,.3)",overflow:"hidden"}} onClick={e=>e.stopPropagation()}>
             {/* шапка */}
             <div style={{padding:"16px 20px",borderBottom:"1px solid #eef2f7",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
               <div>
@@ -11317,10 +11332,18 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
                 <div style={{fontSize:12,color:"#64748b"}}>Итого по акту (без НДС)</div>
                 <div style={{fontSize:22,fontWeight:900,color:"#0f172a"}}>{fmt(total)} ₸</div>
               </div>
-              <div style={{display:"flex",gap:10}}>
-                <button onClick={()=>setAvrModal(null)} style={{padding:"11px 18px",borderRadius:10,border:"1px solid #e2e8f0",background:"#f8fafc",color:"#475569",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Отмена</button>
+              {/* minWidth:0 — не косметика. У флекс-элемента по умолчанию есть «пол»
+                  по самому длинному неразрывному куску текста, ниже которого он не
+                  сжимается. Ряд из двух кнопок упирался в этот пол и оказывался шире
+                  карточки: на айфоне (393px) «Сохранить и печать» обрезало по краю
+                  окна — кнопку было видно наполовину и нажать нечем. Сняли пол у ряда
+                  и у обеих кнопок — теперь ряд ужимается под любую ширину, а длинная
+                  надпись переносится на две строки вместо того, чтобы уехать за край.
+                  На десктопе размеры прежние: сжимать там нечего. */}
+              <div style={{display:"flex",gap:10,minWidth:0,maxWidth:"100%"}}>
+                <button onClick={()=>setAvrModal(null)} style={{flex:"0 1 auto",minWidth:0,padding:"11px 18px",borderRadius:10,border:"1px solid #e2e8f0",background:"#f8fafc",color:"#475569",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Отмена</button>
                 <button disabled={selected.length===0} onClick={()=>saveAndPrintAvr(m)}
-                  style={{padding:"11px 20px",borderRadius:10,border:"none",background:selected.length===0?"#cbd5e1":"#7c3aed",color:"#fff",fontSize:14,fontWeight:700,cursor:selected.length===0?"default":"pointer",fontFamily:"inherit"}}>
+                  style={{flex:"1 1 auto",minWidth:0,padding:"11px 20px",borderRadius:10,border:"none",background:selected.length===0?"#cbd5e1":"#7c3aed",color:"#fff",fontSize:14,fontWeight:700,cursor:selected.length===0?"default":"pointer",fontFamily:"inherit"}}>
                   🖨 Сохранить и печать
                 </button>
               </div>
