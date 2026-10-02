@@ -11327,20 +11327,24 @@ tr.cat td{background:#fdf6e9;font-weight:700;color:#92610f;text-transform:upperc
               <button onClick={addLine} style={{margin:"10px 8px 4px",background:"rgba(124,58,237,.06)",color:"#7c3aed",border:"1px dashed rgba(124,58,237,.35)",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Добавить строку</button>
             </div>
             {/* подвал */}
-            <div style={{padding:"14px 20px",borderTop:"1px solid #eef2f7",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
-              <div>
+            <div style={{padding:"14px 20px",borderTop:"1px solid #eef2f7",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap",width:"100%",minWidth:0,boxSizing:"border-box"}}>
+              <div style={{minWidth:0}}>
                 <div style={{fontSize:12,color:"#64748b"}}>Итого по акту (без НДС)</div>
                 <div style={{fontSize:22,fontWeight:900,color:"#0f172a"}}>{fmt(total)} ₸</div>
               </div>
-              {/* minWidth:0 — не косметика. У флекс-элемента по умолчанию есть «пол»
-                  по самому длинному неразрывному куску текста, ниже которого он не
-                  сжимается. Ряд из двух кнопок упирался в этот пол и оказывался шире
-                  карточки: на айфоне (393px) «Сохранить и печать» обрезало по краю
-                  окна — кнопку было видно наполовину и нажать нечем. Сняли пол у ряда
-                  и у обеих кнопок — теперь ряд ужимается под любую ширину, а длинная
-                  надпись переносится на две строки вместо того, чтобы уехать за край.
-                  На десктопе размеры прежние: сжимать там нечего. */}
-              <div style={{display:"flex",gap:10,minWidth:0,maxWidth:"100%"}}>
+              {/* ШИРИНУ РЯДА КНОПОК СЧИТАЕМ ОТ ЭКРАНА, А НЕ ОТ РОДИТЕЛЯ.
+                  На айфоне ряд выходил за карточку: «Сохранить и печать» обрезало по
+                  её краю, нажать было нечем. Первая попытка — снять у флекса «пол»
+                  по самому длинному слову (minWidth:0) — на телефоне НЕ дала ничего:
+                  замер по скриншоту до и после совпал пиксель в пиксель. Значит шире
+                  карточки оказывался сам подвал, и «100% от родителя» считалось от
+                  него же — то есть от неправильной величины.
+                  Поэтому предел берём от окна: карточка — это min(760px, экран − 32),
+                  внутри неё подвал съедает по 20px с каждой стороны. Эта величина ни
+                  от какого расчёта родителей не зависит, и ряд физически не может
+                  выйти за карточку. На компьютере предел 720px — кнопкам хватает с
+                  запасом, там ничего не меняется. */}
+              <div style={{display:"flex",gap:10,minWidth:0,maxWidth:"calc(min(760px, 100vw - 32px) - 40px)"}}>
                 <button onClick={()=>setAvrModal(null)} style={{flex:"0 1 auto",minWidth:0,padding:"11px 18px",borderRadius:10,border:"1px solid #e2e8f0",background:"#f8fafc",color:"#475569",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Отмена</button>
                 <button disabled={selected.length===0} onClick={()=>saveAndPrintAvr(m)}
                   style={{flex:"1 1 auto",minWidth:0,padding:"11px 20px",borderRadius:10,border:"none",background:selected.length===0?"#cbd5e1":"#7c3aed",color:"#fff",fontSize:14,fontWeight:700,cursor:selected.length===0?"default":"pointer",fontFamily:"inherit"}}>
